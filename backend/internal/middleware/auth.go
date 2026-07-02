@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/domain/auth"
 	"github.com/yourorg/podland/backend/internal/errors"
 )
@@ -41,7 +42,7 @@ func JWTMiddleware(authService *auth.AuthService) func(http.Handler) http.Handle
 			}
 
 			// Add user ID to context
-			ctx := SetUserID(r.Context(), claims.UserID)
+			ctx := contextutils.SetUserID(r.Context(), claims.UserID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/errors"
-	"github.com/yourorg/podland/backend/internal/middleware"
 	"github.com/yourorg/podland/backend/internal/models"
 )
 
@@ -38,24 +38,24 @@ type LoginResponse struct {
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithError(w, errors.ErrInvalidRequest, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidRequest, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Validate required fields
 	if req.Username == "" || req.Password == "" {
-		errors.RespondWithError(w, errors.ErrMissingRequiredFields, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrMissingRequiredFields, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get user from database
 	user, err := h.userRepo.GetByUsername(req.Username)
 	if err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 	if user == nil {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -66,7 +66,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Generate JWT token
 	token, err := h.service.GenerateToken(user.ID)
 	if err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -94,7 +94,7 @@ type StatusResponse struct {
 // Status handles authentication status check
 func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 	// Check if user is authenticated by looking for user ID in context
-	userID := middleware.GetUserIDFromContext(r.Context())
+	userID := contextutils.GetUserIDFromContext(r.Context())
 	
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

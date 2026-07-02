@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/yourorg/podland/backend/internal/contextutils"
 )
 
 // RateLimiter implements a token bucket rate limiter
@@ -125,7 +127,7 @@ type RateLimiter struct {
 func RateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userID := GetUserIDFromContext(r.Context())
+			userID := contextutils.GetUserIDFromContext(r.Context())
 
 			if !rl.Allow(userID) {
 				w.Header().Set("Content-Type", "application/json")
