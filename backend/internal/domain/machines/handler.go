@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/errors"
-	"github.com/yourorg/podland/backend/internal/middleware"
 	"github.com/yourorg/podland/backend/internal/models"
 )
 
@@ -26,16 +26,16 @@ func NewMachineHandler(service *MachineService) *MachineHandler {
 // Create handles machine creation
 func (h *MachineHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from context
-	userID := middleware.GetUserIDFromContext(r.Context())
+	userID := contextutils.GetUserIDFromContext(r.Context())
 	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Parse request body
 	var req CreateMachineRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -44,11 +44,11 @@ func (h *MachineHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Handle specific error types
 		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, middleware.GetRequestID(r.Context()))
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 			return
 		}
 		// Handle generic errors
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -61,16 +61,16 @@ func (h *MachineHandler) Create(w http.ResponseWriter, r *http.Request) {
 // Get handles getting a machine by ID
 func (h *MachineHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from context
-	userID := middleware.GetUserIDFromContext(r.Context())
+	userID := contextutils.GetUserIDFromContext(r.Context())
 	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get machine ID from URL parameter
 	machineID := chi.URLParam(r, "id")
 	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -78,10 +78,10 @@ func (h *MachineHandler) Get(w http.ResponseWriter, r *http.Request) {
 	machine, err := h.service.GetMachineByID(userID, machineID)
 	if err != nil {
 		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, middleware.GetRequestID(r.Context()))
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 			return
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -93,16 +93,16 @@ func (h *MachineHandler) Get(w http.ResponseWriter, r *http.Request) {
 // List handles listing machines
 func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from context
-	userID := middleware.GetUserIDFromContext(r.Context())
+	userID := contextutils.GetUserIDFromContext(r.Context())
 	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// List machines accessible to user
 	machines, err := h.service.ListAllMachines(userID)
 	if err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -120,23 +120,23 @@ func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 // Update handles updating a machine
 func (h *MachineHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from context
-	userID := middleware.GetUserIDFromContext(r.Context())
+	userID := contextutils.GetUserIDFromContext(r.Context())
 	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get machine ID from URL parameter
 	machineID := chi.URLParam(r, "id")
 	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Parse request body
 	var req CreateMachineRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -144,10 +144,10 @@ func (h *MachineHandler) Update(w http.ResponseWriter, r *http.Request) {
 	machine, err := h.service.GetMachineByID(userID, machineID)
 	if err != nil {
 		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, middleware.GetRequestID(r.Context()))
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 			return
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -170,13 +170,13 @@ func (h *MachineHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.SSHPrivateKey != "" {
 		// Validate SSH key
 		if !IsValidPEM(req.SSHPrivateKey) {
-			errors.RespondWithError(w, errors.ErrInvalidSSHKey, middleware.GetRequestID(r.Context()))
+			errors.RespondWithError(w, errors.ErrInvalidSSHKey, contextutils.GetRequestID(r.Context()))
 			return
 		}
 		// Encrypt new SSH key
 		encryptedKey, fingerprint, err := h.service.encryption.EncryptSSHKey(req.SSHPrivateKey)
 		if err != nil {
-			errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+			errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 			return
 		}
 		machine.SSHKeyEncrypted = encryptedKey
@@ -189,7 +189,7 @@ func (h *MachineHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	// Update machine in database
 	if err := h.service.machineRepo.Update(machine); err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -201,16 +201,16 @@ func (h *MachineHandler) Update(w http.ResponseWriter, r *http.Request) {
 // Delete handles deleting a machine
 func (h *MachineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from context
-	userID := middleware.GetUserIDFromContext(r.Context())
+	userID := contextutils.GetUserIDFromContext(r.Context())
 	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get machine ID from URL parameter
 	machineID := chi.URLParam(r, "id")
 	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -218,22 +218,22 @@ func (h *MachineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	machine, err := h.service.GetMachineByID(userID, machineID)
 	if err != nil {
 		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, middleware.GetRequestID(r.Context()))
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 			return
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Only owner can delete the machine
 	if machine.OwnerID != userID {
-		errors.RespondWithError(w, errors.ErrAccessDenied, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrAccessDenied, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Delete machine
 	if err := h.service.machineRepo.Delete(machineID); err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -251,29 +251,29 @@ type AccessResponse struct {
 // ListAccess handles listing access for a machine
 func (h *MachineHandler) ListAccess(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from context
-	userID := middleware.GetUserIDFromContext(r.Context())
+	userID := contextutils.GetUserIDFromContext(r.Context())
 	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get machine ID from URL parameter
 	machineID := chi.URLParam(r, "id")
 	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Verify user has access to machine
 	if !h.service.UserHasAccess(userID, machineID) {
-		errors.RespondWithError(w, errors.ErrAccessDenied, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrAccessDenied, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get machine access entries
 	accesses, err := h.service.accessRepo.ListByMachine(machineID)
 	if err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -301,57 +301,57 @@ type GrantAccessRequest struct {
 // GrantAccess handles granting access to a user
 func (h *MachineHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from context (current user - the grantor)
-	grantorID := middleware.GetUserIDFromContext(r.Context())
+	grantorID := contextutils.GetUserIDFromContext(r.Context())
 	if grantorID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get machine ID from URL parameter
 	machineID := chi.URLParam(r, "id")
 	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Parse request body
 	var req GrantAccessRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Validate permission
 	if req.Permission != models.PermissionRead && req.Permission != models.PermissionWrite && req.Permission != models.PermissionAdmin {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_PERMISSION", "Permission must be read, write, or admin", middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_PERMISSION", "Permission must be read, write, or admin", contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get machine
 	machine, err := h.service.machineRepo.GetByID(machineID)
 	if err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 	if machine == nil {
-		errors.RespondWithError(w, errors.ErrMachineNotFound, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrMachineNotFound, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Only owner can grant access
 	if machine.OwnerID != grantorID {
-		errors.RespondWithError(w, errors.ErrAccessDenied, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrAccessDenied, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Check if access already exists
 	existingAccess, err := h.service.accessRepo.GetByMachineAndUser(machineID, req.UserID)
 	if err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 	if existingAccess != nil {
-		errors.RespondWithError(w, errors.ErrAccessAlreadyGranted, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrAccessAlreadyGranted, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -364,7 +364,7 @@ func (h *MachineHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.accessRepo.Create(access); err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -381,50 +381,50 @@ func (h *MachineHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 // RevokeAccess handles revoking access from a user
 func (h *MachineHandler) RevokeAccess(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from context (current user - the revoker)
-	revokerID := middleware.GetUserIDFromContext(r.Context())
+	revokerID := contextutils.GetUserIDFromContext(r.Context())
 	if revokerID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get machine ID from URL parameter
 	machineID := chi.URLParam(r, "id")
 	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get user ID to revoke from URL parameter
 	targetUserID := chi.URLParam(r, "userId")
 	if targetUserID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_USER_ID", "User ID is required", middleware.GetRequestID(r.Context()))
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_USER_ID", "User ID is required", contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Get machine
 	machine, err := h.service.machineRepo.GetByID(machineID)
 	if err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 	if machine == nil {
-		errors.RespondWithError(w, errors.ErrMachineNotFound, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrMachineNotFound, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Only owner can revoke access, and cannot revoke their own access
 	if machine.OwnerID != revokerID {
-		errors.RespondWithError(w, errors.ErrAccessDenied, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrAccessDenied, contextutils.GetRequestID(r.Context()))
 		return
 	}
 	if targetUserID == revokerID {
-		errors.RespondWithError(w, errors.ErrCannotRevokeOwner, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrCannotRevokeOwner, contextutils.GetRequestID(r.Context()))
 		return
 	}
 
 	// Revoke access
 	if err := h.service.accessRepo.Delete(machineID, targetUserID); err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, middleware.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
 

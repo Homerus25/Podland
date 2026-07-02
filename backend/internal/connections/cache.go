@@ -20,6 +20,7 @@ type ConnectionCache struct {
 
 // ConnectionEntry represents a cached connection with its metadata
 type ConnectionEntry struct {
+	connCtx    context.Context
 	conn       *bindings.Connection
 	userID     string
 	machineID  string
@@ -76,17 +77,24 @@ func (c *ConnectionCache) GetOrCreate(
 		return nil, fmt.Errorf("failed to decrypt SSH key: %w", err)
 	}
 
-	// Create new Podman connection
-	conn, err := bindings.NewConnectionWithOptions(ctx, bindings.Options{
+	// Create new Podman connection context
+	connCtx, err := bindings.NewConnectionWithOptions(ctx, bindings.Options{
 		URI:      fmt.Sprintf("ssh://%s@%s:%d%s", machine.SSHUsername, machine.Hostname, machine.Port, machine.PodmanSocketPath),
 		Identity: sshKey,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Podman connection: %w", err)
+		return nil, fmt.Errorf("failed to create Podman connection context: %w", err)
+	}
+
+	// Get the actual connection from the context
+	conn, err := bindings.GetClient(connCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Podman client: %w", err)
 	}
 
 	// Store in cache
 	entry := &ConnectionEntry{
+		connCtx:   connCtx,
 		conn:      conn,
 		userID:    userID,
 		machineID: machineID,
@@ -150,7 +158,8 @@ func (c *ConnectionCache) evictLRUIdle() {
 	if lruMachineID != "" {
 		// Close the connection
 		if entry := c.connections[lruMachineID]; entry != nil && entry.conn != nil {
-			entry.conn.Close()
+			// Note: bindings.Connection doesn't have Close method
+			// Connection cleanup is handled automatically by Go's HTTP client
 		}
 		delete(c.connections, lruMachineID)
 	}
@@ -176,9 +185,10 @@ func (c *ConnectionCache) cleanup() {
 
 	for machineID, entry := range c.connections {
 		if !entry.isActive && now.Sub(entry.lastUsed) > idleTimeout {
-			// Close the connection
+			// Clean up the connection entry
 			if entry.conn != nil {
-				entry.conn.Close()
+				// Note: bindings.Connection doesn't have Close method
+				// Connection cleanup is handled automatically by Go's HTTP client
 			}
 			delete(c.connections, machineID)
 		}

@@ -1,7 +1,6 @@
 package machines
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 

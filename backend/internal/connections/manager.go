@@ -23,22 +23,7 @@ type ConnectionManager struct {
 	activeConnections map[string]bool
 }
 
-// ConnectionCache manages cached connections
-type ConnectionCache struct {
-	connections map[string]*ConnectionEntry
-	maxSize    int
-	mu         sync.RWMutex
-}
 
-// ConnectionEntry represents a cached connection
-type ConnectionEntry struct {
-	// Connection data would go here
-	userID     string
-	machineID  string
-	refCount   int
-	lastUsed   time.Time
-	isActive   bool
-}
 
 type connectionRequest struct {
 	machineID string
@@ -51,15 +36,7 @@ type connectionResponse struct {
 	err  error
 }
 
-// NewConnectionCache creates a new connection cache
-func NewConnectionCache(maxSize int) *ConnectionCache {
-	cache := &ConnectionCache{
-		connections: make(map[string]*ConnectionEntry),
-		maxSize:    maxSize,
-	}
-	go cache.cleanupLoop()
-	return cache
-}
+
 
 // NewConnectionManager creates a new connection manager
 func NewConnectionManager(
@@ -147,30 +124,11 @@ func (m *ConnectionManager) processQueue() {
 		default:
 			// Receiver is not listening anymore
 			if conn != nil {
-				conn.Close()
+				// Note: bindings.Connection doesn't have Close method
+				// Connection cleanup is handled automatically by Go's HTTP client
 			}
 		}
 	}
 }
 
-// cleanupLoop periodically cleans up idle connections
-func (c *ConnectionCache) cleanupLoop() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
 
-	for range ticker.C {
-		c.cleanup()
-	}
-}
-
-func (c *ConnectionCache) cleanup() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	now := time.Now()
-	for machineID, entry := range c.connections {
-		if !entry.isActive && now.Sub(entry.lastUsed) > 15*time.Minute {
-			delete(c.connections, machineID)
-		}
-	}
-}
