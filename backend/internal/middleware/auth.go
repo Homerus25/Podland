@@ -16,14 +16,14 @@ func JWTMiddleware(authService *auth.AuthService) func(http.Handler) http.Handle
 			// Get token from Authorization header
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				errors.RespondWithError(w, errors.ErrTokenInvalid, GetRequestID(r.Context()))
+				errors.RespondWithError(w, errors.ErrTokenInvalid, contextutils.GetRequestID(r.Context()))
 				return
 			}
 
 			// Extract token from Bearer scheme
 			parts := strings.Split(authHeader, " ")
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				errors.RespondWithError(w, errors.ErrTokenInvalid, GetRequestID(r.Context()))
+				errors.RespondWithError(w, errors.ErrTokenInvalid, contextutils.GetRequestID(r.Context()))
 				return
 			}
 
@@ -34,9 +34,9 @@ func JWTMiddleware(authService *auth.AuthService) func(http.Handler) http.Handle
 			if err != nil {
 				// Check if token is expired
 				if strings.Contains(err.Error(), "expired") {
-					errors.RespondWithError(w, errors.ErrTokenExpired, GetRequestID(r.Context()))
+					errors.RespondWithError(w, errors.ErrTokenExpired, contextutils.GetRequestID(r.Context()))
 				} else {
-					errors.RespondWithError(w, errors.ErrTokenInvalid, GetRequestID(r.Context()))
+					errors.RespondWithError(w, errors.ErrTokenInvalid, contextutils.GetRequestID(r.Context()))
 				}
 				return
 			}

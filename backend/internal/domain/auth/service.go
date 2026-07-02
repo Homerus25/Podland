@@ -24,11 +24,11 @@ type AuthService struct {
 	publicKey      *rsa.PublicKey
 	expiration     time.Duration
 	issuer         string
-	userRepo       *models.UserRepository
+	userRepo       models.UserRepositoryInterface
 }
 
 // NewAuthService creates a new AuthService
-func NewAuthService(config JWTConfig, userRepo *models.UserRepository) (*AuthService, error) {
+func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface) (*AuthService, error) {
 	// Load private key
 	privateKey, err := loadPrivateKey(config.PrivateKeyPath)
 	if err != nil {
@@ -117,10 +117,15 @@ func (s *AuthService) ValidateToken(tokenString string) (*TokenClaims, error) {
 	})
 
 	if err != nil {
-		if ve, ok := err.(*jwt.ValidationError); ok {
-			if ve.Errors&jwt.ValidationErrorExpired != 0 {
-				return nil, fmt.Errorf("token expired: %w", err)
-			}
+		// Check for expired token error
+		if err.Error() == "token has invalid claims: token is expired" {
+			return nil, fmt.Errorf("token expired: %w", err)
+		}
+		// Check for other validation errors
+		if err.Error() == "token contains an invalid number of segments" ||
+		   err.Error() == "token signature is invalid" ||
+		   err.Error() == "token is not valid yet" ||
+		   err.Error() == "token is malformed" {
 			return nil, fmt.Errorf("invalid token: %w", err)
 		}
 		return nil, fmt.Errorf("failed to parse token: %w", err)
