@@ -1,0 +1,51 @@
+# Binaries
+podland
+*.exe
+*.so
+*.dll
+
+# Go workspace
+go.work
+
+# Dependency directories
+go.sum
+vendor/
+
+# IDE specific
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# JWT keys
+jwt-private.pem
+jwt-public.pem
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Build output
+build/
+dist/
+
+# Test files
+coverage.txt
+profile.out
+
+# Migration tracking
+migrations/schema_migrations.db
