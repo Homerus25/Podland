@@ -39,6 +39,20 @@ func GenerateTestMachine() *models.Machine {
 	}
 }
 
+// GenerateTestMachineWithOwner creates a test machine with specified owner ID
+func GenerateTestMachineWithOwner(ownerID string) *models.Machine {
+	return &models.Machine{
+		ID:           uuid.New().String(),
+		Name:         fmt.Sprintf("test-machine-%s", uuid.New().String()[:8]),
+		OwnerID:      ownerID,
+		Hostname:     "example.com",
+		SSHUsername:  "root",
+		Port:         22,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+	}
+}
+
 // GenerateValidPEMKey creates a valid RSA private key in PEM format
 func GenerateValidPEMKey() string {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)

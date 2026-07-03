@@ -256,3 +256,27 @@ func (s *MachineService) ListOwnedMachines(userID string) ([]*models.Machine, er
 func (s *MachineService) ListAllMachines(userID string) ([]*models.Machine, error) {
 	return s.machineRepo.ListAccessible(userID)
 }
+
+// Delete deletes a machine by ID after verifying ownership
+func (s *MachineService) Delete(ctx context.Context, userID, machineID string) error {
+	// Get machine to verify it exists and user is owner
+	machine, err := s.machineRepo.GetByID(machineID)
+	if err != nil {
+		return fmt.Errorf("failed to get machine: %w", err)
+	}
+	if machine == nil {
+		return errors.ErrMachineNotFound
+	}
+	
+	// Verify user is the owner
+	if machine.OwnerID != userID {
+		return errors.ErrAccessDenied
+	}
+	
+	// Delete the machine from database
+	if err := s.machineRepo.Delete(machineID); err != nil {
+		return fmt.Errorf("failed to delete machine: %w", err)
+	}
+	
+	return nil
+}

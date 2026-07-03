@@ -214,25 +214,12 @@ func (h *MachineHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get existing machine to verify ownership
-	machine, err := h.service.GetMachineByID(userID, machineID)
-	if err != nil {
+	// Delete machine through service
+	if err := h.service.Delete(r.Context(), userID, machineID); err != nil {
 		if appErr, ok := err.(*errors.AppError); ok {
 			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 			return
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	// Only owner can delete the machine
-	if machine.OwnerID != userID {
-		errors.RespondWithError(w, errors.ErrAccessDenied, contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	// Delete machine
-	if err := h.service.machineRepo.Delete(machineID); err != nil {
 		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
 		return
 	}
