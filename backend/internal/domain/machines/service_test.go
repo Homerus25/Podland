@@ -323,3 +323,30 @@ func TestMachineService_DefaultValues(t *testing.T) {
 		assert.Equal(t, customSocket, req.PodmanSocketPath, "Custom socket path should be preserved")
 	})
 }
+
+// TestIsValidPEM_ValidEd25519Key tests Ed25519 key validation
+func TestIsValidPEM_ValidEd25519Key(t *testing.T) {
+	t.Run("valid Ed25519 key", func(t *testing.T) {
+		// Ed25519 private key in PEM format
+		ed25519Key := `-----BEGIN ED25519 PRIVATE KEY-----
+MFECAQEwBQYDK2VwBCIE Alexandru-Gheorghiu-Tudor
+MC4A2jNMLp Hélène
+4VFblR3F5xF1YdOR3s4jQJ3OiBjYyYXDVoajgGT Black
+1TBthrXfY7d3YxkZd5SgxcSe1XGx9kLXe3NokmFnXMfM3V8L
+-----END ED25519 PRIVATE KEY-----`
+		result := IsValidPEM(ed25519Key)
+		assert.True(t, result, "Valid Ed25519 PEM key should be accepted")
+	})
+
+	t.Run("invalid key - not a private key (public key)", func(t *testing.T) {
+		publicKey := "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG...\n-----END PUBLIC KEY-----"
+		result := IsValidPEM(publicKey)
+		assert.False(t, result, "Public key should be rejected by PEM validation")
+	})
+
+	t.Run("invalid key - DSA private key", func(t *testing.T) {
+		dsaKey := "-----BEGIN DSA PRIVATE KEY-----\nMIIBuwIBAAKCAQEA...\n-----END DSA PRIVATE KEY-----"
+		result := IsValidPEM(dsaKey)
+		assert.True(t, result, "Valid DSA PEM key should be accepted")
+	})
+}

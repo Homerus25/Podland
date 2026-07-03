@@ -353,7 +353,7 @@ func TestMockConnectionCache(t *testing.T) {
 
 	t.Run("custom GetOrCreate function", func(t *testing.T) {
 		customFunc := func(ctx context.Context, machineID, userID string, machineRepo interface{}, encryption interface{}) (interface{}, error) {
-			return &MockPodmanConnection{machineID: "custom-" + machineID}, nil
+			return &MockPodmanConnection{MachineID: "custom-" + machineID}, nil
 		}
 
 		cache := NewMockConnectionCache()
@@ -574,12 +574,12 @@ func TestMockServiceHelpers(t *testing.T) {
 // TestMockPodmanConnection tests the mock Podman connection
 func TestMockPodmanConnection(t *testing.T) {
 	t.Run("GetMachineID", func(t *testing.T) {
-		conn := &MockPodmanConnection{machineID: "test-machine"}
+		conn := &MockPodmanConnection{MachineID: "test-machine"}
 		assert.Equal(t, "test-machine", conn.GetMachineID())
 	})
 
 	t.Run("Execute", func(t *testing.T) {
-		conn := &MockPodmanConnection{machineID: "test-machine"}
+		conn := &MockPodmanConnection{MachineID: "test-machine"}
 		result, err := conn.Execute("test-command", "arg1", "arg2")
 		assert.NoError(t, err)
 		assert.Contains(t, result.(string), "executed: test-command")

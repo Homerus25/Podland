@@ -2,6 +2,7 @@ package testutils
 
 import (
 	"context"
+	"time"
 
 	"github.com/yourorg/podland/backend/internal/models"
 )
@@ -240,7 +241,7 @@ func (m *MockConnectionCache) GetOrCreate(ctx context.Context, machineID, userID
 	}
 	
 	// Default mock behavior - return a simple mock connection
-	mockConn := &MockPodmanConnection{machineID: machineID}
+	mockConn := &MockPodmanConnection{MachineID: machineID}
 	m.connections[machineID] = mockConn
 	return mockConn, nil
 }
@@ -259,4 +260,159 @@ func (m *MockConnectionCache) MarkIdle(machineID string) {}
 // Clear removes all connections
 func (m *MockConnectionCache) Clear() {
 	m.connections = make(map[string]interface{})
+}
+
+// MockMachineAccessRepository implements a mock machine access repository for testing
+type MockMachineAccessRepository struct {
+	accesses   map[string]*MockMachineAccessEntry
+	createErr  error
+	getByMachineAndUserErr error
+	listByMachineErr     error
+	listByUserErr       error
+	updateErr          error
+	deleteErr          error
+	hasAccessErr       error
+}
+
+// MockMachineAccessEntry represents a mock machine access entry
+// Using machineID+userID as composite key
+type MockMachineAccessEntry struct {
+	machineID string
+	userID    string
+	permission string
+	grantedAt time.Time
+}
+
+func NewMockMachineAccessRepository() *MockMachineAccessRepository {
+	return &MockMachineAccessRepository{
+		accesses: make(map[string]*MockMachineAccessEntry),
+	}
+}
+
+// NewMockMachineAccessRepositoryWithErrors creates a mock access repository with configurable errors
+func NewMockMachineAccessRepositoryWithErrors(createErr, getByMachineAndUserErr, listByMachineErr, listByUserErr, updateErr, deleteErr, hasAccessErr error) *MockMachineAccessRepository {
+	return &MockMachineAccessRepository{
+		accesses:               make(map[string]*MockMachineAccessEntry),
+		createErr:              createErr,
+		getByMachineAndUserErr: getByMachineAndUserErr,
+		listByMachineErr:       listByMachineErr,
+		listByUserErr:         listByUserErr,
+		updateErr:              updateErr,
+		deleteErr:              deleteErr,
+		hasAccessErr:          hasAccessErr,
+	}
+}
+
+func (m *MockMachineAccessRepository) createKey(machineID, userID string) string {
+	return machineID + "|" + userID
+}
+
+func (m *MockMachineAccessRepository) Create(access *models.MachineAccess) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
+	key := m.createKey(access.MachineID, access.UserID)
+	m.accesses[key] = &MockMachineAccessEntry{
+		machineID:  access.MachineID,
+		userID:     access.UserID,
+		permission: access.Permission,
+		grantedAt:  access.GrantedAt,
+	}
+	return nil
+}
+
+func (m *MockMachineAccessRepository) GetByMachineAndUser(machineID, userID string) (*models.MachineAccess, error) {
+	if m.getByMachineAndUserErr != nil {
+		return nil, m.getByMachineAndUserErr
+	}
+	key := m.createKey(machineID, userID)
+	entry, exists := m.accesses[key]
+	if !exists {
+		return nil, nil
+	}
+	return &models.MachineAccess{
+		MachineID:  entry.machineID,
+		UserID:     entry.userID,
+		Permission: entry.permission,
+		GrantedAt:  entry.grantedAt,
+	}, nil
+}
+
+func (m *MockMachineAccessRepository) ListByMachine(machineID string) ([]*models.MachineAccess, error) {
+	if m.listByMachineErr != nil {
+		return nil, m.listByMachineErr
+	}
+	var result []*models.MachineAccess
+	for _, entry := range m.accesses {
+		if entry.machineID == machineID {
+			result = append(result, &models.MachineAccess{
+				MachineID:  entry.machineID,
+				UserID:     entry.userID,
+				Permission: entry.permission,
+				GrantedAt:  entry.grantedAt,
+			})
+		}
+	}
+	return result, nil
+}
+
+func (m *MockMachineAccessRepository) ListByUser(userID string) ([]*models.MachineAccess, error) {
+	if m.listByUserErr != nil {
+		return nil, m.listByUserErr
+	}
+	var result []*models.MachineAccess
+	for _, entry := range m.accesses {
+		if entry.userID == userID {
+			result = append(result, &models.MachineAccess{
+				MachineID:  entry.machineID,
+				UserID:     entry.userID,
+				Permission: entry.permission,
+				GrantedAt:  entry.grantedAt,
+			})
+		}
+	}
+	return result, nil
+}
+
+func (m *MockMachineAccessRepository) Update(access *models.MachineAccess) error {
+	if m.updateErr != nil {
+		return m.updateErr
+	}
+	key := m.createKey(access.MachineID, access.UserID)
+	m.accesses[key] = &MockMachineAccessEntry{
+		machineID:  access.MachineID,
+		userID:     access.UserID,
+		permission: access.Permission,
+		grantedAt:  access.GrantedAt,
+	}
+	return nil
+}
+
+func (m *MockMachineAccessRepository) Delete(machineID, userID string) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	key := m.createKey(machineID, userID)
+	delete(m.accesses, key)
+	return nil
+}
+
+func (m *MockMachineAccessRepository) HasAccess(machineID, userID string) (bool, error) {
+	if m.hasAccessErr != nil {
+		return false, m.hasAccessErr
+	}
+	key := m.createKey(machineID, userID)
+	_, exists := m.accesses[key]
+	return exists, nil
+}
+
+// AddAccess adds access directly without going through Create
+func (m *MockMachineAccessRepository) AddAccess(machineID, userID, permission string, grantedAt time.Time) {
+	key := m.createKey(machineID, userID)
+	m.accesses[key] = &MockMachineAccessEntry{
+		machineID:  machineID,
+		userID:     userID,
+		permission: permission,
+		grantedAt:  grantedAt,
+	}
 }

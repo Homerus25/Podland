@@ -117,7 +117,7 @@ func (m *MockPodmanConnectionService) Connect(ctx context.Context, machineID str
 		return nil, m.connectError
 	}
 	// Return a mock connection
-	return &MockPodmanConnection{machineID: machineID}, nil
+	return &MockPodmanConnection{MachineID: machineID}, nil
 }
 
 func (m *MockPodmanConnectionService) Close(ctx context.Context, connection interface{}) error {
@@ -129,14 +129,43 @@ func (m *MockPodmanConnectionService) Close(ctx context.Context, connection inte
 
 // MockPodmanConnection represents a mock Podman connection
 type MockPodmanConnection struct {
-	machineID string
+	MachineID string
 }
 
 func (m *MockPodmanConnection) GetMachineID() string {
-	return m.machineID
+	return m.MachineID
 }
 
 func (m *MockPodmanConnection) Execute(command string, args ...interface{}) (interface{}, error) {
 	// Simple mock execution - just return the command
 	return fmt.Sprintf("executed: %s %v", command, args), nil
+}
+
+// MockConnectionManager implements a mock connection manager for testing
+type MockConnectionManager struct {
+	getConnectionErr error
+}
+
+func NewMockConnectionManager() *MockConnectionManager {
+	return &MockConnectionManager{}
+}
+
+func NewMockConnectionManagerWithError(getConnectionErr error) *MockConnectionManager {
+	return &MockConnectionManager{
+		getConnectionErr: getConnectionErr,
+	}
+}
+
+func (m *MockConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (interface{}, error) {
+	if m.getConnectionErr != nil {
+		return nil, m.getConnectionErr
+	}
+	return &MockPodmanConnection{MachineID: machineID}, nil
+}
+
+// Helper function to create a test machine service with all mock dependencies
+// Note: This returns individual mock components that can be used to create a MachineService
+// The MachineService itself is created by the caller to maintain proper package boundaries
+func NewTestMachineServiceComponents() (*MockMachineRepository, *MockMachineAccessRepository, *MockConnectionManager, *MockEncryptionService) {
+	return NewMockMachineRepository(), NewMockMachineAccessRepository(), NewMockConnectionManager(), NewMockEncryptionService()
 }

@@ -13,20 +13,30 @@ import (
 	"github.com/yourorg/podland/backend/internal/models"
 )
 
+// concreteConnectionManager wraps a *connections.ConnectionManager to implement ConnectionManagerInterface
+type concreteConnectionManager struct {
+	connManager *connections.ConnectionManager
+}
+
+// GetConnection implements ConnectionManagerInterface by calling the underlying ConnectionManager
+func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (interface{}, error) {
+	return c.connManager.GetConnection(ctx, machineID, userID)
+}
+
 // MachineService provides business logic for machines
 type MachineService struct {
-	machineRepo    *models.MachineRepository
-	accessRepo     *models.MachineAccessRepository
-	connManager    *connections.ConnectionManager
-	encryption     *encryption.EncryptionService
+	machineRepo    MachineRepositoryInterface
+	accessRepo     models.MachineAccessRepositoryInterface
+	connManager    ConnectionManagerInterface
+	encryption     EncryptionServiceInterface
 }
 
 // NewMachineService creates a new MachineService
 func NewMachineService(
-	machineRepo *models.MachineRepository,
-	accessRepo *models.MachineAccessRepository,
-	connManager *connections.ConnectionManager,
-	encryption *encryption.EncryptionService,
+	machineRepo MachineRepositoryInterface,
+	accessRepo models.MachineAccessRepositoryInterface,
+	connManager ConnectionManagerInterface,
+	encryption EncryptionServiceInterface,
 ) *MachineService {
 	return &MachineService{
 		machineRepo:    machineRepo,
@@ -35,6 +45,24 @@ func NewMachineService(
 		encryption:     encryption,
 	}
 }
+
+// NewMachineServiceWithConcreteDeps creates a new MachineService with concrete dependencies
+// This maintains backward compatibility with existing code that uses *connections.ConnectionManager and *encryption.EncryptionService
+func NewMachineServiceWithConcreteDeps(
+	machineRepo MachineRepositoryInterface,
+	accessRepo models.MachineAccessRepositoryInterface,
+	connManager *connections.ConnectionManager,
+	encryption *encryption.EncryptionService,
+) *MachineService {
+	return &MachineService{
+		machineRepo:    machineRepo,
+		accessRepo:     accessRepo,
+		connManager:    &concreteConnectionManager{connManager: connManager},
+		encryption:     encryption,
+	}
+}
+
+
 
 // CreateMachineRequest represents a request to create a new machine
 type CreateMachineRequest struct {
