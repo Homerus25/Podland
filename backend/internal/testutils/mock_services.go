@@ -7,8 +7,12 @@ import (
 
 // MockEncryptionService implements a mock encryption service for testing
 type MockEncryptionService struct {
-	encryptError error
-	decryptError error
+	encryptError     error
+	decryptError     error
+	encryptFunc      func(string) ([]byte, error)
+	decryptFunc      func([]byte) (string, error)
+	encryptSSHFunc   func(string) ([]byte, string, error)
+	decryptSSHFunc   func([]byte) (string, error)
 }
 
 func NewMockEncryptionService() *MockEncryptionService {
@@ -22,23 +26,73 @@ func NewMockEncryptionServiceWithErrors(encryptErr, decryptErr error) *MockEncry
 	}
 }
 
-func (m *MockEncryptionService) Encrypt(ctx context.Context, data string) (string, error) {
-	if m.encryptError != nil {
-		return "", m.encryptError
+// NewMockEncryptionServiceWithCustomFunctions allows custom encryption/decryption logic
+func NewMockEncryptionServiceWithCustomFunctions(
+	encryptFunc func(string) ([]byte, error),
+	decryptFunc func([]byte) (string, error),
+	encryptSSHFunc func(string) ([]byte, string, error),
+	decryptSSHFunc func([]byte) (string, error),
+) *MockEncryptionService {
+	return &MockEncryptionService{
+		encryptFunc:    encryptFunc,
+		decryptFunc:    decryptFunc,
+		encryptSSHFunc: encryptSSHFunc,
+		decryptSSHFunc: decryptSSHFunc,
 	}
-	// Simple mock encryption - just add a prefix
-	return fmt.Sprintf("encrypted:%s", data), nil
 }
 
-func (m *MockEncryptionService) Decrypt(ctx context.Context, encryptedData string) (string, error) {
+func (m *MockEncryptionService) Encrypt(data string) ([]byte, error) {
+	if m.encryptError != nil {
+		return nil, m.encryptError
+	}
+	if m.encryptFunc != nil {
+		return m.encryptFunc(data)
+	}
+	// Simple mock encryption - just convert to bytes with prefix
+	return []byte(fmt.Sprintf("encrypted:%s", data)), nil
+}
+
+func (m *MockEncryptionService) Decrypt(data []byte) (string, error) {
 	if m.decryptError != nil {
 		return "", m.decryptError
 	}
-	// Simple mock decryption - remove the prefix
-	if len(encryptedData) > len("encrypted:") && encryptedData[:len("encrypted:")] == "encrypted:" {
-		return encryptedData[len("encrypted:"):], nil
+	if m.decryptFunc != nil {
+		return m.decryptFunc(data)
 	}
-	return encryptedData, nil
+	// Simple mock decryption - remove the prefix
+	dataStr := string(data)
+	if len(dataStr) > len("encrypted:") && dataStr[:len("encrypted:")] == "encrypted:" {
+		return dataStr[len("encrypted:"):], nil
+	}
+	return dataStr, nil
+}
+
+func (m *MockEncryptionService) EncryptSSHKey(privateKey string) ([]byte, string, error) {
+	if m.encryptError != nil {
+		return nil, "", m.encryptError
+	}
+	if m.encryptSSHFunc != nil {
+		return m.encryptSSHFunc(privateKey)
+	}
+	// Simple mock SSH encryption
+	encrypted := []byte(fmt.Sprintf("ssh-encrypted:%s", privateKey))
+	fingerprint := fmt.Sprintf("sha256:%x", []byte(privateKey))
+	return encrypted, fingerprint, nil
+}
+
+func (m *MockEncryptionService) DecryptSSHKey(encryptedKey []byte) (string, error) {
+	if m.decryptError != nil {
+		return "", m.decryptError
+	}
+	if m.decryptSSHFunc != nil {
+		return m.decryptSSHFunc(encryptedKey)
+	}
+	// Simple mock SSH decryption
+	dataStr := string(encryptedKey)
+	if len(dataStr) > len("ssh-encrypted:") && dataStr[:len("ssh-encrypted:")] == "ssh-encrypted:" {
+		return dataStr[len("ssh-encrypted:"):], nil
+	}
+	return dataStr, nil
 }
 
 // MockPodmanConnectionService implements a mock Podman connection service
