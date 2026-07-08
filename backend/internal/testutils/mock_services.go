@@ -3,6 +3,8 @@ package testutils
 import (
 	"context"
 	"fmt"
+
+	"go.podman.io/podman/v6/pkg/bindings"
 )
 
 // MockEncryptionService implements a mock encryption service for testing
@@ -160,7 +162,10 @@ func (m *MockConnectionManager) GetConnection(ctx context.Context, machineID, us
 	if m.getConnectionErr != nil {
 		return nil, m.getConnectionErr
 	}
-	return &MockPodmanConnection{MachineID: machineID}, nil
+	// Return a mock context with a mock connection
+	mockConn := &bindings.Connection{}
+	mockCtx := context.WithValue(ctx, "mock-connection", mockConn)
+	return mockCtx, nil
 }
 
 // Helper function to create a test machine service with all mock dependencies

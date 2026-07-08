@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"go.podman.io/podman/v6/pkg/bindings"
 	"github.com/yourorg/podland/backend/internal/encryption"
 	"github.com/yourorg/podland/backend/internal/models"
 )
@@ -32,8 +31,8 @@ type connectionRequest struct {
 }
 
 type connectionResponse struct {
-	conn *bindings.Connection
-	err  error
+	connCtx context.Context
+	err     error
 }
 
 
@@ -57,20 +56,20 @@ func NewConnectionManager(
 	}
 }
 
-// GetConnection gets a connection to a machine
-func (m *ConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (*bindings.Connection, error) {
+// GetConnection gets a connection context to a machine
+func (m *ConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (context.Context, error) {
 	// First try to get from cache
-	conn, err := m.cache.GetOrCreate(ctx, machineID, userID, m.machineRepo, m.encryption)
+	connCtx, err := m.cache.GetOrCreateContext(ctx, machineID, userID, m.machineRepo, m.encryption)
 	if err == nil {
-		return conn, nil
+		return connCtx, nil
 	}
 
 	// If cache is full or other issue, queue the request
-	return m.QueueRequest(ctx, machineID, userID)
+	return m.QueueRequestContext(ctx, machineID, userID)
 }
 
-// QueueRequest queues a connection request
-func (m *ConnectionManager) QueueRequest(ctx context.Context, machineID, userID string) (*bindings.Connection, error) {
+// QueueRequestContext queues a connection request and returns context
+func (m *ConnectionManager) QueueRequestContext(ctx context.Context, machineID, userID string) (context.Context, error) {
 	responseChan := make(chan connectionResponse, 1)
 
 	select {
@@ -93,7 +92,7 @@ func (m *ConnectionManager) QueueRequest(ctx context.Context, machineID, userID 
 		if response.err != nil {
 			return nil, response.err
 		}
-		return response.conn, nil
+		return response.connCtx, nil
 	case <-time.After(m.queueTimeout):
 		return nil, fmt.Errorf("connection request timed out")
 	case <-ctx.Done():
@@ -109,12 +108,12 @@ func (m *ConnectionManager) Run() {
 // processQueue processes connection requests from the queue
 func (m *ConnectionManager) processQueue() {
 	for req := range m.connectionQueue {
-		conn, err := m.cache.GetOrCreate(context.Background(), req.machineID, req.userID, m.machineRepo, m.encryption)
+		connCtx, err := m.cache.GetOrCreateContext(context.Background(), req.machineID, req.userID, m.machineRepo, m.encryption)
 		
 		// Send response
 		response := connectionResponse{
-			conn: conn,
-			err:  err,
+			connCtx: connCtx,
+			err:     err,
 		}
 		
 		// Try to send response, but don't block if receiver is gone
@@ -123,10 +122,7 @@ func (m *ConnectionManager) processQueue() {
 			// Response sent successfully
 		default:
 			// Receiver is not listening anymore
-			if conn != nil {
-				// Note: bindings.Connection doesn't have Close method
-				// Connection cleanup is handled automatically by Go's HTTP client
-			}
+			// Connection cleanup is handled automatically by Go's HTTP client
 		}
 	}
 }

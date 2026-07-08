@@ -107,6 +107,74 @@ func (c *ConnectionCache) GetOrCreate(
 	return conn, nil
 }
 
+// GetOrCreateContext gets an existing connection context or creates a new one
+func (c *ConnectionCache) GetOrCreateContext(
+	ctx context.Context,
+	machineID, userID string,
+	machineRepo *models.MachineRepository,
+	encryption *encryption.EncryptionService,
+) (context.Context, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Check if connection already exists
+	if entry, exists := c.connections[machineID]; exists {
+		entry.refCount++
+		entry.lastUsed = time.Now()
+		entry.isActive = true
+		return entry.connCtx, nil
+	}
+
+	// If cache is full, remove the least recently used idle connection
+	if len(c.connections) >= c.maxSize {
+		c.evictLRUIdle()
+	}
+
+	// Get machine details
+	machine, err := machineRepo.GetByID(machineID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get machine details: %w", err)
+	}
+	if machine == nil {
+		return nil, fmt.Errorf("machine not found")
+	}
+
+	// Decrypt SSH key
+	sshKey, err := encryption.Decrypt(machine.SSHKeyEncrypted)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt SSH key: %w", err)
+	}
+
+	// Create new Podman connection context
+	connCtx, err := bindings.NewConnectionWithOptions(ctx, bindings.Options{
+		URI:      fmt.Sprintf("ssh://%s@%s:%d%s", machine.SSHUsername, machine.Hostname, machine.Port, machine.PodmanSocketPath),
+		Identity: sshKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Podman connection context: %w", err)
+	}
+
+	// Get the actual connection from the context
+	conn, err := bindings.GetClient(connCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get Podman client: %w", err)
+	}
+
+	// Store in cache
+	entry := &ConnectionEntry{
+		connCtx:   connCtx,
+		conn:      conn,
+		userID:    userID,
+		machineID: machineID,
+		refCount:  1,
+		lastUsed:  time.Now(),
+		isActive:  true,
+	}
+	c.connections[machineID] = entry
+
+	return connCtx, nil
+}
+
 // Release decrements the reference count for a connection
 func (c *ConnectionCache) Release(machineID string) {
 	c.mu.Lock()

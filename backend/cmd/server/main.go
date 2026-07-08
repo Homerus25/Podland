@@ -83,7 +83,7 @@ func main() {
 
 	// Initialize services
 	machineService := machines.NewMachineServiceWithConcreteDeps(machineRepo, accessRepo, connectionManager, encryptionService)
-	containerService := containers.NewContainerService(connectionManager)
+	containerService := containers.NewContainerServiceWithConcreteDeps(connectionManager)
 	imageService := images.NewImageService(connectionManager)
 	quadletService := quadlets.NewQuadletService(connectionManager)
 	eventService := events.NewEventService(connectionManager)
