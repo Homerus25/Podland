@@ -6,17 +6,17 @@ import (
 
 // EventHandler handles event streaming requests
 type EventHandler struct {
-	service    *EventService
-	machineService interface{}
-	errorHandler interface{}
+	service        *EventService
+	machineService any
+	errorHandler   any
 }
 
 // NewEventHandler creates a new EventHandler
-func NewEventHandler(service *EventService, machineService interface{}, errorHandler interface{}) *EventHandler {
+func NewEventHandler(service *EventService, machineService any, errorHandler any) *EventHandler {
 	return &EventHandler{
-		service: service,
+		service:        service,
 		machineService: machineService,
-		errorHandler: errorHandler,
+		errorHandler:   errorHandler,
 	}
 }
 

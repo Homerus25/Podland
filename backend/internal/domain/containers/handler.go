@@ -6,14 +6,14 @@ import (
 
 // ContainerHandler handles container requests
 type ContainerHandler struct {
-	service    *ContainerService
-	machineService *interface{}
+	service        *ContainerService
+	machineService *any
 }
 
 // NewContainerHandler creates a new ContainerHandler
-func NewContainerHandler(service *ContainerService, machineService interface{}) *ContainerHandler {
+func NewContainerHandler(service *ContainerService, machineService any) *ContainerHandler {
 	return &ContainerHandler{
-		service: service,
+		service:        service,
 		machineService: &machineService,
 	}
 }

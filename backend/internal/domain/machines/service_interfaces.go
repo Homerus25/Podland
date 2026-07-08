@@ -7,7 +7,7 @@ import (
 // ConnectionManagerInterface defines the interface for connection management
 // This allows mocking the ConnectionManager in tests
 type ConnectionManagerInterface interface {
-	GetConnection(ctx context.Context, machineID, userID string) (interface{}, error)
+	GetConnection(ctx context.Context, machineID, userID string) (any, error)
 }
 
 // EncryptionServiceInterface defines the interface for encryption services

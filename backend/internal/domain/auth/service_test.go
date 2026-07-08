@@ -110,9 +110,9 @@ func TestValidateToken_InvalidFormat(t *testing.T) {
 
 	// Test with various invalid token formats
 	invalidTokens := []string{
-		"",                           // Empty string
-		"invalid",                     // Just a word
-		"not.a.valid.token.format",   // Invalid format
+		"",                                     // Empty string
+		"invalid",                              // Just a word
+		"not.a.valid.token.format",             // Invalid format
 		"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", // Incomplete JWT
 	}
 
@@ -163,9 +163,9 @@ func TestValidateToken_InvalidSignature(t *testing.T) {
 	invalidSignatureTokens := []string{
 		"header.payload.invalid_signature",
 		"not.a.real.token",
-		validToken + "extra-data", // Append extra data
+		validToken + "extra-data",                    // Append extra data
 		validToken[:len(validToken)/2] + "corrupted", // Corrupt the middle
-		"AAAA.BBBB.CCCC", // Clearly invalid JWT
+		"AAAA.BBBB.CCCC",                             // Clearly invalid JWT
 	}
 
 	for _, token := range invalidSignatureTokens {
@@ -223,14 +223,14 @@ func TestTokenStructure_Validation(t *testing.T) {
 
 	// Test malformed token structures
 	malformedTokens := []string{
-		"part1.part2",                    // Only 2 parts
-		"part1.part2.part3.part4",        // Too many parts
-		"part1part2part3",               // No separators
-		"",                              // Empty token
-		".",                             // Only dots
-		"..",                            // Only separators
-		"part1.",                        // Missing last part
-		".part2.part3",                  // Missing first part
+		"part1.part2",             // Only 2 parts
+		"part1.part2.part3.part4", // Too many parts
+		"part1part2part3",         // No separators
+		"",                        // Empty token
+		".",                       // Only dots
+		"..",                      // Only separators
+		"part1.",                  // Missing last part
+		".part2.part3",            // Missing first part
 	}
 
 	for _, malformedToken := range malformedTokens {
@@ -301,7 +301,7 @@ func TestGenerateToken_Consistency(t *testing.T) {
 	// Generate multiple tokens for the same user
 	userID := "consistency-test-user"
 	var tokens []string
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		token, err := service.GenerateToken(userID)
 		require.NoError(t, err, "Should generate token without error")
 		assert.NotEmpty(t, token, "Token should not be empty")

@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"go.podman.io/podman/v6/pkg/domain/entities"
-	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
+	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
 // concreteConnectionManager wraps a *connections.ConnectionManager to implement ConnectionManagerInterface
@@ -17,7 +17,7 @@ type concreteConnectionManager struct {
 }
 
 // GetConnection implements ConnectionManagerInterface by calling the underlying ConnectionManager
-func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (interface{}, error) {
+func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (any, error) {
 	return c.connManager.GetConnection(ctx, machineID, userID)
 }
 

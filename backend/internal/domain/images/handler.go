@@ -6,14 +6,14 @@ import (
 
 // ImageHandler handles image requests
 type ImageHandler struct {
-	service    *ImageService
-	machineService interface{}
+	service        *ImageService
+	machineService any
 }
 
 // NewImageHandler creates a new ImageHandler
-func NewImageHandler(service *ImageService, machineService interface{}) *ImageHandler {
+func NewImageHandler(service *ImageService, machineService any) *ImageHandler {
 	return &ImageHandler{
-		service: service,
+		service:        service,
 		machineService: machineService,
 	}
 }

@@ -27,13 +27,13 @@ func NewMockUserRepository() *MockUserRepository {
 // NewMockUserRepositoryWithErrors creates a mock repository with configurable errors
 func NewMockUserRepositoryWithErrors(createErr, getByIDErr, getByNameErr, updateErr, deleteErr, existsErr error) *MockUserRepository {
 	return &MockUserRepository{
-		users:       make(map[string]*models.User),
-		createErr:   createErr,
-		getByIDErr:  getByIDErr,
+		users:        make(map[string]*models.User),
+		createErr:    createErr,
+		getByIDErr:   getByIDErr,
 		getByNameErr: getByNameErr,
-		updateErr:   updateErr,
-		deleteErr:   deleteErr,
-		existsErr:   existsErr,
+		updateErr:    updateErr,
+		deleteErr:    deleteErr,
+		existsErr:    existsErr,
 	}
 }
 
@@ -103,9 +103,9 @@ func (m *MockUserRepository) UsernameExists(username string) (bool, error) {
 
 // MockMachineRepository implements a mock machine repository for testing
 type MockMachineRepository struct {
-	machines map[string]*models.Machine
-	listErr  error
-	getErr   error
+	machines  map[string]*models.Machine
+	listErr   error
+	getErr    error
 	createErr error
 	updateErr error
 	deleteErr error
@@ -208,38 +208,38 @@ func (m *MockMachineRepository) NameExistsForUser(userID, name string) (bool, er
 // MockConnectionCache implements a mock connection cache for testing
 // It simulates the ConnectionCache from connections/cache.go but with simplified interface
 type MockConnectionCache struct {
-	connections map[string]interface{}
-	getOrCreateErr error
-	getOrCreateFunc func(ctx context.Context, machineID, userID string, machineRepo interface{}, encryption interface{}) (interface{}, error)
+	connections     map[string]any
+	getOrCreateErr  error
+	getOrCreateFunc func(ctx context.Context, machineID, userID string, machineRepo any, encryption any) (any, error)
 }
 
 func NewMockConnectionCache() *MockConnectionCache {
 	return &MockConnectionCache{
-		connections: make(map[string]interface{}),
+		connections: make(map[string]any),
 	}
 }
 
 func NewMockConnectionCacheWithError(getOrCreateErr error) *MockConnectionCache {
 	return &MockConnectionCache{
-		connections: make(map[string]interface{}),
+		connections:    make(map[string]any),
 		getOrCreateErr: getOrCreateErr,
 	}
 }
 
 // SetCustomGetOrCreate sets a custom function for GetOrCreate
-func (m *MockConnectionCache) SetCustomGetOrCreate(getOrCreateFunc func(ctx context.Context, machineID, userID string, machineRepo interface{}, encryption interface{}) (interface{}, error)) {
+func (m *MockConnectionCache) SetCustomGetOrCreate(getOrCreateFunc func(ctx context.Context, machineID, userID string, machineRepo any, encryption any) (any, error)) {
 	m.getOrCreateFunc = getOrCreateFunc
 }
 
 // GetOrCreate simulates the ConnectionCache.GetOrCreate method
-func (m *MockConnectionCache) GetOrCreate(ctx context.Context, machineID, userID string, machineRepo interface{}, encryption interface{}) (interface{}, error) {
+func (m *MockConnectionCache) GetOrCreate(ctx context.Context, machineID, userID string, machineRepo any, encryption any) (any, error) {
 	if m.getOrCreateErr != nil {
 		return nil, m.getOrCreateErr
 	}
 	if m.getOrCreateFunc != nil {
 		return m.getOrCreateFunc(ctx, machineID, userID, machineRepo, encryption)
 	}
-	
+
 	// Default mock behavior - return a simple mock connection
 	mockConn := &MockPodmanConnection{MachineID: machineID}
 	m.connections[machineID] = mockConn
@@ -259,28 +259,28 @@ func (m *MockConnectionCache) MarkIdle(machineID string) {}
 
 // Clear removes all connections
 func (m *MockConnectionCache) Clear() {
-	m.connections = make(map[string]interface{})
+	m.connections = make(map[string]any)
 }
 
 // MockMachineAccessRepository implements a mock machine access repository for testing
 type MockMachineAccessRepository struct {
-	accesses   map[string]*MockMachineAccessEntry
-	createErr  error
+	accesses               map[string]*MockMachineAccessEntry
+	createErr              error
 	getByMachineAndUserErr error
-	listByMachineErr     error
-	listByUserErr       error
-	updateErr          error
-	deleteErr          error
-	hasAccessErr       error
+	listByMachineErr       error
+	listByUserErr          error
+	updateErr              error
+	deleteErr              error
+	hasAccessErr           error
 }
 
 // MockMachineAccessEntry represents a mock machine access entry
 // Using machineID+userID as composite key
 type MockMachineAccessEntry struct {
-	machineID string
-	userID    string
+	machineID  string
+	userID     string
 	permission string
-	grantedAt time.Time
+	grantedAt  time.Time
 }
 
 func NewMockMachineAccessRepository() *MockMachineAccessRepository {
@@ -296,10 +296,10 @@ func NewMockMachineAccessRepositoryWithErrors(createErr, getByMachineAndUserErr,
 		createErr:              createErr,
 		getByMachineAndUserErr: getByMachineAndUserErr,
 		listByMachineErr:       listByMachineErr,
-		listByUserErr:         listByUserErr,
+		listByUserErr:          listByUserErr,
 		updateErr:              updateErr,
 		deleteErr:              deleteErr,
-		hasAccessErr:          hasAccessErr,
+		hasAccessErr:           hasAccessErr,
 	}
 }
 

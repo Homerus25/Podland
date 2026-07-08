@@ -228,10 +228,10 @@ func TestMachineCreation_RequestValidation(t *testing.T) {
 
 	t.Run("request with missing name", func(t *testing.T) {
 		req := &CreateMachineRequest{
-			Name:             "", // Empty name
-			Hostname:         "example.com",
-			SSHUsername:      "root",
-			SSHPrivateKey:    testutils.GenerateValidPEMKey(),
+			Name:          "", // Empty name
+			Hostname:      "example.com",
+			SSHUsername:   "root",
+			SSHPrivateKey: testutils.GenerateValidPEMKey(),
 		}
 
 		assert.Empty(t, req.Name, "Name should be empty for this test case")
@@ -257,7 +257,7 @@ func TestMachineService_PEMValidationPerformance(t *testing.T) {
 
 	// Test multiple validations to ensure performance is acceptable
 	startTime := time.Now()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_ = IsValidPEM(validKey)
 		_ = IsValidPEM(invalidKey)
 	}
@@ -356,79 +356,79 @@ MC4A2jNMLp Hélène
 // TestMachineService_Delete tests the MachineService Delete method
 func TestMachineService_Delete(t *testing.T) {
 	ctx := context.Background()
-	
+
 	t.Run("successful deletion by owner", func(t *testing.T) {
 		// Setup mock repositories
 		mockMachineRepo := testutils.NewMockMachineRepository()
 		mockAccessRepo := testutils.NewMockMachineAccessRepository()
 		mockConnectionManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
-		
+
 		// Create test data
 		ownerID := "user-123"
 		machine := testutils.GenerateTestMachineWithOwner(ownerID)
 		mockMachineRepo.AddMachine(machine)
-		
+
 		// Create service
 		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption)
-		
+
 		// Execute
 		err := service.Delete(ctx, ownerID, machine.ID)
-		
+
 		// Verify
 		assert.NoError(t, err, "Deletion should succeed for owner")
-		
+
 		// Verify machine was removed from mock repo
 		resultMachine, _ := mockMachineRepo.GetByID(machine.ID)
 		assert.Nil(t, resultMachine, "Machine should be deleted from repository")
 	})
-	
+
 	t.Run("error when machine not found", func(t *testing.T) {
 		// Setup mock repositories
 		mockMachineRepo := testutils.NewMockMachineRepository()
 		mockAccessRepo := testutils.NewMockMachineAccessRepository()
 		mockConnectionManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
-		
+
 		// Create service
 		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption)
-		
+
 		// Execute
 		err := service.Delete(ctx, "user-123", "non-existent-machine-id")
-		
+
 		// Verify
 		assert.Error(t, err, "Should return error when machine not found")
 		assert.Contains(t, err.Error(), "MACHINE_NOT_FOUND", "Should return ErrMachineNotFound")
 	})
-	
+
 	t.Run("error when user is not owner", func(t *testing.T) {
 		// Setup mock repositories
 		mockMachineRepo := testutils.NewMockMachineRepository()
 		mockAccessRepo := testutils.NewMockMachineAccessRepository()
 		mockConnectionManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
-		
+
 		// Create test data - machine owned by someone else
 		ownerID := "actual-owner-123"
 		nonOwnerID := "non-owner-456"
 		machine := testutils.GenerateTestMachineWithOwner(ownerID)
 		mockMachineRepo.AddMachine(machine)
-		
+
 		// Create service
 		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption)
-		
+
 		// Execute - try to delete as non-owner
 		err := service.Delete(ctx, nonOwnerID, machine.ID)
-		
+
 		// Verify
 		assert.Error(t, err, "Should return error when user is not owner")
 		assert.Contains(t, err.Error(), "ACCESS_DENIED", "Should return ErrAccessDenied")
-		
+
 		// Verify machine still exists (not deleted)
 		resultMachine, _ := mockMachineRepo.GetByID(machine.ID)
 		assert.NotNil(t, resultMachine, "Machine should not be deleted when user is not owner")
 	})
-	
+
 	t.Run("error when repository delete fails", func(t *testing.T) {
 		// Setup mock repositories with error
 		deleteError := fmt.Errorf("database connection failed")
@@ -436,19 +436,19 @@ func TestMachineService_Delete(t *testing.T) {
 		mockAccessRepo := testutils.NewMockMachineAccessRepository()
 		mockConnectionManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
-		
+
 		// Create test data
 		ownerID := "user-123"
 		machine := testutils.GenerateTestMachineWithOwner(ownerID)
 		// Add machine manually to bypass create error
 		mockMachineRepo.AddMachine(machine)
-		
+
 		// Create service
 		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption)
-		
+
 		// Execute
 		err := service.Delete(ctx, ownerID, machine.ID)
-		
+
 		// Verify
 		assert.Error(t, err, "Should return error when repository delete fails")
 		assert.Contains(t, err.Error(), "failed to delete machine", "Error should contain repository error details")

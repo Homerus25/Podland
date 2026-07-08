@@ -9,12 +9,12 @@ import (
 
 // MockEncryptionService implements a mock encryption service for testing
 type MockEncryptionService struct {
-	encryptError     error
-	decryptError     error
-	encryptFunc      func(string) ([]byte, error)
-	decryptFunc      func([]byte) (string, error)
-	encryptSSHFunc   func(string) ([]byte, string, error)
-	decryptSSHFunc   func([]byte) (string, error)
+	encryptError   error
+	decryptError   error
+	encryptFunc    func(string) ([]byte, error)
+	decryptFunc    func([]byte) (string, error)
+	encryptSSHFunc func(string) ([]byte, string, error)
+	decryptSSHFunc func([]byte) (string, error)
 }
 
 func NewMockEncryptionService() *MockEncryptionService {
@@ -51,7 +51,7 @@ func (m *MockEncryptionService) Encrypt(data string) ([]byte, error) {
 		return m.encryptFunc(data)
 	}
 	// Simple mock encryption - just convert to bytes with prefix
-	return []byte(fmt.Sprintf("encrypted:%s", data)), nil
+	return fmt.Appendf(nil, "encrypted:%s", data), nil
 }
 
 func (m *MockEncryptionService) Decrypt(data []byte) (string, error) {
@@ -77,7 +77,7 @@ func (m *MockEncryptionService) EncryptSSHKey(privateKey string) ([]byte, string
 		return m.encryptSSHFunc(privateKey)
 	}
 	// Simple mock SSH encryption
-	encrypted := []byte(fmt.Sprintf("ssh-encrypted:%s", privateKey))
+	encrypted := fmt.Appendf(nil, "ssh-encrypted:%s", privateKey)
 	fingerprint := fmt.Sprintf("sha256:%x", []byte(privateKey))
 	return encrypted, fingerprint, nil
 }
@@ -114,7 +114,7 @@ func NewMockPodmanConnectionServiceWithErrors(connectErr, closeErr error) *MockP
 	}
 }
 
-func (m *MockPodmanConnectionService) Connect(ctx context.Context, machineID string, sshConfig interface{}) (interface{}, error) {
+func (m *MockPodmanConnectionService) Connect(ctx context.Context, machineID string, sshConfig any) (any, error) {
 	if m.connectError != nil {
 		return nil, m.connectError
 	}
@@ -122,7 +122,7 @@ func (m *MockPodmanConnectionService) Connect(ctx context.Context, machineID str
 	return &MockPodmanConnection{MachineID: machineID}, nil
 }
 
-func (m *MockPodmanConnectionService) Close(ctx context.Context, connection interface{}) error {
+func (m *MockPodmanConnectionService) Close(ctx context.Context, connection any) error {
 	if m.closeError != nil {
 		return m.closeError
 	}
@@ -138,7 +138,7 @@ func (m *MockPodmanConnection) GetMachineID() string {
 	return m.MachineID
 }
 
-func (m *MockPodmanConnection) Execute(command string, args ...interface{}) (interface{}, error) {
+func (m *MockPodmanConnection) Execute(command string, args ...any) (any, error) {
 	// Simple mock execution - just return the command
 	return fmt.Sprintf("executed: %s %v", command, args), nil
 }
@@ -158,7 +158,7 @@ func NewMockConnectionManagerWithError(getConnectionErr error) *MockConnectionMa
 	}
 }
 
-func (m *MockConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (interface{}, error) {
+func (m *MockConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (any, error) {
 	if m.getConnectionErr != nil {
 		return nil, m.getConnectionErr
 	}

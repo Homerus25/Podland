@@ -19,16 +19,16 @@ type concreteConnectionManager struct {
 }
 
 // GetConnection implements ConnectionManagerInterface by calling the underlying ConnectionManager
-func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (interface{}, error) {
+func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (any, error) {
 	return c.connManager.GetConnection(ctx, machineID, userID)
 }
 
 // MachineService provides business logic for machines
 type MachineService struct {
-	machineRepo    MachineRepositoryInterface
-	accessRepo     models.MachineAccessRepositoryInterface
-	connManager    ConnectionManagerInterface
-	encryption     EncryptionServiceInterface
+	machineRepo MachineRepositoryInterface
+	accessRepo  models.MachineAccessRepositoryInterface
+	connManager ConnectionManagerInterface
+	encryption  EncryptionServiceInterface
 }
 
 // NewMachineService creates a new MachineService
@@ -39,10 +39,10 @@ func NewMachineService(
 	encryption EncryptionServiceInterface,
 ) *MachineService {
 	return &MachineService{
-		machineRepo:    machineRepo,
-		accessRepo:     accessRepo,
-		connManager:    connManager,
-		encryption:     encryption,
+		machineRepo: machineRepo,
+		accessRepo:  accessRepo,
+		connManager: connManager,
+		encryption:  encryption,
 	}
 }
 
@@ -55,14 +55,12 @@ func NewMachineServiceWithConcreteDeps(
 	encryption *encryption.EncryptionService,
 ) *MachineService {
 	return &MachineService{
-		machineRepo:    machineRepo,
-		accessRepo:     accessRepo,
-		connManager:    &concreteConnectionManager{connManager: connManager},
-		encryption:     encryption,
+		machineRepo: machineRepo,
+		accessRepo:  accessRepo,
+		connManager: &concreteConnectionManager{connManager: connManager},
+		encryption:  encryption,
 	}
 }
-
-
 
 // CreateMachineRequest represents a request to create a new machine
 type CreateMachineRequest struct {
@@ -77,31 +75,31 @@ type CreateMachineRequest struct {
 
 // MachineResponse represents a machine in API responses
 type MachineResponse struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Description      string `json:"description"`
-	Hostname         string `json:"hostname"`
-	Port             int    `json:"port"`
-	SSHUsername      string `json:"sshUsername"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	Hostname          string `json:"hostname"`
+	Port              int    `json:"port"`
+	SSHUsername       string `json:"sshUsername"`
 	SSHKeyFingerprint string `json:"sshKeyFingerprint"`
-	PodmanSocketPath string `json:"podmanSocketPath"`
-	CreatedAt        string `json:"createdAt"`
-	UpdatedAt        string `json:"updatedAt"`
+	PodmanSocketPath  string `json:"podmanSocketPath"`
+	CreatedAt         string `json:"createdAt"`
+	UpdatedAt         string `json:"updatedAt"`
 }
 
 // FromModel converts a Machine model to MachineResponse
 func FromModel(machine *models.Machine) MachineResponse {
 	return MachineResponse{
-		ID:               machine.ID,
-		Name:             machine.Name,
-		Description:      machine.Description,
-		Hostname:         machine.Hostname,
-		Port:             machine.Port,
-		SSHUsername:      machine.SSHUsername,
+		ID:                machine.ID,
+		Name:              machine.Name,
+		Description:       machine.Description,
+		Hostname:          machine.Hostname,
+		Port:              machine.Port,
+		SSHUsername:       machine.SSHUsername,
 		SSHKeyFingerprint: machine.SSHKeyFingerprint,
-		PodmanSocketPath: machine.PodmanSocketPath,
-		CreatedAt:        machine.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:        machine.UpdatedAt.Format(time.RFC3339),
+		PodmanSocketPath:  machine.PodmanSocketPath,
+		CreatedAt:         machine.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:         machine.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -143,18 +141,18 @@ func (s *MachineService) Create(ctx context.Context, userID string, req *CreateM
 	// Create machine model
 	now := time.Now().UTC()
 	machine := &models.Machine{
-		ID:               uuid.New().String(),
-		Name:             req.Name,
-		OwnerID:          userID,
-		Description:      req.Description,
-		Hostname:         req.Hostname,
-		Port:             req.Port,
-		SSHUsername:      req.SSHUsername,
-		SSHKeyEncrypted:  encryptedKey,
+		ID:                uuid.New().String(),
+		Name:              req.Name,
+		OwnerID:           userID,
+		Description:       req.Description,
+		Hostname:          req.Hostname,
+		Port:              req.Port,
+		SSHUsername:       req.SSHUsername,
+		SSHKeyEncrypted:   encryptedKey,
 		SSHKeyFingerprint: fingerprint,
-		PodmanSocketPath: req.PodmanSocketPath,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		PodmanSocketPath:  req.PodmanSocketPath,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 
 	// Create machine in database
@@ -187,7 +185,7 @@ func IsValidPEM(key string) bool {
 	if len(key) < 20 {
 		return false
 	}
-	
+
 	// Check for PEM BEGIN headers
 	sshKeyTypes := []string{
 		"-----BEGIN RSA PRIVATE KEY-----",
@@ -196,7 +194,7 @@ func IsValidPEM(key string) bool {
 		"-----BEGIN EC PRIVATE KEY-----",
 		"-----BEGIN ED25519 PRIVATE KEY-----",
 	}
-	
+
 	for _, keyType := range sshKeyTypes {
 		if strings.HasPrefix(key, keyType) {
 			// Check if it contains a corresponding END marker
@@ -206,7 +204,7 @@ func IsValidPEM(key string) bool {
 			}
 		}
 	}
-	
+
 	return false
 }
 
@@ -233,12 +231,12 @@ func (s *MachineService) GetMachineByID(userID, machineID string) (*models.Machi
 	if machine == nil {
 		return nil, errors.ErrMachineNotFound
 	}
-	
+
 	// Check if user has access to the machine
 	if !s.UserHasAccess(userID, machineID) {
 		return nil, errors.ErrAccessDenied
 	}
-	
+
 	return machine, nil
 }
 
@@ -267,16 +265,16 @@ func (s *MachineService) Delete(ctx context.Context, userID, machineID string) e
 	if machine == nil {
 		return errors.ErrMachineNotFound
 	}
-	
+
 	// Verify user is the owner
 	if machine.OwnerID != userID {
 		return errors.ErrAccessDenied
 	}
-	
+
 	// Delete the machine from database
 	if err := s.machineRepo.Delete(machineID); err != nil {
 		return fmt.Errorf("failed to delete machine: %w", err)
 	}
-	
+
 	return nil
 }

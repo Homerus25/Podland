@@ -5,20 +5,18 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-
 )
 
 // Config holds all application configuration
 type Config struct {
-	Port               int
-	Database          DatabaseConfig
-	JWT               JWTConfig
-	Connections       ConnectionConfig
-	RateLimit         RateLimitConfig
-	AllowedOrigins    []string
-	Log               LogConfig
-	Encryption        EncryptionConfig
+	Port           int
+	Database       DatabaseConfig
+	JWT            JWTConfig
+	Connections    ConnectionConfig
+	RateLimit      RateLimitConfig
+	AllowedOrigins []string
+	Log            LogConfig
+	Encryption     EncryptionConfig
 }
 
 // DatabaseConfig holds database configuration
@@ -28,18 +26,18 @@ type DatabaseConfig struct {
 
 // JWTConfig holds JWT configuration
 type JWTConfig struct {
-	PrivateKeyPath     string
-	PublicKeyPath      string
-	ExpirationMinutes  int
-	Issuer             string
+	PrivateKeyPath    string
+	PublicKeyPath     string
+	ExpirationMinutes int
+	Issuer            string
 }
 
 // ConnectionConfig holds connection configuration
 type ConnectionConfig struct {
-	SSHIdleTimeoutSeconds    int
-	MaxConcurrent            int
-	QueueTimeoutSeconds      int
-	TestTimeoutSeconds       int
+	SSHIdleTimeoutSeconds int
+	MaxConcurrent         int
+	QueueTimeoutSeconds   int
+	TestTimeoutSeconds    int
 }
 
 // RateLimitConfig holds rate limiting configuration
@@ -126,7 +124,7 @@ func getEnvInt(key string, defaultValue int) int {
 
 // NewLogger creates a new logger based on configuration
 // TODO: Implement proper logging when logrus is added
-func NewLogger(config LogConfig) interface{} {
+func NewLogger(config LogConfig) any {
 	// Placeholder for logger
 	return nil
 }

@@ -3,7 +3,7 @@ package auth
 import (
 	"crypto/rsa"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -20,11 +20,11 @@ type JWTConfig struct {
 
 // AuthService handles authentication
 type AuthService struct {
-	privateKey     *rsa.PrivateKey
-	publicKey      *rsa.PublicKey
-	expiration     time.Duration
-	issuer         string
-	userRepo       models.UserRepositoryInterface
+	privateKey *rsa.PrivateKey
+	publicKey  *rsa.PublicKey
+	expiration time.Duration
+	issuer     string
+	userRepo   models.UserRepositoryInterface
 }
 
 // NewAuthService creates a new AuthService
@@ -42,17 +42,17 @@ func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface) (
 	}
 
 	return &AuthService{
-		privateKey:     privateKey,
-		publicKey:      publicKey,
-		expiration:     config.Expiration,
-		issuer:         config.Issuer,
-		userRepo:       userRepo,
+		privateKey: privateKey,
+		publicKey:  publicKey,
+		expiration: config.Expiration,
+		issuer:     config.Issuer,
+		userRepo:   userRepo,
 	}, nil
 }
 
 // loadPrivateKey loads a private key from file
 func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
-	keyBytes, err := ioutil.ReadFile(path)
+	keyBytes, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read private key file: %w", err)
 	}
@@ -67,7 +67,7 @@ func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
 
 // loadPublicKey loads a public key from file
 func loadPublicKey(path string) (*rsa.PublicKey, error) {
-	keyBytes, err := ioutil.ReadFile(path)
+	keyBytes, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read public key file: %w", err)
 	}
@@ -107,7 +107,7 @@ func (s *AuthService) GenerateToken(userID string) (string, error) {
 // ValidateToken validates a JWT token
 func (s *AuthService) ValidateToken(tokenString string) (*TokenClaims, error) {
 	// Parse token
-	token, err := jwt.ParseWithClaims(tokenString, &TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &TokenClaims{}, func(token *jwt.Token) (any, error) {
 		// Verify signing method
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -123,9 +123,9 @@ func (s *AuthService) ValidateToken(tokenString string) (*TokenClaims, error) {
 		}
 		// Check for other validation errors
 		if err.Error() == "token contains an invalid number of segments" ||
-		   err.Error() == "token signature is invalid" ||
-		   err.Error() == "token is not valid yet" ||
-		   err.Error() == "token is malformed" {
+			err.Error() == "token signature is invalid" ||
+			err.Error() == "token is not valid yet" ||
+			err.Error() == "token is malformed" {
 			return nil, fmt.Errorf("invalid token: %w", err)
 		}
 		return nil, fmt.Errorf("failed to parse token: %w", err)

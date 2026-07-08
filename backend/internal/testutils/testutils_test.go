@@ -352,7 +352,7 @@ func TestMockConnectionCache(t *testing.T) {
 	})
 
 	t.Run("custom GetOrCreate function", func(t *testing.T) {
-		customFunc := func(ctx context.Context, machineID, userID string, machineRepo interface{}, encryption interface{}) (interface{}, error) {
+		customFunc := func(ctx context.Context, machineID, userID string, machineRepo any, encryption any) (any, error) {
 			return &MockPodmanConnection{MachineID: "custom-" + machineID}, nil
 		}
 
@@ -388,7 +388,7 @@ func TestTestDataGenerators(t *testing.T) {
 		assert.NotEmpty(t, machine.Name)
 		assert.NotEmpty(t, machine.OwnerID)
 		assert.NotEmpty(t, machine.Hostname)
-		assert.Equal(t, 22, machine.Port) // Default SSH port
+		assert.Equal(t, 22, machine.Port)            // Default SSH port
 		assert.Equal(t, "root", machine.SSHUsername) // Default SSH username
 		assert.False(t, machine.CreatedAt.IsZero())
 		assert.False(t, machine.UpdatedAt.IsZero())
