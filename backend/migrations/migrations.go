@@ -125,13 +125,14 @@ func getExecutedMigrations(db *sql.DB) (map[string]bool, error) {
 }
 
 // splitSQLStatements splits SQL content into individual statements
-// Handles semicolons, but ignores them within strings and comments
+// Handles semicolons, but ignores them within strings, comments, and BEGIN...END blocks
 func splitSQLStatements(content string) []string {
 	var statements []string
 	var currentStmt strings.Builder
 	inString := false
 	inComment := false
 	inMultiLineComment := false
+	inBeginEndBlock := false
 
 	for i := 0; i < len(content); i++ {
 		char := content[i]
@@ -177,14 +178,29 @@ func splitSQLStatements(content string) []string {
 			continue
 		}
 
+		// Handle BEGIN...END blocks
+		if !inString && !inComment && !inMultiLineComment {
+			if isBeginKeyword(content, i) {
+				inBeginEndBlock = true
+			}
+			if isEndKeyword(content, i) {
+				inBeginEndBlock = false
+			}
+		}
+
 		// Handle semicolon (end of statement)
 		if char == ';' {
-			currentStmt.WriteByte(char)
-			stmt := strings.TrimSpace(currentStmt.String())
-			if stmt != "" {
-				statements = append(statements, stmt)
+			// Only treat semicolon as statement terminator if we're not in a BEGIN...END block
+			if !inBeginEndBlock {
+				currentStmt.WriteByte(char)
+				stmt := strings.TrimSpace(currentStmt.String())
+				if stmt != "" {
+					statements = append(statements, stmt)
+				}
+				currentStmt.Reset()
+			} else {
+				currentStmt.WriteByte(char)
 			}
-			currentStmt.Reset()
 		} else {
 			currentStmt.WriteByte(char)
 		}
@@ -199,4 +215,22 @@ func splitSQLStatements(content string) []string {
 	}
 
 	return statements
+}
+
+// isBeginKeyword checks if the current position starts with the BEGIN keyword
+func isBeginKeyword(content string, pos int) bool {
+	if pos+4 >= len(content) {
+		return false
+	}
+	// Check for BEGIN (case insensitive, but content should be uppercase)
+	return strings.HasPrefix(strings.ToUpper(content[pos:]), "BEGIN")
+}
+
+// isEndKeyword checks if the current position starts with the END keyword
+func isEndKeyword(content string, pos int) bool {
+	if pos+2 >= len(content) {
+		return false
+	}
+	// Check for END (case insensitive, but content should be uppercase)
+	return strings.HasPrefix(strings.ToUpper(content[pos:]), "END")
 }
