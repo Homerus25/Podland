@@ -21,6 +21,12 @@ func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID
 	return c.connManager.GetConnection(ctx, machineID, userID)
 }
 
+// ContainerServiceInterface defines the interface for container services
+// This interface is used for dependency injection and testing
+type ContainerServiceInterface interface {
+	List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error)
+}
+
 // ContainerService provides business logic for containers
 type ContainerService struct {
 	connManager machines.ConnectionManagerInterface

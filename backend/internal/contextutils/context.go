@@ -33,6 +33,11 @@ func GetRequestID(ctx context.Context) string {
 	return ""
 }
 
+// SetRequestID sets the request ID in the context
+func SetRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, RequestIDContextKey, requestID)
+}
+
 // SetUserID sets the user ID in the context
 func SetUserID(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, UserIDContextKey, userID)
