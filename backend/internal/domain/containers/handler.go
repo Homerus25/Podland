@@ -123,10 +123,13 @@ func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return success response with container list
+	// Convert podman entities to API DTO response
+	result := ToContainerListResult(containers)
+
+	// Return success response with container list DTO
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(containers)
+	json.NewEncoder(w).Encode(result)
 }
 
 // Create handles creating a container
