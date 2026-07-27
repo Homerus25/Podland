@@ -21,6 +21,10 @@ func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID
 	return c.connManager.GetConnection(ctx, machineID, userID)
 }
 
+func (c *concreteConnectionManager) Release(machineID string) {
+	c.connManager.Release(machineID)
+}
+
 // ContainerServiceInterface defines the interface for container services
 // This interface is used for dependency injection and testing
 type ContainerServiceInterface interface {
@@ -48,10 +52,12 @@ func NewContainerServiceWithConcreteDeps(connManager *connections.ConnectionMana
 // List returns a list of containers on the specified machine
 func (s *ContainerService) List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error) {
 	// Get connection context to the machine
-	connCtxInterface, err := s.connManager.GetConnection(ctx, machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
+
+	defer s.connManager.Release(machineID)
 
 	// Convert interface to context.Context
 	connCtx, ok := connCtxInterface.(context.Context)

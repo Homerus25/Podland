@@ -3,12 +3,15 @@ package connections
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
+
 	"sync"
 	"time"
 
-	"go.podman.io/podman/v6/pkg/bindings"
 	"github.com/yourorg/podland/backend/internal/encryption"
 	"github.com/yourorg/podland/backend/internal/models"
+	"go.podman.io/podman/v6/pkg/bindings"
 )
 
 // ConnectionCache manages cached connections to machines
@@ -20,13 +23,13 @@ type ConnectionCache struct {
 
 // ConnectionEntry represents a cached connection with its metadata
 type ConnectionEntry struct {
-	connCtx    context.Context
-	conn       *bindings.Connection
-	userID     string
-	machineID  string
-	refCount   int
-	lastUsed   time.Time
-	isActive   bool
+	connCtx   context.Context
+	conn      *bindings.Connection
+	userID    string
+	machineID string
+	refCount  int
+	lastUsed  time.Time
+	isActive  bool
 }
 
 // NewConnectionCache creates a new connection cache
@@ -77,12 +80,30 @@ func (c *ConnectionCache) GetOrCreate(
 		return nil, fmt.Errorf("failed to decrypt SSH key: %w", err)
 	}
 
+	// Write SSH key to a temporary file
+	file, err := os.CreateTemp("", "ssh_key_*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(file.Name()) // Clean up the file when done
+
+	_, err = file.WriteString(sshKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// Close the file to ensure all data is written
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+
 	// Create new Podman connection context
 	connCtx, err := bindings.NewConnectionWithOptions(ctx, bindings.Options{
 		URI:      fmt.Sprintf("ssh://%s@%s:%d%s", machine.SSHUsername, machine.Hostname, machine.Port, machine.PodmanSocketPath),
-		Identity: sshKey,
+		Identity: file.Name(),
 	})
 	if err != nil {
+		// slog.ErrorContext(ctx, "failed to create Podman connection context", slog.Any("Identity", sshKey))
 		return nil, fmt.Errorf("failed to create Podman connection context: %w", err)
 	}
 
@@ -119,6 +140,7 @@ func (c *ConnectionCache) GetOrCreateContext(
 
 	// Check if connection already exists
 	if entry, exists := c.connections[machineID]; exists {
+		slog.Info("Machine Connection exists", slog.Any("machineID", machineID))
 		entry.refCount++
 		entry.lastUsed = time.Now()
 		entry.isActive = true
@@ -145,10 +167,27 @@ func (c *ConnectionCache) GetOrCreateContext(
 		return nil, fmt.Errorf("failed to decrypt SSH key: %w", err)
 	}
 
+	// Write SSH key to a temporary file
+	file, err := os.CreateTemp("", "ssh_key_*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(file.Name()) // Clean up the file when done
+
+	_, err = file.WriteString(sshKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// Close the file to ensure all data is written
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+
 	// Create new Podman connection context
 	connCtx, err := bindings.NewConnectionWithOptions(ctx, bindings.Options{
 		URI:      fmt.Sprintf("ssh://%s@%s:%d%s", machine.SSHUsername, machine.Hostname, machine.Port, machine.PodmanSocketPath),
-		Identity: sshKey,
+		Identity: file.Name(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Podman connection context: %w", err)

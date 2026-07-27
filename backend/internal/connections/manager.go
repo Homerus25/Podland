@@ -12,17 +12,15 @@ import (
 
 // ConnectionManager manages SSH connections to machines
 type ConnectionManager struct {
-	cache           *ConnectionCache
-	machineRepo     *models.MachineRepository
-	encryption      *encryption.EncryptionService
-	maxConcurrent   int
-	queueTimeout    time.Duration
-	connectionQueue chan connectionRequest
-	mu              sync.Mutex
+	cache             *ConnectionCache
+	machineRepo       *models.MachineRepository
+	encryption        *encryption.EncryptionService
+	maxConcurrent     int
+	queueTimeout      time.Duration
+	connectionQueue   chan connectionRequest
+	mu                sync.Mutex
 	activeConnections map[string]bool
 }
-
-
 
 type connectionRequest struct {
 	machineID string
@@ -35,8 +33,6 @@ type connectionResponse struct {
 	err     error
 }
 
-
-
 // NewConnectionManager creates a new connection manager
 func NewConnectionManager(
 	cache *ConnectionCache,
@@ -46,12 +42,12 @@ func NewConnectionManager(
 	queueTimeout time.Duration,
 ) *ConnectionManager {
 	return &ConnectionManager{
-		cache:           cache,
-		machineRepo:     machineRepo,
-		encryption:      encryption,
-		maxConcurrent:   maxConcurrent,
-		queueTimeout:    queueTimeout,
-		connectionQueue: make(chan connectionRequest, maxConcurrent),
+		cache:             cache,
+		machineRepo:       machineRepo,
+		encryption:        encryption,
+		maxConcurrent:     maxConcurrent,
+		queueTimeout:      queueTimeout,
+		connectionQueue:   make(chan connectionRequest, maxConcurrent),
 		activeConnections: make(map[string]bool),
 	}
 }
@@ -74,10 +70,10 @@ func (m *ConnectionManager) QueueRequestContext(ctx context.Context, machineID, 
 
 	select {
 	case m.connectionQueue <- connectionRequest{
-			machineID: machineID,
-			userID:    userID,
-			response:  responseChan,
-		}:
+		machineID: machineID,
+		userID:    userID,
+		response:  responseChan,
+	}:
 		// Request queued successfully
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -109,13 +105,13 @@ func (m *ConnectionManager) Run() {
 func (m *ConnectionManager) processQueue() {
 	for req := range m.connectionQueue {
 		connCtx, err := m.cache.GetOrCreateContext(context.Background(), req.machineID, req.userID, m.machineRepo, m.encryption)
-		
+
 		// Send response
 		response := connectionResponse{
 			connCtx: connCtx,
 			err:     err,
 		}
-		
+
 		// Try to send response, but don't block if receiver is gone
 		select {
 		case req.response <- response:
@@ -127,4 +123,6 @@ func (m *ConnectionManager) processQueue() {
 	}
 }
 
-
+func (m *ConnectionManager) Release(machineID string) {
+	m.cache.Release(machineID)
+}

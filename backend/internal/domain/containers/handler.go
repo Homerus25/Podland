@@ -2,6 +2,7 @@ package containers
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -27,10 +28,12 @@ func NewContainerHandler(service ContainerServiceInterface, machineService any) 
 
 // List handles listing containers
 func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
+	slog.InfoContext(r.Context(), "List")
 	// Get user ID from context
 	userID := contextutils.GetUserIDFromContext(r.Context())
 	if userID == "" {
 		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
 		return
 	}
 
@@ -110,6 +113,8 @@ func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	slog.InfoContext(r.Context(), "list", slog.Any("opts", opts))
+
 	// Call ContainerService.List with context, userID, machineID, and options
 	containers, err := h.service.List(r.Context(), userID, machineID, opts)
 	if err != nil {
@@ -120,11 +125,14 @@ func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		// Handle generic errors
 		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "list", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
 		return
 	}
 
 	// Convert podman entities to API DTO response
 	result := ToContainerListResult(containers)
+
+	slog.InfoContext(r.Context(), "list", slog.Any("result", result))
 
 	// Return success response with container list DTO
 	w.Header().Set("Content-Type", "application/json")

@@ -1,6 +1,6 @@
 # Makefile for Podland Backend
 
-.PHONY: all build run clean deps lint test migrate generate-keys
+.PHONY: all build run clean deps lint test migrate generate-keys init-db
 
 # Go parameters
 GOCMD=go
@@ -18,6 +18,9 @@ PORT=8080
 
 # Database path
 DATABASE_PATH=./podland.db
+
+# Default admin password for initialization
+ADMIN_PASSWORD=admin123
 
 all: build
 
@@ -69,6 +72,12 @@ init:
 	cp .env.example .env
 	./scripts/generate-keys.sh
 	@echo "Project initialized. Edit .env with your settings."
+
+# Initialize database with admin user
+init-db:
+	@echo "Initializing database with admin user..."
+	@cd cmd/initdb && go run . -username admin -password $(ADMIN_PASSWORD) -db $(DATABASE_PATH)
+	@echo "Database initialization complete"
 
 # Docker commands
 docker-build:

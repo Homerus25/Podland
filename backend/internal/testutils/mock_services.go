@@ -168,6 +168,9 @@ func (m *MockConnectionManager) GetConnection(ctx context.Context, machineID, us
 	return mockCtx, nil
 }
 
+func (m *MockConnectionManager) Release(machineID string) {
+}
+
 // Helper function to create a test machine service with all mock dependencies
 // Note: This returns individual mock components that can be used to create a MachineService
 // The MachineService itself is created by the caller to maintain proper package boundaries

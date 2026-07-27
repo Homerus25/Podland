@@ -23,6 +23,10 @@ func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID
 	return c.connManager.GetConnection(ctx, machineID, userID)
 }
 
+func (c *concreteConnectionManager) Release(machineID string) {
+	c.connManager.Release(machineID)
+}
+
 // MachineService provides business logic for machines
 type MachineService struct {
 	machineRepo MachineRepositoryInterface
