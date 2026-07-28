@@ -95,38 +95,22 @@ func TestConnectionCacheCore(t *testing.T) {
 
 		// Verify the connection exists
 		assert.Equal(t, 1, len(cache.connections))
+
+		// Verify GetOrCreate returns the existing connection
+		conn, err := cache.GetOrCreate(ctx, testMachine.ID, "test-user-1")
+		assert.NoError(t, err)
+		assert.Equal(t, mockConn, conn)
+		assert.Equal(t, 2, entry.refCount, "Reference count should be incremented")
+		assert.True(t, entry.isActive, "Connection should be marked as active")
 	})
 
-	t.Run("GetOrCreate creates new connection when needed (cache miss)", func(t *testing.T) {
-		factory := &ConnectionFactory{
-			machineRepo: &models.MachineRepository{},
-			encryption:  &encryption.EncryptionService{},
-		}
-		cache := NewConnectionCache(ConnectionCacheOptions{
-			MaxSize: 10,
-			Factory: factory,
-		})
-		ctx := context.Background()
-
-		// Verify cache is empty initially
-		assert.Equal(t, 0, len(cache.connections))
-
-		// Create a mock connection and add it to the cache
-		mockConn := &bindings.Connection{}
-		entry := &ConnectionEntry{
-			connCtx:   ctx,
-			conn:      mockConn,
-			userID:    "test-user-1",
-			machineID: testMachine.ID,
-			refCount:  1,
-			lastUsed:  time.Now(),
-			isActive:  true,
-		}
-		cache.connections[testMachine.ID] = entry
-
-		// Verify the connection was added
-		assert.Equal(t, 1, len(cache.connections))
-	})
+	// t.Run("GetOrCreate creates new connection when needed (cache miss)", func(t *testing.T) {
+	// would implement like:
+	// 1. create Mock-Connection-Factory
+	// 2. create cache with Mock-Factory
+	// 3. call GetOrCreate on cache
+	// 4. verify that a new connection was created at the Mock-Factory
+	// })
 
 	t.Run("Release properly decrements reference count and marks idle when refCount reaches 0", func(t *testing.T) {
 		factory := &ConnectionFactory{
