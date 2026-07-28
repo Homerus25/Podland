@@ -71,7 +71,14 @@ func main() {
 	accessRepo := models.NewMachineAccessRepository(db)
 
 	// Initialize connection manager
-	connectionCache := connections.NewConnectionCache(cfg.Connections.MaxConcurrent)
+	connectionFactory := connections.NewConnectionFactory(connections.ConnectionFactoryOptions{
+		MachineRepo: machineRepo,
+		Encryption:  encryptionService,
+	})
+	connectionCache := connections.NewConnectionCache(connections.ConnectionCacheOptions{
+		MaxSize:  cfg.Connections.MaxConcurrent,
+		Factory:  connectionFactory,
+	})
 	connectionManager := connections.NewConnectionManager(
 		connectionCache,
 		machineRepo,

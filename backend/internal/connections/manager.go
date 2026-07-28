@@ -55,7 +55,7 @@ func NewConnectionManager(
 // GetConnection gets a connection context to a machine
 func (m *ConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (context.Context, error) {
 	// First try to get from cache
-	connCtx, err := m.cache.GetOrCreateContext(ctx, machineID, userID, m.machineRepo, m.encryption)
+	connCtx, err := m.cache.GetOrCreateContext(ctx, machineID, userID)
 	if err == nil {
 		return connCtx, nil
 	}
@@ -104,7 +104,7 @@ func (m *ConnectionManager) Run() {
 // processQueue processes connection requests from the queue
 func (m *ConnectionManager) processQueue() {
 	for req := range m.connectionQueue {
-		connCtx, err := m.cache.GetOrCreateContext(context.Background(), req.machineID, req.userID, m.machineRepo, m.encryption)
+		connCtx, err := m.cache.GetOrCreateContext(context.Background(), req.machineID, req.userID)
 
 		// Send response
 		response := connectionResponse{

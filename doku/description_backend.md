@@ -217,7 +217,7 @@ type ConnectionEntry struct {
     isActive   bool                   // Currently serving a request
 }
 
-func NewConnectionCache(maxSize int) *ConnectionCache {
+func NewConnectionCache(opts ConnectionCacheOptions) *ConnectionCache {
     cache := &ConnectionCache{
         connections: make(map[string]*ConnectionEntry),
         maxSize:    maxSize,

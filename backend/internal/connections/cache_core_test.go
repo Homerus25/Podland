@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/yourorg/podland/backend/internal/encryption"
 	"github.com/yourorg/podland/backend/internal/models"
 	"go.podman.io/podman/v6/pkg/bindings"
 )
@@ -19,7 +20,14 @@ import (
 func TestNewConnectionCache(t *testing.T) {
 	t.Run("creates cache with correct maxSize", func(t *testing.T) {
 		maxSize := 5
-		cache := NewConnectionCache(maxSize)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: maxSize,
+			Factory: factory,
+		})
 
 		// Verify cache is initialized
 		assert.NotNil(t, cache)
@@ -29,7 +37,14 @@ func TestNewConnectionCache(t *testing.T) {
 	})
 
 	t.Run("creates cache with default maxSize", func(t *testing.T) {
-		cache := NewConnectionCache(0)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 0,
+			Factory: factory,
+		})
 
 		// Verify cache is initialized even with maxSize 0
 		assert.NotNil(t, cache)
@@ -55,7 +70,14 @@ func TestConnectionCacheCore(t *testing.T) {
 	}
 
 	t.Run("GetOrCreate returns existing connection when available (cache hit)", func(t *testing.T) {
-		cache := NewConnectionCache(10)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 10,
+			Factory: factory,
+		})
 		ctx := context.Background()
 
 		// Create a mock connection and add it directly to the cache
@@ -76,7 +98,14 @@ func TestConnectionCacheCore(t *testing.T) {
 	})
 
 	t.Run("GetOrCreate creates new connection when needed (cache miss)", func(t *testing.T) {
-		cache := NewConnectionCache(10)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 10,
+			Factory: factory,
+		})
 		ctx := context.Background()
 
 		// Verify cache is empty initially
@@ -100,7 +129,14 @@ func TestConnectionCacheCore(t *testing.T) {
 	})
 
 	t.Run("Release properly decrements reference count and marks idle when refCount reaches 0", func(t *testing.T) {
-		cache := NewConnectionCache(10)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 10,
+			Factory: factory,
+		})
 		ctx := context.Background()
 
 		// Create a connection entry
@@ -128,7 +164,14 @@ func TestConnectionCacheCore(t *testing.T) {
 	})
 
 	t.Run("MarkActive updates connection active status and lastUsed timestamp", func(t *testing.T) {
-		cache := NewConnectionCache(10)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 10,
+			Factory: factory,
+		})
 		ctx := context.Background()
 
 		// Create a connection entry
@@ -151,7 +194,14 @@ func TestConnectionCacheCore(t *testing.T) {
 	})
 
 	t.Run("MarkIdle updates connection idle status and lastUsed timestamp", func(t *testing.T) {
-		cache := NewConnectionCache(10)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 10,
+			Factory: factory,
+		})
 		ctx := context.Background()
 
 		// Create a connection entry
@@ -175,7 +225,14 @@ func TestConnectionCacheCore(t *testing.T) {
 
 	t.Run("evictLRUIdle removes the least recently used idle connection when cache is full", func(t *testing.T) {
 		// Create a small cache (maxSize = 2)
-		cache := NewConnectionCache(2)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 2,
+			Factory: factory,
+		})
 		ctx := context.Background()
 
 		// Create multiple connection entries
@@ -189,7 +246,7 @@ func TestConnectionCacheCore(t *testing.T) {
 				machineID: machineID,
 				refCount:  1,
 				lastUsed:  time.Now().Add(-time.Duration(i) * time.Minute), // Different ages
-				isActive:  false, // All idle
+				isActive:  false,                                           // All idle
 			}
 			cache.connections[machineID] = entry
 		}
@@ -209,7 +266,14 @@ func TestConnectionCacheCore(t *testing.T) {
 
 	t.Run("evictLRUIdle does not remove active connections", func(t *testing.T) {
 		// Create a small cache (maxSize = 2)
-		cache := NewConnectionCache(2)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 2,
+			Factory: factory,
+		})
 		ctx := context.Background()
 
 		// Create connection entries - one active, one idle
@@ -221,7 +285,7 @@ func TestConnectionCacheCore(t *testing.T) {
 			machineID: "test-machine-1",
 			refCount:  1,
 			lastUsed:  time.Now().Add(-2 * time.Minute), // Older
-			isActive:  true, // Active - should NOT be evicted
+			isActive:  true,                             // Active - should NOT be evicted
 		}
 		cache.connections["test-machine-1"] = entry1
 
@@ -233,7 +297,7 @@ func TestConnectionCacheCore(t *testing.T) {
 			machineID: "test-machine-2",
 			refCount:  1,
 			lastUsed:  time.Now().Add(-1 * time.Minute), // Newer
-			isActive:  false, // Idle - should be evicted
+			isActive:  false,                            // Idle - should be evicted
 		}
 		cache.connections["test-machine-2"] = entry2
 
@@ -246,7 +310,7 @@ func TestConnectionCacheCore(t *testing.T) {
 			machineID: "test-machine-3",
 			refCount:  1,
 			lastUsed:  time.Now(), // Newest
-			isActive:  false, // Idle
+			isActive:  false,      // Idle
 		}
 		cache.connections["test-machine-3"] = entry3
 
@@ -262,7 +326,14 @@ func TestConnectionCacheCore(t *testing.T) {
 	})
 
 	t.Run("cleanup removes idle connections that haven't been used for the idle timeout period", func(t *testing.T) {
-		cache := NewConnectionCache(10)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 10,
+			Factory: factory,
+		})
 		ctx := context.Background()
 
 		// Create an idle connection that's older than the timeout (15 minutes)
@@ -274,7 +345,7 @@ func TestConnectionCacheCore(t *testing.T) {
 			machineID: testMachine.ID,
 			refCount:  0,
 			lastUsed:  time.Now().Add(-16 * time.Minute), // 16 minutes ago
-			isActive:  false, // Idle
+			isActive:  false,                             // Idle
 		}
 		cache.connections[testMachine.ID] = entry
 
@@ -287,7 +358,14 @@ func TestConnectionCacheCore(t *testing.T) {
 	})
 
 	t.Run("cleanup does not remove active connections", func(t *testing.T) {
-		cache := NewConnectionCache(10)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 10,
+			Factory: factory,
+		})
 		ctx := context.Background()
 
 		// Create an active connection that's older than the timeout
@@ -299,7 +377,7 @@ func TestConnectionCacheCore(t *testing.T) {
 			machineID: testMachine.ID,
 			refCount:  1,
 			lastUsed:  time.Now().Add(-16 * time.Minute), // 16 minutes ago
-			isActive:  true, // Active
+			isActive:  true,                              // Active
 		}
 		cache.connections[testMachine.ID] = entry
 
@@ -312,7 +390,14 @@ func TestConnectionCacheCore(t *testing.T) {
 	})
 
 	t.Run("cleanupLoop runs periodically and calls cleanup", func(t *testing.T) {
-		cache := NewConnectionCache(10)
+		factory := &ConnectionFactory{
+			machineRepo: &models.MachineRepository{},
+			encryption:  &encryption.EncryptionService{},
+		}
+		cache := NewConnectionCache(ConnectionCacheOptions{
+			MaxSize: 10,
+			Factory: factory,
+		})
 
 		// The cleanup loop runs in a goroutine, so we can't easily test it directly
 		// However, we can verify that it doesn't cause any issues and that

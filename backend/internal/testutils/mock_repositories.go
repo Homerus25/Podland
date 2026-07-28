@@ -210,7 +210,7 @@ func (m *MockMachineRepository) NameExistsForUser(userID, name string) (bool, er
 type MockConnectionCache struct {
 	connections     map[string]any
 	getOrCreateErr  error
-	getOrCreateFunc func(ctx context.Context, machineID, userID string, machineRepo any, encryption any) (any, error)
+	getOrCreateFunc func(ctx context.Context, machineID, userID string) (any, error)
 }
 
 func NewMockConnectionCache() *MockConnectionCache {
@@ -227,17 +227,17 @@ func NewMockConnectionCacheWithError(getOrCreateErr error) *MockConnectionCache 
 }
 
 // SetCustomGetOrCreate sets a custom function for GetOrCreate
-func (m *MockConnectionCache) SetCustomGetOrCreate(getOrCreateFunc func(ctx context.Context, machineID, userID string, machineRepo any, encryption any) (any, error)) {
+func (m *MockConnectionCache) SetCustomGetOrCreate(getOrCreateFunc func(ctx context.Context, machineID, userID string) (any, error)) {
 	m.getOrCreateFunc = getOrCreateFunc
 }
 
 // GetOrCreate simulates the ConnectionCache.GetOrCreate method
-func (m *MockConnectionCache) GetOrCreate(ctx context.Context, machineID, userID string, machineRepo any, encryption any) (any, error) {
+func (m *MockConnectionCache) GetOrCreate(ctx context.Context, machineID, userID string) (any, error) {
 	if m.getOrCreateErr != nil {
 		return nil, m.getOrCreateErr
 	}
 	if m.getOrCreateFunc != nil {
-		return m.getOrCreateFunc(ctx, machineID, userID, machineRepo, encryption)
+		return m.getOrCreateFunc(ctx, machineID, userID)
 	}
 
 	// Default mock behavior - return a simple mock connection

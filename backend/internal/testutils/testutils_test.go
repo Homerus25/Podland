@@ -321,7 +321,7 @@ func TestMockConnectionCache(t *testing.T) {
 		ctx := context.Background()
 
 		// Test GetOrCreate
-		conn, err := cache.GetOrCreate(ctx, "machine-1", "user-1", nil, nil)
+		conn, err := cache.GetOrCreate(ctx, "machine-1", "user-1")
 		assert.NoError(t, err)
 		assert.NotNil(t, conn)
 
@@ -346,13 +346,13 @@ func TestMockConnectionCache(t *testing.T) {
 		cache := NewMockConnectionCacheWithError(expectedErr)
 		ctx := context.Background()
 
-		_, err := cache.GetOrCreate(ctx, "machine-1", "user-1", nil, nil)
+		_, err := cache.GetOrCreate(ctx, "machine-1", "user-1")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "connection cache error")
 	})
 
 	t.Run("custom GetOrCreate function", func(t *testing.T) {
-		customFunc := func(ctx context.Context, machineID, userID string, machineRepo any, encryption any) (any, error) {
+		customFunc := func(ctx context.Context, machineID, userID string) (any, error) {
 			return &MockPodmanConnection{MachineID: "custom-" + machineID}, nil
 		}
 
@@ -360,7 +360,7 @@ func TestMockConnectionCache(t *testing.T) {
 		cache.SetCustomGetOrCreate(customFunc)
 		ctx := context.Background()
 
-		conn, err := cache.GetOrCreate(ctx, "machine-1", "user-1", nil, nil)
+		conn, err := cache.GetOrCreate(ctx, "machine-1", "user-1")
 		assert.NoError(t, err)
 		assert.NotNil(t, conn)
 

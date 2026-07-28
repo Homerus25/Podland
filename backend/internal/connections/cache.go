@@ -2,15 +2,10 @@ package connections
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"os"
-
 	"sync"
 	"time"
 
-	"github.com/yourorg/podland/backend/internal/encryption"
-	"github.com/yourorg/podland/backend/internal/models"
 	"go.podman.io/podman/v6/pkg/bindings"
 )
 
@@ -19,6 +14,7 @@ type ConnectionCache struct {
 	connections map[string]*ConnectionEntry
 	maxSize     int
 	mu          sync.RWMutex
+	factory     *ConnectionFactory
 }
 
 // ConnectionEntry represents a cached connection with its metadata
@@ -33,10 +29,16 @@ type ConnectionEntry struct {
 }
 
 // NewConnectionCache creates a new connection cache
-func NewConnectionCache(maxSize int) *ConnectionCache {
+type ConnectionCacheOptions struct {
+	MaxSize  int
+	Factory  *ConnectionFactory
+}
+
+func NewConnectionCache(opts ConnectionCacheOptions) *ConnectionCache {
 	cache := &ConnectionCache{
 		connections: make(map[string]*ConnectionEntry),
-		maxSize:     maxSize,
+		maxSize:     opts.MaxSize,
+		factory:     opts.Factory,
 	}
 	go cache.cleanupLoop()
 	return cache
@@ -46,8 +48,6 @@ func NewConnectionCache(maxSize int) *ConnectionCache {
 func (c *ConnectionCache) GetOrCreate(
 	ctx context.Context,
 	machineID, userID string,
-	machineRepo *models.MachineRepository,
-	encryption *encryption.EncryptionService,
 ) (*bindings.Connection, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -65,57 +65,15 @@ func (c *ConnectionCache) GetOrCreate(
 		c.evictLRUIdle()
 	}
 
-	// Get machine details
-	machine, err := machineRepo.GetByID(machineID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get machine details: %w", err)
-	}
-	if machine == nil {
-		return nil, fmt.Errorf("machine not found")
-	}
-
-	// Decrypt SSH key
-	sshKey, err := encryption.Decrypt(machine.SSHKeyEncrypted)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt SSH key: %w", err)
-	}
-
-	// Write SSH key to a temporary file
-	file, err := os.CreateTemp("", "ssh_key_*")
+	// Create new connection using factory
+	conn, err := c.factory.CreateConnection(ctx, machineID, userID)
 	if err != nil {
 		return nil, err
-	}
-	defer os.Remove(file.Name()) // Clean up the file when done
-
-	_, err = file.WriteString(sshKey)
-	if err != nil {
-		return nil, err
-	}
-
-	// Close the file to ensure all data is written
-	if err := file.Close(); err != nil {
-		return nil, err
-	}
-
-	// Create new Podman connection context
-	connCtx, err := bindings.NewConnectionWithOptions(ctx, bindings.Options{
-		URI:      fmt.Sprintf("ssh://%s@%s:%d%s", machine.SSHUsername, machine.Hostname, machine.Port, machine.PodmanSocketPath),
-		Identity: file.Name(),
-	})
-	if err != nil {
-		// slog.ErrorContext(ctx, "failed to create Podman connection context", slog.Any("Identity", sshKey))
-		return nil, fmt.Errorf("failed to create Podman connection context: %w", err)
-	}
-
-	// Get the actual connection from the context
-	conn, err := bindings.GetClient(connCtx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get Podman client: %w", err)
 	}
 
 	// Store in cache
 	entry := &ConnectionEntry{
-		connCtx:   connCtx,
+		connCtx:   ctx, // Note: We might want to store the actual connection context
 		conn:      conn,
 		userID:    userID,
 		machineID: machineID,
@@ -132,8 +90,6 @@ func (c *ConnectionCache) GetOrCreate(
 func (c *ConnectionCache) GetOrCreateContext(
 	ctx context.Context,
 	machineID, userID string,
-	machineRepo *models.MachineRepository,
-	encryption *encryption.EncryptionService,
 ) (context.Context, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -152,51 +108,16 @@ func (c *ConnectionCache) GetOrCreateContext(
 		c.evictLRUIdle()
 	}
 
-	// Get machine details
-	machine, err := machineRepo.GetByID(machineID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get machine details: %w", err)
-	}
-	if machine == nil {
-		return nil, fmt.Errorf("machine not found")
-	}
-
-	// Decrypt SSH key
-	sshKey, err := encryption.Decrypt(machine.SSHKeyEncrypted)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt SSH key: %w", err)
-	}
-
-	// Write SSH key to a temporary file
-	file, err := os.CreateTemp("", "ssh_key_*")
-	if err != nil {
-		return nil, err
-	}
-	defer os.Remove(file.Name()) // Clean up the file when done
-
-	_, err = file.WriteString(sshKey)
+	// Create new connection context using factory
+	connCtx, err := c.factory.CreateConnectionContext(ctx, machineID, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Close the file to ensure all data is written
-	if err := file.Close(); err != nil {
-		return nil, err
-	}
-
-	// Create new Podman connection context
-	connCtx, err := bindings.NewConnectionWithOptions(ctx, bindings.Options{
-		URI:      fmt.Sprintf("ssh://%s@%s:%d%s", machine.SSHUsername, machine.Hostname, machine.Port, machine.PodmanSocketPath),
-		Identity: file.Name(),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Podman connection context: %w", err)
-	}
-
-	// Get the actual connection from the context
+	// Get the actual connection from the context for caching
 	conn, err := bindings.GetClient(connCtx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get Podman client: %w", err)
+		return nil, err
 	}
 
 	// Store in cache
