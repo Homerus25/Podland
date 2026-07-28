@@ -131,7 +131,11 @@ func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Convert podman entities to API DTO response
-	result := ToContainerListResult(containers)
+	containersAny := make([]any, len(containers))
+	for i, c := range containers {
+		containersAny[i] = c
+	}
+	result := ToContainerListResult(containersAny)
 
 	slog.InfoContext(r.Context(), "list", slog.Any("result", result))
 
@@ -202,7 +206,55 @@ func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Get handles getting a container by ID
 func (h *ContainerHandler) Get(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Get")
+	
+	// Get user ID from context
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	// Get machine ID from URL parameter
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	// Get container ID from URL parameter
+	containerID := chi.URLParam(r, "containerId")
+	if containerID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_CONTAINER_ID", "Container ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	slog.InfoContext(r.Context(), "get", slog.String("containerID", containerID))
+
+	// Call ContainerService.Get with context, userID, machineID, and containerID
+	containerData, err := h.service.Get(r.Context(), userID, machineID, containerID)
+	if err != nil {
+		// Handle specific error types
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		// Handle generic errors
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "get", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("containerID", containerID))
+		return
+	}
+
+	// Convert podman entities to API DTO response
+	result := FromPodmanInspectContainer(containerData)
+
+	slog.InfoContext(r.Context(), "get", slog.Any("result", result))
+
+	// Return success response with container details DTO
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(result)
 }
 
 // Start handles starting a container

@@ -33,6 +33,7 @@ func (c *concreteConnectionManager) Release(machineID string) {
 type ContainerServiceInterface interface {
 	List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error)
 	Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*ContainerCreateResponse, error)
+	Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error)
 }
 
 // ContainerService provides business logic for containers
@@ -158,4 +159,37 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 	}
 
 	return response, nil
+}
+
+// Get returns detailed information about a specific container
+func (s *ContainerService) Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
+	// Get connection context to the machine
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	// Convert interface to context.Context
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return nil, fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	// Create container engine with the connection context
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	// Call the official podman ContainerInspect method
+	containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect container: %w", err)
+	}
+
+	if len(containerReports) == 0 {
+		return nil, fmt.Errorf("no container found with ID: %s", containerID)
+	}
+
+	return containerReports[0], nil
 }

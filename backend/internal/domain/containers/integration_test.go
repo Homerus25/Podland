@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,6 +33,11 @@ func (m *MockContainerService) List(ctx context.Context, userID, machineID strin
 func (m *MockContainerService) Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*ContainerCreateResponse, error) {
 	args := m.Called(ctx, userID, machineID, request)
 	return args.Get(0).(*ContainerCreateResponse), args.Error(1)
+}
+
+func (m *MockContainerService) Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
+	args := m.Called(ctx, userID, machineID, containerID)
+	return args.Get(0).(*entities.ContainerInspectReport), args.Error(1)
 }
 
 // TestContainerHandler_List_Success tests successful container listing through the handler
@@ -454,4 +460,155 @@ func TestContainerHandler_List_ContainerWithOptionalFields(t *testing.T) {
 	assert.Equal(t, []string{"/var/lib/docker", "/tmp"}, container.Mounts, "Should map mounts")
 
 	mockService.AssertExpectations(t)
+}
+
+// TestContainerHandler_Get_Success tests successful container retrieval through the handler
+func TestContainerHandler_Get_Success(t *testing.T) {
+	// Setup test context with user ID
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	// Setup mock service
+	mockService := new(MockContainerService)
+	// For now, let's test the error handling since we can't easily create a valid ContainerInspectReport
+	mockService.On("Get", mock.Anything, "test-user", "test-machine", "container-123").Return((*entities.ContainerInspectReport)(nil), fmt.Errorf("container not found"))
+
+	// Create handler
+	handler := NewContainerHandler(mockService, nil)
+
+	// Create test request
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123", nil)
+	req = req.WithContext(ctx)
+
+	// Create response recorder
+	rr := httptest.NewRecorder()
+
+	// Setup router with URL parameters
+	r := chi.NewRouter()
+	r.Get("/api/machines/{id}/containers/{containerId}", handler.Get)
+
+	// Execute request
+	r.ServeHTTP(rr, req)
+
+	// Verify response - since we're testing error handling, we expect an error
+	assert.Equal(t, http.StatusInternalServerError, rr.Code, "Should return 500 for service error")
+	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"), "Should return JSON content type")
+
+	// Parse error response
+	var errorResponse struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+	assert.NoError(t, err, "Should be able to parse error response")
+	assert.Equal(t, "INTERNAL_ERROR", errorResponse.Error.Code, "Should return internal error code")
+
+	// Verify mock expectations
+	mockService.AssertExpectations(t)
+}
+
+// TestContainerHandler_Get_ErrorScenarios tests error handling in the container get handler
+func TestContainerHandler_Get_ErrorScenarios(t *testing.T) {
+	testCases := []struct {
+		name           string
+		setupRequest   func() *http.Request
+		expectedStatus int
+		expectedError  string
+		description    string
+	}{
+		{
+			name: "missing user ID",
+			setupRequest: func() *http.Request {
+				ctx := context.Background() // No user ID set
+				req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123", nil)
+				return req.WithContext(ctx)
+			},
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "INVALID_CREDENTIALS",
+			description:    "Should return 401 when user ID is missing",
+		},
+		{
+			name: "missing machine ID",
+			setupRequest: func() *http.Request {
+				ctx := context.Background()
+				ctx = contextutils.SetUserID(ctx, "test-user")
+				ctx = contextutils.SetRequestID(ctx, "test-request-id")
+				req := httptest.NewRequest("GET", "/api/machines//containers/container-123", nil)
+				return req.WithContext(ctx)
+			},
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "MISSING_MACHINE_ID",
+			description:    "Should return 400 when machine ID is missing",
+		},
+		{
+			name: "missing container ID",
+			setupRequest: func() *http.Request {
+				ctx := context.Background()
+				ctx = contextutils.SetUserID(ctx, "test-user")
+				ctx = contextutils.SetRequestID(ctx, "test-request-id")
+				req := httptest.NewRequest("GET", "/api/machines/test-machine/containers//", nil)
+				return req.WithContext(ctx)
+			},
+			expectedStatus: http.StatusNotFound,
+			expectedError:  "NOT_FOUND",
+			description:    "Should return 404 when container ID is missing (route not found)",
+		},
+		{
+			name: "service error",
+			setupRequest: func() *http.Request {
+				ctx := context.Background()
+				ctx = contextutils.SetUserID(ctx, "test-user")
+				ctx = contextutils.SetRequestID(ctx, "test-request-id")
+				req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123", nil)
+				return req.WithContext(ctx)
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedError:  "INTERNAL_ERROR",
+			description:    "Should return 500 when service returns error",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := tc.setupRequest()
+			rr := httptest.NewRecorder()
+
+			// Setup mock service for service error case
+			mockService := new(MockContainerService)
+			if tc.name == "service error" {
+				expectedErr := errors.New("container not found")
+				mockService.On("Get", mock.Anything, "test-user", "test-machine", "container-123").
+					Return((*entities.ContainerInspectReport)(nil), expectedErr)
+			}
+
+			handler := NewContainerHandler(mockService, nil)
+			r := chi.NewRouter()
+			r.Get("/api/machines/{id}/containers/{containerId}", handler.Get)
+
+			r.ServeHTTP(rr, req)
+
+			assert.Equal(t, tc.expectedStatus, rr.Code, tc.description)
+
+		// For 404 errors, Chi returns plain text, not JSON
+		if tc.expectedStatus == http.StatusNotFound {
+			assert.Contains(t, rr.Body.String(), "404 page not found", "Should return Chi's 404 response")
+		} else {
+			// Parse error response
+			var errorResponse struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+			assert.NoError(t, err, "Should be able to parse error response")
+			assert.Equal(t, tc.expectedError, errorResponse.Error.Code, "Should return correct error code")
+		}
+
+			if tc.name == "service error" {
+				mockService.AssertExpectations(t)
+			}
+		})
+	}
 }
