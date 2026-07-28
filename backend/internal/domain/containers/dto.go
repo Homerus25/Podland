@@ -57,6 +57,67 @@ type ContainerSizeResponse struct {
 	RwSize     int64 `json:"rwSize"`
 }
 
+// ContainerCreateRequest represents a request to create a new container
+// This DTO is used to deserialize the API request for container creation
+type ContainerCreateRequest struct {
+	// Name of the container (optional)
+	Name string `json:"name,omitempty" validate:"omitempty,max=255"`
+	// Image to use for the container (required)
+	Image string `json:"image" validate:"required,min=1"`
+	// Command to run in the container (optional)
+	Command []string `json:"command,omitempty"`
+	// Arguments to the command (optional)
+	Args []string `json:"args,omitempty"`
+	// Working directory inside the container (optional)
+	WorkingDir string `json:"workingDir,omitempty"`
+	// Environment variables (optional)
+	Environment map[string]string `json:"environment,omitempty"`
+	// Labels for the container (optional)
+	Labels map[string]string `json:"labels,omitempty"`
+	// Port bindings (optional)
+	PortBindings []PortBindingRequest `json:"portBindings,omitempty"`
+	// Mounts/volumes (optional)
+	Mounts []MountRequest `json:"mounts,omitempty"`
+	// Run container in privileged mode (optional)
+	Privileged bool `json:"privileged,omitempty"`
+	// Restart policy (optional)
+	RestartPolicy string `json:"restartPolicy,omitempty" validate:"omitempty,oneof=no always unless-stopped on-failure"`
+	// Memory limit (optional)
+	Memory string `json:"memory,omitempty"`
+	// CPU limit (optional)
+	CPUs float64 `json:"cpus,omitempty"`
+}
+
+// PortBindingRequest represents a port binding request
+type PortBindingRequest struct {
+	HostPort      int    `json:"hostPort" validate:"required,min=1,max=65535"`
+	ContainerPort int    `json:"containerPort" validate:"required,min=1,max=65535"`
+	Protocol      string `json:"protocol,omitempty" validate:"omitempty,oneof=tcp udp"`
+}
+
+// MountRequest represents a mount/volume request
+type MountRequest struct {
+	Source      string `json:"source" validate:"required,min=1"`
+	Destination string `json:"destination" validate:"required,min=1"`
+	Mode        string `json:"mode,omitempty" validate:"omitempty,oneof=ro rw"`
+}
+
+// ContainerCreateResponse represents the response after creating a container
+type ContainerCreateResponse struct {
+	// Container ID
+	ID string `json:"id"`
+	// Container name
+	Name string `json:"name"`
+	// Container state
+	State string `json:"state"`
+	// Container image
+	Image string `json:"image"`
+	// Container image ID
+	ImageID string `json:"imageId,omitempty"`
+	// Creation timestamp
+	CreatedAt string `json:"createdAt"`
+}
+
 // ContainerListResult wraps the list of containers with metadata
 // This provides a consistent response structure for the API
 type ContainerListResult struct {

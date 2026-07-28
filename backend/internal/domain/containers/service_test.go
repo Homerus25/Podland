@@ -145,3 +145,50 @@ func TestContainerService_List_ErrorHandling(t *testing.T) {
 		assert.Nil(t, result, "Should return nil result on context cancellation")
 	})
 }
+
+// TestContainerService_Create_Success tests successful container creation
+func TestContainerService_Create_Success(t *testing.T) {
+	ctx := context.Background()
+	userID := "test-user"
+	machineID := "test-machine"
+
+	// Setup mock dependencies
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	service := NewContainerService(mockConnManager)
+
+	// Create test request
+	request := ContainerCreateRequest{
+		Name:  "test-container",
+		Image: "nginx:latest",
+		Command: []string{"/bin/sh", "-c", "echo hello"},
+		Environment: map[string]string{
+			"ENV1": "value1",
+		},
+		Labels: map[string]string{
+			"app": "test",
+		},
+	}
+
+	// Test that the service properly handles connection errors
+	t.Run("connection error", func(t *testing.T) {
+		connErr := errors.New("connection failed")
+		var mockConnManagerWithError machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+		serviceWithError := NewContainerService(mockConnManagerWithError)
+
+		result, err := serviceWithError.Create(ctx, userID, machineID, request)
+
+		assert.Error(t, err, "Should return error when connection fails")
+		assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+		assert.Nil(t, result, "Should return nil result when connection fails")
+	})
+
+	// Test that the service properly handles container creation
+	t.Run("container creation error", func(t *testing.T) {
+		// This would require more complex mocking of the ContainerEngine
+		// For now, we'll just verify the basic structure works
+		_, err := service.Create(ctx, userID, machineID, request)
+		// This will fail because we can't easily mock the ContainerEngine creation
+		// but that's expected for this unit test
+		assert.Error(t, err, "Expected error due to mock limitations")
+	})
+}

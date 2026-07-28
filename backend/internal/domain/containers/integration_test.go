@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -26,6 +27,11 @@ type MockContainerService struct {
 func (m *MockContainerService) List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]containerTypes.ListContainer, error) {
 	args := m.Called(ctx, userID, machineID, opts)
 	return args.Get(0).([]containerTypes.ListContainer), args.Error(1)
+}
+
+func (m *MockContainerService) Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*ContainerCreateResponse, error) {
+	args := m.Called(ctx, userID, machineID, request)
+	return args.Get(0).(*ContainerCreateResponse), args.Error(1)
 }
 
 // TestContainerHandler_List_Success tests successful container listing through the handler
@@ -98,6 +104,87 @@ func TestContainerHandler_List_Success(t *testing.T) {
 	assert.Equal(t, []string{"test-container-1"}, result.Containers[0].Names, "Should map container names correctly")
 	assert.Equal(t, "test-image:latest", result.Containers[0].Image, "Should map container image correctly")
 	assert.Equal(t, "running", result.Containers[0].State, "Should map container state correctly")
+
+	// Verify mock expectations
+	mockService.AssertExpectations(t)
+}
+
+// TestContainerHandler_Create_Success tests successful container creation through the handler
+func TestContainerHandler_Create_Success(t *testing.T) {
+	// Setup test context with user ID
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	// Create test request body
+	requestBody := `{
+		"name": "test-container",
+		"image": "nginx:latest",
+		"command": ["/bin/sh", "-c", "echo hello"],
+		"environment": {
+			"ENV1": "value1"
+		},
+		"labels": {
+			"app": "test"
+		}
+	}`
+
+	// Setup mock service
+	mockService := new(MockContainerService)
+	expectedRequest := ContainerCreateRequest{
+		Name:  "test-container",
+		Image: "nginx:latest",
+		Command: []string{"/bin/sh", "-c", "echo hello"},
+		Environment: map[string]string{
+			"ENV1": "value1",
+		},
+		Labels: map[string]string{
+			"app": "test",
+		},
+	}
+	expectedResponse := &ContainerCreateResponse{
+		ID:        "container-123",
+		Name:      "test-container",
+		State:     "created",
+		Image:     "nginx:latest",
+		ImageID:   "",
+		CreatedAt: "2026-07-28T15:53:26Z",
+	}
+	mockService.On("Create", mock.Anything, "test-user", "test-machine", expectedRequest).Return(expectedResponse, nil)
+
+	// Create handler
+	handler := NewContainerHandler(mockService, nil)
+
+	// Create test request
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers", strings.NewReader(requestBody))
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Create response recorder
+	rr := httptest.NewRecorder()
+
+	// Setup router with URL parameter
+	r := chi.NewRouter()
+	r.Post("/api/machines/{id}/containers", handler.Create)
+
+	// Execute request
+	r.ServeHTTP(rr, req)
+
+	// Verify response
+	assert.Equal(t, http.StatusCreated, rr.Code, "Should return 201 Created for successful container creation")
+	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"), "Should return JSON content type")
+
+	// Parse response
+	var result ContainerCreateResponse
+	err := json.Unmarshal(rr.Body.Bytes(), &result)
+	assert.NoError(t, err, "Should be able to parse JSON response")
+
+	// Verify response structure
+	assert.Equal(t, "container-123", result.ID, "Should return correct container ID")
+	assert.Equal(t, "test-container", result.Name, "Should return correct container name")
+	assert.Equal(t, "created", result.State, "Should return correct container state")
+	assert.Equal(t, "nginx:latest", result.Image, "Should return correct container image")
+	assert.NotEmpty(t, result.CreatedAt, "Should include creation timestamp")
 
 	// Verify mock expectations
 	mockService.AssertExpectations(t)

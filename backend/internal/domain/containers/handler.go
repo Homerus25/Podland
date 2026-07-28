@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
 	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -142,7 +143,61 @@ func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Create handles creating a container
 func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Create")
+	
+	// Get user ID from context
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	// Get machine ID from URL parameter
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	// Parse request body
+	var request ContainerCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Invalid request body", slog.Any("error", err))
+		return
+	}
+
+	// Validate request
+	validate := validator.New()
+	if err := validate.Struct(request); err != nil {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error(), contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Validation failed", slog.Any("error", err))
+		return
+	}
+
+	slog.InfoContext(r.Context(), "create", slog.Any("request", request))
+
+	// Call ContainerService.Create
+	response, err := h.service.Create(r.Context(), userID, machineID, request)
+	if err != nil {
+		// Handle specific error types
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		// Handle generic errors
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "create", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
+		return
+	}
+
+	slog.InfoContext(r.Context(), "create", slog.Any("response", response))
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
 }
 
 // Get handles getting a container by ID
