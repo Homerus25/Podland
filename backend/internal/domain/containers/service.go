@@ -9,6 +9,7 @@ import (
 
 	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
+	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 	"go.podman.io/podman/v6/pkg/specgen"
@@ -37,6 +38,7 @@ type ContainerServiceInterface interface {
 	Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error)
 	Start(ctx context.Context, userID, machineID, containerID string) (*ContainerStartResponse, error)
 	Stop(ctx context.Context, userID, machineID, containerID string) (*ContainerStopResponse, error)
+	Delete(ctx context.Context, userID, machineID, containerID string, force bool) error
 }
 
 // ContainerService provides business logic for containers
@@ -301,4 +303,50 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 		State:     "stopped",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}, nil
+}
+
+// Delete removes a container by ID on the specified machine.
+// The force option allows removing running containers.
+func (s *ContainerService) Delete(ctx context.Context, userID, machineID, containerID string, force bool) error {
+	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
+		return err
+	}
+
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	rmReports, err := containerEngine.ContainerRm(ctx, []string{containerID}, entities.RmOptions{
+		Force: force,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "no such container") {
+			return appErrors.ErrContainerNotFound
+		}
+		return fmt.Errorf("failed to remove container: %w", err)
+	}
+
+	if len(rmReports) == 0 {
+		return fmt.Errorf("no remove report returned for container: %s", containerID)
+	}
+
+	if rmReports[0].Err != nil {
+		if strings.Contains(rmReports[0].Err.Error(), "no such container") {
+			return appErrors.ErrContainerNotFound
+		}
+		return fmt.Errorf("failed to remove container: %w", rmReports[0].Err)
+	}
+
+	return nil
 }

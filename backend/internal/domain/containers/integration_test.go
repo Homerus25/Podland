@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/yourorg/podland/backend/internal/contextutils"
+	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	netTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	containerTypes "go.podman.io/podman/v6/pkg/domain/entities/types"
@@ -54,6 +55,11 @@ func (m *MockContainerService) Stop(ctx context.Context, userID, machineID, cont
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*ContainerStopResponse), args.Error(1)
+}
+
+func (m *MockContainerService) Delete(ctx context.Context, userID, machineID, containerID string, force bool) error {
+	args := m.Called(ctx, userID, machineID, containerID, force)
+	return args.Error(0)
 }
 
 // TestContainerHandler_List_Success tests successful container listing through the handler
@@ -625,6 +631,108 @@ func TestContainerHandler_Get_ErrorScenarios(t *testing.T) {
 			if tc.name == "service error" {
 				mockService.AssertExpectations(t)
 			}
+		})
+	}
+}
+
+// TestContainerHandler_Delete_ErrorScenarios tests error handling in the container delete handler
+func TestContainerHandler_Delete_ErrorScenarios(t *testing.T) {
+	testCases := []struct {
+		name           string
+		setupRequest   func() *http.Request
+		setupMock      func(*MockContainerService)
+		expectedStatus int
+		expectedError  string
+		description    string
+	}{
+		{
+			name: "missing user ID",
+			setupRequest: func() *http.Request {
+				ctx := context.Background()
+				req := httptest.NewRequest("DELETE", "/api/machines/test-machine/containers/container-123", nil)
+				return req.WithContext(ctx)
+			},
+			setupMock:      func(m *MockContainerService) {},
+			expectedStatus: http.StatusUnauthorized,
+			expectedError:  "INVALID_CREDENTIALS",
+			description:    "Should return 401 when user ID is missing",
+		},
+		{
+			name: "missing machine ID",
+			setupRequest: func() *http.Request {
+				ctx := context.Background()
+				ctx = contextutils.SetUserID(ctx, "test-user")
+				ctx = contextutils.SetRequestID(ctx, "test-request-id")
+				req := httptest.NewRequest("DELETE", "/api/machines//containers/container-123", nil)
+				return req.WithContext(ctx)
+			},
+			setupMock:      func(m *MockContainerService) {},
+			expectedStatus: http.StatusBadRequest,
+			expectedError:  "MISSING_MACHINE_ID",
+			description:    "Should return 400 when machine ID is missing",
+		},
+		{
+			name: "service error",
+			setupRequest: func() *http.Request {
+				ctx := context.Background()
+				ctx = contextutils.SetUserID(ctx, "test-user")
+				ctx = contextutils.SetRequestID(ctx, "test-request-id")
+				req := httptest.NewRequest("DELETE", "/api/machines/test-machine/containers/container-123", nil)
+				return req.WithContext(ctx)
+			},
+			setupMock: func(m *MockContainerService) {
+				m.On("Delete", mock.Anything, "test-user", "test-machine", "container-123", false).
+					Return(errors.New("container not found"))
+			},
+			expectedStatus: http.StatusInternalServerError,
+			expectedError:  "INTERNAL_ERROR",
+			description:    "Should return 500 when service returns error",
+		},
+		{
+			name: "container not found (AppError)",
+			setupRequest: func() *http.Request {
+				ctx := context.Background()
+				ctx = contextutils.SetUserID(ctx, "test-user")
+				ctx = contextutils.SetRequestID(ctx, "test-request-id")
+				req := httptest.NewRequest("DELETE", "/api/machines/test-machine/containers/container-123", nil)
+				return req.WithContext(ctx)
+			},
+			setupMock: func(m *MockContainerService) {
+				m.On("Delete", mock.Anything, "test-user", "test-machine", "container-123", false).
+					Return(appErrors.ErrContainerNotFound)
+			},
+			expectedStatus: http.StatusNotFound,
+			expectedError:  "CONTAINER_NOT_FOUND",
+			description:    "Should return 404 when container is not found",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := tc.setupRequest()
+			rr := httptest.NewRecorder()
+
+			mockService := new(MockContainerService)
+			tc.setupMock(mockService)
+
+			handler := NewContainerHandler(mockService, nil)
+			r := chi.NewRouter()
+			r.Delete("/api/machines/{id}/containers/{containerId}", handler.Delete)
+
+			r.ServeHTTP(rr, req)
+
+			assert.Equal(t, tc.expectedStatus, rr.Code, tc.description)
+
+			var errorResponse struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+			assert.NoError(t, err, "Should be able to parse error response")
+			assert.Equal(t, tc.expectedError, errorResponse.Error.Code, "Should return correct error code")
+
+			mockService.AssertExpectations(t)
 		})
 	}
 }
