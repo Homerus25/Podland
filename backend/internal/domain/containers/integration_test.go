@@ -14,10 +14,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/yourorg/podland/backend/internal/contextutils"
-	define "go.podman.io/podman/v6/pkg/ps/define"
 	netTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	containerTypes "go.podman.io/podman/v6/pkg/domain/entities/types"
+	define "go.podman.io/podman/v6/pkg/ps/define"
 )
 
 // MockContainerService is a mock implementation of ContainerServiceInterface for testing
@@ -40,6 +40,22 @@ func (m *MockContainerService) Get(ctx context.Context, userID, machineID, conta
 	return args.Get(0).(*entities.ContainerInspectReport), args.Error(1)
 }
 
+func (m *MockContainerService) Start(ctx context.Context, userID, machineID, containerID string) (*ContainerStartResponse, error) {
+	args := m.Called(ctx, userID, machineID, containerID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*ContainerStartResponse), args.Error(1)
+}
+
+func (m *MockContainerService) Stop(ctx context.Context, userID, machineID, containerID string) (*ContainerStopResponse, error) {
+	args := m.Called(ctx, userID, machineID, containerID)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*ContainerStopResponse), args.Error(1)
+}
+
 // TestContainerHandler_List_Success tests successful container listing through the handler
 func TestContainerHandler_List_Success(t *testing.T) {
 	// Setup test context with user ID
@@ -50,19 +66,19 @@ func TestContainerHandler_List_Success(t *testing.T) {
 	// Create test containers
 	testContainers := []containerTypes.ListContainer{
 		{
-			ID:      "container-1",
-			Names:   []string{"test-container-1"},
-			Image:   "test-image:latest",
-			State:   "running",
-			Status:  "Up 5 minutes",
+			ID:       "container-1",
+			Names:    []string{"test-container-1"},
+			Image:    "test-image:latest",
+			State:    "running",
+			Status:   "Up 5 minutes",
 			Restarts: 0,
 		},
 		{
-			ID:      "container-2",
-			Names:   []string{"test-container-2"},
-			Image:   "another-image:v1",
-			State:   "exited",
-			Status:  "Exited (0) 2 hours ago",
+			ID:       "container-2",
+			Names:    []string{"test-container-2"},
+			Image:    "another-image:v1",
+			State:    "exited",
+			Status:   "Exited (0) 2 hours ago",
 			Restarts: 2,
 			Exited:   true,
 			ExitCode: 0,
@@ -138,8 +154,8 @@ func TestContainerHandler_Create_Success(t *testing.T) {
 	// Setup mock service
 	mockService := new(MockContainerService)
 	expectedRequest := ContainerCreateRequest{
-		Name:  "test-container",
-		Image: "nginx:latest",
+		Name:    "test-container",
+		Image:   "nginx:latest",
 		Command: []string{"/bin/sh", "-c", "echo hello"},
 		Environment: map[string]string{
 			"ENV1": "value1",
@@ -207,32 +223,32 @@ func TestContainerHandler_List_QueryParameters(t *testing.T) {
 
 	// Test different query parameter combinations
 	testCases := []struct {
-		name           string
-		url            string
-		expectedOpts   entities.ContainerListOptions
-		description    string
+		name         string
+		url          string
+		expectedOpts entities.ContainerListOptions
+		description  string
 	}{
 		{
-			name: "all parameter",
+			name:         "all parameter",
 			url:          "/api/machines/test-machine/containers?all=true",
 			expectedOpts: entities.ContainerListOptions{All: true},
 			description:  "Should parse all parameter correctly",
 		},
 		{
-			name: "size parameter",
+			name:         "size parameter",
 			url:          "/api/machines/test-machine/containers?size=true",
 			expectedOpts: entities.ContainerListOptions{Size: true},
 			description:  "Should parse size parameter correctly",
 		},
 		{
-			name: "namespace parameter",
+			name:         "namespace parameter",
 			url:          "/api/machines/test-machine/containers?namespace=true",
 			expectedOpts: entities.ContainerListOptions{Namespace: true},
 			description:  "Should parse namespace parameter correctly",
 		},
 		{
 			name: "multiple parameters",
-			url: "/api/machines/test-machine/containers?all=true&size=true&last=5",
+			url:  "/api/machines/test-machine/containers?all=true&size=true&last=5",
 			expectedOpts: entities.ContainerListOptions{
 				All:  true,
 				Size: true,
@@ -393,20 +409,20 @@ func TestContainerHandler_List_ContainerWithOptionalFields(t *testing.T) {
 
 	// Create container with various optional fields
 	testContainer := containerTypes.ListContainer{
-		ID:        "container-with-options",
-		Names:     []string{"test-container"},
-		Image:     "test-image:latest",
-		ImageID:   "sha256:abc123",
-		Command:   []string{"/bin/sh", "-c", "echo hello"},
-		State:     "running",
-		Status:    "Up 10 minutes",
-		Restarts:  3,
-		Exited:    false,
-		ExitCode:  0,
+		ID:       "container-with-options",
+		Names:    []string{"test-container"},
+		Image:    "test-image:latest",
+		ImageID:  "sha256:abc123",
+		Command:  []string{"/bin/sh", "-c", "echo hello"},
+		State:    "running",
+		Status:   "Up 10 minutes",
+		Restarts: 3,
+		Exited:   false,
+		ExitCode: 0,
 		Labels: map[string]string{
-			"app":       "test",
-			"env":       "development",
-			"version":   "1.0",
+			"app":     "test",
+			"env":     "development",
+			"version": "1.0",
 		},
 		Ports: []netTypes.PortMapping{
 			{
@@ -591,20 +607,20 @@ func TestContainerHandler_Get_ErrorScenarios(t *testing.T) {
 
 			assert.Equal(t, tc.expectedStatus, rr.Code, tc.description)
 
-		// For 404 errors, Chi returns plain text, not JSON
-		if tc.expectedStatus == http.StatusNotFound {
-			assert.Contains(t, rr.Body.String(), "404 page not found", "Should return Chi's 404 response")
-		} else {
-			// Parse error response
-			var errorResponse struct {
-				Error struct {
-					Code string `json:"code"`
-				} `json:"error"`
+			// For 404 errors, Chi returns plain text, not JSON
+			if tc.expectedStatus == http.StatusNotFound {
+				assert.Contains(t, rr.Body.String(), "404 page not found", "Should return Chi's 404 response")
+			} else {
+				// Parse error response
+				var errorResponse struct {
+					Error struct {
+						Code string `json:"code"`
+					} `json:"error"`
+				}
+				err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
+				assert.NoError(t, err, "Should be able to parse error response")
+				assert.Equal(t, tc.expectedError, errorResponse.Error.Code, "Should return correct error code")
 			}
-			err := json.Unmarshal(rr.Body.Bytes(), &errorResponse)
-			assert.NoError(t, err, "Should be able to parse error response")
-			assert.Equal(t, tc.expectedError, errorResponse.Error.Code, "Should return correct error code")
-		}
 
 			if tc.name == "service error" {
 				mockService.AssertExpectations(t)

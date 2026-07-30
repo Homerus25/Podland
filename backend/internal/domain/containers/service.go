@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"strings"
 	"time"
 
 	"github.com/yourorg/podland/backend/internal/connections"
@@ -34,6 +35,8 @@ type ContainerServiceInterface interface {
 	List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error)
 	Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*ContainerCreateResponse, error)
 	Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error)
+	Start(ctx context.Context, userID, machineID, containerID string) (*ContainerStartResponse, error)
+	Stop(ctx context.Context, userID, machineID, containerID string) (*ContainerStopResponse, error)
 }
 
 // ContainerService provides business logic for containers
@@ -192,4 +195,110 @@ func (s *ContainerService) Get(ctx context.Context, userID, machineID, container
 	}
 
 	return containerReports[0], nil
+}
+
+// validateContainerOperationParams validates common parameters for container operations
+func validateContainerOperationParams(userID, machineID, containerID string) error {
+	if userID == "" {
+		return fmt.Errorf("userID is required")
+	}
+	if machineID == "" {
+		return fmt.Errorf("machineID is required")
+	}
+	if containerID == "" {
+		return fmt.Errorf("containerID is required")
+	}
+	return nil
+}
+
+// Start starts a container by ID on the specified machine
+func (s *ContainerService) Start(ctx context.Context, userID, machineID, containerID string) (*ContainerStartResponse, error) {
+	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
+		return nil, err
+	}
+
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return nil, fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	startReports, err := containerEngine.ContainerStart(ctx, []string{containerID}, entities.ContainerStartOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to start container: %w", err)
+	}
+
+	if len(startReports) == 0 {
+		return nil, fmt.Errorf("no start report returned for container: %s", containerID)
+	}
+
+	containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
+	containerName := containerID
+	if err == nil && len(containerReports) > 0 {
+		if len(containerReports[0].Name) > 0 {
+			containerName = strings.TrimPrefix(containerReports[0].Name, "/")
+		}
+	}
+
+	return &ContainerStartResponse{
+		ID:        containerID,
+		Name:      containerName,
+		State:     "running",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}, nil
+}
+
+// Stop stops a container by ID on the specified machine
+func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containerID string) (*ContainerStopResponse, error) {
+	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
+		return nil, err
+	}
+
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return nil, fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	stopReports, err := containerEngine.ContainerStop(ctx, []string{containerID}, entities.StopOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	if len(stopReports) == 0 {
+		return nil, fmt.Errorf("no stop report returned for container: %s", containerID)
+	}
+
+	containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
+	containerName := containerID
+	if err == nil && len(containerReports) > 0 {
+		if len(containerReports[0].Name) > 0 {
+			containerName = strings.TrimPrefix(containerReports[0].Name, "/")
+		}
+	}
+
+	return &ContainerStopResponse{
+		ID:        containerID,
+		Name:      containerName,
+		State:     "stopped",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}, nil
 }

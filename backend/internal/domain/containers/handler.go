@@ -148,7 +148,7 @@ func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
 // Create handles creating a container
 func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "Create")
-	
+
 	// Get user ID from context
 	userID := contextutils.GetUserIDFromContext(r.Context())
 	if userID == "" {
@@ -207,7 +207,7 @@ func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
 // Get handles getting a container by ID
 func (h *ContainerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "Get")
-	
+
 	// Get user ID from context
 	userID := contextutils.GetUserIDFromContext(r.Context())
 	if userID == "" {
@@ -259,12 +259,88 @@ func (h *ContainerHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // Start handles starting a container
 func (h *ContainerHandler) Start(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Start")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	containerID := chi.URLParam(r, "containerId")
+	if containerID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_CONTAINER_ID", "Container ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	slog.InfoContext(r.Context(), "start", slog.String("containerID", containerID))
+
+	response, err := h.service.Start(r.Context(), userID, machineID, containerID)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "start", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("containerID", containerID))
+		return
+	}
+
+	slog.InfoContext(r.Context(), "start", slog.Any("response", response))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 // Stop handles stopping a container
 func (h *ContainerHandler) Stop(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Stop")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	containerID := chi.URLParam(r, "containerId")
+	if containerID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_CONTAINER_ID", "Container ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	slog.InfoContext(r.Context(), "stop", slog.String("containerID", containerID))
+
+	response, err := h.service.Stop(r.Context(), userID, machineID, containerID)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "stop", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("containerID", containerID))
+		return
+	}
+
+	slog.InfoContext(r.Context(), "stop", slog.Any("response", response))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }
 
 // Delete handles deleting a container

@@ -4,10 +4,10 @@ import (
 	"strings"
 	"time"
 
-	define "go.podman.io/podman/v6/pkg/ps/define"
+	netTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	containerTypes "go.podman.io/podman/v6/pkg/domain/entities/types"
-	netTypes "go.podman.io/common/libnetwork/types"
+	define "go.podman.io/podman/v6/pkg/ps/define"
 )
 
 // ContainerGetResponse represents detailed information about a specific container
@@ -192,8 +192,8 @@ func FromPodmanInspectContainer(containerReport *entities.ContainerInspectReport
 		Status:    getContainerStatus(containerReport),
 		Image:     getContainerImage(containerReport),
 		CreatedAt: formatCreatedTime(containerReport),
-		Restarts: uint(getContainerRestartCount(containerReport)),
-		Exited:   isContainerExited(containerReport),
+		Restarts:  uint(getContainerRestartCount(containerReport)),
+		Exited:    isContainerExited(containerReport),
 	}
 
 	// Add optional fields if available
@@ -202,7 +202,7 @@ func FromPodmanInspectContainer(containerReport *entities.ContainerInspectReport
 		// Args might not be available in the Config, so we'll skip it
 		response.WorkingDir = containerReport.Config.WorkingDir
 		response.Labels = containerReport.Config.Labels
-		
+
 		// Parse environment variables
 		if len(containerReport.Config.Env) > 0 {
 			response.Environment = make(map[string]string)
@@ -247,22 +247,28 @@ func FromPodmanContainer(container any) ContainerListResponse {
 			Status:    listContainer.Status,
 			Restarts:  listContainer.Restarts,
 			Exited:    listContainer.Exited,
-			ExitCode:  func() *int32 { if listContainer.ExitCode != 0 { v := listContainer.ExitCode; return &v }; return nil }(),
-			Labels:    listContainer.Labels,
-			Ports:     mapPortMappings(listContainer.Ports),
-			Size:      mapContainerSize(listContainer.Size),
-			Networks:  listContainer.Networks,
-			Mounts:    listContainer.Mounts,
+			ExitCode: func() *int32 {
+				if listContainer.ExitCode != 0 {
+					v := listContainer.ExitCode
+					return &v
+				}
+				return nil
+			}(),
+			Labels:   listContainer.Labels,
+			Ports:    mapPortMappings(listContainer.Ports),
+			Size:     mapContainerSize(listContainer.Size),
+			Networks: listContainer.Networks,
+			Mounts:   listContainer.Mounts,
 		}
 	}
-	
+
 	// Fallback for testing
 	return ContainerListResponse{
-		ID:      "placeholder-id",
-		Names:   []string{"placeholder-name"},
-		Image:   "placeholder-image",
-		State:   "unknown",
-		Status:  "Unknown status",
+		ID:        "placeholder-id",
+		Names:     []string{"placeholder-name"},
+		Image:     "placeholder-image",
+		State:     "unknown",
+		Status:    "Unknown status",
 		CreatedAt: time.Now().UTC().Format(time.RFC3339),
 	}
 }
@@ -384,6 +390,30 @@ func formatCreatedTime(containerReport *entities.ContainerInspectReport) string 
 		return containerReport.Created.Format(time.RFC3339)
 	}
 	return ""
+}
+
+// ContainerStartResponse represents the response after starting a container
+type ContainerStartResponse struct {
+	// Container ID
+	ID string `json:"id"`
+	// Container name
+	Name string `json:"name"`
+	// Container state after start
+	State string `json:"state"`
+	// Operation timestamp
+	Timestamp string `json:"timestamp"`
+}
+
+// ContainerStopResponse represents the response after stopping a container
+type ContainerStopResponse struct {
+	// Container ID
+	ID string `json:"id"`
+	// Container name
+	Name string `json:"name"`
+	// Container state after stop
+	State string `json:"state"`
+	// Operation timestamp
+	Timestamp string `json:"timestamp"`
 }
 
 // Helper function to check if container is exited
