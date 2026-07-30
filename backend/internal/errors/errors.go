@@ -62,8 +62,9 @@ var (
 
 // Images
 var (
-	ErrImageNotFound  = NewAppError("IMAGE_NOT_FOUND", "Image not found", http.StatusNotFound)
-	ErrImagePullFailed = NewAppError("IMAGE_PULL_FAILED", "Failed to pull image", http.StatusInternalServerError)
+	ErrImageNotFound         = NewAppError("IMAGE_NOT_FOUND", "Image not found", http.StatusNotFound)
+	ErrImagePullFailed       = NewAppError("IMAGE_PULL_FAILED", "Failed to pull image", http.StatusInternalServerError)
+	ErrImageUsedByContainers = NewAppError("IMAGE_USED_BY_CONTAINERS", "Image is used by one or more containers", http.StatusBadRequest)
 )
 
 // Quadlets
