@@ -2,11 +2,13 @@ package images
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
 // Compile-time check that *ImageService satisfies ImageServiceInterface.
@@ -55,9 +57,29 @@ func NewImageServiceWithConcreteDeps(connManager *connections.ConnectionManager)
 }
 
 // List returns a list of images on the specified machine.
-// Stub — implemented in slice 060-01-image-list.
 func (s *ImageService) List(ctx context.Context, userID, machineID string, opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
-	return nil, appErrors.ErrNotImplemented
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+
+	defer s.connManager.Release(machineID)
+
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return nil, fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	imageEngine := &tunnel.ImageEngine{
+		ClientCtx: connCtx,
+	}
+
+	images, err := imageEngine.List(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list images: %w", err)
+	}
+
+	return images, nil
 }
 
 // Delete removes an image by ID on the specified machine.
