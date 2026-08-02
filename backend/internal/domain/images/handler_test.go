@@ -1,6 +1,7 @@
 package images
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -441,4 +442,130 @@ func TestImageHandler_Delete_ServiceError(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code, "Should return 500 on general service error")
+}
+
+// TestImageHandler_Pull_MissingUserID tests that Pull handles missing user ID
+func TestImageHandler_Pull_MissingUserID(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", nil)
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Post("/api/machines/{id}/images/pull", handler.Pull)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 when user ID is missing")
+}
+
+// TestImageHandler_Pull_MissingMachineID tests that Pull handles missing machine ID
+func TestImageHandler_Pull_MissingMachineID(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("POST", "/api/machines//images/pull", nil)
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Post("/api/machines/{id}/images/pull", handler.Pull)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when machine ID is missing")
+}
+
+// TestImageHandler_Pull_InvalidRequestBody tests that Pull handles invalid request body
+func TestImageHandler_Pull_InvalidRequestBody(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", nil)
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Post("/api/machines/{id}/images/pull", handler.Pull)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when request body is invalid")
+}
+
+// TestImageHandler_Pull_ValidationFailure tests that Pull handles validation failures
+func TestImageHandler_Pull_ValidationFailure(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	requestBody := map[string]any{
+		"platform": "linux/amd64",
+	}
+	jsonBody, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody))
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Post("/api/machines/{id}/images/pull", handler.Pull)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when validation fails")
+}
+
+// TestImageHandler_Pull_ServiceError tests that Pull handles service errors
+func TestImageHandler_Pull_ServiceError(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	requestBody := map[string]string{
+		"image": "nginx:latest",
+	}
+	jsonBody, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody))
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+
+	mockService.On("Pull", mock.Anything, "test-user", "test-machine", "nginx:latest", mock.Anything).Return((*entities.ImagePullReport)(nil), appErrors.ErrImagePullFailed)
+
+	r := chi.NewRouter()
+	r.Post("/api/machines/{id}/images/pull", handler.Pull)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "Should return 500 on service error")
 }

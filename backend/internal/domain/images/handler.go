@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
 	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -89,7 +90,67 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // Pull handles pulling an image
 func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Pull")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	var request ImagePullRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Invalid request body", slog.Any("error", err))
+		return
+	}
+
+	validate := validator.New()
+	if err := validate.Struct(request); err != nil {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error(), contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Validation failed", slog.Any("error", err))
+		return
+	}
+
+	slog.InfoContext(r.Context(), "pull", slog.Any("request", request))
+
+	var pullOpts entities.ImagePullOptions
+	if request.Credentials != nil {
+		pullOpts.Username = request.Credentials.Username
+		pullOpts.Password = request.Credentials.Password
+	}
+	if request.Platform != "" {
+		os, arch, variant := ParsePlatform(request.Platform)
+		pullOpts.OS = os
+		pullOpts.Arch = arch
+		pullOpts.Variant = variant
+	}
+
+	report, err := h.service.Pull(r.Context(), userID, machineID, request.Image, pullOpts)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "pull", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
+		return
+	}
+
+	result := FromImagePullReport(report)
+
+	slog.InfoContext(r.Context(), "pull", slog.Any("result", result))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(result)
 }
 
 // Delete handles deleting an image

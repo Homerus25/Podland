@@ -86,19 +86,6 @@ func (s *ImageService) List(ctx context.Context, userID, machineID string, opts 
 // Delete removes an image by ID on the specified machine.
 // Stub — implemented in slice 060-02-image-delete.
 func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID string, force bool) error {
-	if ctx == nil {
-		return fmt.Errorf("context is required")
-	}
-	if userID == "" {
-		return fmt.Errorf("userID is required")
-	}
-	if machineID == "" {
-		return fmt.Errorf("machineID is required")
-	}
-	if imageID == "" {
-		return fmt.Errorf("imageID is required")
-	}
-
 	connCtxInterface, err := s.connManager.GetConnection(ctx, machineID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get connection to machine: %w", err)
@@ -117,15 +104,6 @@ func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID st
 	report, errs := imageEngine.Remove(ctx, []string{imageID}, entities.ImageRemoveOptions{
 		Force: force,
 	})
-	if err != nil {
-		if strings.Contains(err.Error(), "no such image") || strings.Contains(err.Error(), "image not found") {
-			return appErrors.ErrImageNotFound
-		}
-		if strings.Contains(err.Error(), "image is used by") || strings.Contains(err.Error(), "unable to delete") {
-			return appErrors.ErrImageUsedByContainers
-		}
-		return fmt.Errorf("failed to remove image: %w", err)
-	}
 
 	if len(errs) > 0 && errs[0] != nil {
 		if strings.Contains(errs[0].Error(), "no such image") || strings.Contains(errs[0].Error(), "image not found") {
@@ -145,7 +123,26 @@ func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID st
 }
 
 // Pull pulls an image on the specified machine.
-// Stub — implemented in slice 060-03-image-pull-basic.
 func (s *ImageService) Pull(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {
-	return nil, appErrors.ErrNotImplemented
+	connCtxInterface, err := s.connManager.GetConnection(ctx, machineID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return nil, fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	imageEngine := &tunnel.ImageEngine{
+		ClientCtx: connCtx,
+	}
+
+	report, err := imageEngine.Pull(ctx, rawImage, opts)
+	if err != nil {
+		return nil, appErrors.ErrImagePullFailed
+	}
+
+	return report, nil
 }

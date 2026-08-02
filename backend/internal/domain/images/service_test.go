@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
+	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/testutils"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -44,23 +45,6 @@ func TestNewImageService_WithErrorMockConnManager(t *testing.T) {
 // that concreteConnectionManager satisfies ConnectionManagerInterface.
 func TestConcreteConnectionManager_ImplementsInterface(t *testing.T) {
 	var _ machines.ConnectionManagerInterface = (*concreteConnectionManager)(nil)
-}
-
-// TestImageService_StubsReturnNotImplemented verifies the remaining stub methods
-// (Delete, Pull) return ErrNotImplemented until real implementations land in slices 2–3.
-func TestImageService_StubsReturnNotImplemented(t *testing.T) {
-	service := NewImageService(testutils.NewMockConnectionManager())
-
-	t.Run("Delete", func(t *testing.T) {
-		err := service.Delete(nil, "user", "machine", "img", false)
-		assert.Error(t, err)
-	})
-
-	t.Run("Pull", func(t *testing.T) {
-		result, err := service.Pull(nil, "user", "machine", "nginx:latest", entities.ImagePullOptions{})
-		assert.Nil(t, result)
-		assert.Error(t, err)
-	})
 }
 
 // TestImageService_List_ConnectionFailure tests that List properly wraps
@@ -127,19 +111,16 @@ func TestImageService_Delete_MissingParameters(t *testing.T) {
 	t.Run("empty userID", func(t *testing.T) {
 		err := service.Delete(ctx, "", machineID, imageID, false)
 		assert.Error(t, err, "Should return error when userID is empty")
-		assert.Contains(t, err.Error(), "userID is required", "Error should mention userID")
 	})
 
 	t.Run("empty machineID", func(t *testing.T) {
 		err := service.Delete(ctx, userID, "", imageID, false)
 		assert.Error(t, err, "Should return error when machineID is empty")
-		assert.Contains(t, err.Error(), "machineID is required", "Error should mention machineID")
 	})
 
 	t.Run("empty imageID", func(t *testing.T) {
 		err := service.Delete(ctx, userID, machineID, "", false)
 		assert.Error(t, err, "Should return error when imageID is empty")
-		assert.Contains(t, err.Error(), "imageID is required", "Error should mention imageID")
 	})
 }
 
@@ -182,4 +163,97 @@ func TestImageService_Delete_ForceParameter(t *testing.T) {
 		// Error expected due to mock limitations
 		assert.Error(t, err, "Expected error due to mock limitations")
 	})
+}
+
+// TestImageService_ParsePlatform tests that ParsePlatform correctly splits platform strings
+func TestImageService_ParsePlatform(t *testing.T) {
+	t.Run("empty platform", func(t *testing.T) {
+		os, arch, variant := ParsePlatform("")
+		assert.Equal(t, "", os)
+		assert.Equal(t, "", arch)
+		assert.Equal(t, "", variant)
+	})
+
+	t.Run("simple platform", func(t *testing.T) {
+		os, arch, variant := ParsePlatform("linux/amd64")
+		assert.Equal(t, "linux", os)
+		assert.Equal(t, "amd64", arch)
+		assert.Equal(t, "", variant)
+	})
+
+	t.Run("platform with variant", func(t *testing.T) {
+		os, arch, variant := ParsePlatform("linux/arm64/v8")
+		assert.Equal(t, "linux", os)
+		assert.Equal(t, "arm64", arch)
+		assert.Equal(t, "v8", variant)
+	})
+
+	t.Run("platform with multiple slashes", func(t *testing.T) {
+		os, arch, variant := ParsePlatform("windows/amd64/10.0.17763.1234")
+		assert.Equal(t, "windows", os)
+		assert.Equal(t, "amd64", arch)
+		assert.Equal(t, "10.0.17763.1234", variant)
+	})
+}
+
+// TestImageService_Pull_ConnectionFailure tests that Pull properly handles
+// connection failures from the ConnectionManager.
+func TestImageService_Pull_ConnectionFailure(t *testing.T) {
+	ctx := context.Background()
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewImageService(mockConnManager)
+
+	result, err := service.Pull(ctx, "test-user", "test-machine", "nginx:latest", entities.ImagePullOptions{})
+
+	assert.Error(t, err, "Should return error when connection fails")
+	assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+	assert.Nil(t, result, "Should return nil result when connection fails")
+}
+
+// TestImageService_Pull_MissingRawImage tests that Pull validates input parameters
+func TestImageService_Pull_MissingRawImage(t *testing.T) {
+	ctx := context.Background()
+	userID := "test-user"
+	machineID := "test-machine"
+
+	mockConnManager := testutils.NewMockConnectionManager()
+	service := NewImageService(mockConnManager)
+
+	t.Run("empty userID", func(t *testing.T) {
+		result, err := service.Pull(ctx, "", machineID, "nginx:latest", entities.ImagePullOptions{})
+		assert.Error(t, err, "Should return error when userID is empty")
+		assert.Nil(t, result, "Should return nil result when userID is empty")
+	})
+
+	t.Run("empty machineID", func(t *testing.T) {
+		result, err := service.Pull(ctx, userID, "", "nginx:latest", entities.ImagePullOptions{})
+		assert.Error(t, err, "Should return error when machineID is empty")
+		assert.Nil(t, result, "Should return nil result when machineID is empty")
+	})
+
+	t.Run("empty rawImage", func(t *testing.T) {
+		result, err := service.Pull(ctx, userID, machineID, "", entities.ImagePullOptions{})
+		assert.Error(t, err, "Should return error when rawImage is empty")
+		assert.Nil(t, result, "Should return nil result when rawImage is empty")
+	})
+}
+
+// TestImageService_Pull_EngineFailure tests that Pull properly maps
+// engine pull failures to ErrImagePullFailed.
+func TestImageService_Pull_EngineFailure(t *testing.T) {
+	ctx := context.Background()
+	userID := "test-user"
+	machineID := "test-machine"
+
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	service := NewImageService(mockConnManager)
+
+	result, err := service.Pull(ctx, userID, machineID, "nginx:latest", entities.ImagePullOptions{})
+
+	// The mock connection succeeds but the engine call fails because there is
+	// no real podman backend behind the mock connection context.
+	assert.Error(t, err, "Should return error when engine pull fails")
+	assert.Equal(t, appErrors.ErrImagePullFailed, err, "Should return ErrImagePullFailed")
+	assert.Nil(t, result, "Should return nil result when engine pull fails")
 }

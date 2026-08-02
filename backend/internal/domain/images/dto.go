@@ -1,10 +1,43 @@
 package images
 
 import (
+	"strings"
 	"time"
 
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
+
+// ImagePullRequest represents a request to pull an image from a registry
+type ImagePullRequest struct {
+	// Image reference to pull (required)
+	Image string `json:"image" validate:"required,min=1"`
+	// Credentials for registry authentication (optional)
+	Credentials *ImagePullCredentials `json:"credentials,omitempty"`
+	// Platform for the image (optional, e.g., "linux/amd64")
+	Platform string `json:"platform,omitempty"`
+}
+
+// ImagePullCredentials represents authentication credentials for pulling an image
+type ImagePullCredentials struct {
+	// Username for registry authentication
+	Username string `json:"username,omitempty"`
+	// Password for registry authentication
+	Password string `json:"password,omitempty"`
+}
+
+// ImagePullResponse represents the response after pulling an image
+type ImagePullResponse struct {
+	// List of pulled image references
+	Images []string `json:"images"`
+}
+
+// FromImagePullReport converts a podman ImagePullReport to ImagePullResponse
+func FromImagePullReport(report *entities.ImagePullReport) ImagePullResponse {
+	if report == nil || len(report.Images) == 0 {
+		return ImagePullResponse{Images: []string{}}
+	}
+	return ImagePullResponse{Images: report.Images}
+}
 
 // ImageListResponse represents an image in the API list response.
 // This DTO is used to serialize image information for the API.
@@ -62,4 +95,22 @@ func formatImageCreatedTime(created int64) string {
 		return ""
 	}
 	return time.Unix(created, 0).UTC().Format(time.RFC3339)
+}
+
+// ParsePlatform parses a platform string (e.g., "linux/amd64") into OS, Arch, and Variant
+func ParsePlatform(platform string) (os, arch, variant string) {
+	if platform == "" {
+		return "", "", ""
+	}
+	parts := strings.Split(platform, "/")
+	if len(parts) >= 1 {
+		os = parts[0]
+	}
+	if len(parts) >= 2 {
+		arch = parts[1]
+	}
+	if len(parts) >= 3 {
+		variant = parts[2]
+	}
+	return os, arch, variant
 }
