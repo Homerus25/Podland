@@ -3,7 +3,6 @@ package images
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/errors"
+	"github.com/yourorg/podland/backend/internal/streaming"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -132,25 +132,18 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 	defer cancelPull()
 
 	// Set headers for streaming NDJSON response
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Transfer-Encoding", "chunked")
+	streaming.SetNDJSONHeaders(w)
 
-	// Ensure we can flush
-	flusher, ok := w.(http.Flusher)
-	if !ok {
+	// Create NDJSON writer
+	ndjsonWriter, err := streaming.NewNDJSONWriter(w)
+	if err != nil {
 		errors.RespondWithHTTPError(w, http.StatusInternalServerError, "STREAMING_NOT_SUPPORTED", "Streaming not supported", contextutils.GetRequestID(r.Context()))
 		slog.ErrorContext(r.Context(), "Streaming not supported")
 		return
 	}
 
 	// Create a channel to detect client disconnect
-	disconnectChan := make(chan struct{})
-	go func() {
-		<-pullCtx.Done()
-		close(disconnectChan)
-	}()
+	disconnectChan := streaming.DisconnectChan(pullCtx)
 
 	// Prepare pull options
 	var pullOpts entities.ImagePullOptions
@@ -194,7 +187,7 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 	for !streamComplete {
 		select {
 		case event := <-progressChan:
-			if err := writeAndFlushEvent(w, flusher, event); err != nil {
+			if err := ndjsonWriter.Write(event); err != nil {
 				slog.ErrorContext(r.Context(), "Failed to write event", slog.Any("error", err))
 				cancelPull()
 				streamComplete = true
@@ -203,7 +196,7 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 		case <-resultChan:
 			// Pull completed successfully
 			completeEvent := NewCompleteEvent(operationID, machineID)
-			writeAndFlushEvent(w, flusher, completeEvent)
+			ndjsonWriter.Write(completeEvent)
 			streamComplete = true
 
 		case err := <-errorChan:
@@ -216,7 +209,7 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 			} else {
 				errorEvent = NewErrorEvent(operationID, machineID, errors.ErrImagePullFailed.Code, errors.ErrImagePullFailed.Message)
 			}
-			writeAndFlushEvent(w, flusher, errorEvent)
+			ndjsonWriter.Write(errorEvent)
 			streamComplete = true
 
 		case <-disconnectChan:
@@ -225,23 +218,10 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 			cancelPull()
 			// Try to send cancellation event (best effort)
 			errorEvent := NewErrorEvent(operationID, machineID, errors.ErrOperationCancelled.Code, errors.ErrOperationCancelled.Message)
-			writeAndFlushEvent(w, flusher, errorEvent)
+			ndjsonWriter.Write(errorEvent)
 			streamComplete = true
 		}
 	}
-}
-
-// writeAndFlushEvent writes a single event as NDJSON and flushes the response
-func writeAndFlushEvent(w http.ResponseWriter, flusher http.Flusher, event PullProgressEvent) error {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintln(w, string(data)); err != nil {
-		return err
-	}
-	flusher.Flush()
-	return nil
 }
 
 // Delete handles deleting an image
