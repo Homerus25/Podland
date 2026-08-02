@@ -3,6 +3,7 @@ package images
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
@@ -85,7 +86,62 @@ func (s *ImageService) List(ctx context.Context, userID, machineID string, opts 
 // Delete removes an image by ID on the specified machine.
 // Stub — implemented in slice 060-02-image-delete.
 func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID string, force bool) error {
-	return appErrors.ErrNotImplemented
+	if ctx == nil {
+		return fmt.Errorf("context is required")
+	}
+	if userID == "" {
+		return fmt.Errorf("userID is required")
+	}
+	if machineID == "" {
+		return fmt.Errorf("machineID is required")
+	}
+	if imageID == "" {
+		return fmt.Errorf("imageID is required")
+	}
+
+	connCtxInterface, err := s.connManager.GetConnection(ctx, machineID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	imageEngine := &tunnel.ImageEngine{
+		ClientCtx: connCtx,
+	}
+
+	report, errs := imageEngine.Remove(ctx, []string{imageID}, entities.ImageRemoveOptions{
+		Force: force,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "no such image") || strings.Contains(err.Error(), "image not found") {
+			return appErrors.ErrImageNotFound
+		}
+		if strings.Contains(err.Error(), "image is used by") || strings.Contains(err.Error(), "unable to delete") {
+			return appErrors.ErrImageUsedByContainers
+		}
+		return fmt.Errorf("failed to remove image: %w", err)
+	}
+
+	if len(errs) > 0 && errs[0] != nil {
+		if strings.Contains(errs[0].Error(), "no such image") || strings.Contains(errs[0].Error(), "image not found") {
+			return appErrors.ErrImageNotFound
+		}
+		if strings.Contains(errs[0].Error(), "image is used by") || strings.Contains(errs[0].Error(), "unable to delete") {
+			return appErrors.ErrImageUsedByContainers
+		}
+		return fmt.Errorf("failed to remove image: %w", errs[0])
+	}
+
+	if report == nil {
+		return fmt.Errorf("no remove report returned for image: %s", imageID)
+	}
+
+	return nil
 }
 
 // Pull pulls an image on the specified machine.

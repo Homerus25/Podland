@@ -228,3 +228,217 @@ func TestImageHandler_List_AllQueryParam(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 	mockService.AssertExpectations(t)
 }
+
+// TestImageHandler_Delete_Success tests successful image deletion
+func TestImageHandler_Delete_Success(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", false).Return(nil)
+
+	r := chi.NewRouter()
+	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code, "Should return 204 on success")
+	mockService.AssertExpectations(t)
+}
+
+// TestImageHandler_Delete_Force tests deletion with force query parameter
+func TestImageHandler_Delete_Force(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123?force=true", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", true).Return(nil)
+
+	r := chi.NewRouter()
+	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNoContent, w.Code, "Should return 204 on success with force=true")
+	mockService.AssertExpectations(t)
+}
+
+// TestImageHandler_Delete_ConnectionError tests that Delete handles connection errors
+func TestImageHandler_Delete_ConnectionError(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	connErr := errors.New("connection failed")
+	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", false).Return(connErr)
+
+	r := chi.NewRouter()
+	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "Should return 500 on connection error")
+}
+
+// TestImageHandler_Delete_MissingUserID tests that Delete validates user ID
+func TestImageHandler_Delete_MissingUserID(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 when user ID is missing")
+}
+
+// TestImageHandler_Delete_MissingMachineID tests that Delete validates machine ID
+func TestImageHandler_Delete_MissingMachineID(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("DELETE", "/api/machines//images/sha256:abc123", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when machine ID is missing")
+}
+
+// TestImageHandler_Delete_MissingImageID tests that Delete validates image ID
+func TestImageHandler_Delete_MissingImageID(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	r := chi.NewRouter()
+	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+
+	r.ServeHTTP(w, req)
+
+	// Chi returns 404 for route not found when trailing slash doesn't match
+	// This is expected behavior since the route requires the imageId parameter
+	assert.Equal(t, http.StatusNotFound, w.Code, "Should return 404 when image ID is missing (route not matched)")
+}
+
+// TestImageHandler_Delete_ImageNotFound tests that Delete handles image not found errors
+func TestImageHandler_Delete_ImageNotFound(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", false).Return(appErrors.ErrImageNotFound)
+
+	r := chi.NewRouter()
+	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code, "Should return 404 when image not found")
+}
+
+// TestImageHandler_Delete_ImageUsedByContainers tests that Delete handles image in use errors
+func TestImageHandler_Delete_ImageUsedByContainers(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", false).Return(appErrors.ErrImageUsedByContainers)
+
+	r := chi.NewRouter()
+	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when image is used by containers")
+}
+
+// TestImageHandler_Delete_ServiceError tests that Delete handles general service errors
+func TestImageHandler_Delete_ServiceError(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", false).Return(appErrors.ErrInternalError)
+
+	r := chi.NewRouter()
+	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "Should return 500 on general service error")
+}

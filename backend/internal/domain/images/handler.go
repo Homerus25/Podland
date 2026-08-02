@@ -94,5 +94,46 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles deleting an image
 func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Delete")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	imageID := chi.URLParam(r, "imageId")
+	if imageID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_IMAGE_ID", "Image ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	force := false
+	if forceParam := r.URL.Query().Get("force"); forceParam != "" {
+		if parsed, err := strconv.ParseBool(forceParam); err == nil {
+			force = parsed
+		}
+	}
+
+	slog.InfoContext(r.Context(), "delete", slog.String("imageID", imageID), slog.Bool("force", force))
+
+	err := h.service.Delete(r.Context(), userID, machineID, imageID, force)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "delete", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("imageID", imageID))
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
