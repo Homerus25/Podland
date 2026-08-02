@@ -150,6 +150,7 @@ func main() {
 							r.Post("/start", containerHandler.Start)
 							r.Post("/stop", containerHandler.Stop)
 							r.Delete("/", containerHandler.Delete)
+							r.Get("/logs", containerHandler.Logs)
 						})
 					})
 

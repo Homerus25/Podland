@@ -1110,6 +1110,34 @@ For streaming logs:
 
 ---
 
+### GET /api/machines/{id}/containers/{containerId}/logs
+
+Get logs for a container.
+
+**Authentication:** Required
+
+**Query Parameters:**
+- `follow` (boolean, optional): Follow log output (accepted but not implemented in this slice)
+- `since` (string, optional): Show logs since timestamp (ISO8601)
+- `tail` (integer, optional): Number of lines to show from the end
+
+**Response (Success - 200):**
+```json
+{
+  "id": "string",
+  "logs": "string (multiline log content)"
+}
+```
+
+**Response (Error):**
+- 400: `INVALID_SINCE_PARAM`, `INVALID_TAIL_PARAM`, `MISSING_MACHINE_ID`, `MISSING_CONTAINER_ID`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+
+---
+
 ### POST /api/machines/{id}/quadlets/{quadletId}/generate
 
 Generate a quadlet file from an existing resource (container or pod).

@@ -1,6 +1,7 @@
 package containers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -39,6 +40,7 @@ type ContainerServiceInterface interface {
 	Start(ctx context.Context, userID, machineID, containerID string) (*ContainerStartResponse, error)
 	Stop(ctx context.Context, userID, machineID, containerID string) (*ContainerStopResponse, error)
 	Delete(ctx context.Context, userID, machineID, containerID string, force bool) error
+	GetLogs(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64) (*ContainerLogsResponse, error)
 }
 
 // ContainerService provides business logic for containers
@@ -349,4 +351,66 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 	}
 
 	return nil
+}
+
+// GetLogs retrieves logs for a specific container on the specified machine
+func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64) (*ContainerLogsResponse, error) {
+	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
+		return nil, err
+	}
+
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return nil, fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	// Prepare buffers for stdout and stderr
+	var stdoutBuffer, stderrBuffer bytes.Buffer
+
+	// Set up container logs options
+	logsOpts := entities.ContainerLogsOptions{
+		Follow:     false,
+		Since:      since,
+		Tail:       tail,
+		Timestamps: false,
+	}
+
+	// Set writers to capture output
+	logsOpts.StdoutWriter = &stdoutBuffer
+	logsOpts.StderrWriter = &stderrBuffer
+
+	// Fetch logs from container
+	err = containerEngine.ContainerLogs(ctx, []string{containerID}, logsOpts)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
+			return nil, appErrors.ErrContainerNotFound
+		}
+		return nil, fmt.Errorf("failed to get container logs: %w", err)
+	}
+
+	// Combine stdout and stderr logs
+	combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
+	if stderrBuffer.Len() > 0 {
+		stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
+		if combinedLogs != "" {
+			combinedLogs += "\n" + stderrContent
+		} else {
+			combinedLogs = stderrContent
+		}
+	}
+
+	return &ContainerLogsResponse{
+		ID:   containerID,
+		Logs: combinedLogs,
+	}, nil
 }

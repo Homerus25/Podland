@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -60,6 +61,14 @@ func (m *MockContainerService) Stop(ctx context.Context, userID, machineID, cont
 func (m *MockContainerService) Delete(ctx context.Context, userID, machineID, containerID string, force bool) error {
 	args := m.Called(ctx, userID, machineID, containerID, force)
 	return args.Error(0)
+}
+
+func (m *MockContainerService) GetLogs(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64) (*ContainerLogsResponse, error) {
+	args := m.Called(ctx, userID, machineID, containerID, since, tail)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*ContainerLogsResponse), args.Error(1)
 }
 
 // TestContainerHandler_List_Success tests successful container listing through the handler

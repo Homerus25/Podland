@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -387,4 +388,77 @@ func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Logs handles retrieving logs for a container
+func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
+	slog.InfoContext(r.Context(), "Logs")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	containerID := chi.URLParam(r, "containerId")
+	if containerID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_CONTAINER_ID", "Container ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	// Parse query parameters
+	var since time.Time
+	var tail int64
+
+	// Parse 'since' parameter (ISO8601 timestamp)
+	if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
+		parsedSince, err := time.Parse(time.RFC3339, sinceParam)
+		if err != nil {
+			errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_SINCE_PARAM", "Invalid 'since' parameter format, use ISO8601", contextutils.GetRequestID(r.Context()))
+			slog.ErrorContext(r.Context(), "Invalid since parameter", slog.Any("error", err))
+			return
+		}
+		since = parsedSince
+	}
+
+	// Parse 'tail' parameter (number of lines)
+	if tailParam := r.URL.Query().Get("tail"); tailParam != "" {
+		parsedTail, err := strconv.ParseInt(tailParam, 10, 64)
+		if err != nil {
+			errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_TAIL_PARAM", "Invalid 'tail' parameter, must be an integer", contextutils.GetRequestID(r.Context()))
+			slog.ErrorContext(r.Context(), "Invalid tail parameter", slog.Any("error", err))
+			return
+		}
+		tail = parsedTail
+	}
+
+	// Parse 'follow' parameter (accepted but not implemented in this slice)
+	// It's accepted without error as per the acceptance criteria
+	_ = r.URL.Query().Get("follow")
+
+	slog.InfoContext(r.Context(), "logs", slog.String("containerID", containerID), slog.Time("since", since), slog.Int64("tail", tail))
+
+	response, err := h.service.GetLogs(r.Context(), userID, machineID, containerID, since, tail)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "logs", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("containerID", containerID))
+		return
+	}
+
+	slog.InfoContext(r.Context(), "logs", slog.String("containerID", containerID), slog.Time("since", since), slog.Int64("tail", tail), slog.String("responseID", response.ID))
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
 }

@@ -416,6 +416,14 @@ type ContainerStopResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// ContainerLogsResponse represents the response for container logs
+type ContainerLogsResponse struct {
+	// Container ID
+	ID string `json:"id"`
+	// Container logs content (multiline string)
+	Logs string `json:"logs"`
+}
+
 // Helper function to check if container is exited
 func isContainerExited(containerReport *entities.ContainerInspectReport) bool {
 	if containerReport != nil && containerReport.State != nil {
