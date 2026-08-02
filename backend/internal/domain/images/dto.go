@@ -39,6 +39,80 @@ func FromImagePullReport(report *entities.ImagePullReport) ImagePullResponse {
 	return ImagePullResponse{Images: report.Images}
 }
 
+// Streaming progress event types
+const (
+	EventTypeProgress = "progress"
+	EventTypeComplete = "complete"
+	EventTypeError    = "error"
+)
+
+// PullProgressEvent represents a progress event during image pull
+type PullProgressEvent struct {
+	OperationID string    `json:"operationId"`
+	Type        string    `json:"type"`
+	MachineID   string    `json:"machineId"`
+	State       *EventState `json:"state,omitempty"`
+	Error       *EventError `json:"error,omitempty"`
+	Timestamp   string    `json:"timestamp"`
+}
+
+// EventState represents the state of a progress event
+type EventState struct {
+	Current int    `json:"current,omitempty"`
+	Total   int    `json:"total,omitempty"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// EventError represents an error in an event
+type EventError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// NewProgressEvent creates a new progress event
+func NewProgressEvent(operationID, machineID, status, message string, current, total int) PullProgressEvent {
+	return PullProgressEvent{
+		OperationID: operationID,
+		Type:        EventTypeProgress,
+		MachineID:   machineID,
+		State: &EventState{
+			Current: current,
+			Total:   total,
+			Status:  status,
+			Message: message,
+		},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// NewCompleteEvent creates a new complete event
+func NewCompleteEvent(operationID, machineID string) PullProgressEvent {
+	return PullProgressEvent{
+		OperationID: operationID,
+		Type:        EventTypeComplete,
+		MachineID:   machineID,
+		State: &EventState{
+			Status: "completed",
+		},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// NewErrorEvent creates a new error event
+func NewErrorEvent(operationID, machineID string, code, message string) PullProgressEvent {
+	return PullProgressEvent{
+		OperationID: operationID,
+		Type:        EventTypeError,
+		MachineID:   machineID,
+		Error: &EventError{
+			Code:    code,
+			Message: message,
+		},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
 // ImageListResponse represents an image in the API list response.
 // This DTO is used to serialize image information for the API.
 type ImageListResponse struct {

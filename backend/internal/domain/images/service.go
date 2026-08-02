@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
@@ -37,6 +38,7 @@ type ImageServiceInterface interface {
 	List(ctx context.Context, userID, machineID string, opts entities.ImageListOptions) ([]*entities.ImageSummary, error)
 	Delete(ctx context.Context, userID, machineID, imageID string, force bool) error
 	Pull(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error)
+	PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(event PullProgressEvent)) (*entities.ImagePullReport, error)
 }
 
 // ImageService provides business logic for images.
@@ -124,6 +126,11 @@ func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID st
 
 // Pull pulls an image on the specified machine.
 func (s *ImageService) Pull(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {
+	return s.PullWithProgress(ctx, userID, machineID, rawImage, opts, nil)
+}
+
+// PullWithProgress pulls an image on the specified machine and reports progress via the provided callback.
+func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(event PullProgressEvent)) (*entities.ImagePullReport, error) {
 	connCtxInterface, err := s.connManager.GetConnection(ctx, machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
@@ -139,10 +146,42 @@ func (s *ImageService) Pull(ctx context.Context, userID, machineID, rawImage str
 		ClientCtx: connCtx,
 	}
 
+	// Set up progress writer if callback is provided
+	if progressWriter != nil {
+		opts.Writer = &progressAdapter{
+			writer:     progressWriter,
+			machineID:  machineID,
+			operationID: generateOperationID(),
+		}
+	}
+
 	report, err := imageEngine.Pull(ctx, rawImage, opts)
 	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return nil, appErrors.ErrOperationCancelled
+		}
 		return nil, appErrors.ErrImagePullFailed
 	}
 
 	return report, nil
+}
+
+// progressAdapter adapts podman progress output to our progress event format
+type progressAdapter struct {
+	writer       func(event PullProgressEvent)
+	machineID    string
+	operationID  string
+}
+
+// Write implements io.Writer to capture podman progress output
+func (p *progressAdapter) Write(data []byte) (int, error) {
+	// For now, we'll emit basic progress events
+	// The actual podman progress format may vary, so we emit a generic status update
+	p.writer(NewProgressEvent(p.operationID, p.machineID, "pulling", string(data), 0, 0))
+	return len(data), nil
+}
+
+// generateOperationID generates a unique operation ID for tracking pull operations
+func generateOperationID() string {
+	return fmt.Sprintf("pull-%d", time.Now().UnixNano())
 }

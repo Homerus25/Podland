@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -37,6 +38,14 @@ func (m *MockImageService) Delete(ctx context.Context, userID, machineID, imageI
 
 func (m *MockImageService) Pull(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {
 	args := m.Called(ctx, userID, machineID, rawImage, opts)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*entities.ImagePullReport), args.Error(1)
+}
+
+func (m *MockImageService) PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(PullProgressEvent)) (*entities.ImagePullReport, error) {
+	args := m.Called(ctx, userID, machineID, rawImage, opts, progressWriter)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
@@ -540,6 +549,17 @@ func TestImageHandler_Pull_ValidationFailure(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when validation fails")
 }
 
+// splitLines splits a string into lines, filtering out empty lines
+func splitLines(s string) []string {
+	lines := []string{}
+	for _, line := range strings.Split(s, "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
 // TestImageHandler_Pull_ServiceError tests that Pull handles service errors
 func TestImageHandler_Pull_ServiceError(t *testing.T) {
 	mockService := new(MockImageService)
@@ -560,12 +580,155 @@ func TestImageHandler_Pull_ServiceError(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	mockService.On("Pull", mock.Anything, "test-user", "test-machine", "nginx:latest", mock.Anything).Return((*entities.ImagePullReport)(nil), appErrors.ErrImagePullFailed)
+	mockService.On("PullWithProgress", mock.Anything, "test-user", "test-machine", "nginx:latest", mock.Anything, mock.Anything).Return((*entities.ImagePullReport)(nil), appErrors.ErrImagePullFailed)
 
 	r := chi.NewRouter()
 	r.Post("/api/machines/{id}/images/pull", handler.Pull)
 
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code, "Should return 500 on service error")
+	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 for streaming response")
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"), "Should set Content-Type to application/json")
+
+	// Parse the streaming response
+	body := w.Body.String()
+	lines := splitLines(body)
+
+	assert.True(t, len(lines) > 0, "Should have at least one event")
+
+	// Find the error event
+	var errorEvent PullProgressEvent
+	for _, line := range lines {
+		var event PullProgressEvent
+		if err := json.Unmarshal([]byte(line), &event); err == nil && event.Type == EventTypeError {
+			errorEvent = event
+			break
+		}
+	}
+
+	assert.Equal(t, EventTypeError, errorEvent.Type, "Should have error event type")
+	assert.Equal(t, appErrors.ErrImagePullFailed.Code, errorEvent.Error.Code, "Should have correct error code")
+}
+
+// TestImageHandler_Pull_Success_Streaming tests successful pull with streaming events
+func TestImageHandler_Pull_Success_Streaming(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	requestBody := map[string]string{
+		"image": "nginx:latest",
+	}
+	jsonBody, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody))
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+
+	progressEvents := []PullProgressEvent{}
+	report := &entities.ImagePullReport{
+		Images: []string{"sha256:abc123"},
+	}
+
+	mockService.On("PullWithProgress", mock.Anything, "test-user", "test-machine", "nginx:latest", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			progressWriter := args.Get(5).(func(PullProgressEvent))
+			// Simulate some progress events
+			progressEvents = append(progressEvents, NewProgressEvent("op-1", "test-machine", "pulling", "Downloading layers", 1, 5))
+			progressWriter(progressEvents[len(progressEvents)-1])
+			
+			progressEvents = append(progressEvents, NewProgressEvent("op-1", "test-machine", "pulling", "Verifying checksum", 2, 5))
+			progressWriter(progressEvents[len(progressEvents)-1])
+		}).
+		Return(report, nil)
+
+	r := chi.NewRouter()
+	r.Post("/api/machines/{id}/images/pull", handler.Pull)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 for streaming response")
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"), "Should set Content-Type to application/json")
+
+	// Parse the streaming response
+	body := w.Body.String()
+	lines := splitLines(body)
+
+	assert.True(t, len(lines) >= 2, "Should have at least progress and complete events")
+
+	// Find the complete event
+	var completeEvent PullProgressEvent
+	for _, line := range lines {
+		var event PullProgressEvent
+		if err := json.Unmarshal([]byte(line), &event); err == nil && event.Type == EventTypeComplete {
+			completeEvent = event
+			break
+		}
+	}
+
+	assert.Equal(t, EventTypeComplete, completeEvent.Type, "Should have complete event type")
+	assert.Equal(t, "test-machine", completeEvent.MachineID, "Should have correct machine ID")
+}
+
+// TestImageHandler_Pull_ClientCancellation tests that client cancellation is handled
+func TestImageHandler_Pull_ClientCancellation(t *testing.T) {
+	mockService := new(MockImageService)
+	handler := NewImageHandler(mockService, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	requestBody := map[string]string{
+		"image": "nginx:latest",
+	}
+	jsonBody, _ := json.Marshal(requestBody)
+
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody))
+	req = req.WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+
+	// Simulate immediate cancellation
+	go func() {
+		cancel()
+	}()
+
+	mockService.On("PullWithProgress", mock.Anything, "test-user", "test-machine", "nginx:latest", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			// Simulate context cancellation
+			<-args.Get(0).(context.Context).Done()
+		}).
+		Return((*entities.ImagePullReport)(nil), appErrors.ErrOperationCancelled)
+
+	r := chi.NewRouter()
+	r.Post("/api/machines/{id}/images/pull", handler.Pull)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 for streaming response")
+
+	// Parse the streaming response
+	body := w.Body.String()
+	lines := splitLines(body)
+
+	// Should have at least error event
+	if len(lines) > 0 {
+		var errorEvent PullProgressEvent
+		for _, line := range lines {
+			var event PullProgressEvent
+			if err := json.Unmarshal([]byte(line), &event); err == nil && event.Type == EventTypeError {
+				errorEvent = event
+				break
+			}
+		}
+
+		assert.Equal(t, appErrors.ErrOperationCancelled.Code, errorEvent.Error.Code, "Should have OPERATION_CANCELLED error code")
+	}
 }

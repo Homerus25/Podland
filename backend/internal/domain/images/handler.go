@@ -1,11 +1,14 @@
 package images
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/yourorg/podland/backend/internal/contextutils"
@@ -88,7 +91,7 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
-// Pull handles pulling an image
+// Pull handles pulling an image with streaming progress
 func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "Pull")
 
@@ -121,6 +124,35 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 
 	slog.InfoContext(r.Context(), "pull", slog.Any("request", request))
 
+	// Generate a unique operation ID for this pull
+	operationID := uuid.New().String()
+
+	// Create a cancelable context for the pull operation
+	pullCtx, cancelPull := context.WithCancel(r.Context())
+	defer cancelPull()
+
+	// Set headers for streaming NDJSON response
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Transfer-Encoding", "chunked")
+
+	// Ensure we can flush
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		errors.RespondWithHTTPError(w, http.StatusInternalServerError, "STREAMING_NOT_SUPPORTED", "Streaming not supported", contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Streaming not supported")
+		return
+	}
+
+	// Create a channel to detect client disconnect
+	disconnectChan := make(chan struct{})
+	go func() {
+		<-pullCtx.Done()
+		close(disconnectChan)
+	}()
+
+	// Prepare pull options
 	var pullOpts entities.ImagePullOptions
 	if request.Credentials != nil {
 		pullOpts.Username = request.Credentials.Username
@@ -133,24 +165,83 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 		pullOpts.Variant = variant
 	}
 
-	report, err := h.service.Pull(r.Context(), userID, machineID, request.Image, pullOpts)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	// Create a progress channel
+	progressChan := make(chan PullProgressEvent, 10)
+
+	// Start pull operation in a goroutine
+	resultChan := make(chan *entities.ImagePullReport, 1)
+	errorChan := make(chan error, 1)
+
+	go func() {
+		report, err := h.service.PullWithProgress(pullCtx, userID, machineID, request.Image, pullOpts, func(event PullProgressEvent) {
+			// Update operation ID and machine ID in events
+			event.OperationID = operationID
+			event.MachineID = machineID
+			select {
+			case progressChan <- event:
+			case <-pullCtx.Done():
+			}
+		})
+		if err != nil {
+			errorChan <- err
+		} else {
+			resultChan <- report
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "pull", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
-		return
+	}()
+
+	// Stream events to client
+	streamComplete := false
+	for !streamComplete {
+		select {
+		case event := <-progressChan:
+			if err := writeAndFlushEvent(w, flusher, event); err != nil {
+				slog.ErrorContext(r.Context(), "Failed to write event", slog.Any("error", err))
+				cancelPull()
+				streamComplete = true
+			}
+
+		case <-resultChan:
+			// Pull completed successfully
+			completeEvent := NewCompleteEvent(operationID, machineID)
+			writeAndFlushEvent(w, flusher, completeEvent)
+			streamComplete = true
+
+		case err := <-errorChan:
+			// Pull failed
+			var errorEvent PullProgressEvent
+			if pullCtx.Err() == context.Canceled {
+				errorEvent = NewErrorEvent(operationID, machineID, errors.ErrOperationCancelled.Code, errors.ErrOperationCancelled.Message)
+			} else if appErr, ok := err.(*errors.AppError); ok {
+				errorEvent = NewErrorEvent(operationID, machineID, appErr.Code, appErr.Message)
+			} else {
+				errorEvent = NewErrorEvent(operationID, machineID, errors.ErrImagePullFailed.Code, errors.ErrImagePullFailed.Message)
+			}
+			writeAndFlushEvent(w, flusher, errorEvent)
+			streamComplete = true
+
+		case <-disconnectChan:
+			// Client disconnected
+			slog.InfoContext(r.Context(), "Client disconnected, cancelling pull")
+			cancelPull()
+			// Try to send cancellation event (best effort)
+			errorEvent := NewErrorEvent(operationID, machineID, errors.ErrOperationCancelled.Code, errors.ErrOperationCancelled.Message)
+			writeAndFlushEvent(w, flusher, errorEvent)
+			streamComplete = true
+		}
 	}
+}
 
-	result := FromImagePullReport(report)
-
-	slog.InfoContext(r.Context(), "pull", slog.Any("result", result))
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+// writeAndFlushEvent writes a single event as NDJSON and flushes the response
+func writeAndFlushEvent(w http.ResponseWriter, flusher http.Flusher, event PullProgressEvent) error {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(w, string(data)); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 // Delete handles deleting an image
