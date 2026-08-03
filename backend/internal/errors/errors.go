@@ -32,7 +32,7 @@ func NewAppError(code, message string, status int) *AppError {
 var (
 	ErrMachineNotFound       = NewAppError("MACHINE_NOT_FOUND", "Machine not found", http.StatusNotFound)
 	ErrMachineAlreadyExists  = NewAppError("MACHINE_ALREADY_EXISTS", "Machine with this name already exists", http.StatusBadRequest)
-	ErrConnectionFailed      = NewAppError("CONNECTION_FAILED", "Failed to connect to machine", http.StatusBadRequest)
+	ErrConnectionFailed      = NewAppError("CONNECTION_FAILED", "Failed to connect to machine", http.StatusBadGateway)
 	ErrConnectionTestTimeout = NewAppError("CONNECTION_TEST_TIMEOUT", "Connection test timed out", http.StatusBadRequest)
 	ErrInvalidSSHKey         = NewAppError("INVALID_SSH_KEY", "Invalid SSH private key format", http.StatusBadRequest)
 	ErrMissingRequiredFields = NewAppError("VALIDATION_FAILED", "Missing required fields", http.StatusBadRequest)

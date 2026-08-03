@@ -1,7 +1,13 @@
 package quadlets
 
 import (
+	"encoding/json"
+	"log/slog"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/yourorg/podland/backend/internal/contextutils"
+	"github.com/yourorg/podland/backend/internal/errors"
 )
 
 // QuadletHandler handles quadlet requests
@@ -20,7 +26,40 @@ func NewQuadletHandler(service QuadletServiceInterface, machineService any) *Qua
 
 // List handles listing quadlets
 func (h *QuadletHandler) List(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "List quadlets")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	filters := ListFilters{
+		Resource: r.URL.Query().Get("resource"),
+		Name:     r.URL.Query().Get("name"),
+	}
+
+	quadlets, err := h.service.List(r.Context(), userID, machineID, filters)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "list", slog.Any("error", err), slog.String("userID", userID), slog.String("machineID", machineID))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(quadlets)
 }
 
 // Create handles creating a quadlet
