@@ -415,7 +415,7 @@ func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
 
 	// Parse query parameters
 	var since time.Time
-	var tail int64
+	var tail int64 = -1
 
 	// Parse 'since' parameter (ISO8601 timestamp)
 	if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
