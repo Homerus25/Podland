@@ -41,6 +41,7 @@ type ContainerServiceInterface interface {
 	Stop(ctx context.Context, userID, machineID, containerID string) (*ContainerStopResponse, error)
 	Delete(ctx context.Context, userID, machineID, containerID string, force bool) error
 	GetLogs(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64) (*ContainerLogsResponse, error)
+	GetLogsWithStream(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64, logCallback func(event ContainerLogEvent)) error
 }
 
 // ContainerService provides business logic for containers
@@ -413,4 +414,105 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 		ID:   containerID,
 		Logs: combinedLogs,
 	}, nil
+}
+
+// GetLogsWithStream retrieves logs for a specific container with streaming callback
+// When follow=true, this method streams log lines one at a time via the logCallback function
+func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64, logCallback func(event ContainerLogEvent)) error {
+	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
+		return err
+	}
+
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	// Set up container logs options for streaming
+	logsOpts := entities.ContainerLogsOptions{
+		Follow:     true,
+		Since:      since,
+		Tail:       tail,
+		Timestamps: true,
+	}
+
+	// Create callback writers that convert each log line to an event
+	stdoutWriter := &logEventWriter{
+		callback:   logCallback,
+		level:      "INFO",
+		timestamps: true,
+	}
+	stderrWriter := &logEventWriter{
+		callback:   logCallback,
+		level:      "ERROR",
+		timestamps: true,
+	}
+
+	// Set writers to capture streaming output
+	logsOpts.StdoutWriter = stdoutWriter
+	logsOpts.StderrWriter = stderrWriter
+
+	// Fetch logs from container (this will block until follow ends or context is cancelled)
+	err = containerEngine.ContainerLogs(ctx, []string{containerID}, logsOpts)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
+			return appErrors.ErrContainerNotFound
+		}
+		if ctx.Err() == context.Canceled {
+			return appErrors.ErrOperationCancelled
+		}
+		return fmt.Errorf("failed to get container logs: %w", err)
+	}
+
+	return nil
+}
+
+// logEventWriter wraps podman's log writers and converts each line to a ContainerLogEvent
+type logEventWriter struct {
+	callback   func(event ContainerLogEvent)
+	level      string
+	timestamps bool
+}
+
+// Write implements io.Writer to capture log lines from podman
+func (w *logEventWriter) Write(data []byte) (int, error) {
+	line := string(data)
+	line = strings.TrimSuffix(line, "\n")
+	if line == "" {
+		return len(data), nil
+	}
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	message := line
+
+	// Parse podman timestamp if enabled
+	if w.timestamps {
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) == 2 {
+			parsedTime, err := time.Parse("2006-01-02T15:04:05.999999999Z", parts[0])
+			if err == nil {
+				timestamp = parsedTime.UTC().Format(time.RFC3339)
+				message = parts[1]
+			}
+		}
+	}
+
+	// Emit log event via callback
+	w.callback(ContainerLogEvent{
+		Timestamp: timestamp,
+		Level:     w.level,
+		Message:   message,
+	})
+
+	return len(data), nil
 }

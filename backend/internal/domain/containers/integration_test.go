@@ -71,6 +71,11 @@ func (m *MockContainerService) GetLogs(ctx context.Context, userID, machineID, c
 	return args.Get(0).(*ContainerLogsResponse), args.Error(1)
 }
 
+func (m *MockContainerService) GetLogsWithStream(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64, logCallback func(event ContainerLogEvent)) error {
+	args := m.Called(mock.Anything, userID, machineID, containerID, since, tail, logCallback)
+	return args.Error(0)
+}
+
 // TestContainerHandler_List_Success tests successful container listing through the handler
 func TestContainerHandler_List_Success(t *testing.T) {
 	// Setup test context with user ID

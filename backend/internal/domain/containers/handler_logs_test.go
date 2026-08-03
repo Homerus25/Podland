@@ -33,7 +33,7 @@ func TestContainerHandler_Logs_Success(t *testing.T) {
 		ID:   "container-123",
 		Logs: "test log line 1\ntest log line 2",
 	}
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0)).Return(expectedResponse, nil)
+	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(-1)).Return(expectedResponse, nil)
 
 	r := chi.NewRouter()
 	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
@@ -67,7 +67,7 @@ func TestContainerHandler_Logs_WithSinceParameter(t *testing.T) {
 	}
 	
 	parsedSince, _ := time.Parse(time.RFC3339, sinceTime)
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", parsedSince, int64(0)).Return(expectedResponse, nil)
+	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", parsedSince, int64(-1)).Return(expectedResponse, nil)
 
 	r := chi.NewRouter()
 	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
@@ -116,24 +116,28 @@ func TestContainerHandler_Logs_WithFollowParameter(t *testing.T) {
 	ctx = contextutils.SetUserID(ctx, "test-user")
 	ctx = contextutils.SetRequestID(ctx, "test-request-id")
 
-	// follow=true is accepted but not implemented in this slice
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true", nil)
+	// follow=true is now implemented and should use streaming
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true&tail=0", nil)
 	req = req.WithContext(ctx)
 
 	w := httptest.NewRecorder()
 
-	expectedResponse := &ContainerLogsResponse{
-		ID:   "container-123",
-		Logs: "logs without streaming",
-	}
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0)).Return(expectedResponse, nil)
+	// Mock the streaming service call to emit a log event
+	mockService.On("GetLogsWithStream", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0), mock.AnythingOfType("func(containers.ContainerLogEvent)")).
+		Return(nil)
+
+	// Create context with timeout to avoid hanging
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctxWithTimeout)
 
 	r := chi.NewRouter()
 	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
 
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 even with follow=true")
+	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 with follow=true")
+	assert.Contains(t, w.Body.String(), `"OPERATION_CANCELLED"`, "Response should contain cancellation event due to timeout")
 	mockService.AssertExpectations(t)
 }
 
@@ -197,7 +201,7 @@ func TestContainerHandler_Logs_ContainerNotFound(t *testing.T) {
 
 	w := httptest.NewRecorder()
 
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0)).Return(nil, appErrors.ErrContainerNotFound)
+	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(-1)).Return(nil, appErrors.ErrContainerNotFound)
 
 	r := chi.NewRouter()
 	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
@@ -223,7 +227,7 @@ func TestContainerHandler_Logs_ConnectionError(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	connErr := fmt.Errorf("connection failed")
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0)).Return(nil, connErr)
+	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(-1)).Return(nil, connErr)
 
 	r := chi.NewRouter()
 	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
@@ -297,4 +301,143 @@ func TestContainerHandler_Logs_MissingContainerID(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when container ID is missing")
 	assert.Contains(t, w.Body.String(), "MISSING_CONTAINER_ID", "Response should contain MISSING_CONTAINER_ID error code")
+}
+
+// TestContainerHandler_Logs_StreamingHappyPath tests successful streaming logs with follow=true
+func TestContainerHandler_Logs_StreamingHappyPath(t *testing.T) {
+	mockService := new(MockContainerService)
+	handler := NewContainerHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true&tail=0", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	// Mock the streaming service call to emit some log events
+	mockService.On("GetLogsWithStream", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0), mock.AnythingOfType("func(containers.ContainerLogEvent)")).
+		Return(nil)
+
+	r := chi.NewRouter()
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on streaming success")
+	output := w.Body.String()
+	assert.Contains(t, output, `"timestamp":"2024-01-01T00:00:00Z"`, "Response should contain first log timestamp")
+	assert.Contains(t, output, `"level":"INFO"`, "Response should contain log level")
+	assert.Contains(t, output, `"message":"Starting application"`, "Response should contain first log message")
+	assert.Contains(t, output, `"message":"Application started successfully"`, "Response should contain second log message")
+	assert.Contains(t, output, `"content-type":"application/json"`, "Should have NDJSON headers")
+	mockService.AssertExpectations(t)
+	// Create context with timeout to avoid hanging
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	req = req.WithContext(ctxWithTimeout)
+
+}
+
+// TestContainerHandler_Logs_NonStreamingUnchanged tests that follow=false returns non-streaming response unchanged
+func TestContainerHandler_Logs_NonStreamingUnchanged(t *testing.T) {
+	mockService := new(MockContainerService)
+	handler := NewContainerHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=false", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	expectedResponse := &ContainerLogsResponse{
+		ID:   "container-123",
+		Logs: "test log line 1\ntest log line 2",
+	}
+	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0)).Return(expectedResponse, nil)
+
+	r := chi.NewRouter()
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
+	assert.Contains(t, w.Body.String(), `"id":"container-123"`, "Response should contain container ID")
+	assert.Contains(t, w.Body.String(), `"logs":"test log line 1\\ntest log line 2"`, "Response should contain logs as single field")
+	mockService.AssertExpectations(t)
+}
+
+// TestContainerHandler_Logs_StreamingContainerNotFound tests streaming with container not found
+func TestContainerHandler_Logs_StreamingContainerNotFound(t *testing.T) {
+	mockService := new(MockContainerService)
+	handler := NewContainerHandler(mockService, nil)
+
+	ctx := context.Background()
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true&tail=0", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	// Mock the streaming service call to return container not found error
+	mockService.On("GetLogsWithStream", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0), mock.AnythingOfType("func(containers.ContainerLogEvent)")).
+		Return(appErrors.ErrContainerNotFound)
+
+	r := chi.NewRouter()
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 even on error in streaming mode")
+	output := w.Body.String()
+	assert.Contains(t, output, `"level":"ERROR"`, "Response should contain error level")
+	assert.Contains(t, output, `"CONTAINER_NOT_FOUND"`, "Response should contain CONTAINER_NOT_FOUND error")
+	mockService.AssertExpectations(t)
+}
+
+// TestContainerHandler_Logs_StreamingClientDisconnect tests client disconnect during streaming
+func TestContainerHandler_Logs_StreamingClientDisconnect(t *testing.T) {
+	mockService := new(MockContainerService)
+	handler := NewContainerHandler(mockService, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = contextutils.SetUserID(ctx, "test-user")
+	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true&tail=0", nil)
+	req = req.WithContext(ctx)
+
+	w := httptest.NewRecorder()
+
+	// Mock the streaming service call to emit log events
+	mockService.On("GetLogsWithStream", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0), mock.AnythingOfType("func(containers.ContainerLogEvent)")).
+		Run(func(args mock.Arguments) {
+			callback := args.Get(5).(func(event ContainerLogEvent))
+			// Emit one event before client disconnect
+			callback(ContainerLogEvent{
+				Timestamp: "2024-01-01T00:00:00Z",
+				Level:     "INFO",
+				Message:   "Before disconnect",
+			})
+			// Cancel the context to simulate client disconnect
+			cancel()
+		}).Return(nil)
+
+	r := chi.NewRouter()
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 even on client disconnect")
+	output := w.Body.String()
+	assert.Contains(t, output, `"message":"Before disconnect"`, "Response should contain log before disconnect")
+	assert.Contains(t, output, `"OPERATION_CANCELLED"`, "Response should contain OPERATION_CANCELLED on disconnect")
+	mockService.AssertExpectations(t)
 }

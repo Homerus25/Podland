@@ -424,6 +424,16 @@ type ContainerLogsResponse struct {
 	Logs string `json:"logs"`
 }
 
+// ContainerLogEvent represents a single log line in streaming mode
+type ContainerLogEvent struct {
+	// ISO8601 timestamp
+	Timestamp string `json:"timestamp"`
+	// Log level (INFO, WARN, ERROR, etc.)
+	Level string `json:"level"`
+	// Log message content
+	Message string `json:"message"`
+}
+
 // Helper function to check if container is exited
 func isContainerExited(containerReport *entities.ContainerInspectReport) bool {
 	if containerReport != nil && containerReport.State != nil {
