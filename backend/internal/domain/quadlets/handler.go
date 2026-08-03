@@ -6,12 +6,12 @@ import (
 
 // QuadletHandler handles quadlet requests
 type QuadletHandler struct {
-	service        *QuadletService
+	service        QuadletServiceInterface
 	machineService any
 }
 
 // NewQuadletHandler creates a new QuadletHandler
-func NewQuadletHandler(service *QuadletService, machineService any) *QuadletHandler {
+func NewQuadletHandler(service QuadletServiceInterface, machineService any) *QuadletHandler {
 	return &QuadletHandler{
 		service:        service,
 		machineService: machineService,
