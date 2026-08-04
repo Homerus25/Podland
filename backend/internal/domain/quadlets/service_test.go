@@ -25,6 +25,18 @@ func (m *mockConnectionManager) Release(machineID string) {}
 
 var _ machines.ConnectionManagerInterface = (*mockConnectionManager)(nil)
 
+type mockQuadletLister struct {
+	quadlets []*entities.ListQuadlet
+	err      error
+}
+
+func (m *mockQuadletLister) QuadletList(ctx context.Context, opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.quadlets, nil
+}
+
 func TestQuadletService_List(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -160,17 +172,11 @@ func TestQuadletService_List(t *testing.T) {
 				err:     tt.mockError,
 			}
 
-			service := NewQuadletService(mockConnManager)
-
-			if tt.mockError == nil {
-				originalQuadletList := QuadletListFunc
-				QuadletListFunc = func(ctx context.Context, opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
-					return tt.mockQuadlets, nil
-				}
-				defer func() {
-					QuadletListFunc = originalQuadletList
-				}()
+			mockQuadletLister := &mockQuadletLister{
+				quadlets: tt.mockQuadlets,
 			}
+
+			service := NewQuadletService(mockConnManager, mockQuadletLister)
 
 			result, err := service.List(context.Background(), tt.userID, tt.machineID, tt.filters)
 

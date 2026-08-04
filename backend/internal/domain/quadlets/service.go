@@ -12,8 +12,6 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
-var QuadletListFunc func(ctx context.Context, opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error)
-
 // Compile-time check that *QuadletService satisfies QuadletServiceInterface.
 var _ QuadletServiceInterface = (*QuadletService)(nil)
 
@@ -44,22 +42,39 @@ type ListFilters struct {
 	Name     string
 }
 
-// QuadletService provides business logic for quadlets
-type QuadletService struct {
-	connManager machines.ConnectionManagerInterface
+// QuadletLister defines the interface for listing quadlets.
+type QuadletLister interface {
+	QuadletList(ctx context.Context, opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error)
 }
 
-// NewQuadletService creates a new QuadletService with the given connection manager interface.
-func NewQuadletService(connManager machines.ConnectionManagerInterface) *QuadletService {
+// tunnelQuadletLister implements QuadletLister using tunnel.ContainerEngine.
+type tunnelQuadletLister struct{}
+
+func (t *tunnelQuadletLister) QuadletList(ctx context.Context, opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: ctx,
+	}
+	return containerEngine.QuadletList(ctx, opts)
+}
+
+// QuadletService provides business logic for quadlets
+type QuadletService struct {
+	connManager   machines.ConnectionManagerInterface
+	quadletLister QuadletLister
+}
+
+// NewQuadletService creates a new QuadletService with the given connection manager interface and quadlet lister.
+func NewQuadletService(connManager machines.ConnectionManagerInterface, quadletLister QuadletLister) *QuadletService {
 	return &QuadletService{
-		connManager: connManager,
+		connManager:   connManager,
+		quadletLister: quadletLister,
 	}
 }
 
 // NewQuadletServiceWithConcreteDeps creates a new QuadletService with concrete dependencies.
 // This maintains backward compatibility with existing code that uses *connections.ConnectionManager.
 func NewQuadletServiceWithConcreteDeps(connManager *connections.ConnectionManager) *QuadletService {
-	return NewQuadletService(&concreteConnectionManager{connManager: connManager})
+	return NewQuadletService(&concreteConnectionManager{connManager: connManager}, &tunnelQuadletLister{})
 }
 
 // List returns a list of quadlets on the specified machine.
@@ -76,17 +91,7 @@ func (s *QuadletService) List(ctx context.Context, userID, machineID string, fil
 		return nil, fmt.Errorf("invalid connection type: expected context.Context")
 	}
 
-	var quadlets []*entities.ListQuadlet
-	
-	if QuadletListFunc != nil {
-		quadlets, err = QuadletListFunc(connCtx, entities.QuadletListOptions{})
-	} else {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-		quadlets, err = containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
-	}
-	
+	quadlets, err := s.quadletLister.QuadletList(connCtx, entities.QuadletListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quadlets: %w", err)
 	}
