@@ -69,7 +69,7 @@ func NewQuadletServiceWithConcreteDeps(connManager *connections.ConnectionManage
 
 // List returns a list of quadlets on the specified machine.
 func (s *QuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(ctx, machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
@@ -119,7 +119,7 @@ func applyFilters(quadlets []QuadletListResponse, filters ListFilters) []Quadlet
 
 // Get returns a specific quadlet by name on the specified machine.
 func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(ctx, machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
@@ -175,7 +175,7 @@ func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string
 // primitive with ReloadSystemd enabled so systemd picks up the new unit.
 // A name collision in the install report is mapped to ErrQuadletAlreadyExists.
 func (s *QuadletService) Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(ctx, machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
