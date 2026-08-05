@@ -41,6 +41,7 @@ type QuadletServiceInterface interface {
 	List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
 	Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
 	Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
+	Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error
 }
 
 // ListFilters represents the filters for listing quadlets.
@@ -145,13 +146,7 @@ func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string
 		return nil, fmt.Errorf("failed to list quadlets: %w", err)
 	}
 
-	var targetQuadlet *entities.ListQuadlet
-	for _, q := range quadlets {
-		if q.Name == name {
-			targetQuadlet = q
-			break
-		}
-	}
+	targetQuadlet := findQuadletByName(quadlets, name)
 
 	if targetQuadlet == nil {
 		return nil, appErrors.ErrQuadletNotFound
@@ -237,6 +232,85 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 	}, nil
 }
 
+// Delete removes a quadlet by name on the specified machine.
+//
+// The flow honours the contract's `force` and `stop` query parameters
+// (doku/description_api.md:965-984):
+//
+//   - The quadlet is located via a QuadletList pre-check. A missing quadlet
+//     maps to ErrQuadletNotFound (404).
+//   - If the managed resource is currently running and force is not set, the
+//     delete is refused with ErrQuadletResourceRunning (400).
+//   - Otherwise QuadletRemove is called with Force=force and ReloadSystemd=true
+//     so systemd picks up the removal.
+//
+// `stop` (default true) would normally trigger a systemctl stop over SSH before
+// remove when the resource is running; the SSH-exec infra lands in slice
+// 070-10. Until then stop is accepted and the running-resource guarantee above
+// is enforced via the pre-check so a running quadlet is never silently removed
+// without force.
+func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error {
+	_ = stop // honoured once SSH-exec (070-10) is available; see doc comment.
+
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	if err != nil {
+		return appErrors.ErrConnectionFailed
+	}
+
+	defer s.connManager.Release(machineID)
+
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	// Pre-check: locate the quadlet and evaluate the running guard so we map
+	// not-found / running-conflict before attempting the destructive call.
+	list, err := containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list quadlets: %w", err)
+	}
+
+	if err := checkDeletePreconditions(findQuadletByName(list, name), force); err != nil {
+		return err
+	}
+
+	report, err := containerEngine.QuadletRemove(connCtx, []string{name}, entities.QuadletRemoveOptions{
+		Force:         force,
+		ReloadSystemd: true,
+	})
+	if err != nil {
+		if isNotFoundError(err) {
+			return appErrors.ErrQuadletNotFound
+		}
+		if !force && isResourceRunningError(err) {
+			return appErrors.ErrQuadletResourceRunning
+		}
+		return fmt.Errorf("failed to remove quadlet: %w", err)
+	}
+
+	// A removal failure (e.g. a race where the quadlet vanished or its
+	// resource started between the pre-check and the remove) surfaces in the
+	// report's Errors map keyed by quadlet name.
+	if report != nil {
+		if qErr, ok := report.Errors[name]; ok && qErr != nil {
+			if isNotFoundError(qErr) {
+				return appErrors.ErrQuadletNotFound
+			}
+			if !force && isResourceRunningError(qErr) {
+				return appErrors.ErrQuadletResourceRunning
+			}
+			return fmt.Errorf("failed to remove quadlet: %w", qErr)
+		}
+	}
+
+	return nil
+}
+
 // createTarBody builds an in-memory tar containing a single file with the given
 // name and content. Mirrors the framing of podman's createTarFromReader
 // (~/repos/podman/pkg/domain/infra/tunnel/quadlet.go:161) but operates on an
@@ -273,4 +347,60 @@ func isAlreadyExistsError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "already exists")
+}
+
+// findQuadletByName returns the first ListQuadlet in the slice whose Name
+// matches, or nil if none match. Nil entries in the slice are skipped.
+func findQuadletByName(quadlets []*entities.ListQuadlet, name string) *entities.ListQuadlet {
+	for _, q := range quadlets {
+		if q == nil {
+			continue
+		}
+		if q.Name == name {
+			return q
+		}
+	}
+	return nil
+}
+
+// checkDeletePreconditions evaluates the not-found and running-resource guards
+// for a delete operation against the target quadlet's parsed state. It returns
+// ErrQuadletNotFound when the target is absent, ErrQuadletResourceRunning when
+// the managed resource is running and force is not set, or nil when the delete
+// may proceed.
+func checkDeletePreconditions(target *entities.ListQuadlet, force bool) error {
+	if target == nil {
+		return appErrors.ErrQuadletNotFound
+	}
+	if parseStateFromStatus(target.Status) == "running" && !force {
+		return appErrors.ErrQuadletResourceRunning
+	}
+	return nil
+}
+
+// isNotFoundError heuristically detects a "quadlet missing" error from a
+// QuadletRemove report entry or return value. Podman surfaces removal failures
+// of absent quadlets via the Errors map rather than a typed error, so we match
+// on common "no such" / "not found" phrases.
+func isNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not found") || strings.Contains(msg, "no such")
+}
+
+// isResourceRunningError heuristically detects a "resource in use / running"
+// error from a QuadletRemove call. Per the issue's technical note, podman may
+// return a typed "in use" error on Force=false (e.g. when a quadlet-managed
+// container started between our pre-check and the remove). Such an error maps
+// to ErrQuadletResourceRunning (400) rather than a generic 500.
+func isResourceRunningError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "in use") ||
+		strings.Contains(msg, "running") ||
+		strings.Contains(msg, "active")
 }

@@ -3,14 +3,21 @@ package quadlets
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
 	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/errors"
 )
+
+// errGenericDelete is a non-AppError used to exercise the handler's generic
+// error→500 mapping in TestQuadletHandler_Delete. The app errors package has no
+// New constructor, so we synthesize a plain error here.
+var errGenericDelete = fmt.Errorf("boom")
 
 func TestQuadletHandler_List(t *testing.T) {
 	tests := []struct {
@@ -24,9 +31,9 @@ func TestQuadletHandler_List(t *testing.T) {
 		expectedBody   string
 	}{
 		{
-			name:      "successful list",
-			userID:    "user123",
-			machineID: "machine123",
+			name:        "successful list",
+			userID:      "user123",
+			machineID:   "machine123",
 			queryParams: "",
 			mockQuadlets: []QuadletListResponse{
 				{
@@ -76,9 +83,9 @@ func TestQuadletHandler_List(t *testing.T) {
 			expectedBody:   "",
 		},
 		{
-			name:      "filter by resource",
-			userID:    "user123",
-			machineID: "machine123",
+			name:        "filter by resource",
+			userID:      "user123",
+			machineID:   "machine123",
 			queryParams: "?resource=container",
 			mockQuadlets: []QuadletListResponse{
 				{
@@ -94,9 +101,9 @@ func TestQuadletHandler_List(t *testing.T) {
 			expectedBody:   `[{"id":"my-container.container","name":"my-container.container","path":"/etc/containers/systemd/my-container.container","unit":"my-container.service","resource":"container","state":"running"}]` + "\n",
 		},
 		{
-			name:      "filter by name",
-			userID:    "user123",
-			machineID: "machine123",
+			name:        "filter by name",
+			userID:      "user123",
+			machineID:   "machine123",
 			queryParams: "?name=pod",
 			mockQuadlets: []QuadletListResponse{
 				{
@@ -127,10 +134,10 @@ func TestQuadletHandler_List(t *testing.T) {
 			handler := NewQuadletHandler(mockService, nil)
 
 			req := httptest.NewRequest("GET", "/api/machines/"+tt.machineID+"/quadlets"+tt.queryParams, nil)
-			
+
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", tt.machineID)
-			
+
 			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
 			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
 			req = req.WithContext(ctx)
@@ -157,6 +164,7 @@ type MockQuadletService struct {
 	mockList   func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
 	mockGet    func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
 	mockCreate func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
+	mockDelete func(ctx context.Context, userID, machineID, name string, force, stop bool) error
 }
 
 func (m *MockQuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
@@ -178,6 +186,13 @@ func (m *MockQuadletService) Create(ctx context.Context, userID, machineID strin
 		return m.mockCreate(ctx, userID, machineID, req)
 	}
 	return nil, nil
+}
+
+func (m *MockQuadletService) Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error {
+	if m.mockDelete != nil {
+		return m.mockDelete(ctx, userID, machineID, name, force, stop)
+	}
+	return nil
 }
 
 func TestQuadletHandler_Get(t *testing.T) {
@@ -440,6 +455,181 @@ func TestQuadletHandler_Create(t *testing.T) {
 				if actualBody != tt.expectedBody {
 					t.Errorf("handler returned unexpected body: got %q want %q", actualBody, tt.expectedBody)
 				}
+			}
+		})
+	}
+}
+
+func TestQuadletHandler_Delete(t *testing.T) {
+	tests := []struct {
+		name           string
+		userID         string
+		machineID      string
+		quadletID      string
+		queryParams    string
+		mockError      error
+		expectedStatus int
+		expectedForce  bool
+		expectedStop   bool
+	}{
+		{
+			name:           "successful delete returns 204 with empty body",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			queryParams:    "",
+			mockError:      nil,
+			expectedStatus: http.StatusNoContent,
+			expectedForce:  false,
+			expectedStop:   true, // default
+		},
+		{
+			name:           "force=true query honoured",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			queryParams:    "?force=true",
+			mockError:      nil,
+			expectedStatus: http.StatusNoContent,
+			expectedForce:  true,
+			expectedStop:   true,
+		},
+		{
+			name:           "stop=false query honoured",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			queryParams:    "?stop=false",
+			mockError:      nil,
+			expectedStatus: http.StatusNoContent,
+			expectedForce:  false,
+			expectedStop:   false,
+		},
+		{
+			name:           "force=true&stop=false combined",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			queryParams:    "?force=true&stop=false",
+			mockError:      nil,
+			expectedStatus: http.StatusNoContent,
+			expectedForce:  true,
+			expectedStop:   false,
+		},
+		{
+			name:           "running conflict maps to 400",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			queryParams:    "",
+			mockError:      errors.ErrQuadletResourceRunning,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "not found maps to 404",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "missing.container",
+			queryParams:    "",
+			mockError:      errors.ErrQuadletNotFound,
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "connection failed maps to 502",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			queryParams:    "",
+			mockError:      errors.ErrConnectionFailed,
+			expectedStatus: http.StatusBadGateway,
+		},
+		{
+			name:           "missing user ID",
+			userID:         "",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "missing machine ID",
+			userID:         "user123",
+			machineID:      "",
+			quadletID:      "my-container.container",
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing quadlet ID",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "",
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "invalid force boolean is ignored (defaults to false)",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			queryParams:    "?force=notabool",
+			mockError:      nil,
+			expectedStatus: http.StatusNoContent,
+			expectedForce:  false,
+			expectedStop:   true,
+		},
+		{
+			name:           "generic error maps to 500",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			queryParams:    "",
+			mockError:      errGenericDelete,
+			expectedStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedForce, capturedStop bool
+			var capturedName string
+			mockService := &MockQuadletService{
+				mockDelete: func(ctx context.Context, userID, machineID, name string, force, stop bool) error {
+					capturedForce = force
+					capturedStop = stop
+					capturedName = name
+					return tt.mockError
+				},
+			}
+
+			handler := NewQuadletHandler(mockService, nil)
+
+			req := httptest.NewRequest("DELETE", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+tt.queryParams, nil)
+
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.machineID)
+			rctx.URLParams.Add("quadletId", tt.quadletID)
+
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+
+			handler.Delete(rr, req)
+
+			if status := rr.Code; status != tt.expectedStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+			}
+
+			// On success the body must be empty (204 No Content).
+			if tt.expectedStatus == http.StatusNoContent && rr.Body.String() != "" {
+				t.Errorf("handler returned non-empty body on 204: got %q", rr.Body.String())
+			}
+
+			// Verify the service was called with the right parsed params when
+			// the request was valid (had user + machine + quadlet).
+			if tt.expectedStatus == http.StatusNoContent {
+				assert.Equal(t, tt.expectedForce, capturedForce, "force flag should match expected")
+				assert.Equal(t, tt.expectedStop, capturedStop, "stop flag should match expected")
+				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
 			}
 		})
 	}

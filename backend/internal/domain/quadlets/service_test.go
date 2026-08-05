@@ -143,6 +143,54 @@ func TestQuadletService_Create_InvocationShape(t *testing.T) {
 		"Error should not be a connection error — connection should have succeeded")
 }
 
+// --- Service seam: Delete ---
+//
+// As with List/Get/Create, the engine boundary is built inline and cannot be
+// exercised under the mock connection. These tests cover the connection-stage
+// error wrapping and the invocation shape (the call reaches the engine step but
+// fails because there is no real podman backend). The domain logic
+// (not-found / running guard) is covered directly via the pure helpers above.
+
+func TestQuadletService_Delete_ConnectionFailure(t *testing.T) {
+	ctx := context.Background()
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewQuadletService(mockConnManager)
+
+	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", false, true)
+
+	assert.Error(t, err, "Should return error when connection fails")
+	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
+}
+
+func TestQuadletService_Delete_InvocationShape(t *testing.T) {
+	ctx := context.Background()
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	service := NewQuadletService(mockConnManager)
+
+	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", false, true)
+
+	// The mock connection succeeds but the QuadletList pre-check fails because
+	// there is no real podman backend behind the mock connection context.
+	assert.Error(t, err, "Should return error from engine call with mock connection")
+	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
+		"Error should not be a connection error — connection should have succeeded")
+}
+
+func TestQuadletService_Delete_ForceTrue_InvocationShape(t *testing.T) {
+	ctx := context.Background()
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	service := NewQuadletService(mockConnManager)
+
+	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", true, true)
+
+	// Same shape as above — force only affects the post-list guard, which we
+	// never reach under the mock connection.
+	assert.Error(t, err, "Should return error from engine call with mock connection")
+	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
+		"Error should not be a connection error — connection should have succeeded")
+}
+
 // --- Internal seams: pure domain logic ---
 //
 // These functions are the part of the implementation that carries real domain
@@ -250,8 +298,8 @@ func TestDeriveResourceFromPath(t *testing.T) {
 		{"/etc/containers/systemd/img.image", "image"},
 		{"/etc/containers/systemd/dat.volume", "volume"},
 		{"/etc/containers/systemd/net.network", "network"},
-		{"/etc/containers/systemd/k8s.kube", "container"}, // kube -> container
-		{"/etc/containers/systemd/bld.build", "image"},    // build -> image
+		{"/etc/containers/systemd/k8s.kube", "container"},        // kube -> container
+		{"/etc/containers/systemd/bld.build", "image"},           // build -> image
 		{"/etc/containers/systemd/UPPER.CONTAINER", "container"}, // case-insensitive
 		{"/etc/containers/systemd/weird.txt", "unknown"},
 		{"", "unknown"},
@@ -297,10 +345,10 @@ func TestResourceToExtension(t *testing.T) {
 		{"network", ".network"},
 		{"CONTAINER", ".container"}, // case-insensitive
 		{"Pod", ".pod"},
-		{"", ".container"},          // empty defaults to container
-		{"kube", ".container"},      // not in contract enum → default
-		{"build", ".container"},     // not in contract enum → default
-		{"bogus", ".container"},     // unknown → default
+		{"", ".container"},      // empty defaults to container
+		{"kube", ".container"},  // not in contract enum → default
+		{"build", ".container"}, // not in contract enum → default
+		{"bogus", ".container"}, // unknown → default
 	}
 	for _, tt := range tests {
 		t.Run(tt.resource, func(t *testing.T) {
@@ -391,4 +439,115 @@ func TestQuadletCreateResponse_Shape(t *testing.T) {
 // Compile-time sanity that ErrQuadletAlreadyExists is exposed for handler mapping.
 func TestQuadletAlreadyExists_ErrorIsExposed(t *testing.T) {
 	assert.Equal(t, "QUADLET_ALREADY_EXISTS", appErrors.ErrQuadletAlreadyExists.Code)
+}
+
+// --- Pure helpers used by Delete ---
+//
+// The delete path's domain logic (not-found detection from a list, the
+// running-resource guard, and post-remove error mapping) is extracted into pure
+// functions so it can be unit-tested directly — the engine boundary itself
+// cannot be exercised under the mock connection (see the seam note at the top
+// of the List tests).
+
+func TestFindQuadletByName(t *testing.T) {
+	list := []*entities.ListQuadlet{
+		{Name: "alpha.container", Status: "running"},
+		{Name: "bravo.pod", Status: "stopped"},
+	}
+
+	t.Run("found", func(t *testing.T) {
+		got := findQuadletByName(list, "bravo.pod")
+		assert.NotNil(t, got)
+		assert.Equal(t, "bravo.pod", got.Name)
+	})
+
+	t.Run("not found returns nil", func(t *testing.T) {
+		assert.Nil(t, findQuadletByName(list, "missing.container"))
+	})
+
+	t.Run("empty list returns nil", func(t *testing.T) {
+		assert.Nil(t, findQuadletByName(nil, "alpha.container"))
+	})
+
+	t.Run("nil entries handled", func(t *testing.T) {
+		list := []*entities.ListQuadlet{nil, {Name: "x.container"}}
+		got := findQuadletByName(list, "x.container")
+		assert.NotNil(t, got)
+		assert.Equal(t, "x.container", got.Name)
+	})
+}
+
+func TestCheckDeletePreconditions(t *testing.T) {
+	t.Run("nil target is not found", func(t *testing.T) {
+		err := checkDeletePreconditions(nil, false)
+		assert.Equal(t, appErrors.ErrQuadletNotFound, err)
+	})
+
+	t.Run("stopped quadlet may be deleted without force", func(t *testing.T) {
+		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "stopped"}, false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("unknown state may be deleted without force", func(t *testing.T) {
+		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: ""}, false)
+		assert.NoError(t, err)
+	})
+
+	t.Run("running quadlet without force is rejected", func(t *testing.T) {
+		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "running (1s ago)"}, false)
+		assert.Equal(t, appErrors.ErrQuadletResourceRunning, err)
+	})
+
+	t.Run("running quadlet with force is allowed", func(t *testing.T) {
+		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "running (1s ago)"}, true)
+		assert.NoError(t, err)
+	})
+
+	t.Run("failed/error state may be deleted without force", func(t *testing.T) {
+		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "failed"}, false)
+		assert.NoError(t, err)
+	})
+}
+
+func TestIsNotFoundError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"plain error", errors.New("something broke"), false},
+		{"no such quadlet", errors.New("no such quadlet: foo.container"), true},
+		{"quadlet not found", errors.New("quadlet foo not found"), true},
+		{"no such file", errors.New("no such file or directory"), true},
+		{"case-insensitive not found", errors.New("Quadlet NOT FOUND"), true},
+		{"unrelated running error", errors.New("resource is running"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isNotFoundError(tt.err))
+		})
+	}
+}
+
+func TestIsResourceRunningError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"plain error", errors.New("something broke"), false},
+		{"in use", errors.New("resource is in use"), true},
+		{"is running", errors.New("container is running"), true},
+		{"still running", errors.New("unit still running"), true},
+		{"active", errors.New("resource is active"), true},
+		{"case-insensitive running", errors.New("RESOURCE IS RUNNING"), true},
+		{"not found is not running", errors.New("no such quadlet"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isResourceRunningError(tt.err))
+		})
+	}
 }

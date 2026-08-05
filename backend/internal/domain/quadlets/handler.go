@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -156,7 +157,69 @@ func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles deleting a quadlet
 func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Delete quadlet")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	quadletID := chi.URLParam(r, "quadletId")
+	if quadletID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	// force defaults to false; an unparseable value is ignored (stays false),
+	// matching the images handler convention.
+	force := false
+	if forceParam := r.URL.Query().Get("force"); forceParam != "" {
+		if parsed, err := strconv.ParseBool(forceParam); err == nil {
+			force = parsed
+		}
+	}
+
+	// stop defaults to true per the contract (doku/description_api.md:972).
+	// Only an explicit "false" (or other strconv-false value) turns it off;
+	// an unparseable value leaves the default in place.
+	stop := true
+	if stopParam := r.URL.Query().Get("stop"); stopParam != "" {
+		if parsed, err := strconv.ParseBool(stopParam); err == nil {
+			stop = parsed
+		}
+	}
+
+	slog.InfoContext(r.Context(), "delete",
+		slog.String("quadletId", quadletID),
+		slog.Bool("force", force),
+		slog.Bool("stop", stop),
+	)
+
+	err := h.service.Delete(r.Context(), userID, machineID, quadletID, force, stop)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "delete",
+			slog.Any("error", err),
+			slog.String("userID", userID),
+			slog.String("machineID", machineID),
+			slog.String("quadletId", quadletID),
+		)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Start handles starting a quadlet
