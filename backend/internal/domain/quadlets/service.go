@@ -43,56 +43,22 @@ type ListFilters struct {
 	Name     string
 }
 
-// QuadletLister defines the interface for listing quadlets.
-type QuadletLister interface {
-	QuadletList(ctx context.Context, opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error)
-}
-
-// QuadletPrinter defines the interface for getting quadlet content.
-type QuadletPrinter interface {
-	QuadletPrint(ctx context.Context, name string) (string, error)
-}
-
-// tunnelQuadletLister implements QuadletLister using tunnel.ContainerEngine.
-type tunnelQuadletLister struct{}
-
-func (t *tunnelQuadletLister) QuadletList(ctx context.Context, opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: ctx,
-	}
-	return containerEngine.QuadletList(ctx, opts)
-}
-
-// tunnelQuadletPrinter implements QuadletPrinter using tunnel.ContainerEngine.
-type tunnelQuadletPrinter struct{}
-
-func (t *tunnelQuadletPrinter) QuadletPrint(ctx context.Context, name string) (string, error) {
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: ctx,
-	}
-	return containerEngine.QuadletPrint(ctx, name)
-}
-
 // QuadletService provides business logic for quadlets
 type QuadletService struct {
-	connManager    machines.ConnectionManagerInterface
-	quadletLister  QuadletLister
-	quadletPrinter QuadletPrinter
+	connManager machines.ConnectionManagerInterface
 }
 
-// NewQuadletService creates a new QuadletService with the given connection manager interface and quadlet lister.
-func NewQuadletService(connManager machines.ConnectionManagerInterface, quadletLister QuadletLister, quadletPrinter QuadletPrinter) *QuadletService {
+// NewQuadletService creates a new QuadletService with the given connection manager interface.
+func NewQuadletService(connManager machines.ConnectionManagerInterface) *QuadletService {
 	return &QuadletService{
-		connManager:    connManager,
-		quadletLister:  quadletLister,
-		quadletPrinter: quadletPrinter,
+		connManager: connManager,
 	}
 }
 
 // NewQuadletServiceWithConcreteDeps creates a new QuadletService with concrete dependencies.
 // This maintains backward compatibility with existing code that uses *connections.ConnectionManager.
 func NewQuadletServiceWithConcreteDeps(connManager *connections.ConnectionManager) *QuadletService {
-	return NewQuadletService(&concreteConnectionManager{connManager: connManager}, &tunnelQuadletLister{}, &tunnelQuadletPrinter{})
+	return NewQuadletService(&concreteConnectionManager{connManager: connManager})
 }
 
 // List returns a list of quadlets on the specified machine.
@@ -109,7 +75,11 @@ func (s *QuadletService) List(ctx context.Context, userID, machineID string, fil
 		return nil, fmt.Errorf("invalid connection type: expected context.Context")
 	}
 
-	quadlets, err := s.quadletLister.QuadletList(connCtx, entities.QuadletListOptions{})
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	quadlets, err := containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quadlets: %w", err)
 	}
@@ -155,12 +125,16 @@ func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string
 		return nil, fmt.Errorf("invalid connection type: expected context.Context")
 	}
 
-	content, err := s.quadletPrinter.QuadletPrint(connCtx, name)
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	content, err := containerEngine.QuadletPrint(connCtx, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quadlet content: %w", err)
 	}
 
-	quadlets, err := s.quadletLister.QuadletList(connCtx, entities.QuadletListOptions{})
+	quadlets, err := containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quadlets: %w", err)
 	}
