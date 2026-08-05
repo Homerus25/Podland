@@ -1,6 +1,7 @@
 package quadlets
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -153,8 +154,9 @@ func TestQuadletHandler_List(t *testing.T) {
 }
 
 type MockQuadletService struct {
-	mockList func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
-	mockGet  func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
+	mockList   func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
+	mockGet    func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
+	mockCreate func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
 }
 
 func (m *MockQuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
@@ -167,6 +169,13 @@ func (m *MockQuadletService) List(ctx context.Context, userID, machineID string,
 func (m *MockQuadletService) Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error) {
 	if m.mockGet != nil {
 		return m.mockGet(ctx, userID, machineID, name)
+	}
+	return nil, nil
+}
+
+func (m *MockQuadletService) Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
+	if m.mockCreate != nil {
+		return m.mockCreate(ctx, userID, machineID, req)
 	}
 	return nil, nil
 }
@@ -294,6 +303,133 @@ func TestQuadletHandler_Get(t *testing.T) {
 			rr := httptest.NewRecorder()
 
 			handler.Get(rr, req)
+
+			if status := rr.Code; status != tt.expectedStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+			}
+
+			if tt.expectedBody != "" {
+				actualBody := rr.Body.String()
+				if actualBody != tt.expectedBody {
+					t.Errorf("handler returned unexpected body: got %q want %q", actualBody, tt.expectedBody)
+				}
+			}
+		})
+	}
+}
+
+func TestQuadletHandler_Create(t *testing.T) {
+	tests := []struct {
+		name           string
+		userID         string
+		machineID      string
+		requestBody    string
+		mockResponse   *QuadletCreateResponse
+		mockError      error
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:        "successful create",
+			userID:      "user123",
+			machineID:   "machine123",
+			requestBody: `{"name":"my-container","resource":"container","content":"[Container]\nImage=nginx:latest\n"}`,
+			mockResponse: &QuadletCreateResponse{
+				ID:       "my-container",
+				Name:     "my-container",
+				Path:     "/etc/containers/systemd/my-container.container",
+				Resource: "container",
+				State:    "unknown",
+				Content:  "[Container]\nImage=nginx:latest\n",
+			},
+			expectedStatus: http.StatusCreated,
+			expectedBody:   `{"id":"my-container","name":"my-container","path":"/etc/containers/systemd/my-container.container","resource":"container","state":"unknown","content":"[Container]\nImage=nginx:latest\n"}` + "\n",
+		},
+		{
+			name:           "missing user ID",
+			userID:         "",
+			machineID:      "machine123",
+			requestBody:    `{"name":"x","resource":"container","content":"y"}`,
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "missing machine ID",
+			userID:         "user123",
+			machineID:      "",
+			requestBody:    `{"name":"x","resource":"container","content":"y"}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "malformed JSON body",
+			userID:         "user123",
+			machineID:      "machine123",
+			requestBody:    `{not valid json`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "validation failure: missing name",
+			userID:         "user123",
+			machineID:      "machine123",
+			requestBody:    `{"resource":"container","content":"y"}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "validation failure: invalid resource",
+			userID:         "user123",
+			machineID:      "machine123",
+			requestBody:    `{"name":"x","resource":"kube","content":"y"}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "validation failure: missing content",
+			userID:         "user123",
+			machineID:      "machine123",
+			requestBody:    `{"name":"x","resource":"container"}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "conflict (already exists)",
+			userID:         "user123",
+			machineID:      "machine123",
+			requestBody:    `{"name":"dup","resource":"container","content":"y"}`,
+			mockError:      errors.ErrQuadletAlreadyExists,
+			expectedStatus: http.StatusConflict,
+		},
+		{
+			name:           "connection failed",
+			userID:         "user123",
+			machineID:      "machine123",
+			requestBody:    `{"name":"x","resource":"container","content":"y"}`,
+			mockError:      errors.ErrConnectionFailed,
+			expectedStatus: http.StatusBadGateway,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockService := &MockQuadletService{
+				mockCreate: func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
+					if tt.mockError != nil {
+						return nil, tt.mockError
+					}
+					return tt.mockResponse, nil
+				},
+			}
+
+			handler := NewQuadletHandler(mockService, nil)
+
+			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets", bytes.NewBufferString(tt.requestBody))
+
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.machineID)
+
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+
+			handler.Create(rr, req)
 
 			if status := rr.Code; status != tt.expectedStatus {
 				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)

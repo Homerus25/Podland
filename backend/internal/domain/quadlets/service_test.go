@@ -1,8 +1,11 @@
 package quadlets
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -98,6 +101,44 @@ func TestQuadletService_Get_InvocationShape(t *testing.T) {
 	// no real podman backend behind the mock connection context.
 	assert.Error(t, err, "Should return error from engine call with mock connection")
 	assert.Nil(t, result, "Should return nil result when engine call fails")
+	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
+		"Error should not be a connection error — connection should have succeeded")
+}
+
+// --- Service seam: Create ---
+
+func TestQuadletService_Create_ConnectionFailure(t *testing.T) {
+	ctx := context.Background()
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewQuadletService(mockConnManager)
+
+	result, err := service.Create(ctx, "test-user", "test-machine", QuadletCreateRequest{
+		Name:     "my-container",
+		Resource: "container",
+		Content:  "[Container]\nImage=nginx:latest\n",
+	})
+
+	assert.Error(t, err, "Should return error when connection fails")
+	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
+	assert.Nil(t, result, "Should return nil result when connection fails")
+}
+
+func TestQuadletService_Create_InvocationShape(t *testing.T) {
+	ctx := context.Background()
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	service := NewQuadletService(mockConnManager)
+
+	result, err := service.Create(ctx, "test-user", "test-machine", QuadletCreateRequest{
+		Name:     "my-container",
+		Resource: "container",
+		Content:  "[Container]\nImage=nginx:latest\n",
+	})
+
+	// The mock connection succeeds but the bindings-level Install call fails
+	// because there is no real podman backend behind the mock connection context.
+	assert.Error(t, err, "Should return error from install call with mock connection")
+	assert.Nil(t, result, "Should return nil result when install call fails")
 	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
 		"Error should not be a connection error — connection should have succeeded")
 }
@@ -240,4 +281,114 @@ func TestParseStateFromStatus(t *testing.T) {
 			assert.Equal(t, tt.want, parseStateFromStatus(tt.status))
 		})
 	}
+}
+
+// --- Pure helpers used by Create ---
+
+func TestResourceToExtension(t *testing.T) {
+	tests := []struct {
+		resource string
+		want     string
+	}{
+		{"container", ".container"},
+		{"pod", ".pod"},
+		{"image", ".image"},
+		{"volume", ".volume"},
+		{"network", ".network"},
+		{"CONTAINER", ".container"}, // case-insensitive
+		{"Pod", ".pod"},
+		{"", ".container"},          // empty defaults to container
+		{"kube", ".container"},      // not in contract enum → default
+		{"build", ".container"},     // not in contract enum → default
+		{"bogus", ".container"},     // unknown → default
+	}
+	for _, tt := range tests {
+		t.Run(tt.resource, func(t *testing.T) {
+			assert.Equal(t, tt.want, resourceToExtension(tt.resource))
+		})
+	}
+}
+
+func TestCreateTarBody(t *testing.T) {
+	t.Run("produces a valid single-file tar with the requested name and content", func(t *testing.T) {
+		fileName := "my-container.container"
+		content := []byte("[Container]\nImage=nginx:latest\n")
+
+		reader, err := createTarBody(fileName, content)
+		assert.NoError(t, err, "createTarBody should not error for valid input")
+
+		got, err := io.ReadAll(reader)
+		assert.NoError(t, err)
+
+		tr := tar.NewReader(bytes.NewReader(got))
+
+		hdr, err := tr.Next()
+		assert.NoError(t, err, "Should yield at least one header")
+		assert.Equal(t, fileName, hdr.Name, "Tar entry name should match the requested filename")
+		assert.Equal(t, int64(len(content)), hdr.Size, "Header size should match content length")
+
+		body, err := io.ReadAll(tr)
+		assert.NoError(t, err)
+		assert.Equal(t, content, body, "Tar entry body should equal the input content")
+
+		// No further entries beyond EOF.
+		_, err = tr.Next()
+		assert.ErrorIs(t, err, io.EOF, "Tar should contain exactly one entry")
+	})
+
+	t.Run("empty content still produces a valid (zero-length) tar entry", func(t *testing.T) {
+		reader, err := createTarBody("empty.container", []byte{})
+		assert.NoError(t, err)
+
+		got, err := io.ReadAll(reader)
+		assert.NoError(t, err)
+
+		tr := tar.NewReader(bytes.NewReader(got))
+		hdr, err := tr.Next()
+		assert.NoError(t, err)
+		assert.Equal(t, "empty.container", hdr.Name)
+		assert.Equal(t, int64(0), hdr.Size)
+		_, err = tr.Next()
+		assert.ErrorIs(t, err, io.EOF)
+	})
+}
+
+func TestIsAlreadyExistsError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"plain error", errors.New("something broke"), false},
+		{"already exists phrase", errors.New("quadlet my-container already exists"), true},
+		{"bare exists phrase is not enough", errors.New("file exists"), false},
+		{"case-insensitive", errors.New("Quadlet ALREADY EXISTS"), true},
+		{"unrelated message", errors.New("network unreachable"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isAlreadyExistsError(tt.err))
+		})
+	}
+}
+
+// Compile-time check that *QuadletCreateResponse has the fields the issue requires.
+func TestQuadletCreateResponse_Shape(t *testing.T) {
+	r := QuadletCreateResponse{
+		ID:       "my-container",
+		Name:     "my-container",
+		Path:     "/etc/containers/systemd/my-container.container",
+		Unit:     "",
+		Resource: "container",
+		State:    "unknown",
+		Content:  "[Container]\nImage=nginx:latest\n",
+	}
+	assert.Equal(t, "my-container", r.ID)
+	assert.Equal(t, "unknown", r.State)
+}
+
+// Compile-time sanity that ErrQuadletAlreadyExists is exposed for handler mapping.
+func TestQuadletAlreadyExists_ErrorIsExposed(t *testing.T) {
+	assert.Equal(t, "QUADLET_ALREADY_EXISTS", appErrors.ErrQuadletAlreadyExists.Code)
 }

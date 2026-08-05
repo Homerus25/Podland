@@ -42,6 +42,37 @@ type QuadletGetResponse struct {
 	Content string `json:"content"`
 }
 
+// QuadletCreateRequest represents a request to create a new quadlet.
+type QuadletCreateRequest struct {
+	// Name of the quadlet (without extension). Required.
+	Name string `json:"name" validate:"required,min=1"`
+	// Resource type. Must be one of: container, pod, image, volume, network. Required.
+	Resource string `json:"resource" validate:"required,oneof=container pod image volume network"`
+	// Raw quadlet file content. Required.
+	Content string `json:"content" validate:"required,min=1"`
+}
+
+// QuadletCreateResponse represents a quadlet in the API create response.
+// Per the epic's no-persistence ruling, generation/createdAt/updatedAt are
+// omitted (documented deviation from the contract at doku/description_api.md:914-925).
+type QuadletCreateResponse struct {
+	// Unique identifier for the quadlet (the quadlet name)
+	ID string `json:"id"`
+	// Name of the quadlet (without extension)
+	Name string `json:"name"`
+	// Path to the installed quadlet file (populated when podman reports it)
+	Path string `json:"path,omitempty"`
+	// Systemd unit name (often empty immediately after install before systemd reload)
+	Unit string `json:"unit,omitempty"`
+	// Resource type (container, pod, image, volume, network)
+	Resource string `json:"resource"`
+	// State of the quadlet. Newly installed quadlets are reported as "unknown"
+	// until systemd reload completes and reports a status.
+	State string `json:"state"`
+	// The raw quadlet file content that was installed (echoed back from the request)
+	Content string `json:"content"`
+}
+
 // FromListQuadlet converts a podman entities.ListQuadlet to QuadletListResponse.
 func FromListQuadlet(quadlet *entities.ListQuadlet) QuadletListResponse {
 	if quadlet == nil {
@@ -111,5 +142,17 @@ func parseStateFromStatus(status string) string {
 		return "error"
 	default:
 		return "unknown"
+	}
+}
+
+// resourceToExtension maps a resource type to its quadlet filename extension.
+// This is the inverse of deriveResourceFromPath for the contract's resource enum
+// (container, pod, image, volume, network). Unknown resources default to ".container".
+func resourceToExtension(resource string) string {
+	switch strings.ToLower(resource) {
+	case "container", "pod", "image", "volume", "network":
+		return "." + strings.ToLower(resource)
+	default:
+		return ".container"
 	}
 }
