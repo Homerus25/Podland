@@ -24,6 +24,24 @@ type QuadletListResponse struct {
 	Raw string `json:"raw,omitempty"`
 }
 
+// QuadletGetResponse represents a quadlet in the API get response.
+type QuadletGetResponse struct {
+	// Unique identifier for the quadlet (the quadlet name)
+	ID string `json:"id"`
+	// Name of the quadlet
+	Name string `json:"name"`
+	// Path to the quadlet file
+	Path string `json:"path"`
+	// Systemd unit name
+	Unit string `json:"unit"`
+	// Resource type (container, pod, image, volume, network)
+	Resource string `json:"resource"`
+	// State of the quadlet (unknown, stopped, running, error)
+	State string `json:"state"`
+	// Raw quadlet file content
+	Content string `json:"content"`
+}
+
 // FromListQuadlet converts a podman entities.ListQuadlet to QuadletListResponse.
 func FromListQuadlet(quadlet *entities.ListQuadlet) QuadletListResponse {
 	if quadlet == nil {

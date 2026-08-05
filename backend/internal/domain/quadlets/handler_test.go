@@ -154,6 +154,7 @@ func TestQuadletHandler_List(t *testing.T) {
 
 type MockQuadletService struct {
 	mockList func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
+	mockGet  func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
 }
 
 func (m *MockQuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
@@ -161,4 +162,149 @@ func (m *MockQuadletService) List(ctx context.Context, userID, machineID string,
 		return m.mockList(ctx, userID, machineID, filters)
 	}
 	return nil, nil
+}
+
+func (m *MockQuadletService) Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error) {
+	if m.mockGet != nil {
+		return m.mockGet(ctx, userID, machineID, name)
+	}
+	return nil, nil
+}
+
+func TestQuadletHandler_Get(t *testing.T) {
+	tests := []struct {
+		name           string
+		userID         string
+		machineID      string
+		quadletID      string
+		mockQuadlet    *QuadletGetResponse
+		mockError      error
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:      "successful get",
+			userID:    "user123",
+			machineID: "machine123",
+			quadletID: "my-container.container",
+			mockQuadlet: &QuadletGetResponse{
+				ID:       "my-container.container",
+				Name:     "my-container.container",
+				Path:     "/etc/containers/systemd/my-container.container",
+				Unit:     "my-container.service",
+				Resource: "container",
+				State:    "running",
+				Content:  "[Unit]\nDescription=My Container\n\n[Container]\nImage=nginx:latest\n",
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody:   `{"id":"my-container.container","name":"my-container.container","path":"/etc/containers/systemd/my-container.container","unit":"my-container.service","resource":"container","state":"running","content":"[Unit]\nDescription=My Container\n\n[Container]\nImage=nginx:latest\n"}` + "\n",
+		},
+		{
+			name:           "quadlet not found",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "nonexistent.container",
+			mockQuadlet:    nil,
+			mockError:      errors.ErrQuadletNotFound,
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   "",
+		},
+		{
+			name:           "missing user ID",
+			userID:         "",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockQuadlet:    nil,
+			mockError:      nil,
+			expectedStatus: http.StatusUnauthorized,
+			expectedBody:   "",
+		},
+		{
+			name:           "missing machine ID",
+			userID:         "user123",
+			machineID:      "",
+			quadletID:      "my-container.container",
+			mockQuadlet:    nil,
+			mockError:      nil,
+			expectedStatus: http.StatusBadRequest,
+			expectedBody:   "",
+		},
+		{
+			name:           "missing quadlet ID",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "",
+			mockQuadlet:    nil,
+			mockError:      nil,
+			expectedStatus: http.StatusBadRequest,
+			expectedBody:   "",
+		},
+		{
+			name:           "connection failed",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockQuadlet:    nil,
+			mockError:      errors.ErrConnectionFailed,
+			expectedStatus: http.StatusBadGateway,
+			expectedBody:   "",
+		},
+		{
+			name:      "pod resource type",
+			userID:    "user123",
+			machineID: "machine123",
+			quadletID: "my-pod.pod",
+			mockQuadlet: &QuadletGetResponse{
+				ID:       "my-pod.pod",
+				Name:     "my-pod.pod",
+				Path:     "/etc/containers/systemd/my-pod.pod",
+				Unit:     "my-pod.service",
+				Resource: "pod",
+				State:    "stopped",
+				Content:  "[Unit]\nDescription=My Pod\n\n[Pod]\nPodmanArgs=--name=my-pod\n",
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody:   `{"id":"my-pod.pod","name":"my-pod.pod","path":"/etc/containers/systemd/my-pod.pod","unit":"my-pod.service","resource":"pod","state":"stopped","content":"[Unit]\nDescription=My Pod\n\n[Pod]\nPodmanArgs=--name=my-pod\n"}` + "\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockService := &MockQuadletService{
+				mockGet: func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error) {
+					if tt.mockError != nil {
+						return nil, tt.mockError
+					}
+					return tt.mockQuadlet, nil
+				},
+			}
+
+			handler := NewQuadletHandler(mockService, nil)
+
+			req := httptest.NewRequest("GET", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID, nil)
+
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.machineID)
+			rctx.URLParams.Add("quadletId", tt.quadletID)
+
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+
+			handler.Get(rr, req)
+
+			if status := rr.Code; status != tt.expectedStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+			}
+
+			if tt.expectedBody != "" {
+				actualBody := rr.Body.String()
+				if actualBody != tt.expectedBody {
+					t.Errorf("handler returned unexpected body: got %q want %q", actualBody, tt.expectedBody)
+				}
+			}
+		})
+	}
 }

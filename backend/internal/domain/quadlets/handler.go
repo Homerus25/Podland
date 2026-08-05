@@ -69,7 +69,41 @@ func (h *QuadletHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Get handles getting a quadlet by ID
 func (h *QuadletHandler) Get(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Get quadlet")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	quadletID := chi.URLParam(r, "quadletId")
+	if quadletID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	quadlet, err := h.service.Get(r.Context(), userID, machineID, quadletID)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "get", slog.Any("error", err), slog.String("userID", userID), slog.String("machineID", machineID), slog.String("quadletId", quadletID))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(quadlet)
 }
 
 // Update handles updating a quadlet
