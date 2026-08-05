@@ -14,10 +14,11 @@ import (
 	"github.com/yourorg/podland/backend/internal/errors"
 )
 
-// errGenericDelete is a non-AppError used to exercise the handler's generic
-// error→500 mapping in TestQuadletHandler_Delete. The app errors package has no
-// New constructor, so we synthesize a plain error here.
-var errGenericDelete = fmt.Errorf("boom")
+// errGeneric is a non-AppError used to exercise the handler's generic
+// error→500 mapping in TestQuadletHandler_Delete and TestQuadletHandler_Update.
+// The app errors package has no New constructor, so we synthesize a plain error
+// here.
+var errGeneric = fmt.Errorf("boom")
 
 func TestQuadletHandler_List(t *testing.T) {
 	tests := []struct {
@@ -164,6 +165,7 @@ type MockQuadletService struct {
 	mockList   func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
 	mockGet    func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
 	mockCreate func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
+	mockUpdate func(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
 	mockDelete func(ctx context.Context, userID, machineID, name string, force, stop bool) error
 }
 
@@ -184,6 +186,13 @@ func (m *MockQuadletService) Get(ctx context.Context, userID, machineID, name st
 func (m *MockQuadletService) Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
 	if m.mockCreate != nil {
 		return m.mockCreate(ctx, userID, machineID, req)
+	}
+	return nil, nil
+}
+
+func (m *MockQuadletService) Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
+	if m.mockUpdate != nil {
+		return m.mockUpdate(ctx, userID, machineID, name, req)
 	}
 	return nil, nil
 }
@@ -460,6 +469,165 @@ func TestQuadletHandler_Create(t *testing.T) {
 	}
 }
 
+func TestQuadletHandler_Update(t *testing.T) {
+	tests := []struct {
+		name           string
+		userID         string
+		machineID      string
+		quadletID      string
+		requestBody    string
+		mockResponse   *QuadletGetResponse
+		mockError      error
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:        "successful update returns 200 with the updated quadlet",
+			userID:      "user123",
+			machineID:   "machine123",
+			quadletID:   "my-container.container",
+			requestBody: `{"content":"[Container]\nImage=nginx:1.25\n"}`,
+			mockResponse: &QuadletGetResponse{
+				ID:       "my-container.container",
+				Name:     "my-container.container",
+				Path:     "/etc/containers/systemd/my-container.container",
+				Unit:     "my-container.service",
+				Resource: "container",
+				State:    "unknown",
+				Content:  "[Container]\nImage=nginx:1.25\n",
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody:   `{"id":"my-container.container","name":"my-container.container","path":"/etc/containers/systemd/my-container.container","unit":"my-container.service","resource":"container","state":"unknown","content":"[Container]\nImage=nginx:1.25\n"}` + "\n",
+		},
+		{
+			name:           "quadlet not found maps to 404",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "missing.container",
+			requestBody:    `{"content":"[Container]\nImage=nginx:1.25\n"}`,
+			mockError:      errors.ErrQuadletNotFound,
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "validation failure: missing content",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			requestBody:    `{}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "validation failure: empty content",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			requestBody:    `{"content":""}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "malformed JSON body",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			requestBody:    `{not valid json`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing user ID",
+			userID:         "",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			requestBody:    `{"content":"x"}`,
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "missing machine ID",
+			userID:         "user123",
+			machineID:      "",
+			quadletID:      "my-container.container",
+			requestBody:    `{"content":"x"}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing quadlet ID",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "",
+			requestBody:    `{"content":"x"}`,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "connection failed maps to 502",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			requestBody:    `{"content":"x"}`,
+			mockError:      errors.ErrConnectionFailed,
+			expectedStatus: http.StatusBadGateway,
+		},
+		{
+			name:           "generic error maps to 500",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			requestBody:    `{"content":"x"}`,
+			mockError:      errGeneric,
+			expectedStatus: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedName string
+			var capturedReq QuadletUpdateRequest
+			mockService := &MockQuadletService{
+				mockUpdate: func(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
+					capturedName = name
+					capturedReq = req
+					if tt.mockError != nil {
+						return nil, tt.mockError
+					}
+					return tt.mockResponse, nil
+				},
+			}
+
+			handler := NewQuadletHandler(mockService, nil)
+
+			req := httptest.NewRequest("PUT", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID, bytes.NewBufferString(tt.requestBody))
+
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.machineID)
+			rctx.URLParams.Add("quadletId", tt.quadletID)
+
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+
+			handler.Update(rr, req)
+
+			if status := rr.Code; status != tt.expectedStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+			}
+
+			if tt.expectedBody != "" {
+				actualBody := rr.Body.String()
+				if actualBody != tt.expectedBody {
+					t.Errorf("handler returned unexpected body: got %q want %q", actualBody, tt.expectedBody)
+				}
+			}
+
+			// On success, verify the quadlet name and request content were
+			// passed through to the service.
+			if tt.expectedStatus == http.StatusOK {
+				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
+				assert.Equal(t, "[Container]\nImage=nginx:1.25\n", capturedReq.Content, "request content should be passed through")
+			}
+		})
+	}
+}
+
 func TestQuadletHandler_Delete(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -581,7 +749,7 @@ func TestQuadletHandler_Delete(t *testing.T) {
 			machineID:      "machine123",
 			quadletID:      "my-container.container",
 			queryParams:    "",
-			mockError:      errGenericDelete,
+			mockError:      errGeneric,
 			expectedStatus: http.StatusInternalServerError,
 		},
 	}

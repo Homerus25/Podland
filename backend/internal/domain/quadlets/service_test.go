@@ -143,6 +143,56 @@ func TestQuadletService_Create_InvocationShape(t *testing.T) {
 		"Error should not be a connection error — connection should have succeeded")
 }
 
+// --- Service seam: Update ---
+//
+// Podman has no dedicated update primitive, so Update composes QuadletRemove +
+// QuadletInstall(Replace:true). As with the other service seams, the podman
+// engine boundary is built inline and cannot be exercised under the mock
+// connection, so these tests cover only connection-stage error wrapping and the
+// invocation shape (the call reaches the QuadletList existence check but fails
+// because there is no real podman backend behind the mock connection context).
+//
+// The remaining acceptance-criterion cases for Update are covered outside the
+// service seam:
+//   - success-shape mapping → buildUpdateResponse (pure helper, tested below);
+//   - not-found → findQuadletByName returning nil + the trivial nil check
+//     (findQuadletByName is tested below; the nil check is a one-liner);
+//   - mid-flow failure (remove succeeds, install fails, leaving the quadlet
+//     removed) → cannot be exercised without a real podman backend; see the
+//     doc comment on Service.Update for the documented non-atomicity guarantee.
+
+func TestQuadletService_Update_ConnectionFailure(t *testing.T) {
+	ctx := context.Background()
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewQuadletService(mockConnManager)
+
+	result, err := service.Update(ctx, "test-user", "test-machine", "my-container.container", QuadletUpdateRequest{
+		Content: "[Container]\nImage=nginx:1.25\n",
+	})
+
+	assert.Error(t, err, "Should return error when connection fails")
+	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
+	assert.Nil(t, result, "Should return nil result when connection fails")
+}
+
+func TestQuadletService_Update_InvocationShape(t *testing.T) {
+	ctx := context.Background()
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	service := NewQuadletService(mockConnManager)
+
+	result, err := service.Update(ctx, "test-user", "test-machine", "my-container.container", QuadletUpdateRequest{
+		Content: "[Container]\nImage=nginx:1.25\n",
+	})
+
+	// The mock connection succeeds but the QuadletList existence check fails
+	// because there is no real podman backend behind the mock connection context.
+	assert.Error(t, err, "Should return error from engine call with mock connection")
+	assert.Nil(t, result, "Should return nil result when engine call fails")
+	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
+		"Error should not be a connection error — connection should have succeeded")
+}
+
 // --- Service seam: Delete ---
 //
 // As with List/Get/Create, the engine boundary is built inline and cannot be
@@ -419,6 +469,73 @@ func TestIsAlreadyExistsError(t *testing.T) {
 			assert.Equal(t, tt.want, isAlreadyExistsError(tt.err))
 		})
 	}
+}
+
+// --- Pure helpers used by Create + Update ---
+
+func TestFirstInstalledPath(t *testing.T) {
+	t.Run("nil map returns empty", func(t *testing.T) {
+		assert.Equal(t, "", firstInstalledPath(nil))
+	})
+
+	t.Run("empty map returns empty", func(t *testing.T) {
+		assert.Equal(t, "", firstInstalledPath(map[string]string{}))
+	})
+
+	t.Run("populated map returns one of the destinations", func(t *testing.T) {
+		// Map ordering is non-deterministic; the contract is "a populated path".
+		installed := map[string]string{
+			"/tmp/x.container": "/etc/containers/systemd/x.container",
+		}
+		assert.Equal(t, "/etc/containers/systemd/x.container", firstInstalledPath(installed))
+	})
+
+	t.Run("multiple entries returns exactly one (non-empty)", func(t *testing.T) {
+		installed := map[string]string{
+			"/tmp/a.container": "/etc/containers/systemd/a.container",
+			"/tmp/b.container": "/etc/containers/systemd/b.container",
+		}
+		got := firstInstalledPath(installed)
+		assert.NotEmpty(t, got)
+		assert.Contains(t, installed, "/tmp/a.container")
+	})
+}
+
+// --- Pure helpers used by Update ---
+
+func TestBuildUpdateResponse(t *testing.T) {
+	t.Run("maps all fields and forces state to unknown", func(t *testing.T) {
+		got := buildUpdateResponse(
+			"my-container.container",
+			"my-container.service",
+			"container",
+			"/etc/containers/systemd/my-container.container",
+			"[Container]\nImage=nginx:1.25\n",
+		)
+
+		assert.Equal(t, &QuadletGetResponse{
+			ID:       "my-container.container",
+			Name:     "my-container.container",
+			Path:     "/etc/containers/systemd/my-container.container",
+			Unit:     "my-container.service",
+			Resource: "container",
+			State:    "unknown",
+			Content:  "[Container]\nImage=nginx:1.25\n",
+		}, got)
+	})
+
+	t.Run("state is unknown even though a freshly updated unit may be running", func(t *testing.T) {
+		// The decision under test: Update reports "unknown" right after reinstall
+		// because systemd has not reloaded to report a fresh status. This pins
+		// that decision regardless of the inputs.
+		got := buildUpdateResponse("x.pod", "x.service", "pod", "/p/x.pod", "[Pod]\n")
+		assert.Equal(t, "unknown", got.State)
+	})
+
+	t.Run("empty installed path is echoed as empty", func(t *testing.T) {
+		got := buildUpdateResponse("x.container", "x.service", "container", "", "c")
+		assert.Equal(t, "", got.Path)
+	})
 }
 
 // Compile-time check that *QuadletCreateResponse has the fields the issue requires.

@@ -41,6 +41,7 @@ type QuadletServiceInterface interface {
 	List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
 	Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
 	Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
+	Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
 	Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error
 }
 
@@ -216,10 +217,7 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 	// Resolve the installed path if podman reported one back.
 	installedPath := ""
 	if report != nil {
-		for _, dest := range report.InstalledQuadlets {
-			installedPath = dest
-			break
-		}
+		installedPath = firstInstalledPath(report.InstalledQuadlets)
 	}
 
 	return &QuadletCreateResponse{
@@ -230,6 +228,98 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 		State:    "unknown",
 		Content:  req.Content,
 	}, nil
+}
+
+// Update replaces an existing quadlet's content on the specified machine.
+//
+// Podman has no dedicated update primitive, so the service composes
+// QuadletRemove + QuadletInstall (with Replace: true) of the new content
+// (doku/description_api.md:939-961):
+//
+//  1. Existence check: locate the quadlet via QuadletList. A missing quadlet
+//     maps to ErrQuadletNotFound (404). The list result also supplies the
+//     resource extension used to name the rebuilt tar entry.
+//  2. Remove the existing quadlet (Force: true so an active managed resource
+//     does not block the replace; the PUT contract exposes no running-conflict
+//     error, so an update is allowed even while the resource is up).
+//  3. Install the new content as an in-memory tar (single file named
+//     `<name>.<resource-extension>`), with Replace: true and ReloadSystemd: true.
+//
+// IMPORTANT: this flow is NOT atomic across the remove/install pair. A failure
+// after the remove succeeds but before the install completes leaves the quadlet
+// removed. The returned error reflects the install failure, but the caller
+// cannot assume the original quadlet is still present.
+//
+// The response reuses the Get shape (doku/description_api.md:953). State is
+// reported as "unknown" immediately after the reinstall because systemd has not
+// yet reloaded to report a fresh status — matching the Create slice's behaviour.
+func (s *QuadletService) Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
+	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	if err != nil {
+		return nil, appErrors.ErrConnectionFailed
+	}
+
+	defer s.connManager.Release(machineID)
+
+	connCtx, ok := connCtxInterface.(context.Context)
+	if !ok {
+		return nil, fmt.Errorf("invalid connection type: expected context.Context")
+	}
+
+	containerEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	// 1. Existence check + resource derivation. A missing quadlet is a 404.
+	list, err := containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list quadlets: %w", err)
+	}
+
+	target := findQuadletByName(list, name)
+	if target == nil {
+		return nil, appErrors.ErrQuadletNotFound
+	}
+
+	// 2. Remove the existing quadlet. Force: true so an active managed resource
+	//    does not block the replace (the PUT contract has no running-conflict
+	//    error). ReloadSystemd: true so systemd drops the old unit.
+	if _, err := containerEngine.QuadletRemove(connCtx, []string{name}, entities.QuadletRemoveOptions{
+		Force:         true,
+		ReloadSystemd: true,
+	}); err != nil {
+		if isNotFoundError(err) {
+			return nil, appErrors.ErrQuadletNotFound
+		}
+		return nil, fmt.Errorf("failed to remove existing quadlet: %w", err)
+	}
+
+	// 3. Install the new content. The filename preserves the original resource
+	//    extension so the rebuilt quadlet keeps its type. Replace: true overwrites
+	//    any leftover file from a partial state; ReloadSystemd: true picks up the
+	//    change.
+	//    The derive→extension round-trip re-normalizes the contract enum (so a
+	//    .kube/.build path rebuilds as .container/.image), matching Create's use
+	//    of resourceToExtension on the request resource.
+	resource := deriveResourceFromPath(target.Path)
+	fileName := name + resourceToExtension(resource)
+	body, err := createTarBody(fileName, []byte(req.Content))
+	if err != nil {
+		return nil, fmt.Errorf("failed to build quadlet tar body: %w", err)
+	}
+
+	options := new(quadlets.QuadletInstallOptions).WithReplace(true).WithReloadSystemd(true)
+	report, err := quadlets.Install(connCtx, options, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to install updated quadlet: %w", err)
+	}
+
+	installedPath := ""
+	if report != nil {
+		installedPath = firstInstalledPath(report.InstalledQuadlets)
+	}
+
+	return buildUpdateResponse(name, target.UnitName, resource, installedPath, req.Content), nil
 }
 
 // Delete removes a quadlet by name on the specified machine.
@@ -336,6 +426,35 @@ func createTarBody(fileName string, content []byte) (io.Reader, error) {
 		return nil, fmt.Errorf("failed to close tar: %w", err)
 	}
 	return &buf, nil
+}
+
+// firstInstalledPath returns the destination path of the first installed
+// quadlet reported by QuadletInstall, or the empty string when none is present.
+// The install report's InstalledQuadlets is a path→path map whose ordering is
+// non-deterministic, so "first" is arbitrary — callers only need *a* populated
+// path to echo back, mirroring the install primitive's own reporting.
+func firstInstalledPath(installed map[string]string) string {
+	for _, dest := range installed {
+		return dest
+	}
+	return ""
+}
+
+// buildUpdateResponse assembles the Get-shaped response for a freshly updated
+// quadlet. State is reported as "unknown" because systemd has not yet reloaded
+// to report a fresh status (matching the Create slice's behaviour). Extracted as
+// a pure function so the success-shape mapping is unit-testable independently of
+// the unmockable engine boundary (see the service-seam note in service_test.go).
+func buildUpdateResponse(name, unit, resource, installedPath, content string) *QuadletGetResponse {
+	return &QuadletGetResponse{
+		ID:       name,
+		Name:     name,
+		Path:     installedPath,
+		Unit:     unit,
+		Resource: resource,
+		State:    "unknown",
+		Content:  content,
+	}
 }
 
 // isAlreadyExistsError heuristically detects a quadlet name-collision error.

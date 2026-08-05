@@ -42,6 +42,15 @@ type QuadletGetResponse struct {
 	Content string `json:"content"`
 }
 
+// QuadletUpdateRequest represents a request to replace an existing quadlet's
+// content. Only the raw file content is sent; the quadlet name comes from the
+// URL path and the resource type is derived from the existing quadlet's path
+// during the existence check.
+type QuadletUpdateRequest struct {
+	// Raw quadlet file content. Required.
+	Content string `json:"content" validate:"required,min=1"`
+}
+
 // QuadletCreateRequest represents a request to create a new quadlet.
 type QuadletCreateRequest struct {
 	// Name of the quadlet (without extension). Required.

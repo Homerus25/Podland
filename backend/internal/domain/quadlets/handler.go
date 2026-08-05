@@ -152,7 +152,55 @@ func (h *QuadletHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 // Update handles updating a quadlet
 func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Update quadlet")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	quadletID := chi.URLParam(r, "quadletId")
+	if quadletID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	var request QuadletUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Invalid request body", slog.Any("error", err))
+		return
+	}
+
+	validate := validator.New()
+	if err := validate.Struct(request); err != nil {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error(), contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Validation failed", slog.Any("error", err))
+		return
+	}
+
+	quadlet, err := h.service.Update(r.Context(), userID, machineID, quadletID, request)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "update", slog.Any("error", err), slog.String("userID", userID), slog.String("machineID", machineID), slog.String("quadletId", quadletID))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(quadlet)
 }
 
 // Delete handles deleting a quadlet
