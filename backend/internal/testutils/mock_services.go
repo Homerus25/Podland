@@ -158,13 +158,13 @@ func NewMockConnectionManagerWithError(getConnectionErr error) *MockConnectionMa
 	}
 }
 
-func (m *MockConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (any, error) {
+func (m *MockConnectionManager) GetConnection(machineID, userID string) (any, error) {
 	if m.getConnectionErr != nil {
 		return nil, m.getConnectionErr
 	}
 	// Return a mock context with a mock connection
 	mockConn := &bindings.Connection{}
-	mockCtx := context.WithValue(ctx, "mock-connection", mockConn)
+	mockCtx := context.WithValue(context.Background(), "mock-connection", mockConn)
 	return mockCtx, nil
 }
 

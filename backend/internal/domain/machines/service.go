@@ -19,8 +19,8 @@ type concreteConnectionManager struct {
 }
 
 // GetConnection implements ConnectionManagerInterface by calling the underlying ConnectionManager
-func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (any, error) {
-	return c.connManager.GetConnection(ctx, machineID, userID)
+func (c *concreteConnectionManager) GetConnection(machineID, userID string) (any, error) {
+	return c.connManager.GetConnection(machineID, userID)
 }
 
 func (c *concreteConnectionManager) Release(machineID string) {

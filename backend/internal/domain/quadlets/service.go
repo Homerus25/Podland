@@ -27,8 +27,8 @@ type concreteConnectionManager struct {
 }
 
 // GetConnection implements ConnectionManagerInterface by calling the underlying ConnectionManager.
-func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (any, error) {
-	return c.connManager.GetConnection(ctx, machineID, userID)
+func (c *concreteConnectionManager) GetConnection(machineID, userID string) (any, error) {
+	return c.connManager.GetConnection(machineID, userID)
 }
 
 func (c *concreteConnectionManager) Release(machineID string) {
@@ -71,7 +71,7 @@ func NewQuadletServiceWithConcreteDeps(connManager *connections.ConnectionManage
 
 // List returns a list of quadlets on the specified machine.
 func (s *QuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
@@ -121,7 +121,7 @@ func applyFilters(quadlets []QuadletListResponse, filters ListFilters) []Quadlet
 
 // Get returns a specific quadlet by name on the specified machine.
 func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
@@ -171,7 +171,7 @@ func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string
 // primitive with ReloadSystemd enabled so systemd picks up the new unit.
 // A name collision in the install report is mapped to ErrQuadletAlreadyExists.
 func (s *QuadletService) Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
@@ -254,7 +254,7 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 // reported as "unknown" immediately after the reinstall because systemd has not
 // yet reloaded to report a fresh status — matching the Create slice's behaviour.
 func (s *QuadletService) Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
@@ -342,7 +342,7 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error {
 	_ = stop // honoured once SSH-exec (070-10) is available; see doc comment.
 
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return appErrors.ErrConnectionFailed
 	}

@@ -23,8 +23,8 @@ type concreteConnectionManager struct {
 }
 
 // GetConnection implements ConnectionManagerInterface by calling the underlying ConnectionManager
-func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (any, error) {
-	return c.connManager.GetConnection(ctx, machineID, userID)
+func (c *concreteConnectionManager) GetConnection(machineID, userID string) (any, error) {
+	return c.connManager.GetConnection(machineID, userID)
 }
 
 func (c *concreteConnectionManager) Release(machineID string) {
@@ -65,7 +65,7 @@ func NewContainerServiceWithConcreteDeps(connManager *connections.ConnectionMana
 // List returns a list of containers on the specified machine
 func (s *ContainerService) List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error) {
 	// Get connection context to the machine
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
@@ -95,7 +95,7 @@ func (s *ContainerService) List(ctx context.Context, userID, machineID string, o
 // Create creates a new container on the specified machine
 func (s *ContainerService) Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*ContainerCreateResponse, error) {
 	// Get connection context to the machine
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
@@ -172,7 +172,7 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 // Get returns detailed information about a specific container
 func (s *ContainerService) Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
 	// Get connection context to the machine
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
@@ -222,7 +222,7 @@ func (s *ContainerService) Start(ctx context.Context, userID, machineID, contain
 		return nil, err
 	}
 
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
@@ -268,7 +268,7 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 		return nil, err
 	}
 
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
@@ -315,7 +315,7 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 		return err
 	}
 
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get connection to machine: %w", err)
 	}
@@ -360,7 +360,7 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 		return nil, err
 	}
 
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
@@ -423,7 +423,7 @@ func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machin
 		return err
 	}
 
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get connection to machine: %w", err)
 	}

@@ -23,8 +23,8 @@ type concreteConnectionManager struct {
 }
 
 // GetConnection implements ConnectionManagerInterface by calling the underlying ConnectionManager.
-func (c *concreteConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (any, error) {
-	return c.connManager.GetConnection(ctx, machineID, userID)
+func (c *concreteConnectionManager) GetConnection(machineID, userID string) (any, error) {
+	return c.connManager.GetConnection(machineID, userID)
 }
 
 func (c *concreteConnectionManager) Release(machineID string) {
@@ -61,7 +61,7 @@ func NewImageServiceWithConcreteDeps(connManager *connections.ConnectionManager)
 
 // List returns a list of images on the specified machine.
 func (s *ImageService) List(ctx context.Context, userID, machineID string, opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
-	connCtxInterface, err := s.connManager.GetConnection(context.Background(), machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
@@ -88,7 +88,7 @@ func (s *ImageService) List(ctx context.Context, userID, machineID string, opts 
 // Delete removes an image by ID on the specified machine.
 // Stub — implemented in slice 060-02-image-delete.
 func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID string, force bool) error {
-	connCtxInterface, err := s.connManager.GetConnection(ctx, machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get connection to machine: %w", err)
 	}
@@ -131,7 +131,7 @@ func (s *ImageService) Pull(ctx context.Context, userID, machineID, rawImage str
 
 // PullWithProgress pulls an image on the specified machine and reports progress via the provided callback.
 func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(event PullProgressEvent)) (*entities.ImagePullReport, error) {
-	connCtxInterface, err := s.connManager.GetConnection(ctx, machineID, userID)
+	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}

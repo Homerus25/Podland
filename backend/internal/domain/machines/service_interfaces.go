@@ -1,13 +1,9 @@
 package machines
 
-import (
-	"context"
-)
-
 // ConnectionManagerInterface defines the interface for connection management
 // This allows mocking the ConnectionManager in tests
 type ConnectionManagerInterface interface {
-	GetConnection(ctx context.Context, machineID, userID string) (any, error)
+	GetConnection(machineID, userID string) (any, error)
 	Release(machineID string)
 }
 

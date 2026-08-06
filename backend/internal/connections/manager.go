@@ -53,7 +53,8 @@ func NewConnectionManager(
 }
 
 // GetConnection gets a connection context to a machine
-func (m *ConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (context.Context, error) {
+func (m *ConnectionManager) GetConnection(machineID, userID string) (context.Context, error) {
+	ctx := context.Background()
 	// First try to get from cache
 	connCtx, err := m.cache.GetOrCreateContext(ctx, machineID, userID)
 	if err == nil {
