@@ -89,10 +89,10 @@ func main() {
 	go connectionManager.Run()
 
 	// Initialize services
-	machineService := machines.NewMachineServiceWithConcreteDeps(machineRepo, accessRepo, connectionManager, encryptionService)
-	containerService := containers.NewContainerServiceWithConcreteDeps(connectionManager)
-	imageService := images.NewImageServiceWithConcreteDeps(connectionManager)
-	quadletService := quadlets.NewQuadletServiceWithConcreteDeps(connectionManager)
+	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService)
+	containerService := containers.NewContainerService(connectionManager)
+	imageService := images.NewImageService(connectionManager)
+	quadletService := quadlets.NewQuadletService(connectionManager)
 	eventService := events.NewEventService(connectionManager)
 
 	// Initialize handlers

@@ -7,25 +7,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/yourorg/podland/backend/internal/connections"
-	"github.com/yourorg/podland/backend/internal/encryption"
 	"github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/models"
 )
-
-// concreteConnectionManager wraps a *connections.ConnectionManager to implement ConnectionManagerInterface
-type concreteConnectionManager struct {
-	connManager *connections.ConnectionManager
-}
-
-// GetConnection implements ConnectionManagerInterface by calling the underlying ConnectionManager
-func (c *concreteConnectionManager) GetConnection(machineID, userID string) (any, error) {
-	return c.connManager.GetConnection(machineID, userID)
-}
-
-func (c *concreteConnectionManager) Release(machineID string) {
-	c.connManager.Release(machineID)
-}
 
 // MachineService provides business logic for machines
 type MachineService struct {
@@ -46,22 +30,6 @@ func NewMachineService(
 		machineRepo: machineRepo,
 		accessRepo:  accessRepo,
 		connManager: connManager,
-		encryption:  encryption,
-	}
-}
-
-// NewMachineServiceWithConcreteDeps creates a new MachineService with concrete dependencies
-// This maintains backward compatibility with existing code that uses *connections.ConnectionManager and *encryption.EncryptionService
-func NewMachineServiceWithConcreteDeps(
-	machineRepo MachineRepositoryInterface,
-	accessRepo models.MachineAccessRepositoryInterface,
-	connManager *connections.ConnectionManager,
-	encryption *encryption.EncryptionService,
-) *MachineService {
-	return &MachineService{
-		machineRepo: machineRepo,
-		accessRepo:  accessRepo,
-		connManager: &concreteConnectionManager{connManager: connManager},
 		encryption:  encryption,
 	}
 }

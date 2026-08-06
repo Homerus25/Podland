@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/bindings/quadlets"
@@ -19,21 +18,6 @@ import (
 
 // Compile-time check that *QuadletService satisfies QuadletServiceInterface.
 var _ QuadletServiceInterface = (*QuadletService)(nil)
-
-// concreteConnectionManager wraps a *connections.ConnectionManager to implement ConnectionManagerInterface.
-// This is needed for backward compatibility.
-type concreteConnectionManager struct {
-	connManager *connections.ConnectionManager
-}
-
-// GetConnection implements ConnectionManagerInterface by calling the underlying ConnectionManager.
-func (c *concreteConnectionManager) GetConnection(machineID, userID string) (any, error) {
-	return c.connManager.GetConnection(machineID, userID)
-}
-
-func (c *concreteConnectionManager) Release(machineID string) {
-	c.connManager.Release(machineID)
-}
 
 // QuadletServiceInterface defines the interface for quadlet services.
 // This interface is used for dependency injection and testing.
@@ -63,26 +47,14 @@ func NewQuadletService(connManager machines.ConnectionManagerInterface) *Quadlet
 	}
 }
 
-// NewQuadletServiceWithConcreteDeps creates a new QuadletService with concrete dependencies.
-// This maintains backward compatibility with existing code that uses *connections.ConnectionManager.
-func NewQuadletServiceWithConcreteDeps(connManager *connections.ConnectionManager) *QuadletService {
-	return NewQuadletService(&concreteConnectionManager{connManager: connManager})
-}
-
 // List returns a list of quadlets on the specified machine.
 func (s *QuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
 
 	defer s.connManager.Release(machineID)
-
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection type: expected context.Context")
-	}
-
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
 	}
@@ -121,18 +93,12 @@ func applyFilters(quadlets []QuadletListResponse, filters ListFilters) []Quadlet
 
 // Get returns a specific quadlet by name on the specified machine.
 func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
 
 	defer s.connManager.Release(machineID)
-
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection type: expected context.Context")
-	}
-
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
 	}
@@ -171,18 +137,12 @@ func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string
 // primitive with ReloadSystemd enabled so systemd picks up the new unit.
 // A name collision in the install report is mapped to ErrQuadletAlreadyExists.
 func (s *QuadletService) Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
 
 	defer s.connManager.Release(machineID)
-
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection type: expected context.Context")
-	}
-
 	// Build the in-memory tar: a single file named `<name>.<resource-extension>`.
 	// Podman's QuadletInstall primitive accepts a tar body, not raw content —
 	// see ~/repos/podman/pkg/domain/infra/tunnel/quadlet.go:161 (createTarFromReader).
@@ -254,18 +214,12 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 // reported as "unknown" immediately after the reinstall because systemd has not
 // yet reloaded to report a fresh status — matching the Create slice's behaviour.
 func (s *QuadletService) Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, appErrors.ErrConnectionFailed
 	}
 
 	defer s.connManager.Release(machineID)
-
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection type: expected context.Context")
-	}
-
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
 	}
@@ -342,17 +296,12 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error {
 	_ = stop // honoured once SSH-exec (070-10) is available; see doc comment.
 
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return appErrors.ErrConnectionFailed
 	}
 
 	defer s.connManager.Release(machineID)
-
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return fmt.Errorf("invalid connection type: expected context.Context")
-	}
 
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,

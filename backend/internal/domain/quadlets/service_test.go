@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/testutils"
@@ -21,10 +22,11 @@ func TestQuadletService_ImplementsInterface(t *testing.T) {
 	var _ QuadletServiceInterface = (*QuadletService)(nil)
 }
 
-// TestConcreteConnectionManager_ImplementsInterface is a compile-time check
-// that concreteConnectionManager satisfies ConnectionManagerInterface.
-func TestConcreteConnectionManager_ImplementsInterface(t *testing.T) {
-	var _ machines.ConnectionManagerInterface = (*concreteConnectionManager)(nil)
+// TestConnectionManager_ImplementsInterface is a compile-time check that
+// *connections.ConnectionManager satisfies ConnectionManagerInterface,
+// allowing it to be passed directly to NewQuadletService.
+func TestConnectionManager_ImplementsInterface(t *testing.T) {
+	var _ machines.ConnectionManagerInterface = (*connections.ConnectionManager)(nil)
 }
 
 // TestNewQuadletService_WithMockConnManager verifies that QuadletService can be

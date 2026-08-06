@@ -158,7 +158,7 @@ func NewMockConnectionManagerWithError(getConnectionErr error) *MockConnectionMa
 	}
 }
 
-func (m *MockConnectionManager) GetConnection(machineID, userID string) (any, error) {
+func (m *MockConnectionManager) GetConnection(machineID, userID string) (context.Context, error) {
 	if m.getConnectionErr != nil {
 		return nil, m.getConnectionErr
 	}

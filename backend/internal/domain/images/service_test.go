@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/testutils"
@@ -41,10 +42,11 @@ func TestNewImageService_WithErrorMockConnManager(t *testing.T) {
 	assert.NotNil(t, service)
 }
 
-// TestConcreteConnectionManager_ImplementsInterface is a compile-time check
-// that concreteConnectionManager satisfies ConnectionManagerInterface.
-func TestConcreteConnectionManager_ImplementsInterface(t *testing.T) {
-	var _ machines.ConnectionManagerInterface = (*concreteConnectionManager)(nil)
+// TestConnectionManager_ImplementsInterface is a compile-time check that
+// *connections.ConnectionManager satisfies ConnectionManagerInterface,
+// allowing it to be passed directly to NewImageService.
+func TestConnectionManager_ImplementsInterface(t *testing.T) {
+	var _ machines.ConnectionManagerInterface = (*connections.ConnectionManager)(nil)
 }
 
 // TestImageService_List_ConnectionFailure tests that List properly wraps

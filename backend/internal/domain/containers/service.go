@@ -8,28 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 	"go.podman.io/podman/v6/pkg/specgen"
 )
-
-// concreteConnectionManager wraps a *connections.ConnectionManager to implement ConnectionManagerInterface
-// This is needed for backward compatibility
-type concreteConnectionManager struct {
-	connManager *connections.ConnectionManager
-}
-
-// GetConnection implements ConnectionManagerInterface by calling the underlying ConnectionManager
-func (c *concreteConnectionManager) GetConnection(machineID, userID string) (any, error) {
-	return c.connManager.GetConnection(machineID, userID)
-}
-
-func (c *concreteConnectionManager) Release(machineID string) {
-	c.connManager.Release(machineID)
-}
 
 // ContainerServiceInterface defines the interface for container services
 // This interface is used for dependency injection and testing
@@ -56,28 +40,15 @@ func NewContainerService(connManager machines.ConnectionManagerInterface) *Conta
 	}
 }
 
-// NewContainerServiceWithConcreteDeps creates a new ContainerService with concrete dependencies
-// This maintains backward compatibility with existing code that uses *connections.ConnectionManager
-func NewContainerServiceWithConcreteDeps(connManager *connections.ConnectionManager) *ContainerService {
-	return NewContainerService(&concreteConnectionManager{connManager: connManager})
-}
-
 // List returns a list of containers on the specified machine
 func (s *ContainerService) List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error) {
 	// Get connection context to the machine
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
 
 	defer s.connManager.Release(machineID)
-
-	// Convert interface to context.Context
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection type: expected context.Context")
-	}
-
 	// Create container engine with the connection context
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
@@ -95,18 +66,11 @@ func (s *ContainerService) List(ctx context.Context, userID, machineID string, o
 // Create creates a new container on the specified machine
 func (s *ContainerService) Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*ContainerCreateResponse, error) {
 	// Get connection context to the machine
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
 	defer s.connManager.Release(machineID)
-
-	// Convert interface to context.Context
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection type: expected context.Context")
-	}
-
 	// Create container engine with the connection context
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
@@ -172,18 +136,11 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 // Get returns detailed information about a specific container
 func (s *ContainerService) Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
 	// Get connection context to the machine
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
 	defer s.connManager.Release(machineID)
-
-	// Convert interface to context.Context
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection type: expected context.Context")
-	}
-
 	// Create container engine with the connection context
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
@@ -222,17 +179,11 @@ func (s *ContainerService) Start(ctx context.Context, userID, machineID, contain
 		return nil, err
 	}
 
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
 	defer s.connManager.Release(machineID)
-
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection type: expected context.Context")
-	}
-
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
 	}
@@ -268,17 +219,11 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 		return nil, err
 	}
 
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
 	defer s.connManager.Release(machineID)
-
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection type: expected context.Context")
-	}
-
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
 	}
@@ -315,16 +260,11 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 		return err
 	}
 
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get connection to machine: %w", err)
 	}
 	defer s.connManager.Release(machineID)
-
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return fmt.Errorf("invalid connection type: expected context.Context")
-	}
 
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
@@ -360,17 +300,11 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 		return nil, err
 	}
 
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
 	}
 	defer s.connManager.Release(machineID)
-
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return nil, fmt.Errorf("invalid connection type: expected context.Context")
-	}
-
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
 	}
@@ -423,16 +357,11 @@ func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machin
 		return err
 	}
 
-	connCtxInterface, err := s.connManager.GetConnection(machineID, userID)
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return fmt.Errorf("failed to get connection to machine: %w", err)
 	}
 	defer s.connManager.Release(machineID)
-
-	connCtx, ok := connCtxInterface.(context.Context)
-	if !ok {
-		return fmt.Errorf("invalid connection type: expected context.Context")
-	}
 
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
