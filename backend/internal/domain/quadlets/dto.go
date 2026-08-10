@@ -82,6 +82,31 @@ type QuadletCreateResponse struct {
 	Content string `json:"content"`
 }
 
+// LifecycleOptions carries the optional force/timeout parameters for stop and
+// restart operations (doku/description_api.md:1019-1022, 1048-1050). Start has
+// no options per the contract.
+type LifecycleOptions struct {
+	// Force requests an aggressive stop/restart. Maps to `systemctl --force`.
+	Force bool
+	// Timeout is the stop/restart grace period in seconds. 0 means unset.
+	// Maps to `systemctl --kill-seconds=<n>`.
+	Timeout int
+}
+
+// QuadletLifecycleResponse is the success body for the start/stop/restart
+// endpoints (doku/description_api.md:994-1001, 1023-1030, 1052-1060). The shape
+// is intentionally narrow: id + state + unit, with restartedAt on restart only.
+type QuadletLifecycleResponse struct {
+	// Unique identifier for the quadlet (the quadlet name)
+	ID string `json:"id"`
+	// State of the quadlet after the operation (running / stopped)
+	State string `json:"state"`
+	// Systemd unit name that was acted on
+	Unit string `json:"unit"`
+	// RestartedAt is the timestamp of a restart (restart only, ISO8601).
+	RestartedAt string `json:"restartedAt,omitempty"`
+}
+
 // FromListQuadlet converts a podman entities.ListQuadlet to QuadletListResponse.
 func FromListQuadlet(quadlet *entities.ListQuadlet) QuadletListResponse {
 	if quadlet == nil {

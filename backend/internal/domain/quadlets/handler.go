@@ -270,19 +270,165 @@ func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Start handles starting a quadlet
+// Start handles starting a quadlet-managed resource.
+// Runs `systemctl start <unit>` over SSH via the service.
+// Returns 200 with {id, state, unit}, or QUADLET_ALREADY_RUNNING (400) /
+// QUADLET_NOT_FOUND (404) / CONNECTION_FAILED (502) on error.
 func (h *QuadletHandler) Start(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Start quadlet")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	quadletID := chi.URLParam(r, "quadletId")
+	if quadletID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	resp, err := h.service.Start(r.Context(), userID, machineID, quadletID)
+	if err != nil {
+		respondLifecycleError(w, r, err, "start", userID, machineID, quadletID)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
 }
 
-// Stop handles stopping a quadlet
+// Stop handles stopping a running quadlet-managed resource.
+// Runs `systemctl stop <unit>` over SSH, honouring the `force` and `timeout`
+// query params (doku/description_api.md:1019-1022).
 func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Stop quadlet")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	quadletID := chi.URLParam(r, "quadletId")
+	if quadletID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	opts := parseLifecycleOptions(r)
+
+	slog.InfoContext(r.Context(), "stop",
+		slog.String("quadletId", quadletID),
+		slog.Bool("force", opts.Force),
+		slog.Int("timeout", opts.Timeout),
+	)
+
+	resp, err := h.service.Stop(r.Context(), userID, machineID, quadletID, opts)
+	if err != nil {
+		respondLifecycleError(w, r, err, "stop", userID, machineID, quadletID)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
 }
 
-// Restart handles restarting a quadlet
+// Restart handles restarting a quadlet-managed resource.
+// Runs `systemctl restart <unit>` over SSH, honouring the `force` and `timeout`
+// query params (doku/description_api.md:1048-1050).
 func (h *QuadletHandler) Restart(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Restart quadlet")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	quadletID := chi.URLParam(r, "quadletId")
+	if quadletID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	opts := parseLifecycleOptions(r)
+
+	slog.InfoContext(r.Context(), "restart",
+		slog.String("quadletId", quadletID),
+		slog.Bool("force", opts.Force),
+		slog.Int("timeout", opts.Timeout),
+	)
+
+	resp, err := h.service.Restart(r.Context(), userID, machineID, quadletID, opts)
+	if err != nil {
+		respondLifecycleError(w, r, err, "restart", userID, machineID, quadletID)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(resp)
+}
+
+// parseLifecycleOptions reads the `force` (bool) and `timeout` (int, seconds)
+// query parameters for stop/restart. force defaults to false; an unparseable
+// value is ignored (stays false), matching the Delete handler convention.
+// timeout defaults to 0 (unset); an unparseable or negative value is ignored.
+func parseLifecycleOptions(r *http.Request) LifecycleOptions {
+	opts := LifecycleOptions{}
+	if forceParam := r.URL.Query().Get("force"); forceParam != "" {
+		if parsed, err := strconv.ParseBool(forceParam); err == nil {
+			opts.Force = parsed
+		}
+	}
+	if timeoutParam := r.URL.Query().Get("timeout"); timeoutParam != "" {
+		if parsed, err := strconv.Atoi(timeoutParam); err == nil && parsed > 0 {
+			opts.Timeout = parsed
+		}
+	}
+	return opts
+}
+
+// respondLifecycleError maps a service error to the appropriate HTTP response
+// for the lifecycle endpoints, mirroring the error-handling shape used by the
+// other quadlet handlers. action is used for log attribution only.
+func respondLifecycleError(w http.ResponseWriter, r *http.Request, err error, action, userID, machineID, quadletID string) {
+	if appErr, ok := err.(*errors.AppError); ok {
+		errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+		return
+	}
+	errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+	slog.ErrorContext(r.Context(), action,
+		slog.Any("error", err),
+		slog.String("userID", userID),
+		slog.String("machineID", machineID),
+		slog.String("quadletId", quadletID),
+	)
 }
 
 // GetLogs handles getting quadlet logs

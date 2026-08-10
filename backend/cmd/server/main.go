@@ -26,6 +26,7 @@ import (
 	"github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/middleware"
 	"github.com/yourorg/podland/backend/internal/models"
+	"github.com/yourorg/podland/backend/internal/sshexec"
 	"github.com/yourorg/podland/backend/migrations"
 )
 
@@ -88,11 +89,21 @@ func main() {
 	)
 	go connectionManager.Run()
 
+	// sshExecService is the SSH-exec capability (sshexec.SSHExecInterface).
+	// It is constructed here so its dialer cache + cleanup goroutine start
+	// at boot, but it has no HTTP route of its own — it is infrastructure
+	// consumed by the quadlet lifecycle endpoints (070-06), which run
+	// `systemctl` over SSH.
+	sshExecService := sshexec.NewService(sshexec.Options{
+		MachineRepo: machineRepo,
+		Encryption:  encryptionService,
+	})
+
 	// Initialize services
 	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService)
 	containerService := containers.NewContainerService(connectionManager)
 	imageService := images.NewImageService(connectionManager)
-	quadletService := quadlets.NewQuadletService(connectionManager)
+	quadletService := quadlets.NewQuadletService(connectionManager, sshExecService)
 	eventService := events.NewEventService(connectionManager)
 
 	// Initialize handlers

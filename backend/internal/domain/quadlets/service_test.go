@@ -34,7 +34,7 @@ func TestConnectionManager_ImplementsInterface(t *testing.T) {
 func TestNewQuadletService_WithMockConnManager(t *testing.T) {
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
 
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	assert.NotNil(t, service)
 	assert.NotNil(t, service.connManager)
@@ -53,7 +53,7 @@ func TestQuadletService_List_ConnectionFailure(t *testing.T) {
 	ctx := context.Background()
 	connErr := errors.New("SSH connection failed")
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.List(ctx, "test-user", "test-machine", ListFilters{})
 
@@ -65,7 +65,7 @@ func TestQuadletService_List_ConnectionFailure(t *testing.T) {
 func TestQuadletService_List_InvocationShape(t *testing.T) {
 	ctx := context.Background()
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.List(ctx, "test-user", "test-machine", ListFilters{})
 
@@ -83,7 +83,7 @@ func TestQuadletService_Get_ConnectionFailure(t *testing.T) {
 	ctx := context.Background()
 	connErr := errors.New("SSH connection failed")
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Get(ctx, "test-user", "test-machine", "my-container.container")
 
@@ -95,7 +95,7 @@ func TestQuadletService_Get_ConnectionFailure(t *testing.T) {
 func TestQuadletService_Get_InvocationShape(t *testing.T) {
 	ctx := context.Background()
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Get(ctx, "test-user", "test-machine", "my-container.container")
 
@@ -113,7 +113,7 @@ func TestQuadletService_Create_ConnectionFailure(t *testing.T) {
 	ctx := context.Background()
 	connErr := errors.New("SSH connection failed")
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Create(ctx, "test-user", "test-machine", QuadletCreateRequest{
 		Name:     "my-container",
@@ -129,7 +129,7 @@ func TestQuadletService_Create_ConnectionFailure(t *testing.T) {
 func TestQuadletService_Create_InvocationShape(t *testing.T) {
 	ctx := context.Background()
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Create(ctx, "test-user", "test-machine", QuadletCreateRequest{
 		Name:     "my-container",
@@ -167,7 +167,7 @@ func TestQuadletService_Update_ConnectionFailure(t *testing.T) {
 	ctx := context.Background()
 	connErr := errors.New("SSH connection failed")
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Update(ctx, "test-user", "test-machine", "my-container.container", QuadletUpdateRequest{
 		Content: "[Container]\nImage=nginx:1.25\n",
@@ -181,7 +181,7 @@ func TestQuadletService_Update_ConnectionFailure(t *testing.T) {
 func TestQuadletService_Update_InvocationShape(t *testing.T) {
 	ctx := context.Background()
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Update(ctx, "test-user", "test-machine", "my-container.container", QuadletUpdateRequest{
 		Content: "[Container]\nImage=nginx:1.25\n",
@@ -207,7 +207,7 @@ func TestQuadletService_Delete_ConnectionFailure(t *testing.T) {
 	ctx := context.Background()
 	connErr := errors.New("SSH connection failed")
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", false, true)
 
@@ -218,7 +218,7 @@ func TestQuadletService_Delete_ConnectionFailure(t *testing.T) {
 func TestQuadletService_Delete_InvocationShape(t *testing.T) {
 	ctx := context.Background()
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", false, true)
 
@@ -232,7 +232,7 @@ func TestQuadletService_Delete_InvocationShape(t *testing.T) {
 func TestQuadletService_Delete_ForceTrue_InvocationShape(t *testing.T) {
 	ctx := context.Background()
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager)
+	service := NewQuadletService(mockConnManager, nil)
 
 	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", true, true)
 

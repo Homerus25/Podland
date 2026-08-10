@@ -11,6 +11,7 @@ import (
 
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	appErrors "github.com/yourorg/podland/backend/internal/errors"
+	"github.com/yourorg/podland/backend/internal/sshexec"
 	"go.podman.io/podman/v6/pkg/bindings/quadlets"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
@@ -27,6 +28,9 @@ type QuadletServiceInterface interface {
 	Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
 	Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
 	Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error
+	Start(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error)
+	Stop(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
+	Restart(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
 }
 
 // ListFilters represents the filters for listing quadlets.
@@ -38,12 +42,22 @@ type ListFilters struct {
 // QuadletService provides business logic for quadlets
 type QuadletService struct {
 	connManager machines.ConnectionManagerInterface
+	// sshExec runs systemctl over SSH for the lifecycle (Start/Stop/Restart)
+	// operations. It is a SEPARATE dependency from connManager (which is a
+	// podman-socket tunnel only) per the 070-10 SSH-exec infra slice.
+	sshExec sshexec.SSHExecInterface
 }
 
-// NewQuadletService creates a new QuadletService with the given connection manager interface.
-func NewQuadletService(connManager machines.ConnectionManagerInterface) *QuadletService {
+// NewQuadletService creates a new QuadletService with the given connection
+// manager interface and SSH-exec interface. The SSH-exec dependency is required
+// by the lifecycle endpoints (Start/Stop/Restart) which run systemctl over SSH;
+// the other operations (List/Get/Create/Update/Delete) use only the connection
+// manager and are unaffected by it. Tests that do not exercise lifecycle may
+// pass nil for sshExec.
+func NewQuadletService(connManager machines.ConnectionManagerInterface, sshExec sshexec.SSHExecInterface) *QuadletService {
 	return &QuadletService{
 		connManager: connManager,
+		sshExec:     sshExec,
 	}
 }
 

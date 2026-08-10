@@ -162,11 +162,14 @@ func TestQuadletHandler_List(t *testing.T) {
 }
 
 type MockQuadletService struct {
-	mockList   func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
-	mockGet    func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
-	mockCreate func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
-	mockUpdate func(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
-	mockDelete func(ctx context.Context, userID, machineID, name string, force, stop bool) error
+	mockList    func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
+	mockGet     func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
+	mockCreate  func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
+	mockUpdate  func(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
+	mockDelete  func(ctx context.Context, userID, machineID, name string, force, stop bool) error
+	mockStart   func(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error)
+	mockStop    func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
+	mockRestart func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
 }
 
 func (m *MockQuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
@@ -202,6 +205,27 @@ func (m *MockQuadletService) Delete(ctx context.Context, userID, machineID, name
 		return m.mockDelete(ctx, userID, machineID, name, force, stop)
 	}
 	return nil
+}
+
+func (m *MockQuadletService) Start(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error) {
+	if m.mockStart != nil {
+		return m.mockStart(ctx, userID, machineID, name)
+	}
+	return nil, nil
+}
+
+func (m *MockQuadletService) Stop(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
+	if m.mockStop != nil {
+		return m.mockStop(ctx, userID, machineID, name, opts)
+	}
+	return nil, nil
+}
+
+func (m *MockQuadletService) Restart(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
+	if m.mockRestart != nil {
+		return m.mockRestart(ctx, userID, machineID, name, opts)
+	}
+	return nil, nil
 }
 
 func TestQuadletHandler_Get(t *testing.T) {
@@ -798,6 +822,443 @@ func TestQuadletHandler_Delete(t *testing.T) {
 				assert.Equal(t, tt.expectedForce, capturedForce, "force flag should match expected")
 				assert.Equal(t, tt.expectedStop, capturedStop, "stop flag should match expected")
 				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
+			}
+		})
+	}
+}
+
+func TestQuadletHandler_Start(t *testing.T) {
+	tests := []struct {
+		name           string
+		userID         string
+		machineID      string
+		quadletID      string
+		mockResponse   *QuadletLifecycleResponse
+		mockError      error
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:      "successful start returns 200 with running state",
+			userID:    "user123",
+			machineID: "machine123",
+			quadletID: "my-container.container",
+			mockResponse: &QuadletLifecycleResponse{
+				ID:    "my-container.container",
+				State: "running",
+				Unit:  "my-container.service",
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody:   `{"id":"my-container.container","state":"running","unit":"my-container.service"}` + "\n",
+		},
+		{
+			name:           "already running maps to 400",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockError:      errors.ErrQuadletAlreadyRunning,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "not found maps to 404",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "missing.container",
+			mockError:      errors.ErrQuadletNotFound,
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "connection failed maps to 502",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockError:      errors.ErrConnectionFailed,
+			expectedStatus: http.StatusBadGateway,
+		},
+		{
+			name:           "generic error maps to 500",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockError:      errGeneric,
+			expectedStatus: http.StatusInternalServerError,
+		},
+		{
+			name:           "missing user ID",
+			userID:         "",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "missing machine ID",
+			userID:         "user123",
+			machineID:      "",
+			quadletID:      "my-container.container",
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "missing quadlet ID",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "",
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedName string
+			mockService := &MockQuadletService{
+				mockStart: func(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error) {
+					capturedName = name
+					if tt.mockError != nil {
+						return nil, tt.mockError
+					}
+					return tt.mockResponse, nil
+				},
+			}
+
+			handler := NewQuadletHandler(mockService, nil)
+
+			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+"/start", nil)
+
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.machineID)
+			rctx.URLParams.Add("quadletId", tt.quadletID)
+
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+
+			handler.Start(rr, req)
+
+			if status := rr.Code; status != tt.expectedStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+			}
+
+			if tt.expectedBody != "" {
+				assert.Equal(t, tt.expectedBody, rr.Body.String())
+			}
+
+			if tt.expectedStatus == http.StatusOK {
+				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
+			}
+		})
+	}
+}
+
+func TestQuadletHandler_Stop(t *testing.T) {
+	tests := []struct {
+		name            string
+		userID          string
+		machineID       string
+		quadletID       string
+		queryParams     string
+		mockResponse    *QuadletLifecycleResponse
+		mockError       error
+		expectedStatus  int
+		expectedBody    string
+		expectedForce   bool
+		expectedTimeout int
+	}{
+		{
+			name:        "successful stop returns 200 with stopped state",
+			userID:      "user123",
+			machineID:   "machine123",
+			quadletID:   "my-container.container",
+			queryParams: "",
+			mockResponse: &QuadletLifecycleResponse{
+				ID:    "my-container.container",
+				State: "stopped",
+				Unit:  "my-container.service",
+			},
+			expectedStatus:  http.StatusOK,
+			expectedBody:    `{"id":"my-container.container","state":"stopped","unit":"my-container.service"}` + "\n",
+			expectedForce:   false,
+			expectedTimeout: 0,
+		},
+		{
+			name:            "force=true query honoured",
+			userID:          "user123",
+			machineID:       "machine123",
+			quadletID:       "my-container.container",
+			queryParams:     "?force=true",
+			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "stopped", Unit: "my-container.service"},
+			expectedStatus:  http.StatusOK,
+			expectedForce:   true,
+			expectedTimeout: 0,
+		},
+		{
+			name:            "timeout=10 query honoured",
+			userID:          "user123",
+			machineID:       "machine123",
+			quadletID:       "my-container.container",
+			queryParams:     "?timeout=10",
+			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "stopped", Unit: "my-container.service"},
+			expectedStatus:  http.StatusOK,
+			expectedForce:   false,
+			expectedTimeout: 10,
+		},
+		{
+			name:            "force and timeout combined",
+			userID:          "user123",
+			machineID:       "machine123",
+			quadletID:       "my-container.container",
+			queryParams:     "?force=true&timeout=5",
+			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "stopped", Unit: "my-container.service"},
+			expectedStatus:  http.StatusOK,
+			expectedForce:   true,
+			expectedTimeout: 5,
+		},
+		{
+			name:            "invalid timeout is ignored",
+			userID:          "user123",
+			machineID:       "machine123",
+			quadletID:       "my-container.container",
+			queryParams:     "?timeout=notanint",
+			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "stopped", Unit: "my-container.service"},
+			expectedStatus:  http.StatusOK,
+			expectedForce:   false,
+			expectedTimeout: 0,
+		},
+		{
+			name:            "negative timeout is ignored",
+			userID:          "user123",
+			machineID:       "machine123",
+			quadletID:       "my-container.container",
+			queryParams:     "?timeout=-1",
+			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "stopped", Unit: "my-container.service"},
+			expectedStatus:  http.StatusOK,
+			expectedForce:   false,
+			expectedTimeout: 0,
+		},
+		{
+			name:           "not running maps to 400",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockError:      errors.ErrQuadletNotRunning,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "not found maps to 404",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "missing.container",
+			mockError:      errors.ErrQuadletNotFound,
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "connection failed maps to 502",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockError:      errors.ErrConnectionFailed,
+			expectedStatus: http.StatusBadGateway,
+		},
+		{
+			name:           "generic error maps to 500",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockError:      errGeneric,
+			expectedStatus: http.StatusInternalServerError,
+		},
+		{
+			name:           "missing user ID",
+			userID:         "",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "missing quadlet ID",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "",
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedOpts LifecycleOptions
+			var capturedName string
+			mockService := &MockQuadletService{
+				mockStop: func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
+					capturedOpts = opts
+					capturedName = name
+					if tt.mockError != nil {
+						return nil, tt.mockError
+					}
+					return tt.mockResponse, nil
+				},
+			}
+
+			handler := NewQuadletHandler(mockService, nil)
+
+			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+"/stop"+tt.queryParams, nil)
+
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.machineID)
+			rctx.URLParams.Add("quadletId", tt.quadletID)
+
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+
+			handler.Stop(rr, req)
+
+			if status := rr.Code; status != tt.expectedStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+			}
+
+			if tt.expectedBody != "" {
+				assert.Equal(t, tt.expectedBody, rr.Body.String())
+			}
+
+			if tt.expectedStatus == http.StatusOK {
+				assert.Equal(t, tt.expectedForce, capturedOpts.Force, "force flag should match expected")
+				assert.Equal(t, tt.expectedTimeout, capturedOpts.Timeout, "timeout should match expected")
+				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
+			}
+		})
+	}
+}
+
+func TestQuadletHandler_Restart(t *testing.T) {
+	tests := []struct {
+		name            string
+		userID          string
+		machineID       string
+		quadletID       string
+		queryParams     string
+		mockResponse    *QuadletLifecycleResponse
+		mockError       error
+		expectedStatus  int
+		expectedForce   bool
+		expectedTimeout int
+	}{
+		{
+			name:      "successful restart returns 200 with running state and restartedAt",
+			userID:    "user123",
+			machineID: "machine123",
+			quadletID: "my-container.container",
+			mockResponse: &QuadletLifecycleResponse{
+				ID:          "my-container.container",
+				State:       "running",
+				Unit:        "my-container.service",
+				RestartedAt: "2026-08-07T12:00:00Z",
+			},
+			expectedStatus:  http.StatusOK,
+			expectedForce:   false,
+			expectedTimeout: 0,
+		},
+		{
+			name:            "force and timeout honoured",
+			userID:          "user123",
+			machineID:       "machine123",
+			quadletID:       "my-container.container",
+			queryParams:     "?force=true&timeout=20",
+			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "running", Unit: "my-container.service", RestartedAt: "2026-08-07T12:00:00Z"},
+			expectedStatus:  http.StatusOK,
+			expectedForce:   true,
+			expectedTimeout: 20,
+		},
+		{
+			name:           "not running maps to 400",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockError:      errors.ErrQuadletNotRunning,
+			expectedStatus: http.StatusBadRequest,
+		},
+		{
+			name:           "not found maps to 404",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "missing.container",
+			mockError:      errors.ErrQuadletNotFound,
+			expectedStatus: http.StatusNotFound,
+		},
+		{
+			name:           "connection failed maps to 502",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockError:      errors.ErrConnectionFailed,
+			expectedStatus: http.StatusBadGateway,
+		},
+		{
+			name:           "generic error maps to 500",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			mockError:      errGeneric,
+			expectedStatus: http.StatusInternalServerError,
+		},
+		{
+			name:           "missing user ID",
+			userID:         "",
+			machineID:      "machine123",
+			quadletID:      "my-container.container",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "missing quadlet ID",
+			userID:         "user123",
+			machineID:      "machine123",
+			quadletID:      "",
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedOpts LifecycleOptions
+			var capturedName string
+			mockService := &MockQuadletService{
+				mockRestart: func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
+					capturedOpts = opts
+					capturedName = name
+					if tt.mockError != nil {
+						return nil, tt.mockError
+					}
+					return tt.mockResponse, nil
+				},
+			}
+
+			handler := NewQuadletHandler(mockService, nil)
+
+			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+"/restart"+tt.queryParams, nil)
+
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", tt.machineID)
+			rctx.URLParams.Add("quadletId", tt.quadletID)
+
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+
+			handler.Restart(rr, req)
+
+			if status := rr.Code; status != tt.expectedStatus {
+				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+			}
+
+			if tt.expectedStatus == http.StatusOK {
+				assert.Equal(t, tt.expectedForce, capturedOpts.Force, "force flag should match expected")
+				assert.Equal(t, tt.expectedTimeout, capturedOpts.Timeout, "timeout should match expected")
+				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
+				// Restart success body must carry a restartedAt timestamp.
+				assert.Contains(t, rr.Body.String(), "restartedAt", "restart response must include restartedAt")
 			}
 		})
 	}
