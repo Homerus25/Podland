@@ -274,25 +274,35 @@ func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // Runs `systemctl start <unit>` over SSH via the service.
 // Returns 200 with {id, state, unit}, or QUADLET_ALREADY_RUNNING (400) /
 // QUADLET_NOT_FOUND (404) / CONNECTION_FAILED (502) on error.
-func (h *QuadletHandler) Start(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Start quadlet")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
+func parseLifecyclePath(r *http.Request) (userID, machineID, quadletID string, err error) {
+	userID = contextutils.GetUserIDFromContext(r.Context())
 	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
+		return "", "", "", errors.ErrInvalidCredentials
 	}
 
-	machineID := chi.URLParam(r, "id")
+	machineID = chi.URLParam(r, "id")
 	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
+		return "", "", "", errors.NewAppError("MISSING_MACHINE_ID", "Machine ID is required", http.StatusBadRequest)
 	}
 
-	quadletID := chi.URLParam(r, "quadletId")
+	quadletID = chi.URLParam(r, "quadletId")
 	if quadletID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+		return "", "", "", errors.NewAppError("MISSING_QUADLET_ID", "Quadlet ID is required", http.StatusBadRequest)
+	}
+
+	return userID, machineID, quadletID, nil
+}
+
+func (h *QuadletHandler) Start(w http.ResponseWriter, r *http.Request) {
+	slog.InfoContext(r.Context(), "Start quadlet",
+		slog.String("quadletId", chi.URLParam(r, "quadletId")))
+
+	userID, machineID, quadletID, err := parseLifecyclePath(r)
+	if err != nil {
+		if err == errors.ErrInvalidCredentials {
+			slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		}
+		errors.RespondWithError(w, err.(*errors.AppError), contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -311,24 +321,12 @@ func (h *QuadletHandler) Start(w http.ResponseWriter, r *http.Request) {
 // Runs `systemctl stop <unit>` over SSH, honouring the `force` and `timeout`
 // query params (doku/description_api.md:1019-1022).
 func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Stop quadlet")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	quadletID := chi.URLParam(r, "quadletId")
-	if quadletID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+	userID, machineID, quadletID, err := parseLifecyclePath(r)
+	if err != nil {
+		if err == errors.ErrInvalidCredentials {
+			slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		}
+		errors.RespondWithError(w, err.(*errors.AppError), contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -355,24 +353,12 @@ func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
 // Runs `systemctl restart <unit>` over SSH, honouring the `force` and `timeout`
 // query params (doku/description_api.md:1048-1050).
 func (h *QuadletHandler) Restart(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Restart quadlet")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	quadletID := chi.URLParam(r, "quadletId")
-	if quadletID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+	userID, machineID, quadletID, err := parseLifecyclePath(r)
+	if err != nil {
+		if err == errors.ErrInvalidCredentials {
+			slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		}
+		errors.RespondWithError(w, err.(*errors.AppError), contextutils.GetRequestID(r.Context()))
 		return
 	}
 

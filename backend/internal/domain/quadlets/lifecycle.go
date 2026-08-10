@@ -12,14 +12,72 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
-// Lifecycle action constants. Using named constants keeps the action plumbing
-// (precondition check, arg building, exit-code interpretation) consistent
-// across Start/Stop/Restart and typo-proof.
+// lifecycleAction represents a systemd lifecycle operation on a quadlet.
+// Each action knows its own precondition rules, result interpretation,
+// and response construction. This eliminates primitive obsession on action
+// strings and consolidates switch-case logic into type methods.
+type lifecycleAction string
+
 const (
-	actionStart   = "start"
-	actionStop    = "stop"
-	actionRestart = "restart"
+	actionStart   lifecycleAction = "start"
+	actionStop    lifecycleAction = "stop"
+	actionRestart lifecycleAction = "restart"
 )
+
+func (a lifecycleAction) checkPrecondition(state string) error {
+	switch a {
+	case actionStart:
+		if state == "running" {
+			return appErrors.ErrQuadletAlreadyRunning
+		}
+	case actionStop, actionRestart:
+		if state != "running" {
+			return appErrors.ErrQuadletNotRunning
+		}
+	}
+	return nil
+}
+
+func (a lifecycleAction) interpretResult(result sshexec.ExecResult) error {
+	if result.ExitCode == 0 {
+		return nil
+	}
+	stderr := strings.ToLower(result.Stderr)
+
+	if result.ExitCode == 5 || containsAny(stderr, "not found", "not loaded", "no such", "not-loaded") {
+		return appErrors.ErrQuadletNotFound
+	}
+
+	switch a {
+	case actionStart:
+		if containsAny(stderr, "already", "active", "running") {
+			return appErrors.ErrQuadletAlreadyRunning
+		}
+	case actionStop, actionRestart:
+		if containsAny(stderr, "inactive", "not active", "not running", "not-active") {
+			return appErrors.ErrQuadletNotRunning
+		}
+	}
+
+	return fmt.Errorf("systemctl %s failed (exit %d): %s", a, result.ExitCode, result.Stderr)
+}
+
+func (a lifecycleAction) buildResponse(name, unit string) *QuadletLifecycleResponse {
+	resp := &QuadletLifecycleResponse{
+		ID:   name,
+		Unit: unit,
+	}
+	switch a {
+	case actionStart, actionRestart:
+		resp.State = "running"
+	case actionStop:
+		resp.State = "stopped"
+	}
+	if a == actionRestart {
+		resp.RestartedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	return resp
+}
 
 // start starts a stopped quadlet-managed resource by running
 // `systemctl start <unit>` over SSH (via SSHExecInterface from 070-10).
@@ -42,16 +100,16 @@ func (s *QuadletService) Start(ctx context.Context, userID, machineID, name stri
 		return nil, err
 	}
 
-	result, err := s.runSystemctl(ctx, machineID, userID, actionStart, unit, LifecycleOptions{})
+	result, err := s.runSystemctl(ctx, machineID, userID, string(actionStart), unit, LifecycleOptions{})
 	if err != nil {
 		return nil, err
 	}
 
-	if err := interpretLifecycleResult(actionStart, result); err != nil {
+	if err := actionStart.interpretResult(result); err != nil {
 		return nil, err
 	}
 
-	return buildLifecycleResponse(name, unit, actionStart), nil
+	return actionStart.buildResponse(name, unit), nil
 }
 
 // Stop stops a running quadlet-managed resource by running
@@ -68,16 +126,16 @@ func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name strin
 		return nil, err
 	}
 
-	result, err := s.runSystemctl(ctx, machineID, userID, actionStop, unit, opts)
+	result, err := s.runSystemctl(ctx, machineID, userID, string(actionStop), unit, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := interpretLifecycleResult(actionStop, result); err != nil {
+	if err := actionStop.interpretResult(result); err != nil {
 		return nil, err
 	}
 
-	return buildLifecycleResponse(name, unit, actionStop), nil
+	return actionStop.buildResponse(name, unit), nil
 }
 
 // Restart restarts a quadlet-managed resource by running
@@ -93,16 +151,16 @@ func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name st
 		return nil, err
 	}
 
-	result, err := s.runSystemctl(ctx, machineID, userID, actionRestart, unit, opts)
+	result, err := s.runSystemctl(ctx, machineID, userID, string(actionRestart), unit, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := interpretLifecycleResult(actionRestart, result); err != nil {
+	if err := actionRestart.interpretResult(result); err != nil {
 		return nil, err
 	}
 
-	return buildLifecycleResponse(name, unit, actionRestart), nil
+	return actionRestart.buildResponse(name, unit), nil
 }
 
 // resolveForLifecycle performs the shared pre-work for every lifecycle action:
@@ -113,7 +171,7 @@ func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name st
 // The quadlet lookup goes through the podman QuadletList primitive (built
 // inline, matching the rest of the service) so the existence check and
 // unit-name resolution are consistent with the Get/Delete slices.
-func (s *QuadletService) resolveForLifecycle(ctx context.Context, userID, machineID, name, action string) (string, error) {
+func (s *QuadletService) resolveForLifecycle(ctx context.Context, userID, machineID, name string, action lifecycleAction) (string, error) {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return "", appErrors.ErrConnectionFailed
@@ -135,7 +193,7 @@ func (s *QuadletService) resolveForLifecycle(ctx context.Context, userID, machin
 	}
 
 	state := parseStateFromStatus(target.Status)
-	if err := checkLifecyclePrecondition(action, state); err != nil {
+	if err := action.checkPrecondition(state); err != nil {
 		return "", err
 	}
 
@@ -161,6 +219,23 @@ func (s *QuadletService) runSystemctl(ctx context.Context, machineID, userID, ac
 	return result, nil
 }
 
+// buildLifecycleArgs builds the systemctl argument vector for a lifecycle
+// action. force prepends the global `--force` flag; a positive timeout adds
+// `--kill-seconds=<n>` (per the issue's resolved mechanism decision). The
+// action verb and unit are always appended last so the result reads as
+// `systemctl [--force] [--kill-seconds=N] <action> <unit>`.
+func buildLifecycleArgs(action string, unit string, opts LifecycleOptions) []string {
+	var args []string
+	if opts.Force {
+		args = append(args, "--force")
+	}
+	if opts.Timeout > 0 {
+		args = append(args, fmt.Sprintf("--kill-seconds=%d", opts.Timeout))
+	}
+	args = append(args, "--user", action, unit)
+	return args
+}
+
 // --- Pure lifecycle helpers ---
 //
 // These carry the real domain logic for the lifecycle slice and are unit-tested
@@ -171,10 +246,9 @@ func (s *QuadletService) runSystemctl(ctx context.Context, machineID, userID, ac
 
 // resolveUnitName returns the systemd unit name for a quadlet, preferring the
 // UnitName reported by QuadletList and falling back to deriving `<base>.service`
-// from the quadlet name (stripping the resource extension). A nil quadlet is
-// tolerated — the fallback derives from the name alone.
+// from the quadlet name (stripping the resource extension).
 func resolveUnitName(quadlet *entities.ListQuadlet, name string) string {
-	if quadlet != nil && quadlet.UnitName != "" {
+	if quadlet.UnitName != "" {
 		return quadlet.UnitName
 	}
 	return deriveServiceUnit(name)
@@ -189,105 +263,6 @@ func deriveServiceUnit(name string) string {
 		base = name[:idx]
 	}
 	return base + ".service"
-}
-
-// checkLifecyclePrecondition evaluates the wrong-state guard for a lifecycle
-// action against the quadlet's current normalized state. It returns:
-//
-//   - start:    ErrQuadletAlreadyRunning when already running
-//   - stop:     ErrQuadletNotRunning      when not running
-//   - restart:  ErrQuadletNotRunning      when not running
-//
-// "Not running" means any state other than "running" (stopped, unknown, error).
-// Starting from an error/unknown state is permitted so a failed unit can be
-// recovered.
-func checkLifecyclePrecondition(action, state string) error {
-	switch action {
-	case actionStart:
-		if state == "running" {
-			return appErrors.ErrQuadletAlreadyRunning
-		}
-	case actionStop, actionRestart:
-		if state != "running" {
-			return appErrors.ErrQuadletNotRunning
-		}
-	}
-	return nil
-}
-
-// buildLifecycleArgs builds the systemctl argument vector for a lifecycle
-// action. force prepends the global `--force` flag; a positive timeout adds
-// `--kill-seconds=<n>` (per the issue's resolved mechanism decision). The
-// action verb and unit are always appended last so the result reads as
-// `systemctl [--force] [--kill-seconds=N] <action> <unit>`.
-func buildLifecycleArgs(action, unit string, opts LifecycleOptions) []string {
-	var args []string
-	if opts.Force {
-		args = append(args, "--force")
-	}
-	if opts.Timeout > 0 {
-		args = append(args, fmt.Sprintf("--kill-seconds=%d", opts.Timeout))
-	}
-	args = append(args, action, unit)
-	return args
-}
-
-// interpretLifecycleResult maps a non-zero systemctl exit to the appropriate
-// AppError, based on the exit code and stderr content. Returns nil on success
-// (exit 0).
-//
-// This is defensive: the QuadletList pre-check in resolveForLifecycle already
-// rejects wrong-state/not-found before systemctl runs. These mappings catch
-// races (the state changed between the pre-check and the exec) so callers still
-// see the right error code rather than a generic 500.
-func interpretLifecycleResult(action string, result sshexec.ExecResult) error {
-	if result.ExitCode == 0 {
-		return nil
-	}
-	stderr := strings.ToLower(result.Stderr)
-
-	// systemctl exit 5 = "unit ... not found" (unit not loaded). Also match
-	// common phrasings in stderr so a non-5 exit code with a clear not-found
-	// message still maps correctly.
-	if result.ExitCode == 5 || containsAny(stderr, "not found", "not loaded", "no such", "not-loaded") {
-		return appErrors.ErrQuadletNotFound
-	}
-
-	// Wrong-state races: the unit's state shifted between the pre-check and
-	// the exec. Map the systemctl-reported state back to the action's
-	// specific wrong-state error.
-	switch action {
-	case actionStart:
-		if containsAny(stderr, "already", "active", "running") {
-			return appErrors.ErrQuadletAlreadyRunning
-		}
-	case actionStop, actionRestart:
-		if containsAny(stderr, "inactive", "not active", "not running", "not-active") {
-			return appErrors.ErrQuadletNotRunning
-		}
-	}
-
-	return fmt.Errorf("systemctl %s failed (exit %d): %s", action, result.ExitCode, result.Stderr)
-}
-
-// buildLifecycleResponse assembles the success body for a lifecycle action.
-// Start/restart report state "running"; stop reports "stopped". Restart also
-// carries a restartedAt timestamp (ISO8601, per doku/description_api.md:1058).
-func buildLifecycleResponse(name, unit, action string) *QuadletLifecycleResponse {
-	resp := &QuadletLifecycleResponse{
-		ID:   name,
-		Unit: unit,
-	}
-	switch action {
-	case actionStart, actionRestart:
-		resp.State = "running"
-	case actionStop:
-		resp.State = "stopped"
-	}
-	if action == actionRestart {
-		resp.RestartedAt = time.Now().UTC().Format(time.RFC3339)
-	}
-	return resp
 }
 
 // containsAny reports whether s contains any of the substrings. Used by the

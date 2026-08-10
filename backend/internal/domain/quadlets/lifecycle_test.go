@@ -37,17 +37,14 @@ func TestResolveUnitName(t *testing.T) {
 		assert.Equal(t, "web.service", resolveUnitName(q, "web.container"))
 	})
 
-	t.Run("nil quadlet derives from name", func(t *testing.T) {
-		assert.Equal(t, "web.service", resolveUnitName(nil, "web.container"))
-	})
-
 	t.Run("derives for pod resource", func(t *testing.T) {
 		q := &entities.ListQuadlet{Name: "grp.pod", UnitName: ""}
 		assert.Equal(t, "grp.service", resolveUnitName(q, "grp.pod"))
 	})
 
 	t.Run("name without extension appends .service", func(t *testing.T) {
-		assert.Equal(t, "barename.service", resolveUnitName(nil, "barename"))
+		q := &entities.ListQuadlet{Name: "barename", UnitName: ""}
+		assert.Equal(t, "barename.service", resolveUnitName(q, "barename"))
 	})
 }
 
@@ -73,95 +70,95 @@ func TestDeriveServiceUnit(t *testing.T) {
 
 func TestCheckLifecyclePrecondition(t *testing.T) {
 	t.Run("start of stopped resource is allowed", func(t *testing.T) {
-		assert.NoError(t, checkLifecyclePrecondition(actionStart, "stopped"))
+		assert.NoError(t, actionStart.checkPrecondition("stopped"))
 	})
 
 	t.Run("start of unknown state is allowed", func(t *testing.T) {
-		assert.NoError(t, checkLifecyclePrecondition(actionStart, "unknown"))
+		assert.NoError(t, actionStart.checkPrecondition("unknown"))
 	})
 
 	t.Run("start of running resource is rejected", func(t *testing.T) {
 		assert.Equal(t, appErrors.ErrQuadletAlreadyRunning,
-			checkLifecyclePrecondition(actionStart, "running"))
+			actionStart.checkPrecondition("running"))
 	})
 
 	t.Run("stop of running resource is allowed", func(t *testing.T) {
-		assert.NoError(t, checkLifecyclePrecondition(actionStop, "running"))
+		assert.NoError(t, actionStop.checkPrecondition("running"))
 	})
 
 	t.Run("stop of stopped resource is rejected", func(t *testing.T) {
 		assert.Equal(t, appErrors.ErrQuadletNotRunning,
-			checkLifecyclePrecondition(actionStop, "stopped"))
+			actionStop.checkPrecondition("stopped"))
 	})
 
 	t.Run("stop of unknown state is rejected", func(t *testing.T) {
 		assert.Equal(t, appErrors.ErrQuadletNotRunning,
-			checkLifecyclePrecondition(actionStop, "unknown"))
+			actionStop.checkPrecondition("unknown"))
 	})
 
 	t.Run("restart of running resource is allowed", func(t *testing.T) {
-		assert.NoError(t, checkLifecyclePrecondition(actionRestart, "running"))
+		assert.NoError(t, actionRestart.checkPrecondition("running"))
 	})
 
 	t.Run("restart of stopped resource is rejected", func(t *testing.T) {
 		assert.Equal(t, appErrors.ErrQuadletNotRunning,
-			checkLifecyclePrecondition(actionRestart, "stopped"))
+			actionRestart.checkPrecondition("stopped"))
 	})
 
 	t.Run("start of error state is allowed (attempt recovery)", func(t *testing.T) {
-		assert.NoError(t, checkLifecyclePrecondition(actionStart, "error"))
+		assert.NoError(t, actionStart.checkPrecondition("error"))
 	})
 }
 
 func TestBuildLifecycleArgs(t *testing.T) {
 	t.Run("start has no force/timeout flags", func(t *testing.T) {
-		got := buildLifecycleArgs(actionStart, "web.service", LifecycleOptions{})
+		got := buildLifecycleArgs("start", "web.service", LifecycleOptions{})
 		assert.Equal(t, []string{"start", "web.service"}, got)
 	})
 
 	t.Run("stop without options", func(t *testing.T) {
-		got := buildLifecycleArgs(actionStop, "web.service", LifecycleOptions{})
+		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{})
 		assert.Equal(t, []string{"stop", "web.service"}, got)
 	})
 
 	t.Run("stop with force", func(t *testing.T) {
-		got := buildLifecycleArgs(actionStop, "web.service", LifecycleOptions{Force: true})
+		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true})
 		assert.Equal(t, []string{"--force", "stop", "web.service"}, got)
 	})
 
 	t.Run("stop with timeout", func(t *testing.T) {
-		got := buildLifecycleArgs(actionStop, "web.service", LifecycleOptions{Timeout: 10})
+		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 10})
 		assert.Equal(t, []string{"--kill-seconds=10", "stop", "web.service"}, got)
 	})
 
 	t.Run("stop with force and timeout", func(t *testing.T) {
-		got := buildLifecycleArgs(actionStop, "web.service", LifecycleOptions{Force: true, Timeout: 5})
+		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true, Timeout: 5})
 		assert.Equal(t, []string{"--force", "--kill-seconds=5", "stop", "web.service"}, got)
 	})
 
 	t.Run("restart with force and timeout", func(t *testing.T) {
-		got := buildLifecycleArgs(actionRestart, "grp.service", LifecycleOptions{Force: true, Timeout: 30})
+		got := buildLifecycleArgs("restart", "grp.service", LifecycleOptions{Force: true, Timeout: 30})
 		assert.Equal(t, []string{"--force", "--kill-seconds=30", "restart", "grp.service"}, got)
 	})
 
 	t.Run("zero timeout is omitted", func(t *testing.T) {
-		got := buildLifecycleArgs(actionStop, "web.service", LifecycleOptions{Timeout: 0})
+		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 0})
 		assert.Equal(t, []string{"stop", "web.service"}, got)
 	})
 
 	t.Run("negative timeout is omitted", func(t *testing.T) {
-		got := buildLifecycleArgs(actionStop, "web.service", LifecycleOptions{Timeout: -1})
+		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: -1})
 		assert.Equal(t, []string{"stop", "web.service"}, got)
 	})
 }
 
 func TestInterpretLifecycleResult(t *testing.T) {
 	t.Run("exit zero is success", func(t *testing.T) {
-		assert.NoError(t, interpretLifecycleResult(actionStart, sshexec.ExecResult{ExitCode: 0}))
+		assert.NoError(t, actionStart.interpretResult(sshexec.ExecResult{ExitCode: 0}))
 	})
 
 	t.Run("exit 5 (unit not loaded) maps to not found", func(t *testing.T) {
-		err := interpretLifecycleResult(actionStart, sshexec.ExecResult{
+		err := actionStart.interpretResult(sshexec.ExecResult{
 			ExitCode: 5,
 			Stderr:   "Failed to start web.service: Unit web.service not found.",
 		})
@@ -169,7 +166,7 @@ func TestInterpretLifecycleResult(t *testing.T) {
 	})
 
 	t.Run("stderr 'not found' maps to not found regardless of exit code", func(t *testing.T) {
-		err := interpretLifecycleResult(actionStop, sshexec.ExecResult{
+		err := actionStop.interpretResult(sshexec.ExecResult{
 			ExitCode: 1,
 			Stderr:   "Unit web.service is not loaded: no such file",
 		})
@@ -177,7 +174,7 @@ func TestInterpretLifecycleResult(t *testing.T) {
 	})
 
 	t.Run("start with 'already active' stderr maps to already running", func(t *testing.T) {
-		err := interpretLifecycleResult(actionStart, sshexec.ExecResult{
+		err := actionStart.interpretResult(sshexec.ExecResult{
 			ExitCode: 1,
 			Stderr:   "Unit is already active",
 		})
@@ -185,7 +182,7 @@ func TestInterpretLifecycleResult(t *testing.T) {
 	})
 
 	t.Run("stop with 'inactive' stderr maps to not running", func(t *testing.T) {
-		err := interpretLifecycleResult(actionStop, sshexec.ExecResult{
+		err := actionStop.interpretResult(sshexec.ExecResult{
 			ExitCode: 1,
 			Stderr:   "Unit is inactive",
 		})
@@ -193,7 +190,7 @@ func TestInterpretLifecycleResult(t *testing.T) {
 	})
 
 	t.Run("restart with 'not running' stderr maps to not running", func(t *testing.T) {
-		err := interpretLifecycleResult(actionRestart, sshexec.ExecResult{
+		err := actionRestart.interpretResult(sshexec.ExecResult{
 			ExitCode: 1,
 			Stderr:   "Unit is not running",
 		})
@@ -201,7 +198,7 @@ func TestInterpretLifecycleResult(t *testing.T) {
 	})
 
 	t.Run("unrecognized failure is a generic error", func(t *testing.T) {
-		err := interpretLifecycleResult(actionStop, sshexec.ExecResult{
+		err := actionStop.interpretResult(sshexec.ExecResult{
 			ExitCode: 1,
 			Stderr:   "something exploded",
 		})
@@ -215,7 +212,7 @@ func TestInterpretLifecycleResult(t *testing.T) {
 
 func TestBuildLifecycleResponse(t *testing.T) {
 	t.Run("start response is running", func(t *testing.T) {
-		got := buildLifecycleResponse("web.container", "web.service", actionStart)
+		got := actionStart.buildResponse("web.container", "web.service")
 		assert.Equal(t, &QuadletLifecycleResponse{
 			ID:    "web.container",
 			State: "running",
@@ -224,7 +221,7 @@ func TestBuildLifecycleResponse(t *testing.T) {
 	})
 
 	t.Run("stop response is stopped", func(t *testing.T) {
-		got := buildLifecycleResponse("web.container", "web.service", actionStop)
+		got := actionStop.buildResponse("web.container", "web.service")
 		assert.Equal(t, &QuadletLifecycleResponse{
 			ID:    "web.container",
 			State: "stopped",
@@ -233,7 +230,7 @@ func TestBuildLifecycleResponse(t *testing.T) {
 	})
 
 	t.Run("restart response is running with restartedAt", func(t *testing.T) {
-		got := buildLifecycleResponse("web.container", "web.service", actionRestart)
+		got := actionRestart.buildResponse("web.container", "web.service")
 		assert.Equal(t, "running", got.State)
 		assert.Equal(t, "web.container", got.ID)
 		assert.Equal(t, "web.service", got.Unit)
@@ -339,17 +336,24 @@ func TestQuadletService_Restart_InvocationShape(t *testing.T) {
 		"Error should not be a connection error — connection should have succeeded")
 }
 
-// TestQuadletService_Lifecycle_NilSSHExec verifies that a missing SSH-exec
-// dependency is caught defensively (ErrInternalError) rather than panicking on
-// a nil-dereference. In practice resolveForLifecycle fails first under the mock
-// connection, so this guards the runSystemctl path directly.
+// TestQuadletService_Lifecycle_NilSSHExec tests the defensive nil-check in
+// runSystemctl. When a nil sshExec is configured, the service should return
+// ErrInternalError rather than panic.
 func TestQuadletService_Lifecycle_NilSSHExec(t *testing.T) {
-	// Drive runSystemctl in isolation by asserting the nil-dep branch. The
-	// service method itself would fail at QuadletList first; calling the pure
-	// seam indirectly is not possible, so we assert the guard at the unit
-	// level by confirming NewQuadletService with a nil sshExec still
-	// constructs and the connection-failure path still works.
-	service := NewQuadletService(testutils.NewMockConnectionManagerWithError(errors.New("nope")), nil)
-	assert.NotNil(t, service)
-	assert.Nil(t, service.sshExec)
+	service := NewQuadletService(testutils.NewMockConnectionManager(), nil)
+	ctx := context.Background()
+
+	result, err := service.runSystemctl(ctx, "test-machine", "test-user", "start", "test.service", LifecycleOptions{})
+	assert.Error(t, err, "Should return error when sshExec is nil")
+	assert.Equal(t, appErrors.ErrInternalError, err, "Should map to ErrInternalError")
+	assert.Equal(t, sshexec.ExecResult{}, result, "Should return empty result")
+}
+
+// TestQuadletService_Lifecycle_ServiceConstruction tests that a service can
+// be constructed with nil dependencies for defensive programming, matching
+// the established pattern in this package.
+func TestQuadletService_Lifecycle_ServiceConstruction(t *testing.T) {
+	service := NewQuadletService(testutils.NewMockConnectionManager(), nil)
+	assert.NotNil(t, service, "Service should construct even with nil sshExec")
+	assert.Nil(t, service.sshExec, "sshExec should be nil")
 }

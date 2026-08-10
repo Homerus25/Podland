@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/yourorg/podland/backend/internal/sshexec"
 )
 
 // TestMockUserRepository tests the mock user repository functionality
@@ -583,5 +584,105 @@ func TestMockPodmanConnection(t *testing.T) {
 		result, err := conn.Execute("test-command", "arg1", "arg2")
 		assert.NoError(t, err)
 		assert.Contains(t, result.(string), "executed: test-command")
+	})
+}
+
+// TestMockSSHExec tests the MockSSHExec functionality across its three
+// construction modes (default, fixed-result, fixed-error, custom-func) plus
+// the call-recording helpers. Mirrors the MockEncryptionService test shape.
+func TestMockSSHExec(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("default returns zero-exit empty result with no error", func(t *testing.T) {
+		m := NewMockSSHExec()
+
+		res, err := m.Exec(ctx, "m", "u", "uptime", sshexec.ExecOptions{})
+
+		assert.NoError(t, err)
+		assert.Equal(t, sshexec.ExecResult{Stdout: "", Stderr: "", ExitCode: 0}, res)
+	})
+
+	t.Run("WithResult returns the configured result", func(t *testing.T) {
+		want := sshexec.ExecResult{Stdout: "active\n", ExitCode: 0}
+		m := NewMockSSHExecWithResult(want)
+
+		res, err := m.Exec(ctx, "m", "u", "systemctl", sshexec.ExecOptions{Args: []string{"is-active", "web"}})
+
+		assert.NoError(t, err)
+		assert.Equal(t, want, res)
+	})
+
+	t.Run("WithError returns the configured error", func(t *testing.T) {
+		wantErr := errors.New("dial tcp: connection refused")
+		m := NewMockSSHExecWithError(wantErr)
+
+		res, err := m.Exec(ctx, "m", "u", "uptime", sshexec.ExecOptions{})
+
+		assert.ErrorIs(t, err, wantErr)
+		assert.Equal(t, sshexec.ExecResult{}, res)
+	})
+
+	t.Run("WithFunc delegates each call to the function", func(t *testing.T) {
+		calls := 0
+		m := NewMockSSHExecWithFunc(func(_ context.Context, _, _, cmd string, _ sshexec.ExecOptions) (sshexec.ExecResult, error) {
+			calls++
+			if cmd == "fail" {
+				return sshexec.ExecResult{ExitCode: 1, Stderr: "nope"}, nil
+			}
+			return sshexec.ExecResult{ExitCode: 0, Stdout: cmd}, nil
+		})
+
+		r1, err := m.Exec(ctx, "m", "u", "ok", sshexec.ExecOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, 0, r1.ExitCode)
+		assert.Equal(t, "ok", r1.Stdout)
+
+		r2, err := m.Exec(ctx, "m", "u", "fail", sshexec.ExecOptions{})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, r2.ExitCode)
+		assert.Equal(t, "nope", r2.Stderr)
+
+		assert.Equal(t, 2, calls, "the custom func must be invoked for every Exec call")
+	})
+
+	t.Run("records every Exec invocation for assertion", func(t *testing.T) {
+		m := NewMockSSHExec()
+		opts := sshexec.ExecOptions{Args: []string{"start", "web.service"}}
+
+		_, _ = m.Exec(ctx, "machine-1", "user-1", "systemctl", opts)
+		_, _ = m.Exec(ctx, "machine-2", "user-2", "echo", sshexec.ExecOptions{})
+
+		assert.Equal(t, 2, m.CallCount())
+
+		calls := m.Calls()
+		assert.Len(t, calls, 2)
+		assert.Equal(t, "machine-1", calls[0].MachineID)
+		assert.Equal(t, "user-1", calls[0].UserID)
+		assert.Equal(t, "systemctl", calls[0].Command)
+		assert.Equal(t, []string{"start", "web.service"}, calls[0].Opts.Args)
+
+		assert.Equal(t, "machine-2", calls[1].MachineID)
+		assert.Equal(t, "echo", calls[1].Command)
+		assert.Empty(t, calls[1].Opts.Args)
+	})
+
+	t.Run("Calls returns a defensive copy", func(t *testing.T) {
+		m := NewMockSSHExec()
+		_, _ = m.Exec(ctx, "m", "u", "echo", sshexec.ExecOptions{})
+
+		calls := m.Calls()
+		calls[0].Command = "mutated"
+
+		// The mock's internal record must not be affected by callers
+		// mutating the returned slice.
+		fresh := m.Calls()
+		assert.Equal(t, "echo", fresh[0].Command)
+	})
+
+	t.Run("satisfies sshexec.SSHExecInterface", func(t *testing.T) {
+		// Compile-time check: any code accepting sshexec.SSHExecInterface
+		// can be handed a *MockSSHExec in tests. This is the whole point
+		// of the mock — pinning it as a test prevents accidental drift.
+		var _ sshexec.SSHExecInterface = (*MockSSHExec)(nil)
 	})
 }

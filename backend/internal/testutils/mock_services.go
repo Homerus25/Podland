@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/yourorg/podland/backend/internal/sshexec"
 	"go.podman.io/podman/v6/pkg/bindings"
 )
 
@@ -169,6 +170,85 @@ func (m *MockConnectionManager) GetConnection(machineID, userID string) (context
 }
 
 func (m *MockConnectionManager) Release(machineID string) {
+}
+
+// MockSSHExec implements sshexec.SSHExecInterface for tests. It supports
+// both error-injection (the simple cases: a single fixed result or a single
+// fixed error) and custom-function injection (per-call scripting, used when
+// a test needs to vary behaviour across multiple Exec calls).
+//
+// Mirrors the MockEncryptionService mock pattern (error fields + func fields).
+type MockSSHExec struct {
+	execResult sshexec.ExecResult
+	execError  error
+	execFunc   func(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error)
+	execCalls  []MockSSHExecCall
+}
+
+// MockSSHExecCall records a single Exec invocation, for assertion in tests.
+type MockSSHExecCall struct {
+	MachineID string
+	UserID    string
+	Command   string
+	Opts      sshexec.ExecOptions
+}
+
+// NewMockSSHExec returns a MockSSHExec whose Exec succeeds with a zero
+// exit code and empty output.
+func NewMockSSHExec() *MockSSHExec {
+	return &MockSSHExec{}
+}
+
+// NewMockSSHExecWithResult returns a MockSSHExec whose Exec always returns
+// the given result (and no error). Use this for happy-path quadlet-service
+// tests where the remote systemctl produced a specific stdout/stderr/exit.
+func NewMockSSHExecWithResult(result sshexec.ExecResult) *MockSSHExec {
+	return &MockSSHExec{execResult: result}
+}
+
+// NewMockSSHExecWithError returns a MockSSHExec whose Exec always fails with
+// the given error. Use this to exercise SSH-layer failure handling in
+// callers (e.g. CONNECTION_FAILED mapping).
+func NewMockSSHExecWithError(err error) *MockSSHExec {
+	return &MockSSHExec{execError: err}
+}
+
+// NewMockSSHExecWithFunc returns a MockSSHExec that delegates each Exec to
+// the supplied function. Use this when a test needs to vary behaviour across
+// calls (e.g. first call returns "already running", second returns success).
+func NewMockSSHExecWithFunc(f func(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error)) *MockSSHExec {
+	return &MockSSHExec{execFunc: f}
+}
+
+// Exec implements sshexec.SSHExecInterface.
+func (m *MockSSHExec) Exec(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+	m.execCalls = append(m.execCalls, MockSSHExecCall{
+		MachineID: machineID,
+		UserID:    userID,
+		Command:   command,
+		Opts:      opts,
+	})
+	if m.execFunc != nil {
+		return m.execFunc(ctx, machineID, userID, command, opts)
+	}
+	if m.execError != nil {
+		return sshexec.ExecResult{}, m.execError
+	}
+	return m.execResult, nil
+}
+
+// Calls returns a snapshot of every Exec invocation recorded by the mock.
+// Tests use this to assert that callers invoked SSH exec with the expected
+// command + args (e.g. systemctl start <unit>).
+func (m *MockSSHExec) Calls() []MockSSHExecCall {
+	out := make([]MockSSHExecCall, len(m.execCalls))
+	copy(out, m.execCalls)
+	return out
+}
+
+// CallCount returns the number of times Exec has been invoked.
+func (m *MockSSHExec) CallCount() int {
+	return len(m.execCalls)
 }
 
 // Helper function to create a test machine service with all mock dependencies
