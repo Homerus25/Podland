@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -502,10 +503,15 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create a callback writer that converts QuadletLogEvent to NDJSON
+	// Track write errors to stop streaming when client disconnects
+	var writeError atomic.Bool
 	logCallback := func(event QuadletLogEvent) {
+		if writeError.Load() {
+			return
+		}
 		if err := ndjsonWriter.Write(event); err != nil {
 			slog.ErrorContext(r.Context(), "Failed to write log event", slog.Any("error", err))
-			return
+			writeError.Store(true)
 		}
 	}
 
@@ -524,8 +530,9 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			// Emit error event to the stream
 			errorEvent := map[string]interface{}{
-				"level":   "ERROR",
-				"message": err.Error(),
+				"timestamp": time.Now().UTC().Format(time.RFC3339),
+				"level":     "ERROR",
+				"message":   err.Error(),
 			}
 			if appErr, ok := err.(*errors.AppError); ok {
 				errorEvent["code"] = appErr.Code
@@ -536,9 +543,10 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	case <-disconnectChan:
 		// Client disconnected, emit cancellation event
 		ndjsonWriter.Write(map[string]interface{}{
-			"level":   "ERROR",
-			"code":    "OPERATION_CANCELLED",
-			"message": "Client disconnected",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+			"level":     "ERROR",
+			"code":      "OPERATION_CANCELLED",
+			"message":   "Client disconnected",
 		})
 		// Wait for streaming to complete and avoid goroutine leak
 		go func() {
