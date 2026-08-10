@@ -190,3 +190,38 @@ func resourceToExtension(resource string) string {
 		return ".container"
 	}
 }
+
+// QuadletLogsResponse represents the response for quadlet logs (non-streaming)
+type QuadletLogsResponse struct {
+	// Quadlet ID (the quadlet name)
+	ID string `json:"id"`
+	// Quadlet logs content (multiline string)
+	Logs string `json:"logs"`
+}
+
+// QuadletLogEvent represents a single log line in streaming mode
+type QuadletLogEvent struct {
+	// ISO8601 timestamp
+	Timestamp string `json:"timestamp"`
+	// Log level (INFO, WARN, ERROR, etc.)
+	Level string `json:"level"`
+	// Log message content
+	Message string `json:"message"`
+}
+
+// resolveManagedContainerName resolves the managed container name for a quadlet.
+// For container-type quadlets, the managed container name is the quadlet name;
+// for pod-type quadlets, we use the Pod container name from the ListQuadlet result.
+func resolveManagedContainerName(quadlet *entities.ListQuadlet, quadletName string) string {
+	if quadlet == nil {
+		return quadletName
+	}
+
+	// For pod-type quadlets, use the Pod container name if available
+	if quadlet.Pod != "" {
+		return quadlet.Pod
+	}
+
+	// For container-type quadlets and others, use the quadlet name
+	return quadletName
+}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -170,6 +171,8 @@ type MockQuadletService struct {
 	mockStart   func(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error)
 	mockStop    func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
 	mockRestart func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
+	mockGetLogs         func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error)
+	mockGetLogsWithStream func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error
 }
 
 func (m *MockQuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
@@ -226,6 +229,20 @@ func (m *MockQuadletService) Restart(ctx context.Context, userID, machineID, nam
 		return m.mockRestart(ctx, userID, machineID, name, opts)
 	}
 	return nil, nil
+}
+
+func (m *MockQuadletService) GetLogs(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error) {
+	if m.mockGetLogs != nil {
+		return m.mockGetLogs(ctx, userID, machineID, quadletName, since, tail)
+	}
+	return nil, nil
+}
+
+func (m *MockQuadletService) GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
+	if m.mockGetLogsWithStream != nil {
+		return m.mockGetLogsWithStream(ctx, userID, machineID, quadletName, since, tail, logCallback)
+	}
+	return nil
 }
 
 func TestQuadletHandler_Get(t *testing.T) {

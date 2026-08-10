@@ -113,42 +113,42 @@ func TestCheckLifecyclePrecondition(t *testing.T) {
 func TestBuildLifecycleArgs(t *testing.T) {
 	t.Run("start has no force/timeout flags", func(t *testing.T) {
 		got := buildLifecycleArgs("start", "web.service", LifecycleOptions{})
-		assert.Equal(t, []string{"start", "web.service"}, got)
+		assert.Equal(t, []string{"--user", "start", "web.service"}, got)
 	})
 
 	t.Run("stop without options", func(t *testing.T) {
 		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{})
-		assert.Equal(t, []string{"stop", "web.service"}, got)
+		assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
 	})
 
 	t.Run("stop with force", func(t *testing.T) {
 		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true})
-		assert.Equal(t, []string{"--force", "stop", "web.service"}, got)
+		assert.Equal(t, []string{"--force", "--user", "stop", "web.service"}, got)
 	})
 
 	t.Run("stop with timeout", func(t *testing.T) {
 		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 10})
-		assert.Equal(t, []string{"--kill-seconds=10", "stop", "web.service"}, got)
+		assert.Equal(t, []string{"--kill-seconds=10", "--user", "stop", "web.service"}, got)
 	})
 
 	t.Run("stop with force and timeout", func(t *testing.T) {
 		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true, Timeout: 5})
-		assert.Equal(t, []string{"--force", "--kill-seconds=5", "stop", "web.service"}, got)
+		assert.Equal(t, []string{"--force", "--kill-seconds=5", "--user", "stop", "web.service"}, got)
 	})
 
 	t.Run("restart with force and timeout", func(t *testing.T) {
 		got := buildLifecycleArgs("restart", "grp.service", LifecycleOptions{Force: true, Timeout: 30})
-		assert.Equal(t, []string{"--force", "--kill-seconds=30", "restart", "grp.service"}, got)
+		assert.Equal(t, []string{"--force", "--kill-seconds=30", "--user", "restart", "grp.service"}, got)
 	})
 
 	t.Run("zero timeout is omitted", func(t *testing.T) {
 		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 0})
-		assert.Equal(t, []string{"stop", "web.service"}, got)
+		assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
 	})
 
 	t.Run("negative timeout is omitted", func(t *testing.T) {
 		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: -1})
-		assert.Equal(t, []string{"stop", "web.service"}, got)
+		assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
 	})
 }
 

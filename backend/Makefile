@@ -56,6 +56,9 @@ migrate:
 	@cd migrations && go run .
 	@echo "Migrations complete"
 
+initDB:
+	cd cmd/initdb && go run .
+
 # Generate JWT keys
 keys:
 	chmod +x scripts/generate-keys.sh

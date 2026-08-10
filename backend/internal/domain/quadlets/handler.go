@@ -5,11 +5,13 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/errors"
+	"github.com/yourorg/podland/backend/internal/streaming"
 )
 
 // QuadletHandler handles quadlet requests
@@ -419,7 +421,130 @@ func respondLifecycleError(w http.ResponseWriter, r *http.Request, err error, ac
 
 // GetLogs handles getting quadlet logs
 func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Get quadlet logs")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	quadletID := chi.URLParam(r, "quadletId")
+	if quadletID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	// Parse query parameters
+	// follow defaults to false
+	follow := false
+	if followParam := r.URL.Query().Get("follow"); followParam != "" {
+		if parsed, err := strconv.ParseBool(followParam); err == nil {
+			follow = parsed
+		}
+	}
+
+	// Parse since parameter (ISO8601 timestamp)
+	since := time.Time{}
+	if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
+		parsedSince, err := time.Parse(time.RFC3339, sinceParam)
+		if err != nil {
+			errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_SINCE_PARAM", "Invalid since parameter format (use RFC3339)", contextutils.GetRequestID(r.Context()))
+			slog.ErrorContext(r.Context(), "Invalid since parameter", slog.Any("error", err), slog.String("since", sinceParam))
+			return
+		}
+		since = parsedSince
+	}
+
+	// Parse tail parameter (number of lines, -1 for all)
+	tail := int64(-1)
+	if tailParam := r.URL.Query().Get("tail"); tailParam != "" {
+		if parsed, err := strconv.ParseInt(tailParam, 10, 64); err == nil {
+			tail = parsed
+		}
+	}
+
+	// Non-streaming mode
+	if !follow {
+		logs, err := h.service.GetLogs(r.Context(), userID, machineID, quadletID, since, tail)
+		if err != nil {
+			if appErr, ok := err.(*errors.AppError); ok {
+				errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+				return
+			}
+			errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+			slog.ErrorContext(r.Context(), "get logs", slog.Any("error", err), slog.String("userID", userID), slog.String("machineID", machineID), slog.String("quadletId", quadletID))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(logs)
+		return
+	}
+
+	// Streaming mode (follow=true)
+	streaming.SetNDJSONHeaders(w)
+	w.WriteHeader(http.StatusOK)
+
+	ndjsonWriter, err := streaming.NewNDJSONWriter(w)
+	if err != nil {
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Failed to create NDJSON writer", slog.Any("error", err))
+		return
+	}
+
+	// Create a callback writer that converts QuadletLogEvent to NDJSON
+	logCallback := func(event QuadletLogEvent) {
+		if err := ndjsonWriter.Write(event); err != nil {
+			slog.ErrorContext(r.Context(), "Failed to write log event", slog.Any("error", err))
+			return
+		}
+	}
+
+	// Create a disconnect channel
+	disconnectChan := streaming.DisconnectChan(r.Context())
+
+	// Start streaming logs in a goroutine
+	doneChan := make(chan error, 1)
+	go func() {
+		doneChan <- h.service.GetLogsWithStream(r.Context(), userID, machineID, quadletID, since, tail, logCallback)
+	}()
+
+	// Wait for either completion or client disconnect
+	select {
+	case err := <-doneChan:
+		if err != nil {
+			// Emit error event to the stream
+			errorEvent := map[string]interface{}{
+				"level":   "ERROR",
+				"message": err.Error(),
+			}
+			if appErr, ok := err.(*errors.AppError); ok {
+				errorEvent["code"] = appErr.Code
+				errorEvent["message"] = appErr.Message
+			}
+			ndjsonWriter.Write(errorEvent)
+		}
+	case <-disconnectChan:
+		// Client disconnected, emit cancellation event
+		ndjsonWriter.Write(map[string]interface{}{
+			"level":   "ERROR",
+			"code":    "OPERATION_CANCELLED",
+			"message": "Client disconnected",
+		})
+		// Wait for streaming to complete and avoid goroutine leak
+		go func() {
+			<-doneChan
+		}()
+	}
 }
 
 // Generate handles generating a quadlet
