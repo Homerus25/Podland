@@ -254,3 +254,49 @@ func resolveManagedContainerName(quadlet *entities.ListQuadlet, quadletName stri
 	// For container-type quadlets and others, use the quadlet name
 	return quadletName
 }
+
+// QuadletImportRequest represents a request to import quadlets from uploaded content.
+// Each entry contains the quadlet name, resource type, and file content.
+type QuadletImportRequest struct {
+	// List of quadlets to import. At least one entry is required.
+	Quadlets []QuadletImportEntry `json:"quadlets" validate:"required,min=1"`
+}
+
+// QuadletImportEntry represents a single quadlet to import.
+type QuadletImportEntry struct {
+	// Name of the quadlet (without extension). Required.
+	Name string `json:"name" validate:"required,min=1"`
+	// Resource type. Must be one of: container, pod, image, volume, network. Required.
+	Resource string `json:"resource" validate:"required,oneof=container pod image volume network"`
+	// Raw quadlet file content. Required.
+	Content string `json:"content" validate:"required,min=1"`
+}
+
+// QuadletImportResponse represents the response from importing quadlets.
+// Returns separate arrays for successfully imported and failed quadlets.
+type QuadletImportResponse struct {
+	// Successfully imported quadlets
+	Imported []QuadletImportResult `json:"imported"`
+	// Failed imports with error details
+	Failed []QuadletImportError `json:"failed"`
+}
+
+// QuadletImportResult represents a successfully imported quadlet.
+type QuadletImportResult struct {
+	// Unique identifier for the quadlet (the quadlet name)
+	ID string `json:"id"`
+	// Name of the quadlet
+	Name string `json:"name"`
+	// Path to the installed quadlet file
+	Path string `json:"path"`
+	// State of the quadlet (reported as "unknown" after import)
+	State string `json:"state"`
+}
+
+// QuadletImportError represents a failed quadlet import with error details.
+type QuadletImportError struct {
+	// Name of the quadlet that failed to import
+	Name string `json:"name"`
+	// Error message explaining why the import failed
+	Error string `json:"error"`
+}

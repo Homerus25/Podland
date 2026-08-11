@@ -1178,15 +1178,20 @@ Generate a quadlet file from an existing resource (container or pod).
 
 ### POST /api/machines/{id}/quadlets/import
 
-Import quadlets from a directory or archive on the remote machine.
+Import quadlets from uploaded content.
 
 **Authentication:** Required
 
 **Request:**
 ```json
 {
-  "path": "string (required, path to quadlet file or directory)",
-  "recursive": boolean (optional, default: false)
+  "quadlets": [
+    {
+      "name": "string (required, quadlet name without extension)",
+      "resource": "container|pod|image|volume|network (required)",
+      "content": "string (required, quadlet file content)"
+    }
+  ]
 }
 ```
 
@@ -1203,7 +1208,7 @@ Import quadlets from a directory or archive on the remote machine.
   ],
   "failed": [
     {
-      "path": "string",
+      "name": "string",
       "error": "string"
     }
   ]
@@ -1211,7 +1216,7 @@ Import quadlets from a directory or archive on the remote machine.
 ```
 
 **Response (Error):**
-- 400: `VALIDATION_FAILED`, `INVALID_PATH`
+- 400: `VALIDATION_FAILED`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
 - 404: `MACHINE_NOT_FOUND`

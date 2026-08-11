@@ -162,19 +162,20 @@ func TestQuadletHandler_List(t *testing.T) {
 	}
 }
 
-type MockQuadletService struct {
-	mockList    func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
-	mockGet     func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
-	mockCreate  func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
-	mockUpdate  func(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
-	mockDelete  func(ctx context.Context, userID, machineID, name string, force, stop bool) error
-	mockStart   func(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error)
-	mockStop    func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
-	mockRestart func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
-	mockGetLogs         func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error)
-	mockGetLogsWithStream func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error
-	mockGenerate func(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error)
-}
+ type MockQuadletService struct {
+ 	mockList    func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
+ 	mockGet     func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
+ 	mockCreate  func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
+ 	mockUpdate  func(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
+ 	mockDelete  func(ctx context.Context, userID, machineID, name string, force, stop bool) error
+ 	mockStart   func(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error)
+ 	mockStop    func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
+ 	mockRestart func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
+ 	mockGetLogs         func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error)
+ 	mockGetLogsWithStream func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error
+ 	mockGenerate func(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error)
+ 	mockImport  func(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error)
+ }
 
 func (m *MockQuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
 	if m.mockList != nil {
@@ -249,6 +250,13 @@ func (m *MockQuadletService) GetLogsWithStream(ctx context.Context, userID, mach
 func (m *MockQuadletService) Generate(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error) {
 	if m.mockGenerate != nil {
 		return m.mockGenerate(ctx, userID, machineID, req)
+	}
+	return nil, nil
+}
+
+func (m *MockQuadletService) Import(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error) {
+	if m.mockImport != nil {
+		return m.mockImport(ctx, userID, machineID, req)
 	}
 	return nil, nil
 }

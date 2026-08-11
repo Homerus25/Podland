@@ -34,6 +34,7 @@ type QuadletServiceInterface interface {
 	GetLogs(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error)
 	GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error
 	Generate(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error)
+	Import(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error)
 }
 
 // ListFilters represents the filters for listing quadlets.
@@ -875,4 +876,76 @@ func generatePodQuadlet(inspect *entities.PodInspectReport) (string, error) {
 	}
 
 	return builder.String(), nil
+}
+
+// Import installs multiple quadlets on the specified machine from uploaded content.
+// Each entry in the request is wrapped as an in-memory tar and passed to podman's
+// QuadletInstall primitive. The method handles partial failures by collecting
+// successful and failed imports separately.
+func (s *QuadletService) Import(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error) {
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
+	if err != nil {
+		return nil, appErrors.ErrConnectionFailed
+	}
+
+	defer s.connManager.Release(machineID)
+
+	response := &QuadletImportResponse{
+		Imported: make([]QuadletImportResult, 0),
+		Failed:   make([]QuadletImportError, 0),
+	}
+
+	for _, entry := range req.Quadlets {
+		importResult, err := s.importSingleQuadlet(connCtx, entry)
+		if err != nil {
+			response.Failed = append(response.Failed, QuadletImportError{
+				Name:  entry.Name,
+				Error: err.Error(),
+			})
+		} else {
+			response.Imported = append(response.Imported, importResult)
+		}
+	}
+
+	return response, nil
+}
+
+// importSingleQuadlet imports a single quadlet entry using QuadletInstall.
+// Returns the import result or an error explaining why the import failed.
+func (s *QuadletService) importSingleQuadlet(connCtx context.Context, entry QuadletImportEntry) (QuadletImportResult, error) {
+	fileName := entry.Name + resourceToExtension(entry.Resource)
+	body, err := createTarBody(fileName, []byte(entry.Content))
+	if err != nil {
+		return QuadletImportResult{}, fmt.Errorf("failed to build quadlet tar body: %w", err)
+	}
+
+	options := new(quadlets.QuadletInstallOptions).WithReloadSystemd(true)
+
+	report, err := quadlets.Install(connCtx, options, body)
+	if err != nil {
+		if isAlreadyExistsError(err) {
+			return QuadletImportResult{}, fmt.Errorf("quadlet already exists")
+		}
+		return QuadletImportResult{}, fmt.Errorf("failed to install quadlet: %w", err)
+	}
+
+	if report != nil {
+		for _, qErr := range report.QuadletErrors {
+			if qErr != nil && isAlreadyExistsError(qErr) {
+				return QuadletImportResult{}, fmt.Errorf("quadlet already exists")
+			}
+		}
+	}
+
+	installedPath := ""
+	if report != nil {
+		installedPath = firstInstalledPath(report.InstalledQuadlets)
+	}
+
+	return QuadletImportResult{
+		ID:    entry.Name,
+		Name:  entry.Name,
+		Path:  installedPath,
+		State: "unknown",
+	}, nil
 }
