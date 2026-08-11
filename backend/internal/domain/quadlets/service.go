@@ -680,6 +680,67 @@ func (w *quadletLogEventWriter) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
+// resourceType represents a resource type that can be converted to a quadlet.
+// Each resource type knows its own inspection logic, name extraction,
+// and conversion logic. This eliminates primitive obsession on resource type
+// strings and consolidates switch-case logic into type methods, following
+// the lifecycleAction pattern from lifecycle.go.
+type resourceType string
+
+const (
+	resourceTypeContainer resourceType = "container"
+	resourceTypePod       resourceType = "pod"
+)
+
+func (rt resourceType) inspectAndConvert(ctx context.Context, engine *tunnel.ContainerEngine, resourceID string) (string, string, error) {
+	switch rt {
+	case resourceTypeContainer:
+		containerReports, _, err := engine.ContainerInspect(ctx, []string{resourceID}, entities.InspectOptions{})
+		if err != nil {
+			return "", "", appErrors.ErrContainerNotFound
+		}
+		if len(containerReports) == 0 {
+			return "", "", appErrors.ErrContainerNotFound
+		}
+
+		inspectReport := containerReports[0]
+		quadletName := inspectReport.Name
+		if quadletName == "" {
+			quadletName = resourceID
+		}
+
+		content, err := generateContainerQuadlet(containerReports[0])
+		if err != nil {
+			return "", "", appErrors.ErrQuadletGenerationFailed
+		}
+		return quadletName, content, nil
+
+	case resourceTypePod:
+		podReports, _, err := engine.PodInspect(ctx, []string{resourceID}, entities.InspectOptions{})
+		if err != nil {
+			return "", "", appErrors.ErrPodNotFound
+		}
+		if len(podReports) == 0 {
+			return "", "", appErrors.ErrPodNotFound
+		}
+
+		inspectReport := podReports[0]
+		quadletName := inspectReport.Name
+		if quadletName == "" {
+			quadletName = resourceID
+		}
+
+		content, err := generatePodQuadlet(podReports[0])
+		if err != nil {
+			return "", "", appErrors.ErrQuadletGenerationFailed
+		}
+		return quadletName, content, nil
+
+	default:
+		return "", "", appErrors.ErrInvalidRequest
+	}
+}
+
 // Generate generates a quadlet file from an existing container or pod on the
 // remote machine. It inspects the source resource via the podman API and
 // converts it to quadlet format using the pkg/systemd/quadlet converter.
@@ -694,54 +755,10 @@ func (s *QuadletService) Generate(ctx context.Context, userID, machineID string,
 		ClientCtx: connCtx,
 	}
 
-	var content string
-	var quadletName string
-
-	switch req.ResourceType {
-	case "container":
-		containerReports, _, err := containerEngine.ContainerInspect(connCtx, []string{req.ResourceID}, entities.InspectOptions{})
-		if err != nil {
-			return nil, appErrors.ErrContainerNotFound
-		}
-
-		if len(containerReports) == 0 {
-			return nil, appErrors.ErrContainerNotFound
-		}
-
-		inspectReport := containerReports[0]
-		quadletName = inspectReport.Name
-		if quadletName == "" {
-			quadletName = req.ResourceID
-		}
-
-		content, err = generateContainerQuadlet(containerReports[0])
-		if err != nil {
-			return nil, appErrors.ErrQuadletGenerationFailed
-		}
-
-	case "pod":
-		podReports, _, err := containerEngine.PodInspect(connCtx, []string{req.ResourceID}, entities.InspectOptions{})
-		if err != nil {
-			return nil, appErrors.ErrPodNotFound
-		}
-
-		if len(podReports) == 0 {
-			return nil, appErrors.ErrPodNotFound
-		}
-
-		inspectReport := podReports[0]
-		quadletName = inspectReport.Name
-		if quadletName == "" {
-			quadletName = req.ResourceID
-		}
-
-		content, err = generatePodQuadlet(podReports[0])
-		if err != nil {
-			return nil, appErrors.ErrQuadletGenerationFailed
-		}
-
-	default:
-		return nil, appErrors.ErrInvalidRequest
+	rt := resourceType(req.ResourceType)
+	quadletName, content, err := rt.inspectAndConvert(connCtx, containerEngine, req.ResourceID)
+	if err != nil {
+		return nil, err
 	}
 
 	return &QuadletGenerateResponse{

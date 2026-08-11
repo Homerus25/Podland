@@ -572,12 +572,6 @@ func (h *QuadletHandler) Generate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quadletID := chi.URLParam(r, "quadletId")
-	if quadletID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
 	var request QuadletGenerateRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", contextutils.GetRequestID(r.Context()))

@@ -1434,14 +1434,7 @@ func TestQuadletHandler_Generate(t *testing.T) {
 			requestBody:    `{"resourceId":"my-container","resourceType":"container"}`,
 			expectedStatus: http.StatusBadRequest,
 		},
-		{
-			name:           "missing quadlet ID",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "",
-			requestBody:    `{"resourceId":"my-container","resourceType":"container"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
+
 		{
 			name:           "malformed JSON body",
 			userID:         "user123",
