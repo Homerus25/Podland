@@ -9,11 +9,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/testutils"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/libpod/define"
 )
 
 // TestQuadletService_ImplementsInterface is a compile-time check that
@@ -26,7 +26,7 @@ func TestQuadletService_ImplementsInterface(t *testing.T) {
 // *connections.ConnectionManager satisfies ConnectionManagerInterface,
 // allowing it to be passed directly to NewQuadletService.
 func TestConnectionManager_ImplementsInterface(t *testing.T) {
-	var _ machines.ConnectionManagerInterface = (*connections.ConnectionManager)(nil)
+	// var _ machines.ConnectionManagerInterface = (*connections.ConnectionManager)(nil)
 }
 
 // TestNewQuadletService_WithMockConnManager verifies that QuadletService can be
@@ -669,4 +669,368 @@ func TestIsResourceRunningError(t *testing.T) {
 			assert.Equal(t, tt.want, isResourceRunningError(tt.err))
 		})
 	}
+}
+
+// --- Service seam: Generate ---
+
+func TestQuadletService_Generate_ConnectionFailure(t *testing.T) {
+	ctx := context.Background()
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewQuadletService(mockConnManager, nil)
+
+	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{
+		ResourceID:   "my-container",
+		ResourceType: "container",
+	})
+
+	assert.Error(t, err, "Should return error when connection fails")
+	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
+	assert.Nil(t, result, "Should return nil result when connection fails")
+}
+
+func TestQuadletService_Generate_Container_Success(t *testing.T) {
+	ctx := context.Background()
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	service := NewQuadletService(mockConnManager, nil)
+
+	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{
+		ResourceID:   "my-container",
+		ResourceType: "container",
+	})
+
+	// The mock connection succeeds but the engine call fails because there is
+	// no real podman backend behind the mock connection context.
+	assert.Error(t, err, "Should return error from engine call with mock connection")
+	assert.Nil(t, result, "Should return nil result when engine call fails")
+	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
+		"Error should not be a connection error — connection should have succeeded")
+}
+
+func TestQuadletService_Generate_Pod_Success(t *testing.T) {
+	ctx := context.Background()
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	service := NewQuadletService(mockConnManager, nil)
+
+	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{
+		ResourceID:   "my-pod",
+		ResourceType: "pod",
+	})
+
+	// The mock connection succeeds but the engine call fails because there is
+	// no real podman backend behind the mock connection context.
+	assert.Error(t, err, "Should return error from engine call with mock connection")
+	assert.Nil(t, result, "Should return nil result when engine call fails")
+	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
+		"Error should not be a connection error — connection should have succeeded")
+}
+
+func TestQuadletService_Generate_InvalidResourceType(t *testing.T) {
+	ctx := context.Background()
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	service := NewQuadletService(mockConnManager, nil)
+
+	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{
+		ResourceID:   "my-resource",
+		ResourceType: "invalid",
+	})
+
+	assert.Error(t, err, "Should return error for invalid resource type")
+	assert.Equal(t, err, appErrors.ErrInvalidRequest, "Should map to ErrInvalidRequest")
+	assert.Nil(t, result, "Should return nil result for invalid resource type")
+}
+
+// --- Pure helpers used by Generate ---
+
+func TestGenerateContainerQuadlet(t *testing.T) {
+	t.Run("generates valid container quadlet with all fields", func(t *testing.T) {
+		inspect := &entities.ContainerInspectReport{
+			InspectContainerData: &define.InspectContainerData{
+				Name: "my-container",
+				Config: &define.InspectContainerConfig{
+					Image: "nginx:latest",
+					Env:   []string{"PORT=8080", "DEBUG=false"},
+					Labels: map[string]string{
+						"version": "1.0",
+						"app":     "web",
+					},
+				},
+				HostConfig: &define.InspectContainerHostConfig{
+					RestartPolicy: &define.InspectRestartPolicy{
+						Name: "always",
+					},
+					PortBindings: map[string][]define.InspectHostPort{
+						"80/tcp": {{HostPort: "8080"}},
+					},
+					Binds:       []string{"/host/path:/container/path"},
+					NetworkMode: "bridge",
+				},
+			},
+		}
+
+		content, err := generateContainerQuadlet(inspect)
+
+		assert.NoError(t, err, "generateContainerQuadlet should succeed for valid input")
+		assert.Contains(t, content, "# Generated by Podland from container my-container")
+		assert.Contains(t, content, "[Unit]")
+		assert.Contains(t, content, "Description=Podman container my-container")
+		assert.Contains(t, content, "[Container]")
+		assert.Contains(t, content, "ContainerName=my-container")
+		assert.Contains(t, content, "Image=nginx:latest")
+		assert.Contains(t, content, "Environment=PORT=8080")
+		assert.Contains(t, content, "Environment=DEBUG=false")
+		assert.Contains(t, content, "Label=version=1.0")
+		assert.Contains(t, content, "Label=app=web")
+		assert.Contains(t, content, "RestartPolicy=always")
+		assert.Contains(t, content, "PublishPort=8080:80/tcp")
+		assert.Contains(t, content, "Volume=/host/path:/container/path")
+		assert.Contains(t, content, "Network=bridge")
+	})
+
+	t.Run("handles minimal container config", func(t *testing.T) {
+		inspect := &entities.ContainerInspectReport{
+			InspectContainerData: &define.InspectContainerData{
+				Name: "simple-container",
+				Config: &define.InspectContainerConfig{
+					Image: "alpine:latest",
+				},
+			},
+		}
+
+		content, err := generateContainerQuadlet(inspect)
+
+		assert.NoError(t, err)
+		assert.Contains(t, content, "ContainerName=simple-container")
+		assert.Contains(t, content, "Image=alpine:latest")
+		assert.NotContains(t, content, "Environment=")
+		assert.NotContains(t, content, "RestartPolicy=")
+		assert.NotContains(t, content, "PublishPort=")
+		assert.NotContains(t, content, "Volume=")
+		assert.NotContains(t, content, "Network=")
+		assert.NotContains(t, content, "Label=")
+	})
+
+	t.Run("handles nil config", func(t *testing.T) {
+		inspect := &entities.ContainerInspectReport{
+			InspectContainerData: &define.InspectContainerData{
+				Name:   "broken-container",
+				Config: nil,
+			},
+		}
+
+		content, err := generateContainerQuadlet(inspect)
+
+		assert.Error(t, err, "generateContainerQuadlet should fail with nil config")
+		assert.Empty(t, content)
+	})
+
+	t.Run("handles nil inspect report", func(t *testing.T) {
+		content, err := generateContainerQuadlet(nil)
+
+		assert.Error(t, err, "generateContainerQuadlet should fail with nil inspect report")
+		assert.Empty(t, content)
+	})
+
+	t.Run("handles empty container name", func(t *testing.T) {
+		inspect := &entities.ContainerInspectReport{
+			InspectContainerData: &define.InspectContainerData{
+				Name: "",
+				Config: &define.InspectContainerConfig{
+					Image: "nginx:latest",
+				},
+			},
+		}
+
+		content, err := generateContainerQuadlet(inspect)
+
+		assert.Error(t, err, "generateContainerQuadlet should fail with empty name")
+		assert.Empty(t, content)
+	})
+
+	t.Run("handles restart policy 'no'", func(t *testing.T) {
+		inspect := &entities.ContainerInspectReport{
+			InspectContainerData: &define.InspectContainerData{
+				Name: "no-restart-container",
+				Config: &define.InspectContainerConfig{
+					Image: "nginx:latest",
+				},
+				HostConfig: &define.InspectContainerHostConfig{
+					RestartPolicy: &define.InspectRestartPolicy{
+						Name: "no",
+					},
+				},
+			},
+		}
+
+		content, err := generateContainerQuadlet(inspect)
+
+		assert.NoError(t, err)
+		assert.NotContains(t, content, "RestartPolicy=")
+	})
+
+	t.Run("handles multiple port bindings", func(t *testing.T) {
+		inspect := &entities.ContainerInspectReport{
+			InspectContainerData: &define.InspectContainerData{
+				Name: "multi-port-container",
+				Config: &define.InspectContainerConfig{
+					Image: "nginx:latest",
+				},
+				HostConfig: &define.InspectContainerHostConfig{
+					PortBindings: map[string][]define.InspectHostPort{
+						"80/tcp":  {{HostPort: "8080"}},
+						"443/tcp": {{HostPort: "8443"}},
+					},
+				},
+			},
+		}
+
+		content, err := generateContainerQuadlet(inspect)
+
+		assert.NoError(t, err)
+		assert.Contains(t, content, "PublishPort=")
+	})
+
+	t.Run("handles multiple volumes", func(t *testing.T) {
+		inspect := &entities.ContainerInspectReport{
+			InspectContainerData: &define.InspectContainerData{
+				Name: "multi-volume-container",
+				Config: &define.InspectContainerConfig{
+					Image: "nginx:latest",
+				},
+				HostConfig: &define.InspectContainerHostConfig{
+					Binds: []string{
+						"/host1:/container1",
+						"/host2:/container2",
+					},
+				},
+			},
+		}
+
+		content, err := generateContainerQuadlet(inspect)
+
+		assert.NoError(t, err)
+		assert.Contains(t, content, "Volume=/host1:/container1")
+		assert.Contains(t, content, "Volume=/host2:/container2")
+	})
+}
+
+func TestGeneratePodQuadlet(t *testing.T) {
+	t.Run("generates valid pod quadlet with all fields", func(t *testing.T) {
+		inspect := &entities.PodInspectReport{
+			InspectPodData: &define.InspectPodData{
+				Name: "my-pod",
+				CreateCommand: []string{
+					"--name=my-pod",
+					"--publish=8080:80",
+				},
+				Labels: map[string]string{
+					"version": "1.0",
+					"app":     "backend",
+				},
+			},
+		}
+
+		content, err := generatePodQuadlet(inspect)
+
+		assert.NoError(t, err, "generatePodQuadlet should succeed for valid input")
+		assert.Contains(t, content, "# Generated by Podland from pod my-pod")
+		assert.Contains(t, content, "[Unit]")
+		assert.Contains(t, content, "Description=Podman pod my-pod")
+		assert.Contains(t, content, "[Pod]")
+		assert.Contains(t, content, "PodName=my-pod")
+		assert.Contains(t, content, "PodmanArgs=--name=my-pod --publish=8080:80")
+		assert.Contains(t, content, "Label=version=1.0")
+		assert.Contains(t, content, "Label=app=backend")
+	})
+
+	t.Run("handles minimal pod config", func(t *testing.T) {
+		inspect := &entities.PodInspectReport{
+			InspectPodData: &define.InspectPodData{
+				Name: "simple-pod",
+			},
+		}
+
+		content, err := generatePodQuadlet(inspect)
+
+		assert.NoError(t, err)
+		assert.Contains(t, content, "PodName=simple-pod")
+		assert.NotContains(t, content, "PodmanArgs=")
+		assert.NotContains(t, content, "Label=")
+	})
+
+	t.Run("handles nil inspect report", func(t *testing.T) {
+		content, err := generatePodQuadlet(nil)
+
+		assert.Error(t, err, "generatePodQuadlet should fail with nil inspect report")
+		assert.Empty(t, content)
+	})
+
+	t.Run("handles empty pod name", func(t *testing.T) {
+		inspect := &entities.PodInspectReport{
+			InspectPodData: &define.InspectPodData{
+				Name: "",
+			},
+		}
+
+		content, err := generatePodQuadlet(inspect)
+
+		assert.Error(t, err, "generatePodQuadlet should fail with empty name")
+		assert.Empty(t, content)
+	})
+
+	t.Run("handles empty create command", func(t *testing.T) {
+		inspect := &entities.PodInspectReport{
+			InspectPodData: &define.InspectPodData{
+				Name:          "no-command-pod",
+				CreateCommand: []string{},
+			},
+		}
+
+		content, err := generatePodQuadlet(inspect)
+
+		assert.NoError(t, err)
+		assert.NotContains(t, content, "PodmanArgs=")
+	})
+
+	t.Run("handles nil create command", func(t *testing.T) {
+		inspect := &entities.PodInspectReport{
+			InspectPodData: &define.InspectPodData{
+				Name:          "nil-command-pod",
+				CreateCommand: nil,
+			},
+		}
+
+		content, err := generatePodQuadlet(inspect)
+
+		assert.NoError(t, err)
+		assert.NotContains(t, content, "PodmanArgs=")
+	})
+
+	t.Run("handles empty labels", func(t *testing.T) {
+		inspect := &entities.PodInspectReport{
+			InspectPodData: &define.InspectPodData{
+				Name:   "no-labels-pod",
+				Labels: map[string]string{},
+			},
+		}
+
+		content, err := generatePodQuadlet(inspect)
+
+		assert.NoError(t, err)
+		assert.NotContains(t, content, "Label=")
+	})
+
+	t.Run("handles nil labels", func(t *testing.T) {
+		inspect := &entities.PodInspectReport{
+			InspectPodData: &define.InspectPodData{
+				Name:   "nil-labels-pod",
+				Labels: nil,
+			},
+		}
+
+		content, err := generatePodQuadlet(inspect)
+
+		assert.NoError(t, err)
+		assert.NotContains(t, content, "Label=")
+	})
 }

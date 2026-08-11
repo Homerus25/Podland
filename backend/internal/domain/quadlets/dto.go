@@ -179,6 +179,35 @@ func parseStateFromStatus(status string) string {
 	}
 }
 
+// QuadletGenerateRequest represents a request to generate a quadlet from an existing
+// container or pod on the remote machine.
+type QuadletGenerateRequest struct {
+	// ID of the container or pod to generate a quadlet from. Required.
+	ResourceID string `json:"resourceId" validate:"required,min=1"`
+	// Type of resource to generate from. Must be either "container" or "pod". Required.
+	ResourceType string `json:"resourceType" validate:"required,oneof=container pod"`
+}
+
+// QuadletGenerateResponse represents the response from generating a quadlet.
+// The response includes the generated quadlet content with state "unknown" since
+// the quadlet is not installed or started by this endpoint.
+type QuadletGenerateResponse struct {
+	// Unique identifier for the quadlet (the quadlet name)
+	ID string `json:"id"`
+	// Name of the quadlet
+	Name string `json:"name"`
+	// Path to the quadlet file (empty since not installed)
+	Path string `json:"path,omitempty"`
+	// Systemd unit name (empty since not installed)
+	Unit string `json:"unit,omitempty"`
+	// Resource type (container or pod)
+	Resource string `json:"resource"`
+	// State of the quadlet (always "unknown" for generated quadlets)
+	State string `json:"state"`
+	// Generated quadlet file content
+	Content string `json:"content"`
+}
+
 // resourceToExtension maps a resource type to its quadlet filename extension.
 // This is the inverse of deriveResourceFromPath for the contract's resource enum
 // (container, pod, image, volume, network). Unknown resources default to ".container".

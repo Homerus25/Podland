@@ -555,9 +555,57 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Generate handles generating a quadlet
+// Generate handles generating a quadlet from an existing container or pod
 func (h *QuadletHandler) Generate(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not implemented", http.StatusNotImplemented)
+	slog.InfoContext(r.Context(), "Generate quadlet")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	quadletID := chi.URLParam(r, "quadletId")
+	if quadletID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	var request QuadletGenerateRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Invalid request body", slog.Any("error", err))
+		return
+	}
+
+	validate := validator.New()
+	if err := validate.Struct(request); err != nil {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error(), contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Validation failed", slog.Any("error", err))
+		return
+	}
+
+	quadlet, err := h.service.Generate(r.Context(), userID, machineID, request)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "generate", slog.Any("error", err), slog.String("userID", userID), slog.String("machineID", machineID))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(quadlet)
 }
 
 // Import handles importing quadlets

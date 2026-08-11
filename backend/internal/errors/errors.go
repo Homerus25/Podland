@@ -58,6 +58,7 @@ var (
 	ErrContainerAlreadyRunning  = NewAppError("CONTAINER_ALREADY_RUNNING", "Container is already running", http.StatusBadRequest)
 	ErrContainerNotRunning      = NewAppError("CONTAINER_NOT_RUNNING", "Container is not running", http.StatusBadRequest)
 	ErrContainerCreationFailed  = NewAppError("CONTAINER_CREATION_FAILED", "Failed to create container", http.StatusInternalServerError)
+	ErrPodNotFound              = NewAppError("POD_NOT_FOUND", "Pod not found", http.StatusNotFound)
 )
 
 // Images
