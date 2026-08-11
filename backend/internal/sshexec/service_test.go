@@ -79,6 +79,11 @@ func (d *fakeDialer) Invalidate(machineID string) {
 	d.invalidated = append(d.invalidated, machineID)
 }
 
+// Close satisfies the dialer interface. The fake never starts a cleanup
+// goroutine, so this is a no-op that must be safe to call repeatedly —
+// internal/app.App.Close may call it more than once.
+func (d *fakeDialer) Close() error { return nil }
+
 // --- Compile-time interface checks ---
 
 func TestService_ImplementsSSHExecInterface(t *testing.T) {
@@ -249,4 +254,49 @@ func TestService_Exec_ContextCancellationDuringRun(t *testing.T) {
 	<-runner.started
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Equal(t, ExecResult{}, res)
+}
+
+// --- Service.Close ---
+
+// TestService_Close_StopsDialerCleanupGoroutine verifies that Close stops
+// the production dialer's background cleanup goroutine AND blocks until it
+// has exited — mirroring connections.ConnectionManager.Stop. The blocking
+// contract is what internal/app.App.Close relies on so the integration
+// harness (080-01) doesn't leak goroutines between subtests.
+//
+// We can't observe the goroutine directly, so we assert Close returns
+// without error and is idempotent. The blocking-until-exit guarantee is
+// exercised via the deadline-style test in app_test.go.
+func TestService_Close_StopsDialerCleanupGoroutine(t *testing.T) {
+	// Use a real sshDialer (not a fake) so the cleanup goroutine is
+	// actually running. CleanupInterval must be > 0 to start the loop.
+	d := newSSHDialer(sshDialerConfig{
+		maxSize:         10,
+		idleTimeout:     15 * time.Minute,
+		cleanupInterval: 50 * time.Millisecond,
+	})
+	svc := newServiceWithDialer(d)
+
+	// Close must not error and must be idempotent. Idempotency is
+	// critical: App.Close may be called multiple times (once via the
+	// prod defer, once via the test cleanup), and the second call must
+	// not panic on a double-close of stopCh.
+	assert.NoError(t, svc.Close())
+	assert.NoError(t, svc.Close())
+}
+
+// TestService_Close_NoOpWhenDialerHasNoCleanup verifies that Close is safe
+// to call on a Service whose dialer was constructed without the cleanup
+// goroutine (cleanupInterval == 0). This mirrors the test-dialer paths and
+// the production constructor's zero-value default for tests.
+func TestService_Close_NoOpWhenDialerHasNoCleanup(t *testing.T) {
+	d := newSSHDialer(sshDialerConfig{
+		maxSize:         10,
+		cleanupInterval: 0,
+	})
+	svc := newServiceWithDialer(d)
+
+	assert.NotPanics(t, func() {
+		_ = svc.Close()
+	})
 }

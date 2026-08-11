@@ -20,6 +20,17 @@ type ConnectionManager struct {
 	connectionQueue   chan connectionRequest
 	mu                sync.Mutex
 	activeConnections map[string]bool
+
+	// stopCh signals processQueue to exit. Closed by Stop.
+	stopCh chan struct{}
+	// stoppedCh is closed by processQueue when it has fully exited,
+	// letting Stop block until the goroutine is gone.
+	stoppedCh chan struct{}
+
+	// stopOnce makes Stop idempotent — internal/app.App.Close() promises
+	// "safe to call any number of times"; this keeps Stop safe to call
+	// repeatedly without panicking on a double-close of stopCh.
+	stopOnce sync.Once
 }
 
 type connectionRequest struct {
@@ -49,6 +60,8 @@ func NewConnectionManager(
 		queueTimeout:      queueTimeout,
 		connectionQueue:   make(chan connectionRequest, maxConcurrent),
 		activeConnections: make(map[string]bool),
+		stopCh:            make(chan struct{}),
+		stoppedCh:         make(chan struct{}),
 	}
 }
 
@@ -102,26 +115,47 @@ func (m *ConnectionManager) Run() {
 	go m.processQueue()
 }
 
-// processQueue processes connection requests from the queue
+// processQueue processes connection requests from the queue. It exits when
+// either the queue channel is closed or Stop is called, closing stoppedCh on
+// its way out so Stop can block until the goroutine is gone.
 func (m *ConnectionManager) processQueue() {
-	for req := range m.connectionQueue {
-		connCtx, err := m.cache.GetOrCreateContext(context.Background(), req.machineID, req.userID)
-
-		// Send response
-		response := connectionResponse{
-			connCtx: connCtx,
-			err:     err,
-		}
-
-		// Try to send response, but don't block if receiver is gone
+	defer close(m.stoppedCh)
+	for {
 		select {
-		case req.response <- response:
-			// Response sent successfully
-		default:
-			// Receiver is not listening anymore
-			// Connection cleanup is handled automatically by Go's HTTP client
+		case req, ok := <-m.connectionQueue:
+			if !ok {
+				return
+			}
+			connCtx, err := m.cache.GetOrCreateContext(context.Background(), req.machineID, req.userID)
+
+			// Send response
+			response := connectionResponse{
+				connCtx: connCtx,
+				err:     err,
+			}
+
+			// Try to send response, but don't block if receiver is gone
+			select {
+			case req.response <- response:
+				// Response sent successfully
+			default:
+				// Receiver is not listening anymore
+				// Connection cleanup is handled automatically by Go's HTTP client
+			}
+		case <-m.stopCh:
+			return
 		}
 	}
+}
+
+// Stop signals the processQueue goroutine to exit and blocks until it has
+// terminated. Safe to call any number of times — subsequent calls are no-ops
+// that return immediately.
+func (m *ConnectionManager) Stop() {
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+	})
+	<-m.stoppedCh
 }
 
 func (m *ConnectionManager) Release(machineID string) {

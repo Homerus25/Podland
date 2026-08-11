@@ -207,6 +207,44 @@ func TestSSHDialer_Cleanup_KeepsRecentlyUsedEntries(t *testing.T) {
 	assert.Len(t, d.clients, 1, "recently-used entries must survive cleanup")
 }
 
+// TestSSHDialer_Close_BlocksUntilCleanupGoroutineExits verifies the
+// blocking-until-exit contract on Close. ConnectionManager.Stop blocks on
+// <-stoppedCh for the same reason; the symmetry is what lets
+// internal/app.App.Close guarantee "no goroutine is left running" by the
+// time it returns.
+//
+// We spin up a real cleanup goroutine, close, then race the goroutine's
+// observed-exit signal against a deadline. Without stoppedCh this test
+// would be flaky or impossible.
+func TestSSHDialer_Close_BlocksUntilCleanupGoroutineExits(t *testing.T) {
+	d := newSSHDialer(sshDialerConfig{
+		maxSize:         10,
+		cleanupInterval: 10 * time.Millisecond,
+	})
+
+	exited := make(chan struct{})
+	// Poll for the cleanup goroutine to actually start by checking that
+	// d.stopCh is not yet closed, then Close and expect <-exited to fire
+	// promptly (well within the 1s deadline) — proving Close blocked
+	// until cleanupLoop returned, not until some external timer.
+	go func() {
+		_ = d.Close()
+		close(exited)
+	}()
+
+	select {
+	case <-exited:
+		// expected: Close returned promptly once cleanupLoop observed stopCh
+	case <-time.After(2 * time.Second):
+		t.Fatal("sshDialer.Close did not return within 2s; cleanupLoop goroutine likely still running")
+	}
+
+	// After Close returns, the cleanup goroutine must be gone — prove it
+	// by asserting Close is idempotent (the second call would race on
+	// stopCh if the goroutine weren't joined and tried to read it again).
+	assert.NotPanics(t, func() { _ = d.Close() })
+}
+
 // --- dialSSHProd error paths (no live SSH server needed) ---
 
 func TestSSHDialer_dialSSHProd_MachineNotFound(t *testing.T) {

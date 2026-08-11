@@ -112,6 +112,15 @@ func newServiceWithDialer(d dialer) *Service {
 	return &Service{dialer: d}
 }
 
+// Close stops background goroutines owned by the dialer (the cleanup loop)
+// and releases cached SSH clients. Safe to call any number of times.
+//
+// Used by internal/app.App.Close so the in-process test harness and the
+// production server share the same shutdown path.
+func (s *Service) Close() error {
+	return s.dialer.Close()
+}
+
 // Exec implements SSHExecInterface.
 //
 // The command string and opts.Args are concatenated into a single

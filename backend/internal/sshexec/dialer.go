@@ -23,6 +23,11 @@ type dialer interface {
 	// next Dial re-dials. Called by the Service after a real session
 	// failure (the cached client is likely stale).
 	Invalidate(machineID string)
+	// Close stops any background goroutines owned by the dialer (the
+	// cleanup loop) and releases cached clients. It must be safe to call
+	// multiple times. Used by Service.Close so internal/app.App.Close can
+	// shut the whole backend down without leaking goroutines.
+	Close() error
 }
 
 // sessionRunner runs a single command on a remote machine. Each Dial returns
@@ -72,6 +77,15 @@ type sshDialer struct {
 	mu      sync.Mutex
 	clients map[string]*sshClientEntry
 	stopCh  chan struct{}
+	// stoppedCh is closed by cleanupLoop on its way out so Close can block
+	// until the goroutine has truly exited. nil when no cleanup goroutine
+	// was started (cleanupInterval == 0); in that case Close doesn't wait.
+	// The pointer is set once in newSSHDialer before the goroutine starts
+	// and never modified after, so reading it in Close is race-free.
+	stoppedCh chan struct{}
+	// stopOnce makes Close idempotent so repeat callers don't observe a
+	// panic on a double-close of stopCh.
+	stopOnce sync.Once
 
 	// dialCount counts how many times dialSSH has been invoked. Test-only
 	// observable; production never reads it. Lives behind d.mu so the
@@ -107,6 +121,7 @@ func newSSHDialer(cfg sshDialerConfig) *sshDialer {
 	}
 	d.dialSSH = d.dialSSHProd
 	if cfg.cleanupInterval > 0 {
+		d.stoppedCh = make(chan struct{})
 		go d.cleanupLoop()
 	}
 	return d
@@ -148,6 +163,33 @@ func (d *sshDialer) Invalidate(machineID string) {
 	}
 }
 
+// Close stops the cleanup goroutine (blocking until it has exited) and
+// drops all cached clients. Safe to call any number of times — sync.Once
+// guards the stopCh close so repeat callers don't observe a panic, and
+// waiting on an already-closed stoppedCh returns immediately.
+//
+// If no cleanup goroutine was started (cleanupInterval == 0) Close returns
+// without blocking — there's nothing to join.
+//
+// Mirrors connections.ConnectionManager.Stop so internal/app.App.Close has
+// symmetric "no goroutine left running" guarantees across both background
+// loops it owns.
+func (d *sshDialer) Close() error {
+	d.stopOnce.Do(func() {
+		close(d.stopCh)
+	})
+	if d.stoppedCh != nil {
+		<-d.stoppedCh
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for id, entry := range d.clients {
+		_ = entry.client.Close()
+		delete(d.clients, id)
+	}
+	return nil
+}
+
 // evictLRU drops the entry with the oldest lastUsed. Must be called with
 // d.mu held.
 //
@@ -174,8 +216,11 @@ func (d *sshDialer) evictLRU() {
 	}
 }
 
-// cleanupLoop periodically drops idle clients older than IdleTimeout.
+// cleanupLoop periodically drops idle clients older than IdleTimeout. It
+// closes stoppedCh on exit so Close can block until the goroutine has
+// truly terminated (mirroring connections.ConnectionManager.processQueue).
 func (d *sshDialer) cleanupLoop() {
+	defer close(d.stoppedCh)
 	ticker := time.NewTicker(d.cleanupInterval)
 	defer ticker.Stop()
 	for {
