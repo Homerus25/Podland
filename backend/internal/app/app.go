@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimid "github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 	"github.com/yourorg/podland/backend/internal/config"
 	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/auth"
@@ -38,6 +39,7 @@ import (
 	"github.com/yourorg/podland/backend/internal/models"
 	"github.com/yourorg/podland/backend/internal/sshexec"
 	"github.com/yourorg/podland/backend/migrations"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // App owns every backend resource and background goroutine constructed by
@@ -276,4 +278,38 @@ func (a *App) Close() error {
 		}
 	})
 	return a.closeErr
+}
+
+// SeedUser inserts a user with the given username and plaintext password
+// (bcrypt-hashed with bcrypt.DefaultCost, matching cmd/initdb) into the
+// App's database. It is intended for the in-process integration harness
+// (PRD 080-01), which needs a seeded user before the first real
+// POST /api/auth/login can fly; production gets the same effect from
+// cmd/initdb.
+//
+// This is a seam, not a backdoor: it does not bypass auth, mint tokens,
+// or otherwise grant capabilities the HTTP API wouldn't. It only writes
+// a row that the real login endpoint will then validate against.
+func (a *App) SeedUser(username, password string) error {
+	if a.db == nil {
+		return fmt.Errorf("app: SeedUser on closed app")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("app: bcrypt hash: %w", err)
+	}
+	user := &models.User{
+		ID:           uuid.New().String(),
+		Username:     username,
+		PasswordHash: string(hash),
+		// cmd/initdb uses time.Now() (local); we use UTC for
+		// determinism in tests. The difference is cosmetic — the
+		// column stores whatever time.Now() returns in either case.
+		CreatedAt: time.Now().UTC(),
+	}
+	repo := models.NewUserRepository(a.db)
+	if err := repo.Create(user); err != nil {
+		return fmt.Errorf("app: create seeded user: %w", err)
+	}
+	return nil
 }

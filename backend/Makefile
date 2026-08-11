@@ -1,6 +1,6 @@
 # Makefile for Podland Backend
 
-.PHONY: all build run clean deps lint test migrate generate-keys init-db
+.PHONY: all build run clean deps lint test test-integration migrate generate-keys init-db
 
 # Go parameters
 GOCMD=go
@@ -50,6 +50,19 @@ tidy:
 test:
 	$(GOCMD) test -v ./...
 
+# Integration tests — boots a real podman machine, brings the backend
+# up in-process via internal/app.App + httptest.NewServer, and runs the
+# end-to-end suite in backend/test/integration/. Gated behind a build
+# tag so `make test` / `go test ./...` never accidentally boot a VM or
+# depend on podman being installed.
+#
+# Override the target machine/connection with PODLAND_TEST_MACHINE_NAME
+# (defaults to podman-machine-default); individual SSH fields can be
+# overridden via PODLAND_TEST_SSH_{HOST,PORT,USER,SOCKET,KEY_PATH} to
+# target an external host.
+test-integration:
+	$(GOCMD) test -v -tags=integration ./test/integration/...
+
 # Run migrations
 migrate:
 	@echo "Running database migrations..."
@@ -97,6 +110,7 @@ help:
 	@echo "  make debug     - Run in debug mode"
 	@echo "  make clean     - Clean build artifacts"
 	@echo "  make test      - Run tests"
+	@echo "  make test-integration - Run integration tests against a real podman machine"
 	@echo "  make migrate   - Run database migrations"
 	@echo "  make keys      - Generate JWT keys"
 	@echo "  make docker-build - Build Docker image"
