@@ -207,16 +207,31 @@ func run(m *testing.M) int {
 	// --- Step 4: seed user + real login -----------------------------
 	username := "it-" + suite.RunID + "-admin"
 	password := "it-" + suite.RunID + "-pw-" + uuid.New().String()[:8]
-	if err := application.SeedUser(username, password); err != nil {
+	ownerUserID, err := application.SeedUser(username, password)
+	if err != nil {
 		return bail("SeedUser", err)
 	}
+	suite.OwnerUserID = ownerUserID
 
 	token, err := realLogin(suite.ServerURL, username, password)
 	if err != nil {
 		return bail("realLogin", err)
 	}
 	suite.Token = token
-	logf("integration: logged in as %q", username)
+	logf("integration: logged in as %q (id=%s)", username, ownerUserID)
+
+	// Seed a second user — never logged in, but its ID is needed by
+	// downstream slices (080-04 machines CRUD/access) as the grantee
+	// target for POST /api/machines/{id}/access. The user exists only
+	// to satisfy the machine_access(user_id) FK; no token is captured
+	// because the ACs exercise grant/revoke as the owner, not as the
+	// grantee.
+	otherUsername := "it-" + suite.RunID + "-other"
+	otherUserID, err := application.SeedUser(otherUsername, password)
+	if err != nil {
+		return bail("SeedUser (other)", err)
+	}
+	suite.OtherUserID = otherUserID
 
 	// --- Step 5: register machine once ------------------------------
 	keyMaterial, err := os.ReadFile(disc.IdentityPath)

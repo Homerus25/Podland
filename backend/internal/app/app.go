@@ -282,21 +282,26 @@ func (a *App) Close() error {
 
 // SeedUser inserts a user with the given username and plaintext password
 // (bcrypt-hashed with bcrypt.DefaultCost, matching cmd/initdb) into the
-// App's database. It is intended for the in-process integration harness
-// (PRD 080-01), which needs a seeded user before the first real
-// POST /api/auth/login can fly; production gets the same effect from
-// cmd/initdb.
+// App's database, returning the new user's ID. It is intended for the
+// in-process integration harness (PRD 080-01), which needs a seeded user
+// before the first real POST /api/auth/login can fly; production gets
+// the same effect from cmd/initdb.
+//
+// Returning the ID lets the harness seed additional users and reference
+// them by ID downstream — e.g. the machines CRUD/access slice (080-04)
+// needs a second user's ID to exercise grant/revoke without minting a
+// token for that user.
 //
 // This is a seam, not a backdoor: it does not bypass auth, mint tokens,
 // or otherwise grant capabilities the HTTP API wouldn't. It only writes
 // a row that the real login endpoint will then validate against.
-func (a *App) SeedUser(username, password string) error {
+func (a *App) SeedUser(username, password string) (string, error) {
 	if a.db == nil {
-		return fmt.Errorf("app: SeedUser on closed app")
+		return "", fmt.Errorf("app: SeedUser on closed app")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return fmt.Errorf("app: bcrypt hash: %w", err)
+		return "", fmt.Errorf("app: bcrypt hash: %w", err)
 	}
 	user := &models.User{
 		ID:           uuid.New().String(),
@@ -309,7 +314,7 @@ func (a *App) SeedUser(username, password string) error {
 	}
 	repo := models.NewUserRepository(a.db)
 	if err := repo.Create(user); err != nil {
-		return fmt.Errorf("app: create seeded user: %w", err)
+		return "", fmt.Errorf("app: create seeded user: %w", err)
 	}
-	return nil
+	return user.ID, nil
 }

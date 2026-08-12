@@ -49,6 +49,20 @@ type Suite struct {
 	// `Authorization: Bearer <token>`, matching middleware/auth.go.
 	Token string
 
+	// OwnerUserID is the DB-level ID (a UUID) of the user the suite
+	// registered and logged in as during TestMain. Tests that need to
+	// reference the authenticated user by ID (e.g. asserting owner
+	// self-revoke is rejected in 080-04) use this rather than guessing
+	// or re-deriving it from the JWT.
+	OwnerUserID string
+
+	// OtherUserID is the DB-level ID of a second user seeded during
+	// TestMain. It exists to satisfy the machine_access(user_id) FK so
+	// the machines CRUD/access slice (080-04) can exercise
+	// grant/revoke/list against a real grantee without minting a token
+	// for them. The second user is never logged in.
+	OtherUserID string
+
 	// RunID is the run-scoped identifier (a short UUID) embedded in
 	// RunTag. Anything the suite creates on the shared machine is tagged
 	// with RunTag so per-run isolation is possible and the suite sweep
