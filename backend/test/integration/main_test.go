@@ -121,6 +121,7 @@ func run(m *testing.M) int {
 
 	// --- Step 1: ensure machine -------------------------------------
 	machineName := envOr("PODLAND_TEST_MACHINE_NAME", "podman-machine-default")
+	suite.MachineName = machineName
 	started, startErr := ensureMachine(machineName)
 	if startErr != nil {
 		// Missing podman binary is a clean skip; anything else is a

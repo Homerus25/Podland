@@ -32,6 +32,18 @@ type Suite struct {
 	// it from a test — that would break every other test in the suite.
 	MachineID string
 
+	// MachineName is the podman system-connection name (resolved from
+	// PODLAND_TEST_MACHINE_NAME, default "podman-machine-default") that
+	// the backend's registered machine points at. Downstream slices use
+	// it for the isolation/cleanup CLI scaffolding (tag, rmi, sweep) so
+	// they hit the same host the backend does — instead of re-reading
+	// the env var (and risking drift if the var name changes).
+	//
+	// The readiness probe in TestMain guarantees `podman --connection
+	// <MachineName>` is reachable before any test runs, so CLI helpers
+	// can rely on it without their own probe.
+	MachineName string
+
 	// Token is the JWT bearer token captured from POST /api/auth/login
 	// during TestMain. AuthenticatedClient injects it as
 	// `Authorization: Bearer <token>`, matching middleware/auth.go.
