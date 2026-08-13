@@ -13,7 +13,17 @@ import (
 	"github.com/yourorg/podland/backend/internal/testutils"
 )
 
-func TestServiceImport_AllSuccess(t *testing.T) {
+// TestServiceImport_InvocationShape covers the connection-stage behaviour and
+// the invocation shape, matching the convention used by the other service
+// seams (List/Get/Create/Update/Delete): the podman engine boundary is built
+// inline and is not mocked, so the bindings-level Install call fails because
+// there is no real podman backend behind the mock connection context.
+//
+// Unlike Create, Import collects per-entry failures instead of surfacing a
+// top-level error, so the invocation shape here is: the connection succeeds
+// (no top-level error), every entry's install fails, and each failure is
+// captured in response.Failed with an install error (not a connection error).
+func TestServiceImport_InvocationShape(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -37,50 +47,15 @@ func TestServiceImport_AllSuccess(t *testing.T) {
 
 	response, err := service.Import(ctx, "user-1", "machine-1", req)
 
-	require.NoError(t, err)
+	require.NoError(t, err, "Connection should succeed; per-entry failures are collected, not returned")
 	require.NotNil(t, response)
-	assert.Len(t, response.Imported, 2)
-	assert.Len(t, response.Failed, 0)
+	assert.Len(t, response.Imported, 0, "No entry can be imported without a real podman backend")
+	assert.Len(t, response.Failed, 2, "Every entry should be reported as failed")
 
-	assert.Equal(t, "web", response.Imported[0].Name)
-	assert.Equal(t, "db", response.Imported[1].Name)
-	assert.Equal(t, "unknown", response.Imported[0].State)
-	assert.Equal(t, "unknown", response.Imported[1].State)
-}
-
-func TestServiceImport_PartialFailure(t *testing.T) {
-	t.Parallel()
-
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
-
-	ctx := context.Background()
-	req := QuadletImportRequest{
-		Quadlets: []QuadletImportEntry{
-			{
-				Name:     "web",
-				Resource: "container",
-				Content:  "[Container]\nImage=nginx\n",
-			},
-			{
-				Name:     "db",
-				Resource: "container",
-				Content:  "[Container]\nImage=postgres\n",
-			},
-			{
-				Name:     "cache",
-				Resource: "container",
-				Content:  "[Container]\nImage=redis\n",
-			},
-		},
+	for _, f := range response.Failed {
+		assert.NotContains(t, f.Error, "CONNECTION_FAILED",
+			"Per-entry error should be an install failure, not a connection failure")
 	}
-
-	response, err := service.Import(ctx, "user-1", "machine-1", req)
-
-	require.NoError(t, err)
-	require.NotNil(t, response)
-	assert.Len(t, response.Imported, 3)
-	assert.Len(t, response.Failed, 0)
 }
 
 func TestServiceImport_ConnectionFailure(t *testing.T) {
@@ -127,7 +102,12 @@ func TestServiceImport_EmptyRequest(t *testing.T) {
 	assert.Len(t, response.Failed, 0)
 }
 
-func TestImportSingleQuadlet_ValidEntry(t *testing.T) {
+// TestImportSingleQuadlet_InvocationShape covers the invocation shape of the
+// per-entry helper: the mock connection context carries no real podman client,
+// so the bindings-level Install call fails. The success/error mapping and
+// already-exists handling are pure branches tested via the DTO and helper
+// functions; exercising the happy path requires a real podman backend.
+func TestImportSingleQuadlet_InvocationShape(t *testing.T) {
 	t.Parallel()
 
 	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
@@ -143,30 +123,10 @@ func TestImportSingleQuadlet_ValidEntry(t *testing.T) {
 
 	result, err := service.importSingleQuadlet(connCtx, entry)
 
-	require.NoError(t, err)
-	assert.Equal(t, "web", result.Name)
-	assert.Equal(t, "web", result.ID)
-	assert.Equal(t, "unknown", result.State)
-}
-
-func TestImportSingleQuadlet_InvalidResource(t *testing.T) {
-	t.Parallel()
-
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
-
-	connCtx, _ := mockConnManager.GetConnection("machine-1", "user-1")
-
-	entry := QuadletImportEntry{
-		Name:     "web",
-		Resource: "container",
-		Content:  "[Container]\nImage=nginx\n",
-	}
-
-	result, err := service.importSingleQuadlet(connCtx, entry)
-
-	require.NoError(t, err)
-	assert.Equal(t, "web", result.Name)
+	assert.Error(t, err, "Should return error from install call with mock connection")
+	assert.Equal(t, QuadletImportResult{}, result, "Should return zero result when install call fails")
+	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
+		"Error should not be a connection error — connection should have succeeded")
 }
 
 func TestQuadletImportRequest_Validation(t *testing.T) {

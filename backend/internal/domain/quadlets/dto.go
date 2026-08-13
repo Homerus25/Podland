@@ -259,7 +259,7 @@ func resolveManagedContainerName(quadlet *entities.ListQuadlet, quadletName stri
 // Each entry contains the quadlet name, resource type, and file content.
 type QuadletImportRequest struct {
 	// List of quadlets to import. At least one entry is required.
-	Quadlets []QuadletImportEntry `json:"quadlets" validate:"required,min=1"`
+	Quadlets []QuadletImportEntry `json:"quadlets" validate:"required,min=1,dive"`
 }
 
 // QuadletImportEntry represents a single quadlet to import.
