@@ -150,7 +150,7 @@ CREATE TABLE machine_access (
 
 ### JWT Implementation
 - **Algorithm**: RS256 (asymmetric signing)
-- **Storage**: HTTP-only cookies
+- **Transport**: Authorization: Bearer header
 - **Key storage**: File-based (PEM files)
   - Private key path: `JWT_PRIVATE_KEY_PATH` (default: `./jwt-private.pem`)
   - Public key path: `JWT_PUBLIC_KEY_PATH` (default: `./jwt-public.pem`)
@@ -158,14 +158,14 @@ CREATE TABLE machine_access (
 
 ### JWT Middleware
 - Applied to all protected routes
-- Validates JWT from HTTP-only cookie
+- Validates JWT from Authorization: Bearer header
 - Extracts user claims and attaches to request context
 - On expiration: Returns 401, frontend redirects to login
 
 ### Endpoints
 ```
-POST /api/auth/login       # Authenticate, return JWT in HTTP-only cookie
-POST /api/auth/logout      # Clear cookie
+POST /api/auth/login       # Authenticate, return JWT in JSON response body
+POST /api/auth/logout      # Client-side token removal
 GET  /api/auth/status      # Check authentication status
 ```
 

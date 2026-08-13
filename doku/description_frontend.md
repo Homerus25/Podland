@@ -582,7 +582,6 @@ import axios, { AxiosError, AxiosInstance } from 'axios'
 
 const api: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
-  withCredentials: true, // Required for HTTP-only cookies
 })
 
 // 401 Interceptor

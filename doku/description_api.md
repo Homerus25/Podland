@@ -22,18 +22,8 @@ In production, the API is served behind a Caddy reverse proxy, which routes:
 
 ### Mechanism
 - **JWT tokens** signed with RS256
-- **Storage**: HTTP-only cookies (named `token`)
+- **Transport**: Authorization: Bearer header
 - **Token expiration**: Configurable, default 60 minutes
-
-### Cookie Details
-```
-Name: token
-Path: /
-HttpOnly: true
-Secure: true (in production)
-SameSite: Strict
-Expires: <calculated from JWT expiration>
-```
 
 ### Auth Endpoints
 
@@ -50,10 +40,11 @@ Content-Type: application/json
 ```
 
 **Response (Success - 200):**
-- Sets HTTP-only cookie with JWT token
+- Returns JWT token in response body
 - Returns user information
 ```json
 {
+  "token": "string (jwt)",
   "user": {
     "id": "string (uuid)",
     "username": "string"
@@ -71,7 +62,7 @@ Content-Type: application/json
 
 **Request:**
 - No body required
-- Clears the `token` cookie
+- Client should remove stored token
 
 **Response (Success - 200):**
 ```json
@@ -85,7 +76,7 @@ Content-Type: application/json
 #### GET /api/auth/status
 
 **Request:**
-- Sends `token` cookie automatically
+- Requires Authorization: Bearer header with valid token
 
 **Response (Success - 200):**
 ```json

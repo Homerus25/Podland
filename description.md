@@ -27,7 +27,7 @@ A web application for managing Podman on remote machines, consisting of:
 
 ### 4. Authentication & Security
 - **JWT tokens** (RS256 asymmetric keys)
-  - Stored in HTTP-only cookies
+  - Transported via Authorization: Bearer header
   - Frontend redirects to login page on expiration
 - **CORS**: Environment variables for allowed origins
 - **Sensitive data encryption**: `github.com/secure-systems-lab/go-securesystemslib`
@@ -132,8 +132,8 @@ A web application for managing Podman on remote machines, consisting of:
 - `GET /api/machines/{id}/events` - SSE endpoint for Podman events
 
 ### Authentication
-- `POST /api/auth/login` - Login (returns JWT in HTTP-only cookie)
-- `POST /api/auth/logout` - Logout (clears cookie)
+- `POST /api/auth/login` - Login (returns JWT in JSON response body)
+- `POST /api/auth/logout` - Logout (client-side token removal)
 - `GET /api/auth/status` - Check authentication status
 
 ---

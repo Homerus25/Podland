@@ -352,15 +352,24 @@ func loadOrGenerateKeys(privateKeyPath, publicKeyPath string) (*rsa.PrivateKey, 
 func JWTMiddleware(authService *AuthService) func(http.Handler) http.Handler {
     return func(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            // Get token from HTTP-only cookie
-            cookie, err := r.Cookie("token")
-            if err != nil {
+            // Get token from Authorization: Bearer header
+            authHeader := r.Header.Get("Authorization")
+            if authHeader == "" {
                 respondWithError(w, http.StatusUnauthorized, "TOKEN_MISSING", "Authentication required")
                 return
             }
             
+            // Extract token from Bearer scheme
+            parts := strings.Split(authHeader, " ")
+            if len(parts) != 2 || parts[0] != "Bearer" {
+                respondWithError(w, http.StatusUnauthorized, "TOKEN_INVALID", "Invalid token format")
+                return
+            }
+            
+            tokenString := parts[1]
+            
             // Validate token
-            claims, err := authService.ValidateToken(cookie.Value)
+            claims, err := authService.ValidateToken(tokenString)
             if err != nil {
                 respondWithError(w, http.StatusUnauthorized, "TOKEN_INVALID", "Invalid token")
                 return
@@ -384,8 +393,8 @@ func GetUserIDFromContext(ctx context.Context) (string, error)
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| POST | `/api/auth/login` | Authenticate user, return JWT in HTTP-only cookie | No |
-| POST | `/api/auth/logout` | Clear authentication cookie | No |
+| POST | `/api/auth/login` | Authenticate user, return JWT in JSON response body | No |
+| POST | `/api/auth/logout` | Client-side token removal | No |
 | GET | `/api/auth/status` | Check if user is authenticated, return user info | No |
 
 ### Machines

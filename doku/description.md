@@ -44,7 +44,7 @@ A full-stack web application for managing Podman on remote machines. This docume
 
 ### 5. Authentication & Security
 - **JWT tokens** (RS256 asymmetric keys)
-  - Stored in **HTTP-only cookies**
+  - Transported via **Authorization: Bearer** header
   - Frontend redirects to login page on expiration (401 interceptor)
 - **Key Storage**: File-based (PEM files) with auto-generation on startup
 - **CORS**: Environment variables for allowed origins
@@ -121,7 +121,7 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **Framework**: Standard library + custom routing
 - **API**: RESTful endpoints
 - **Database**: SQLite (via `github.com/mattn/go-sqlite3`)
-- **Authentication**: JWT (RS256) with HTTP-only cookies
+- **Authentication**: JWT (RS256) with Authorization: Bearer header
 - **Logging**: Logrus
 - **Validation**: `go-playground/validator`
 - **SSH**: `golang.org/x/crypto/ssh` via forked Podman's connection.go
@@ -149,14 +149,14 @@ A full-stack web application for managing Podman on remote machines. This docume
 
 ### Simplicity
 - Fail fast on errors (no retry logic)
-- HTTP-only cookies for JWT (no frontend JWT handling)
+- Authorization: Bearer header for JWT (frontend manages token storage)
 - One connection per machine (not per user)
 - Direct streaming with NDJSON (no buffering)
 
 ### Security
 - SSH keys encrypted at rest in SQLite
 - JWT tokens with RS256 asymmetric signing
-- Short-lived tokens stored in HTTP-only cookies
+- Short-lived tokens transported via Authorization: Bearer header
 - Application-level permissions for machine sharing
 
 ### Performance
@@ -222,7 +222,7 @@ Podland/
 ## Security Considerations
 
 1. **SSH Keys**: Encrypted at rest in SQLite using go-securesystemslib
-2. **JWT**: Short-lived tokens, RS256 asymmetric signing, HTTP-only cookies
+2. **JWT**: Short-lived tokens, RS256 asymmetric signing, Authorization: Bearer header
 3. **CORS**: Strict origin control via environment variables
 4. **Input Validation**: Structured validation on all API inputs
 5. **Error Handling**: No sensitive data in error responses
