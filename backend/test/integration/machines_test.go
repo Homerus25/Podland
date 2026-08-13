@@ -18,50 +18,56 @@ import (
 
 // Test_Integration_Machines_CRUDAccessTripwire is the machines CRUD +
 // access-control vertical slice for the real-podman integration suite
-// (PRD 080-04). It registers a SECOND, throwaway machine pointing at an
-// unreachable target (127.0.0.1:1) and uses it to exercise PUT, access
-// grant/revoke/list, and DELETE — without disturbing the shared good
-// machine registered during harness setup.
+// (PRD 080-04). It registers a SECOND, throwaway machine pointing at the
+// SAME reachable target as the shared good machine and uses it to
+// exercise PUT, access grant/revoke/list, and DELETE — without
+// disturbing the shared good machine registered during harness setup.
 //
 // Why a throwaway: every mutation in this slice (PUT, access, DELETE)
 // is a per-machine DB row, not a podman operation. Running them against
 // the shared good machine would change its name/hostname and leave
 // grantee rows behind, breaking the contract that subsequent slices
 // (containers, images, …) see the machine as TestMain registered it.
-// The bad-host machine is the only one this slice mutates, and it is
+// The throwaway is the only machine this slice mutates, and it is
 // deleted at the end of the run.
 //
-// Tripwire (gap #1, issue 080-05): with the current code,
-// MachineService.Create performs NO connection test, so registering the
-// bad-host machine returns 201 and the failure surfaces only at the
-// first podman-touching call. This slice pins that behavior so the test
-// documents reality and flips naturally when 080-05 lands — at which
-// point the "first podman call fails" assertion is removed and the
-// registration assertion becomes 400 CONNECTION_FAILED.
+// Connection-test tripwire (issue 080-05, formerly gap #1): the slice
+// ALSO registers a machine pointing at an unreachable target
+// (127.0.0.1:1) and asserts the registration is now rejected with
+// 400 CONNECTION_FAILED. Before 080-05, MachineService.Create performed
+// no connection probe, so the bad-host machine registered with 201 and
+// the failure surfaced only at the first podman-touching call. 080-05
+// added the synchronous probe (description_backend.md §Machine
+// Registration step 5), so bad-host registration now fails fast at the
+// API boundary and no machine row is created. This slice pins that
+// behavior so a regression that re-introduces the gap fails loudly.
 //
 // Isolation model (per the master PRD's "run-scoped tag + per-test
 // cleanup + suite sweep" ruling):
 //
-//   - The throwaway machine is named with the run-scoped prefix
-//     (it-<runID>-badhost) so the suite sweep can find and delete any
+//   - Both throwaway machines are named with the run-scoped prefix
+//     (it-<runID>-…) so the suite sweep can find and delete any
 //     leftover if a test aborts before its own t.Cleanup fires.
-//   - t.Cleanup force-deletes the throwaway via the API as the primary
-//     cleanup path. The sweep is the backstop.
+//   - t.Cleanup force-deletes the reachable throwaway via the API as
+//     the primary cleanup path. The sweep is the backstop. (The
+//     bad-host machine is never created — the probe rejects it — so
+//     there is nothing to clean up for it.)
 //   - No podman resources are created or mutated by this slice, so
 //     there is no run-tag labelling and no podman CLI sweep.
 func Test_Integration_Machines_CRUDAccessTripwire(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerMachinesSweep()
 
-	// --- Shared throwaway: the bad-host machine ----------------------
+	// --- Tripwire throwaway: the bad-host machine -------------------
 	//
 	// 127.0.0.1:1 is the canonical "nobody's listening" target: TCP
-	// connect refuses immediately (ECONNREFUSED), so the SSH dial fails
-	// fast instead of hanging on a connect timeout. The SSH key is a
-	// freshly-generated RSA PEM — syntactically valid so
-	// MachineService.Create's IsValidPEM check passes, but it won't
-	// authenticate anywhere. That's the point: registration must not
-	// depend on the key being usable, only on it being well-formed.
+	// connect refuses immediately (ECONNREFUSED), so the SSH dial
+	// inside the registration probe fails fast instead of hanging on a
+	// connect timeout. The SSH key is a freshly-generated RSA PEM —
+	// syntactically valid so MachineService.Create's IsValidPEM check
+	// passes and the request reaches the connection probe, where the
+	// unreachable host is rejected. The bad-host machine is NEVER
+	// persisted, so there is no cleanup for it.
 	badHost := machineRegistration{
 		Name:    "it-" + suite.RunID + "-badhost",
 		Host:    "127.0.0.1",
@@ -71,10 +77,23 @@ func Test_Integration_Machines_CRUDAccessTripwire(t *testing.T) {
 		SSHKey:  testutils.GenerateValidPEMKey(),
 	}
 
-	// badHostID is captured by the RegisterReturns201 subtest and read
-	// by every later subtest. The whole slice operates on exactly one
-	// throwaway machine.
-	var badHostID string
+	// --- CRUD/access/DELETE throwaway: a reachable machine -----------
+	//
+	// The mutation subtests (PUT, access grant/revoke, DELETE) need a
+	// machine that is actually registered, which — since 080-05 —
+	// means it must point at a host the registration probe can reach.
+	// Registering against the suite's discovered target (the same one
+	// the good machine uses) sails through the probe. The throwaway is
+	// mutated and deleted by this slice; the good machine is untouched.
+	var crudHostID string
+	crudHost := machineRegistration{
+		Name:    "it-" + suite.RunID + "-crud",
+		Host:    suite.goodMachineRegistration.Host,
+		Port:    suite.goodMachineRegistration.Port,
+		SSHUser: suite.goodMachineRegistration.SSHUser,
+		Socket:  suite.goodMachineRegistration.Socket,
+		SSHKey:  suite.goodMachineRegistration.SSHKey,
+	}
 
 	// Snapshot the shared good machine's fields BEFORE any mutation in
 	// this slice. The DeleteRemovesThrowawaySharedUntouched subtest
@@ -86,14 +105,16 @@ func Test_Integration_Machines_CRUDAccessTripwire(t *testing.T) {
 	// mutation this slice makes.
 	goodMachineBefore := getMachine(t, suite.MachineID)
 
-	// Per-test cleanup: DELETE the throwaway machine via the API if it
-	// was created and not already deleted by the DeleteRemovesMachine
-	// subtest. Best-effort; the sweep is the abort backstop.
+	// Per-test cleanup: DELETE the reachable throwaway machine via the
+	// API if it was created and not already deleted by the
+	// DeleteRemovesMachine subtest. Best-effort; the sweep is the abort
+	// backstop. (No cleanup for the bad-host machine — it is never
+	// created, the probe rejects the registration.)
 	t.Cleanup(func() {
-		if badHostID == "" {
+		if crudHostID == "" {
 			return
 		}
-		delURL := suite.ServerURL + "/api/machines/" + badHostID + "/"
+		delURL := suite.ServerURL + "/api/machines/" + crudHostID + "/"
 		req, err := http.NewRequest(http.MethodDelete, delURL, nil)
 		if err != nil {
 			return
@@ -106,79 +127,82 @@ func Test_Integration_Machines_CRUDAccessTripwire(t *testing.T) {
 		resp.Body.Close()
 	})
 
-	// --- AC #1 (tripwire, gap-#1): registration returns 201 ----------
+	// --- AC #1 (connection-test, 080-05): bad-host registration -----
 	//
-	// Pinning current behavior. MachineService.Create does NOT probe
-	// the target, so a bad host sails through and the failure surfaces
-	// later. When 080-05 lands this assertion flips to:
+	// Registering the bad-host machine must be rejected at the API
+	// boundary: 400 with the CONNECTION_FAILED code, and no machine
+	// row created. Before 080-05 this returned 201 (gap #1) and the
+	// failure surfaced only at the first podman-touching call; the
+	// synchronous connection probe now closes that gap. Pinning both
+	// the status AND the machine-readable code is what "documents the
+	// behavior" means here — a bare `!= 201` would also pass on a 401
+	// or 500 and mask the real surface, and a future regression that
+	// re-introduces the gap (201 + silent persist) would slip a
+	// status-only check that didn't also assert the body code.
 	//
-	//	assertStatusCode(t, resp, http.StatusBadRequest, "register bad-host machine")
-	//	assertErrorCode(t, body, "CONNECTION_FAILED")
-	//
-	// and the FirstPodmanCallFails subtest below is removed.
-	t.Run("RegisterReturns201_Tripwire_Gap1", func(t *testing.T) {
-		var err error
-		badHostID, err = registerMachine(suite.ServerURL, suite.Token, badHost)
-		require.NoError(t, err, "register bad-host machine must succeed (current gap-#1 behavior)")
-		require.NotEmpty(t, badHostID, "register must return a machine id")
-		t.Logf("tripwire (gap-#1): bad-host machine registered as %s with 201 — MachineService.Create performs no connection test", badHostID)
+	// The registerMachine helper expects 201 and errors otherwise, so
+	// POST directly and inspect the response — matching the inline
+	// style of the self-revoke subtest further down.
+	t.Run("RegisterBadHostRejectedWith400_CONNECTION_FAILED", func(t *testing.T) {
+		body, err := json.Marshal(map[string]any{
+			"name":             badHost.Name,
+			"hostname":         badHost.Host,
+			"port":             badHost.Port,
+			"sshUsername":      badHost.SSHUser,
+			"podmanSocketPath": badHost.Socket,
+			"sshPrivateKey":    badHost.SSHKey,
+		})
+		require.NoError(t, err)
+
+		url := suite.ServerURL + "/api/machines/"
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := suite.AuthenticatedClient().Do(req)
+		require.NoError(t, err, "POST /api/machines must reach the in-process server")
+		defer resp.Body.Close()
+		respBody, _ := io.ReadAll(resp.Body)
+
+		assert.Equalf(t, http.StatusBadRequest, resp.StatusCode,
+			"bad-host registration must be rejected with 400 (connection probe failed). got %d. body=%s",
+			resp.StatusCode, string(respBody))
+		assert.Contains(t, string(respBody), "CONNECTION_FAILED",
+			"bad-host registration body must carry the CONNECTION_FAILED code. body=%s", string(respBody))
+
+		// The rejection must not have persisted anything: the bad-host
+		// machine must not appear in the owner's list.
+		assert.False(t, machineListedByName(t, badHost.Name),
+			"bad-host machine must NOT be persisted after a rejected registration")
 	})
 	if t.Failed() {
 		return
 	}
 
-	// --- AC #2 (tripwire, gap-#1): first podman call fails ----------
+	// --- Register the reachable throwaway for the mutation subtests -
 	//
-	// Documents where the bad-host failure actually surfaces today: not
-	// at registration, but at the first podman-touching call. We hit
-	// GET /containers because it's the cheapest podman probe and the
-	// same one the tracer bullet uses — so the assertion is directly
-	// comparable to the happy path. The container List handler
-	// (containers/handler.go) returns 500 via ErrInternalError when
-	// connManager.GetConnection fails; errors.RespondWithError then
-	// sanitises the 5xx body to a generic
-	// {"error":{"code":"INTERNAL_ERROR","message":"An unexpected error occurred"}}
-	// so the underlying SSH cause ("dial tcp ... connection refused")
-	// surfaces only in the server log, NOT in the HTTP body. Pinning
-	// the status AND the INTERNAL_ERROR code is what "documents where
-	// the failure surfaces today" means in this codebase; a bare
-	// `!= 200` would also pass on a 404 or 401 and mask the real
-	// surface, and asserting the SSH cause lives in the body would
-	// fail (it doesn't — by design).
-	//
-	// Removed when 080-05 lands: a connection-test at registration
-	// means the bad-host machine never gets created, so there is no
-	// machine to probe.
-	t.Run("FirstPodmanCallFails_Tripwire_Gap1", func(t *testing.T) {
-		url := suite.ServerURL + "/api/machines/" + badHostID + "/containers/"
-		resp, err := suite.AuthenticatedClient().Get(url)
-		require.NoError(t, err, "GET containers must reach the in-process server")
-		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
-		assert.Equalf(t, http.StatusInternalServerError, resp.StatusCode,
-			"tripwire (gap-#1): bad-host machine's first podman-touching call must surface as 500 (ErrInternalError from connManager.GetConnection). got %d. body=%s",
-			resp.StatusCode, string(body))
-		// The 5xx body is sanitised by errors.RespondWithError to a
-		// generic INTERNAL_ERROR — the underlying SSH failure lives
-		// only in the server log. Pin the code so a future "200 +
-		// swallow" or a non-500 error-class regression fails the test.
-		assert.Contains(t, string(body), "INTERNAL_ERROR",
-			"tripwire (gap-#1): 500 body must carry the INTERNAL_ERROR code (the underlying SSH cause is server-log only). body=%s", string(body))
-		t.Logf("tripwire (gap-#1): first podman-touching call failed as expected — status=%d body=%s (the underlying SSH dial error is in the server log only)",
-			resp.StatusCode, string(body))
+	// This implicitly covers the 080-05 happy path: a machine pointing
+	// at a reachable target still registers (201) and is persisted,
+	// because its connection probe succeeds. Doing it as a named
+	// subtest (rather than inline) surfaces the registration step
+	// explicitly in the test output and lets the slice bail cleanly if
+	// it fails.
+	t.Run("RegisterReachableThrowaway", func(t *testing.T) {
+		crudHostID = suite.RegisterReachableMachine(t, crudHost.Name)
+		require.NotEmpty(t, crudHostID, "reachable throwaway must register and return an id")
 	})
 	if t.Failed() {
 		return
 	}
 
 	// --- AC #3: PUT updates name/description/hostname; GET reflects -
-	updateMachineCRUD(t, badHostID)
+	updateMachineCRUD(t, crudHostID)
 	if t.Failed() {
 		return
 	}
 
 	// --- AC #4: access grant/list/revoke; self-revoke rejected ------
-	exerciseAccessCRUD(t, badHostID)
+	exerciseAccessCRUD(t, crudHostID)
 	if t.Failed() {
 		return
 	}
@@ -201,11 +225,11 @@ func Test_Integration_Machines_CRUDAccessTripwire(t *testing.T) {
 
 		// Prove the throwaway is also present before delete, so the
 		// post-delete absence check is meaningful.
-		require.True(t, machineListed(t, badHostID),
+		require.True(t, machineListed(t, crudHostID),
 			"throwaway machine must be listed before delete (precondition)")
 
 		// DELETE the throwaway.
-		url := suite.ServerURL + "/api/machines/" + badHostID + "/"
+		url := suite.ServerURL + "/api/machines/" + crudHostID + "/"
 		req, err := http.NewRequest(http.MethodDelete, url, nil)
 		require.NoError(t, err)
 		resp, err := suite.AuthenticatedClient().Do(req)
@@ -217,10 +241,10 @@ func Test_Integration_Machines_CRUDAccessTripwire(t *testing.T) {
 
 		// Null the caller's handle so t.Cleanup doesn't retry the
 		// delete on an already-removed machine.
-		badHostID = ""
+		crudHostID = ""
 
 		// Throwaway is gone from the list…
-		assert.False(t, machineListed(t, badHostID),
+		assert.False(t, machineListed(t, crudHostID),
 			"throwaway machine must not appear in the list after delete")
 
 		// …and the shared good machine is still there, untouched.
@@ -262,7 +286,7 @@ func updateMachineCRUD(t *testing.T, machineID string) {
 		before := getMachine(t, machineID)
 
 		req := updateMachineRequest{
-			Name:        "it-" + suite.RunID + "-badhost-renamed",
+			Name:        "it-" + suite.RunID + "-crud-renamed",
 			Description: "throwaway bad-host machine for 080-04 (updated)",
 			Hostname:    "192.0.2.123", // TEST-NET-1 — guaranteed unroutable
 			// Echo the SSH identity so the handler's non-empty checks
@@ -546,6 +570,20 @@ func machineListed(t *testing.T, machineID string) bool {
 	t.Helper()
 	for _, m := range listMachines(t) {
 		if m.ID == machineID {
+			return true
+		}
+	}
+	return false
+}
+
+// machineListedByName reports whether any machine with the given name
+// appears in the owner's list. Used by the bad-host tripwire to prove a
+// rejected registration left no row behind — the rejected request has no
+// machine ID to look up, so presence is checked by the requested name.
+func machineListedByName(t *testing.T, name string) bool {
+	t.Helper()
+	for _, m := range listMachines(t) {
+		if m.Name == name {
 			return true
 		}
 	}

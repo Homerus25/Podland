@@ -2,6 +2,7 @@ package machines
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -75,7 +76,12 @@ func FromModel(machine *models.Machine) MachineResponse {
 	}
 }
 
-// Create creates a new machine after validating the request and testing the connection
+// Create creates a new machine after validating the request and testing
+// that the target is reachable over SSH + podman (description_backend.md
+// §Machine Registration). The synchronous connection probe runs BEFORE
+// the machine is persisted, so a bad host / bad credentials / wrong
+// socket path is rejected at registration (400 CONNECTION_FAILED) instead
+// of silently saving an unreachable machine that only fails at first use.
 func (s *MachineService) Create(ctx context.Context, userID string, req *CreateMachineRequest) (*models.Machine, error) {
 	// Validate required fields
 	if req.Name == "" || req.Hostname == "" || req.SSHUsername == "" || req.SSHPrivateKey == "" {
@@ -96,18 +102,35 @@ func (s *MachineService) Create(ctx context.Context, userID string, req *CreateM
 		return nil, errors.ErrMachineAlreadyExists
 	}
 
-	// Encrypt SSH private key
-	encryptedKey, fingerprint, err := s.encryption.EncryptSSHKey(req.SSHPrivateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt SSH key: %w", err)
-	}
-
-	// Set defaults
+	// Apply defaults BEFORE the probe so the connection test dials the
+	// real (defaulted) port and socket the machine will ultimately use.
 	if req.Port == 0 {
 		req.Port = 22
 	}
 	if req.PodmanSocketPath == "" {
 		req.PodmanSocketPath = "/run/podman/podman.sock"
+	}
+
+	// Synchronous connection probe (step 5). Per the documented flow the
+	// probe runs against the plaintext key, before encryption, and before
+	// any DB write — so a failed probe leaves nothing behind. The probe
+	// is bounded by MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS inside the
+	// connection manager.
+	if err := s.connManager.TestConnection(ctx, req.Hostname, req.Port, req.SSHUsername, req.SSHPrivateKey, req.PodmanSocketPath); err != nil {
+		// A deadline (the probe's own timeout, or the caller's context
+		// expiring) maps to CONNECTION_TEST_TIMEOUT; any other failure
+		// (bad host / credentials / socket) maps to CONNECTION_FAILED.
+		// Both are 400 — the target the client described is not usable.
+		if stderrors.Is(err, context.DeadlineExceeded) {
+			return nil, errors.ErrConnectionTestTimeout
+		}
+		return nil, errors.ErrConnectionTestFailed
+	}
+
+	// Encrypt SSH private key
+	encryptedKey, fingerprint, err := s.encryption.EncryptSSHKey(req.SSHPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt SSH key: %w", err)
 	}
 
 	// Create machine model

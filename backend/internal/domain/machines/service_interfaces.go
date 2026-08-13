@@ -9,6 +9,26 @@ import (
 type ConnectionManagerInterface interface {
 	GetConnection(machineID, userID string) (context.Context, error)
 	Release(machineID string)
+	// TestConnection probes an SSH/podman connection using raw credentials,
+	// without requiring the machine to be persisted first. It is called from
+	// MachineService.Create during registration (description_backend.md
+	// §Machine Registration step 5): the machine is not yet in the database,
+	// so GetConnection (which looks up by machineID) cannot be used. The
+	// implementation is responsible for bounding the probe by the configured
+	// MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS.
+	//
+	// The credentials are passed as primitives rather than a struct so this
+	// interface stays self-contained in the machines package (no dependency
+	// on the connections package), matching the primitive-typed
+	// GetConnection/Release above.
+	TestConnection(
+		ctx context.Context,
+		hostname string,
+		port int,
+		sshUsername string,
+		sshPrivateKey string,
+		podmanSocketPath string,
+	) error
 }
 
 // EncryptionServiceInterface defines the interface for encryption services

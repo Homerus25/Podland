@@ -120,6 +120,7 @@ func New(cfg *config.Config) (*App, error) {
 		encryptionService,
 		cfg.Connections.MaxConcurrent,
 		time.Duration(cfg.Connections.QueueTimeoutSeconds)*time.Second,
+		time.Duration(cfg.Connections.TestTimeoutSeconds)*time.Second,
 	)
 	go connectionManager.Run()
 

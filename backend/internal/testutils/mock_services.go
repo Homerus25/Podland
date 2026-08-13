@@ -144,9 +144,24 @@ func (m *MockPodmanConnection) Execute(command string, args ...any) (any, error)
 	return fmt.Sprintf("executed: %s %v", command, args), nil
 }
 
+// MockTestConnectionCall records a single TestConnection invocation so
+// tests can assert the probe received the expected (defaulted) raw
+// credentials. Defined locally (rather than reusing a domain type) so
+// testutils does not import the machines package and create a test
+// import cycle with the white-box machines tests.
+type MockTestConnectionCall struct {
+	Hostname         string
+	Port             int
+	SSHUsername      string
+	SSHPrivateKey    string
+	PodmanSocketPath string
+}
+
 // MockConnectionManager implements a mock connection manager for testing
 type MockConnectionManager struct {
-	getConnectionErr error
+	getConnectionErr    error
+	testConnectionErr   error
+	testConnectionCalls []MockTestConnectionCall
 }
 
 func NewMockConnectionManager() *MockConnectionManager {
@@ -156,6 +171,17 @@ func NewMockConnectionManager() *MockConnectionManager {
 func NewMockConnectionManagerWithError(getConnectionErr error) *MockConnectionManager {
 	return &MockConnectionManager{
 		getConnectionErr: getConnectionErr,
+	}
+}
+
+// NewMockConnectionManagerWithTestError returns a MockConnectionManager
+// whose TestConnection always fails with the given error. Use this to
+// exercise the registration connection-test failure branch in
+// MachineService.Create (the machine must not be persisted and Create
+// must surface ErrConnectionTestFailed).
+func NewMockConnectionManagerWithTestError(testErr error) *MockConnectionManager {
+	return &MockConnectionManager{
+		testConnectionErr: testErr,
 	}
 }
 
@@ -170,6 +196,30 @@ func (m *MockConnectionManager) GetConnection(machineID, userID string) (context
 }
 
 func (m *MockConnectionManager) Release(machineID string) {
+}
+
+// TestConnection records the probe arguments and returns the injected
+// error. The default — no error set — is success (nil), so existing
+// happy-path machine-service tests keep passing once Create calls the
+// probe.
+func (m *MockConnectionManager) TestConnection(ctx context.Context, hostname string, port int, sshUsername, sshPrivateKey, podmanSocketPath string) error {
+	m.testConnectionCalls = append(m.testConnectionCalls, MockTestConnectionCall{
+		Hostname:         hostname,
+		Port:             port,
+		SSHUsername:      sshUsername,
+		SSHPrivateKey:    sshPrivateKey,
+		PodmanSocketPath: podmanSocketPath,
+	})
+	return m.testConnectionErr
+}
+
+// TestConnectionCalls returns a snapshot of the arguments passed to every
+// TestConnection invocation, for asserting the probe received the
+// expected (defaulted) credentials.
+func (m *MockConnectionManager) TestConnectionCalls() []MockTestConnectionCall {
+	out := make([]MockTestConnectionCall, len(m.testConnectionCalls))
+	copy(out, m.testConnectionCalls)
+	return out
 }
 
 // MockSSHExec implements sshexec.SSHExecInterface for tests. It supports

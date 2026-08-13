@@ -69,6 +69,18 @@ type Suite struct {
 	// can find its own garbage.
 	RunID string
 
+	// goodMachineRegistration holds the coordinates + identity the
+	// shared good machine was registered with (the discovered podman
+	// target). It is NOT used directly by tests; RegisterReachableMachine
+	// consumes it to register additional throwaway machines against the
+	// same reachable target. This exists because 080-05 made
+	// MachineService.Create probe the target at registration, so a
+	// throwaway pointing at an unreachable host (the original 080-04
+	// pattern) can no longer be registered — slices that need a
+	// mutable throwaway (PUT/access/DELETE) must now point at a host
+	// that actually answers.
+	goodMachineRegistration reachableTarget
+
 	// skipReason is the reason TestMain decided the suite cannot run
 	// (e.g. podman binary missing, machine unavailable). When non-empty,
 	// SkipIfUnavailable triggers t.Skip so a clean `go test` run on a
@@ -77,8 +89,8 @@ type Suite struct {
 
 	// cleanup stack — LIFO, mirrors t.Cleanup semantics. Run during
 	// suite teardown after m.Run() returns (or on signal).
-	cleanupMu  sync.Mutex
-	cleanups   []cleanupStep
+	cleanupMu sync.Mutex
+	cleanups  []cleanupStep
 }
 
 // cleanupStep is one entry in the suite teardown stack.
@@ -199,4 +211,22 @@ func (s *Suite) runCleanups(log func(format string, args ...any)) {
 // without bloating label values.
 func newRunID() string {
 	return strings.ReplaceAll(uuid.New().String(), "-", "")[:8]
+}
+
+// reachableTarget is the SSH/podman coordinate set for a host the suite
+// has already proven reachable (the discovered podman machine). The
+// suite stores the good machine's target here so
+// RegisterReachableMachine can register additional throwaway machines
+// against the same host — needed because 080-05 made registration probe
+// the target, so a throwaway must point at a host that answers.
+//
+// Defined here (not as machineRegistration, which lives in a _test.go
+// file) so the non-test harness.go can reference it without breaking
+// `go build -tags=integration`.
+type reachableTarget struct {
+	Host    string
+	Port    int
+	SSHUser string
+	Socket  string
+	SSHKey  string
 }

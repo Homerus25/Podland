@@ -27,6 +27,7 @@ func TestConnectionManager_Stop_TerminatesProcessQueueGoroutine(t *testing.T) {
 		&encryption.EncryptionService{},
 		1,
 		1*time.Second,
+		10*time.Second,
 	)
 	mgr.Run()
 

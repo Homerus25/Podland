@@ -251,6 +251,17 @@ func run(m *testing.M) int {
 		return bail("registerMachine", err)
 	}
 	suite.MachineID = machineID
+	// Stash the reachable target so downstream slices can register
+	// additional throwaway machines against the same host via
+	// RegisterReachableMachine. Required since 080-05: a throwaway
+	// pointing at an unreachable host can no longer be registered.
+	suite.goodMachineRegistration = reachableTarget{
+		Host:    disc.Host,
+		Port:    disc.Port,
+		SSHUser: disc.SSHUser,
+		Socket:  disc.SocketPath,
+		SSHKey:  string(keyMaterial),
+	}
 	logf("integration: machine registered: id=%s", machineID)
 
 	// --- Step 6: readiness ------------------------------------------
@@ -750,6 +761,40 @@ func registerMachine(baseURL, token string, req machineRegistration) (string, er
 		return "", fmt.Errorf("register response missing id")
 	}
 	return created.ID, nil
+}
+
+// RegisterReachableMachine registers a SECOND machine pointing at the
+// same reachable target as the shared good machine, returning its ID.
+// The caller owns cleanup (register a t.Cleanup that DELETEs the ID via
+// the API, as the machines slice does).
+//
+// Why this exists: 080-05 made MachineService.Create probe the target at
+// registration, so a throwaway pointing at an unreachable host (the
+// original 080-04 bad-host pattern) is now rejected with 400 and never
+// persisted. Slices that need a mutable throwaway (PUT / access /
+// DELETE) must therefore register against the reachable target. This
+// helper reuses the coordinates TestMain proved reachable so the
+// throwaway sails through the connection probe.
+//
+// The name should include suite.RunID so the suite sweep can find any
+// leftover if the caller's own t.Cleanup does not fire.
+func (s *Suite) RegisterReachableMachine(t *testing.T, name string) string {
+	t.Helper()
+	id, err := registerMachine(s.ServerURL, s.Token, machineRegistration{
+		Name:    name,
+		Host:    s.goodMachineRegistration.Host,
+		Port:    s.goodMachineRegistration.Port,
+		SSHUser: s.goodMachineRegistration.SSHUser,
+		Socket:  s.goodMachineRegistration.Socket,
+		SSHKey:  s.goodMachineRegistration.SSHKey,
+	})
+	if err != nil {
+		t.Fatalf("register reachable throwaway %q against the suite's discovered target: %v", name, err)
+	}
+	if id == "" {
+		t.Fatalf("register reachable throwaway %q returned an empty id", name)
+	}
+	return id
 }
 
 // ---------------------------------------------------------------------------
