@@ -7,16 +7,17 @@ import (
 	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/models"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthHandler handles authentication requests
 type AuthHandler struct {
 	service *AuthService
-	userRepo *models.UserRepository
+	userRepo models.UserRepositoryInterface
 }
 
 // NewAuthHandler creates a new AuthHandler
-func NewAuthHandler(service *AuthService, userRepo *models.UserRepository) *AuthHandler {
+func NewAuthHandler(service *AuthService, userRepo models.UserRepositoryInterface) *AuthHandler {
 	return &AuthHandler{
 		service: service,
 		userRepo: userRepo,
@@ -59,9 +60,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: Verify password hash
-	// For now, we'll assume password is valid
-	// In production, you would use bcrypt.CompareHashAndPassword
+	// Verify password hash
+	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password))
+	if err != nil {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		return
+	}
 
 	// Generate JWT token
 	token, err := h.service.GenerateToken(user.ID)
