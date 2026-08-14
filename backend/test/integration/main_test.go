@@ -619,10 +619,15 @@ func buildTestConfig() (*config.Config, []string, error) {
 			QueueTimeoutSeconds:   30,
 			TestTimeoutSeconds:    10,
 		},
-		// Same default as the rest of the codebase (60/min) — the
-		// integration suite doesn't need a higher ceiling, and a
-		// different value here would mask rate-limit regressions.
-		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 60},
+		// The rate limiter is a production abuse guard keyed per user;
+		// the whole suite authenticates as ONE user and legitimately
+		// issues hundreds of requests per minute (state-transition
+		// polls alone fire ~2/s for up to 30s each), so the 60/min
+		// production default causes spurious 429s that poison every
+		// test after the first poll-heavy slice. The limiter has no
+		// coverage here by design — it is not under test — so the
+		// ceiling is raised out of the way instead.
+		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 100000},
 		AllowedOrigins: []string{},
 		Log:            config.LogConfig{Level: "info", Format: "json"},
 		Encryption:     config.EncryptionConfig{Key: encKey},
