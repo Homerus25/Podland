@@ -273,8 +273,14 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 	//    The derive→extension round-trip re-normalizes the contract enum (so a
 	//    .kube/.build path rebuilds as .container/.image), matching Create's use
 	//    of resourceToExtension on the request resource.
+	//
+	//    NOTE: The `name` parameter includes the extension (e.g. "my-quadlet.container"),
+	//    but we need to strip it before adding the new extension to avoid doubling it.
 	resource := deriveResourceFromPath(target.Path)
-	fileName := name + resourceToExtension(resource)
+	// Strip the existing extension from the name to avoid doubling
+	ext := resourceToExtension(resource)
+	baseName := strings.TrimSuffix(name, ext)
+	fileName := baseName + ext
 	body, err := createTarBody(fileName, []byte(req.Content))
 	if err != nil {
 		return nil, fmt.Errorf("failed to build quadlet tar body: %w", err)
@@ -574,10 +580,10 @@ func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineI
 	}
 
 	logsOpts := entities.ContainerLogsOptions{
-		Follow:       true,
-		Since:        since,
-		Tail:         tail,
-		Timestamps:   true,
+		Follow:     true,
+		Since:      since,
+		Tail:       tail,
+		Timestamps: true,
 	}
 
 	stdoutWriter := &quadletLogEventWriter{
