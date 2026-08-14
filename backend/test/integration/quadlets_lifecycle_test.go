@@ -273,8 +273,9 @@ func requireUserSystemd(t *testing.T) {
 	out, err := session.CombinedOutput("systemctl --user is-system-running")
 	status := strings.TrimSpace(string(out))
 	// "degraded" still means the user manager is up; individual units may
-	// have failed but systemctl itself works, which is all we need.
-	if err != nil || (status != "running" && status != "degraded") {
+	// have failed but systemctl itself works, which is all we need. Note
+	// systemctl exits 1 for "degraded", so err != nil alone must not skip.
+	if status != "running" && status != "degraded" {
 		t.Skipf("machine user systemd unusable (is-system-running=%q, err=%v)", status, err)
 	}
 }

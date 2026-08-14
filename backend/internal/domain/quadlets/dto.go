@@ -239,8 +239,10 @@ type QuadletLogEvent struct {
 }
 
 // resolveManagedContainerName resolves the managed container name for a quadlet.
-// For container-type quadlets, the managed container name is the quadlet name;
-// for pod-type quadlets, we use the Pod container name from the ListQuadlet result.
+// For container-type quadlets, the managed container is the systemd-spawned
+// container, which podman names `systemd-<basename>` — the quadlet file name
+// without its resource extension (podman quadlet generator: `--name systemd-%N`).
+// For pod-type quadlets, we use the Pod container name from the ListQuadlet result.
 func resolveManagedContainerName(quadlet *entities.ListQuadlet, quadletName string) string {
 	if quadlet == nil {
 		return quadletName
@@ -251,8 +253,14 @@ func resolveManagedContainerName(quadlet *entities.ListQuadlet, quadletName stri
 		return quadlet.Pod
 	}
 
-	// For container-type quadlets and others, use the quadlet name
-	return quadletName
+	// For container-type quadlets and others, derive the systemd-spawned
+	// container name: strip the resource extension ("foo.container" → "foo")
+	// and apply podman quadlet's "systemd-" naming convention.
+	base := quadletName
+	if idx := strings.LastIndex(quadletName, "."); idx > 0 {
+		base = quadletName[:idx]
+	}
+	return "systemd-" + base
 }
 
 // QuadletImportRequest represents a request to import quadlets from uploaded content.

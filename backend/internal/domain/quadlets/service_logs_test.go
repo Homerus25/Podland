@@ -116,11 +116,12 @@ func TestQuadletService_GetLogs_ErrorMapping(t *testing.T) {
 func TestQuadletService_GetLogs_ResolveContainerName(t *testing.T) {
 	t.Run("container-type quadlet", func(t *testing.T) {
 		quadlet := &entities.ListQuadlet{
-			Name: "my-quadlet",
-			Pod:  "", // No pod, so use quadlet name
+			Name: "my-quadlet.container",
+			Pod:  "", // No pod, so use the systemd-spawned container name
 		}
-		containerName := resolveManagedContainerName(quadlet, "my-quadlet")
-		assert.Equal(t, "my-quadlet", containerName, "Container-type quadlet should use quadlet name")
+		containerName := resolveManagedContainerName(quadlet, "my-quadlet.container")
+		assert.Equal(t, "systemd-my-quadlet", containerName,
+			"Container-type quadlet must resolve to the systemd-spawned container (podman names it systemd-<basename>)")
 	})
 
 	t.Run("pod-type quadlet with pod container", func(t *testing.T) {
