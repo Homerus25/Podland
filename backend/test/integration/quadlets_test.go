@@ -70,16 +70,10 @@ func Test_Integration_Quadlets_CRUD(t *testing.T) {
 	// find exactly what this run created. The filename on the remote machine
 	// becomes `<name>.container`.
 	quadletName := "it-" + suite.RunID + "-crud"
-	// Runnable-quadlet recipe (reused by every slice that needs a unit
-	// systemd can actually start). `busybox` must be present — ensured above.
-	runnableQuadletContent := `[Container]
-Image=busybox
-Exec=sh -c "sleep 3600"
-`
 	createReq := quadletCreateBody{
 		Name:     quadletName,
 		Resource: "container",
-		Content:  runnableQuadletContent,
+		Content:  runnableContainerQuadletContent,
 	}
 
 	// Per-test cleanup: DELETE the quadlet we create via API. Registered
@@ -119,7 +113,7 @@ Exec=sh -c "sleep 3600"
 		// The API returns the name with extension
 		require.Equal(t, quadletName+".container", got.Name, "quadlet name must match request (with extension)")
 		require.Equal(t, "container", got.Resource, "quadlet resource must be container")
-		require.Equal(t, runnableQuadletContent, got.Content, "quadlet content must match request")
+		require.Equal(t, runnableContainerQuadletContent, got.Content, "quadlet content must match request")
 		require.NotEmpty(t, got.Path, "quadlet path must be populated by podman")
 		require.NotEmpty(t, got.Unit, "quadlet unit must be populated by podman")
 	})
@@ -177,6 +171,25 @@ Exec=sh -c "sleep 7200"
 // ---------------------------------------------------------------------------
 // HTTP helpers — each hits the in-process backend via the authenticated client
 // ---------------------------------------------------------------------------
+
+// runnableContainerQuadletContent is the recipe every quadlet slice uses
+// when it needs a unit systemd can actually start: a busybox container
+// that sleeps long enough to outlive the test. `busybox` must already be
+// present on the machine — slices ensure this via ensureBusyboxImage.
+const runnableContainerQuadletContent = `[Container]
+Image=busybox
+Exec=sh -c "sleep 3600"
+`
+
+// quadletErrorEnvelope mirrors the {"error":{code,message}} shape the
+// backend's error responses use. Shared by the quadlet slices' error
+// assertions.
+type quadletErrorEnvelope struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
 
 // quadletCreateBody mirrors the JSON-accepted fields of
 // quadlets.QuadletCreateRequest that this slice populates. Kept as a local
@@ -270,12 +283,7 @@ func createQuadletExpectConflict(t *testing.T, machineID string, body quadletCre
 	require.Equalf(t, http.StatusConflict, resp.StatusCode,
 		"create duplicate quadlet: expected 409, got %d. body: %s", resp.StatusCode, string(raw))
 
-	var errResp struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
+	var errResp quadletErrorEnvelope
 	require.NoErrorf(t, json.Unmarshal(raw, &errResp),
 		"create duplicate quadlet: error response must decode. body: %s", string(raw))
 	require.Equal(t, "QUADLET_ALREADY_EXISTS", errResp.Error.Code,
@@ -379,12 +387,7 @@ func deleteQuadletExpectNotFound(t *testing.T, machineID, quadletName string) {
 	require.Equalf(t, http.StatusNotFound, resp.StatusCode,
 		"delete missing quadlet: expected 404, got %d. body: %s", resp.StatusCode, string(body))
 
-	var errResp struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
+	var errResp quadletErrorEnvelope
 	require.NoErrorf(t, json.Unmarshal(body, &errResp),
 		"delete missing quadlet: error response must decode. body: %s", string(body))
 	require.Equal(t, "QUADLET_NOT_FOUND", errResp.Error.Code,
