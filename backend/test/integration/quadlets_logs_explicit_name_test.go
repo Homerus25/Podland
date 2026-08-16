@@ -200,3 +200,16 @@ Exec=sh -c "while true; do echo hi; sleep 1; done"
 ContainerName=%s
 `, containerName)
 }
+
+// removeNamedContainer force-removes a container by its explicit name —
+// the explicit-name counterpart of the lifecycle slice's
+// removeSpawnedContainer (which targets podman's `systemd-<basename>`
+// default). Best-effort: after a force delete the unit teardown usually
+// removes it already, and the containers suite sweep covers anything
+// left over.
+func removeNamedContainer(t *testing.T, name string) {
+	t.Helper()
+	if out, err := podmanConnRun("rm", "-f", name); err != nil {
+		t.Logf("cleanup rm container %s: %v (%s)", name, err, strings.TrimSpace(out))
+	}
+}
