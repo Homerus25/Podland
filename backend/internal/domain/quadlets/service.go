@@ -82,11 +82,7 @@ func (s *QuadletService) List(ctx context.Context, userID, machineID string, fil
 		return nil, fmt.Errorf("failed to list quadlets: %w", err)
 	}
 
-	result := ToQuadletListResponse(quadlets)
-
-	result = applyFilters(result, filters)
-
-	return result, nil
+	return applyFilters(ToQuadletListResponse(quadlets), filters), nil
 }
 
 // applyFilters applies the resource and name filters to the quadlet list.
@@ -513,16 +509,23 @@ func isResourceRunningError(err error) bool {
 //  3. Map "no such container" → QUADLET_NOT_FOUND (404).
 //
 // Returns `{id, logs}` on success. Supports `since` and `tail` query params.
-func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error) {
-	connCtx, containerName, err := s.resolveForLogs(ctx, userID, machineID, quadletName)
+func (s *QuadletService) GetLogs(_ context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error) {
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, err
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
 	}
+
+	containerName, err := s.resolveForLogs(containerEngine, userID, machineID, quadletName)
+	println("containername: " + containerName)
+	if err != nil {
+		return nil, err
+	}
+	defer s.connManager.Release(machineID)
 
 	var stdoutBuffer, stderrBuffer bytes.Buffer
 	logsOpts := entities.ContainerLogsOptions{
@@ -534,7 +537,7 @@ func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadlet
 		StderrWriter: &stderrBuffer,
 	}
 
-	err = containerEngine.ContainerLogs(ctx, []string{containerName}, logsOpts)
+	err = containerEngine.ContainerLogs(connCtx, []string{containerName}, logsOpts)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
 			return nil, appErrors.ErrQuadletNotFound
@@ -568,15 +571,20 @@ func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadlet
 // via context cancellation and mapped to OPERATION_CANCELLED.
 //
 // Supports `since` and `tail` query params. Emits NDJSON events via callback.
-func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
-	connCtx, containerName, err := s.resolveForLogs(ctx, userID, machineID, quadletName)
+func (s *QuadletService) GetLogsWithStream(_ context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return err
+		return appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
 	containerEngine := &tunnel.ContainerEngine{
 		ClientCtx: connCtx,
+	}
+
+	containerName, err := s.resolveForLogs(containerEngine, userID, machineID, quadletName)
+	if err != nil {
+		return err
 	}
 
 	logsOpts := entities.ContainerLogsOptions{
@@ -600,12 +608,12 @@ func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineI
 	logsOpts.StdoutWriter = stdoutWriter
 	logsOpts.StderrWriter = stderrWriter
 
-	err = containerEngine.ContainerLogs(ctx, []string{containerName}, logsOpts)
+	err = containerEngine.ContainerLogs(connCtx, []string{containerName}, logsOpts)
 	if err != nil {
 		if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
 			return appErrors.ErrQuadletNotFound
 		}
-		if ctx.Err() == context.Canceled {
+		if connCtx.Err() == context.Canceled {
 			return appErrors.ErrOperationCancelled
 		}
 		return fmt.Errorf("failed to get quadlet logs: %w", err)
@@ -619,29 +627,19 @@ func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineI
 // For container-type quadlets, the managed container name is the quadlet name;
 // for pod-type quadlets, we use the Pod container name from the ListQuadlet result.
 // Returns the connection context and resolved container name to avoid redundant connection acquisition.
-func (s *QuadletService) resolveForLogs(ctx context.Context, userID, machineID, quadletName string) (context.Context, string, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
+func (s *QuadletService) resolveForLogs(containerEngine *tunnel.ContainerEngine, userID, machineID, quadletName string) (string, error) {
+	target, err := s.resolveTarget(containerEngine, quadletName)
 	if err != nil {
-		return nil, "", appErrors.ErrConnectionFailed
+		return "", err
+	}
+	content, err := containerEngine.QuadletPrint(context.Background(), quadletName)
+	if err == nil {
+		if name := explicitContainerNameFromQuadletContent(content); name != "" {
+			return name, nil
+		}
 	}
 
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	list, err := containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
-	if err != nil {
-		s.connManager.Release(machineID)
-		return nil, "", fmt.Errorf("failed to list quadlets: %w", err)
-	}
-
-	target := findQuadletByName(list, quadletName)
-	if target == nil {
-		s.connManager.Release(machineID)
-		return nil, "", appErrors.ErrQuadletNotFound
-	}
-
-	return connCtx, resolveManagedContainerName(target, quadletName), nil
+	return resolveManagedContainerName(target, quadletName), nil
 }
 
 // quadletLogEventWriter wraps podman's log writers and converts each line to a QuadletLogEvent

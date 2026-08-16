@@ -139,6 +139,46 @@ func TestQuadletService_GetLogs_ResolveContainerName(t *testing.T) {
 	})
 }
 
+// TestQuadletService_GetLogs_ExplicitContainerNameFromContent tests the
+// ContainerName= extraction that overrides the systemd-<basename> convention.
+func TestQuadletService_GetLogs_ExplicitContainerNameFromContent(t *testing.T) {
+	t.Run("explicit ContainerName wins", func(t *testing.T) {
+		content := `[Container]
+Image=busybox
+Exec=sh -c "while true; do echo hi; sleep 1; done"
+ContainerName=my-explicit-container
+`
+		assert.Equal(t, "my-explicit-container", explicitContainerNameFromQuadletContent(content))
+	})
+
+	t.Run("absent key returns empty", func(t *testing.T) {
+		content := `[Container]
+Image=busybox
+Exec=sleep 3600
+`
+		assert.Equal(t, "", explicitContainerNameFromQuadletContent(content))
+	})
+
+	t.Run("case-insensitive key, trimmed and unquoted value", func(t *testing.T) {
+		content := "[Container]\ncontainername=  \"quoted-name\"  \n"
+		assert.Equal(t, "quoted-name", explicitContainerNameFromQuadletContent(content))
+	})
+
+	t.Run("comments and lookalike keys are ignored", func(t *testing.T) {
+		content := `[Container]
+# ContainerName=commented-out
+Label=this.looks=like=an=assignment
+Exec=echo ContainerName=not-a-key
+`
+		assert.Equal(t, "", explicitContainerNameFromQuadletContent(content))
+	})
+
+	t.Run("empty value returns empty", func(t *testing.T) {
+		content := "[Container]\nContainerName=\n"
+		assert.Equal(t, "", explicitContainerNameFromQuadletContent(content))
+	})
+}
+
 // TestQuadletService_GetLogsWithStream_Success tests successful streaming log retrieval
 func TestQuadletService_GetLogsWithStream_Success(t *testing.T) {
 	ctx := context.Background()

@@ -4,6 +4,7 @@ package integration
 
 import (
 	"bufio"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -46,23 +47,29 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 	ensureBusyboxImage(t)
 
 	// Run-scoped name: file on the remote machine becomes
-	// `<name>.container`, the systemd unit `<name>.service`, and the
-	// spawned container `systemd-<name>` (podman quadlet naming).
+	// `<name>.container` and the systemd unit `<name>.service` (both
+	// derived from the file name, unchanged by the content). The spawned
+	// container is named by the content's ContainerName — also run-scoped
+	// (this slice's whole point: the logs path must resolve the managed
+	// container through the explicit name, not `systemd-<name>`).
 	quadletName := "it-" + suite.RunID + "-logs"
 	quadletID := quadletName + ".container"
+	explicitContainerName := "it-" + suite.RunID + "-logs-c"
 
 	// Per-test cleanup, registered before create so it runs even if a
 	// later phase fails. Best-effort; the sweep is the abort backstop.
+	// The CLI rm targets the EXPLICIT container name, like the lifecycle
+	// explicit-name slice (removeNamedContainer, not removeSpawnedContainer).
 	t.Cleanup(func() {
 		forceDeleteQuadlet(t, machineID, quadletID)
-		removeSpawnedContainer(t, quadletName)
+		removeNamedContainer(t, explicitContainerName)
 	})
 
 	// --- Setup: create + start the logging quadlet -------------------
 	createQuadlet(t, machineID, quadletCreateBody{
 		Name:     quadletName,
 		Resource: "container",
-		Content:  explicitNameContainerQuadletContent(loggingContainerQuadletContent),
+		Content:  explicitNameLoggingQuadletContent(explicitContainerName),
 	})
 	startQuadlet(t, machineID, quadletID)
 	waitForQuadletRunning(t, machineID, quadletID,
@@ -175,4 +182,21 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 		status, raw := getQuadletLogsRaw(t, machineID, quadletID, "")
 		requireQuadletLogs404(t, status, raw, "logs on a quadlet without a managed container")
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Recipe
+// ---------------------------------------------------------------------------
+
+// explicitNameLoggingQuadletContent is the unnamed slice's logging recipe
+// (busybox echo loop, so the log assertions have real output) with the
+// lifecycle slice's explicit-name addition: `ContainerName=<name>` names
+// the managed container verbatim instead of podman's `systemd-<basename>`
+// default — the resolution difference this slice exercises.
+func explicitNameLoggingQuadletContent(containerName string) string {
+	return fmt.Sprintf(`[Container]
+Image=busybox
+Exec=sh -c "while true; do echo hi; sleep 1; done"
+ContainerName=%s
+`, containerName)
 }

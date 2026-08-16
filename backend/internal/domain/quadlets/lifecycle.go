@@ -95,7 +95,7 @@ func (a lifecycleAction) buildResponse(name, unit string) *QuadletLifecycleRespo
 // Returns `{id, state: running, unit}` on success. Start has no force/timeout
 // options per the contract.
 func (s *QuadletService) Start(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error) {
-	unit, err := s.resolveForLifecycle(ctx, userID, machineID, name, actionStart)
+	unit, err := s.resolveUnitNameForLifecycle(ctx, userID, machineID, name, actionStart)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (s *QuadletService) Start(ctx context.Context, userID, machineID, name stri
 //
 // Returns `{id, state: stopped, unit}` on success.
 func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-	unit, err := s.resolveForLifecycle(ctx, userID, machineID, name, actionStop)
+	unit, err := s.resolveUnitNameForLifecycle(ctx, userID, machineID, name, actionStop)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name strin
 //
 // Returns `{id, state: running, unit, restartedAt}` on success.
 func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-	unit, err := s.resolveForLifecycle(ctx, userID, machineID, name, actionRestart)
+	unit, err := s.resolveUnitNameForLifecycle(ctx, userID, machineID, name, actionRestart)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name st
 	return actionRestart.buildResponse(name, unit), nil
 }
 
-// resolveForLifecycle performs the shared pre-work for every lifecycle action:
+// resolveUnitNameForLifecycle performs the shared pre-work for every lifecycle action:
 // it locates the quadlet (404 if absent), evaluates the wrong-state guard for
 // the action (400 if the current state disallows it), and resolves the systemd
 // unit name to act on.
@@ -171,7 +171,7 @@ func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name st
 // The quadlet lookup goes through the podman QuadletList primitive (built
 // inline, matching the rest of the service) so the existence check and
 // unit-name resolution are consistent with the Get/Delete slices.
-func (s *QuadletService) resolveForLifecycle(ctx context.Context, userID, machineID, name string, action lifecycleAction) (string, error) {
+func (s *QuadletService) resolveUnitNameForLifecycle(ctx context.Context, userID, machineID, name string, action lifecycleAction) (string, error) {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
 		return "", appErrors.ErrConnectionFailed
@@ -182,14 +182,9 @@ func (s *QuadletService) resolveForLifecycle(ctx context.Context, userID, machin
 		ClientCtx: connCtx,
 	}
 
-	list, err := containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
+	target, err := s.resolveTarget(containerEngine, name)
 	if err != nil {
-		return "", fmt.Errorf("failed to list quadlets: %w", err)
-	}
-
-	target := findQuadletByName(list, name)
-	if target == nil {
-		return "", appErrors.ErrQuadletNotFound
+		return "", err
 	}
 
 	state := parseStateFromStatus(target.Status)
@@ -198,6 +193,19 @@ func (s *QuadletService) resolveForLifecycle(ctx context.Context, userID, machin
 	}
 
 	return resolveUnitName(target, name), nil
+}
+
+func (s *QuadletService) resolveTarget(containerEngine *tunnel.ContainerEngine, name string) (*entities.ListQuadlet, error) {
+	list, err := containerEngine.QuadletList(context.Background(), entities.QuadletListOptions{Filters: []string{"name=" + name}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list quadlets: %w", err)
+	}
+
+	target := findQuadletByName(list, name)
+	if target == nil {
+		return nil, appErrors.ErrQuadletNotFound
+	}
+	return target, nil
 }
 
 // runSystemctl executes `systemctl <action> [flags] <unit>` over SSH via the

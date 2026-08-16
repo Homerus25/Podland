@@ -243,6 +243,9 @@ type QuadletLogEvent struct {
 // container, which podman names `systemd-<basename>` — the quadlet file name
 // without its resource extension (podman quadlet generator: `--name systemd-%N`).
 // For pod-type quadlets, we use the Pod container name from the ListQuadlet result.
+// An explicit `ContainerName=` key in the quadlet content overrides this
+// convention (see explicitContainerNameFromQuadletContent); callers that have
+// the content at hand should check that first.
 func resolveManagedContainerName(quadlet *entities.ListQuadlet, quadletName string) string {
 	if quadlet == nil {
 		return quadletName
@@ -261,6 +264,33 @@ func resolveManagedContainerName(quadlet *entities.ListQuadlet, quadletName stri
 		base = quadletName[:idx]
 	}
 	return "systemd-" + base
+}
+
+// explicitContainerNameFromQuadletContent extracts the value of the
+// `ContainerName=` key from quadlet file content. Podman's quadlet generator
+// passes it to `podman run --name`, so when present the managed container is
+// named verbatim instead of the default `systemd-<basename>`. Returns "" when
+// the key is absent (or has an empty value), meaning the default applies.
+// Key matching is case-insensitive, matching systemd's unit-file parser; the
+// value is used verbatim apart from surrounding whitespace and quotes.
+func explicitContainerNameFromQuadletContent(content string) string {
+	for line := range strings.Lines(content) {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found || !strings.EqualFold(strings.TrimSpace(key), "ContainerName") {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		if value != "" {
+			return value
+		}
+		return ""
+	}
+	return ""
 }
 
 // QuadletImportRequest represents a request to import quadlets from uploaded content.

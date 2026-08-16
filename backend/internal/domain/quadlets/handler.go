@@ -420,6 +420,12 @@ func respondLifecycleError(w http.ResponseWriter, r *http.Request, err error, ac
 	)
 }
 
+// logStreamShutdownTimeout bounds how long the follow-mode logs handler
+// waits for the streaming goroutine to notice the canceled request context
+// after a client disconnect. It only trips on a stream that ignores
+// cancellation; healthy streams stop well within it.
+const logStreamShutdownTimeout = 15 * time.Second
+
 // GetLogs handles getting quadlet logs
 func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "Get quadlet logs")
@@ -548,10 +554,24 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 			"code":      "OPERATION_CANCELLED",
 			"message":   "Client disconnected",
 		})
-		// Wait for streaming to complete and avoid goroutine leak
-		go func() {
-			<-doneChan
-		}()
+		// Stop accepting further events: logCallback checks this before
+		// every write, so the streaming goroutine becomes a no-op even
+		// before it notices the canceled context.
+		writeError.Store(true)
+		// Wait for GetLogsWithStream to return before this handler
+		// returns. The callback writes to this handler's ResponseWriter,
+		// and a write after the handler returned lands in the connection's
+		// recycled write buffer — corrupting whatever response is served
+		// on the reused keep-alive connection next. ContainerLogs aborts
+		// on the canceled request context, so this wait is brief; the
+		// timeout only guards a pathological stream that ignores
+		// cancellation (in which case the warning surfaces it).
+		select {
+		case <-doneChan:
+		case <-time.After(logStreamShutdownTimeout):
+			slog.WarnContext(r.Context(), "log stream did not stop after client disconnect",
+				slog.String("machineID", machineID), slog.String("quadletId", quadletID))
+		}
 	}
 }
 

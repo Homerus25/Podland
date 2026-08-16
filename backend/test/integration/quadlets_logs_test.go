@@ -193,6 +193,8 @@ Image=busybox
 Exec=sh -c "while true; do echo hi; sleep 1; done"
 `
 
+// Exec=sh -c "echo hi; sleep 1; echo hi, sleep 2; echo hi done"
+
 // quadletLogsResponse mirrors the fields of quadlets.QuadletLogsResponse
 // that this slice consumes.
 type quadletLogsResponse struct {
@@ -258,6 +260,8 @@ func waitForQuadletLogOutput(t *testing.T, machineID, quadletID string) quadletL
 	var lastStatus int
 	for time.Now().Before(deadline) {
 		lastStatus, lastBody = getQuadletLogsRaw(t, machineID, quadletID, "")
+		print(lastStatus)
+		print(lastBody)
 		if lastStatus == http.StatusOK {
 			var logs quadletLogsResponse
 			if err := json.Unmarshal(lastBody, &logs); err == nil && logs.Logs != "" {
