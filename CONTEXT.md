@@ -183,7 +183,12 @@ Podland/
 │   ├── description.md               # This file - complete architecture
 │   ├── description_backend.md        # Backend implementation guide
 │   ├── description_frontend.md       # Frontend implementation guide
-│   └── description_api.md            # API contract
+│   ├── description_api.md            # API contract (shared conventions)
+│   ├── description_auth_api.md       # Auth endpoints
+│   ├── description_machines_api.md   # Machine + event endpoints
+│   ├── description_containers_api.md # Container endpoints
+│   ├── description_images_api.md     # Image endpoints
+│   └── description_quadlets_api.md   # Quadlet endpoints
 ├── backend/
 │   ├── cmd/
 │   │   └── server/
