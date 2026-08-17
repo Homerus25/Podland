@@ -162,6 +162,72 @@ func TestQuadletHandler_List(t *testing.T) {
 	}
 }
 
+// TestQuadletHandler_List_ForwardsQueryFiltersToService pins the HTTP seam of
+// the list filters: the `resource` and `name` query parameters (contract at
+// doku/description_api.md:831-833) must reach the service as ListFilters.
+// TestQuadletHandler_List returns canned payloads regardless of the filters
+// argument, so forwarding is asserted separately here by capturing what the
+// mock service actually receives.
+func TestQuadletHandler_List_ForwardsQueryFiltersToService(t *testing.T) {
+	tests := []struct {
+		name        string
+		queryParams string
+		wantFilters ListFilters
+	}{
+		{
+			name:        "resource only",
+			queryParams: "?resource=container",
+			wantFilters: ListFilters{Resource: "container"},
+		},
+		{
+			name:        "name only",
+			queryParams: "?name=web",
+			wantFilters: ListFilters{Name: "web"},
+		},
+		{
+			name:        "resource and name combined",
+			queryParams: "?resource=volume&name=data",
+			wantFilters: ListFilters{Resource: "volume", Name: "data"},
+		},
+		{
+			name:        "no query params yield empty filters",
+			queryParams: "",
+			wantFilters: ListFilters{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotFilters ListFilters
+			mockService := &MockQuadletService{
+				mockList: func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
+					gotFilters = filters
+					return []QuadletListResponse{}, nil
+				},
+			}
+
+			handler := NewQuadletHandler(mockService, nil)
+
+			req := httptest.NewRequest("GET", "/api/machines/machine123/quadlets"+tt.queryParams, nil)
+
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", "machine123")
+
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+
+			handler.List(rr, req)
+
+			assert.Equal(t, http.StatusOK, rr.Code)
+			assert.Equal(t, tt.wantFilters, gotFilters,
+				"handler must forward the resource/name query params to the service as ListFilters")
+		})
+	}
+}
+
 type MockQuadletService struct {
 	mockList              func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
 	mockGet               func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
