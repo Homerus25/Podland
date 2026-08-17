@@ -63,7 +63,15 @@ var (
 	ErrTokenExpired       = NewAppError("TOKEN_EXPIRED", "Token has expired", http.StatusUnauthorized)
 	ErrTokenInvalid       = NewAppError("TOKEN_INVALID", "Invalid token", http.StatusUnauthorized)
 	ErrUserNotFound       = NewAppError("USER_NOT_FOUND", "User not found", http.StatusNotFound)
-	ErrUsernameTaken      = NewAppError("USERNAME_TAKEN", "Username already exists", http.StatusBadRequest)
+	// ErrAdminRequired backs the admin-only routes (starting with
+	// POST /api/users): the caller is authenticated but lacks the
+	// admin role.
+	ErrAdminRequired = NewAppError("ADMIN_REQUIRED", "Admin privileges required", http.StatusForbidden)
+	// ErrUsernameTaken is 409 Conflict: the username is already taken.
+	// The service's exists-check returns it directly; the users.username
+	// UNIQUE constraint can also surface it as a backstop when two
+	// concurrent creations race past the check.
+	ErrUsernameTaken = NewAppError("USERNAME_TAKEN", "Username already exists", http.StatusConflict)
 )
 
 // Rate Limiting

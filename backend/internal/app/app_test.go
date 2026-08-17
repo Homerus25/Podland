@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,6 +135,29 @@ func TestApp_Handler_HealthRouteWorks(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode,
 		"/api/health must return 200 OK — proves the router wiring is intact")
+}
+
+// TestApp_Handler_UsersRouteIsProtected pins the 090-01 wiring: POST
+// /api/users must exist behind the JWT middleware, so an anonymous
+// caller gets 401 (not 404). If the route is dropped or registered
+// outside the protected group, this fails.
+func TestApp_Handler_UsersRouteIsProtected(t *testing.T) {
+	cfg := newTestConfig(t)
+
+	a, err := app.New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = a.Close() })
+
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Post(srv.URL+"/api/users", "application/json",
+		strings.NewReader(`{"username":"someone","password":"secret"}`))
+	require.NoError(t, err, "POST /api/users must connect")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"POST /api/users must sit behind the JWT middleware (401, not 404)")
 }
 
 // TestApp_Close_IsIdempotent pins the "safe to call once" promise: App.Close

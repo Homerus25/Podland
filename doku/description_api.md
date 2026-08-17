@@ -7,6 +7,7 @@ This document defines the API contract between the frontend and backend for the 
 Endpoint documentation is split by domain:
 
 - [Auth](description_auth_api.md) - Login, logout, token status
+- [Users](description_users_api.md) - User creation (admin-only)
 - [Machines](description_machines_api.md) - Machine CRUD, access management, event stream (SSE)
 - [Containers](description_containers_api.md) - Container CRUD, lifecycle, logs
 - [Images](description_images_api.md) - Image listing, pull, removal

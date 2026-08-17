@@ -24,7 +24,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimid "github.com/go-chi/chi/v5/middleware"
-	"github.com/google/uuid"
 	"github.com/yourorg/podland/backend/internal/config"
 	"github.com/yourorg/podland/backend/internal/connections"
 	"github.com/yourorg/podland/backend/internal/domain/auth"
@@ -33,13 +32,13 @@ import (
 	"github.com/yourorg/podland/backend/internal/domain/images"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	"github.com/yourorg/podland/backend/internal/domain/quadlets"
+	"github.com/yourorg/podland/backend/internal/domain/users"
 	"github.com/yourorg/podland/backend/internal/encryption"
 	"github.com/yourorg/podland/backend/internal/errors"
 	appmiddleware "github.com/yourorg/podland/backend/internal/middleware"
 	"github.com/yourorg/podland/backend/internal/models"
 	"github.com/yourorg/podland/backend/internal/sshexec"
 	"github.com/yourorg/podland/backend/migrations"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // App owns every backend resource and background goroutine constructed by
@@ -49,6 +48,11 @@ type App struct {
 	db                *sql.DB
 	connectionManager *connections.ConnectionManager
 	sshExecService    *sshexec.Service
+
+	// userSvc is the single user-creation path (hash + exists-check +
+	// insert). The POST /api/users endpoint, cmd/initdb, and the
+	// SeedUserWithRole test seam all go through it.
+	userSvc *users.UserService
 
 	router http.Handler
 
@@ -105,6 +109,9 @@ func New(cfg *config.Config) (*App, error) {
 	machineRepo := models.NewMachineRepository(db)
 	accessRepo := models.NewMachineAccessRepository(db)
 
+	// User management shares one creation path with cmd/initdb
+	userService := users.NewUserService(userRepo)
+
 	// Initialize connection manager
 	connectionFactory := connections.NewConnectionFactory(connections.ConnectionFactoryOptions{
 		MachineRepo: machineRepo,
@@ -143,6 +150,7 @@ func New(cfg *config.Config) (*App, error) {
 
 	// Initialize handlers
 	authHandler := auth.NewAuthHandler(authService, userRepo)
+	userHandler := users.NewUserHandler(userService)
 	machineHandler := machines.NewMachineHandler(machineService)
 	containerHandler := containers.NewContainerHandler(containerService, machineService)
 	imageHandler := images.NewImageHandler(imageService, machineService)
@@ -230,6 +238,10 @@ func New(cfg *config.Config) (*App, error) {
 					r.Get("/events", eventHandler.HandleEvents)
 				})
 			})
+
+			// Users — admin-only (090-01): creating users is the first
+			// role-enforced endpoint. Sits beside /machines, not inside it.
+			r.With(appmiddleware.RequireAdmin(userRepo)).Post("/users", userHandler.Create)
 		})
 	})
 
@@ -243,6 +255,7 @@ func New(cfg *config.Config) (*App, error) {
 		db:                db,
 		connectionManager: connectionManager,
 		sshExecService:    sshExecService,
+		userSvc:           userService,
 		router:            router,
 	}, nil
 }
@@ -304,28 +317,15 @@ func (a *App) SeedUser(username, password string) (string, error) {
 
 // SeedUserWithRole is SeedUser with an explicit role, so harness tests
 // can mint users of any role (e.g. an admin mirroring the cmd/initdb
-// bootstrap user) without a backdoor around login. Role values are
-// validated by the repository like any other write.
+// bootstrap user) without a backdoor around login. It rides the same
+// user-creation service as the endpoint and the bootstrap tool, so
+// hashing and duplicate detection cannot drift between them.
 func (a *App) SeedUserWithRole(username, password, role string) (string, error) {
 	if a.db == nil {
 		return "", fmt.Errorf("app: SeedUserWithRole on closed app")
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	user, err := a.userSvc.CreateUserWithRole(username, password, role)
 	if err != nil {
-		return "", fmt.Errorf("app: bcrypt hash: %w", err)
-	}
-	user := &models.User{
-		ID:           uuid.New().String(),
-		Username:     username,
-		PasswordHash: string(hash),
-		Role:         role,
-		// cmd/initdb uses time.Now() (local); we use UTC for
-		// determinism in tests. The difference is cosmetic — the
-		// column stores whatever time.Now() returns in either case.
-		CreatedAt: time.Now().UTC(),
-	}
-	repo := models.NewUserRepository(a.db)
-	if err := repo.Create(user); err != nil {
 		return "", fmt.Errorf("app: create seeded user: %w", err)
 	}
 	return user.ID, nil
