@@ -15,7 +15,7 @@ import (
 // Test_Integration_Quadlets_ListFilters is the quadlet list-filter vertical
 // slice for the real-podman integration suite. It proves the query-parameter
 // filtering of GET /api/machines/{id}/quadlets end-to-end through handler →
-// service → podman QuadletList (contract at doku/description_api.md:831-833):
+// service → podman QuadletList (contract at doku/description_quadlets_api.md:15-17):
 //
 //	GET /api/machines/{id}/quadlets?resource=<type>  → only that resource type
 //	GET /api/machines/{id}/quadlets?name=<substr>    → case-insensitive substring

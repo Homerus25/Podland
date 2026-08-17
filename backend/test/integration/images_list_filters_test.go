@@ -16,7 +16,7 @@ import (
 // Test_Integration_Images_ListFilters is the image list-filter vertical
 // slice for the real-podman integration suite. It proves the `filters` query
 // parameter of GET /api/machines/{id}/images is applied server-side by
-// podman (contract at doku/description_api.md:692-693), through handler →
+// podman (contract at doku/description_images_api.md:15-16), through handler →
 // service → tunnel ImageEngine.List:
 //
 //	GET /api/machines/{id}/images?filters={"reference":["<ref>"]}

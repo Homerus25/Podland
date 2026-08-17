@@ -238,7 +238,7 @@ func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// stop defaults to true per the contract (doku/description_api.md:972).
+	// stop defaults to true per the contract (doku/description_quadlets_api.md:147).
 	// Only an explicit "false" (or other strconv-false value) turns it off;
 	// an unparseable value leaves the default in place.
 	stop := true
@@ -322,7 +322,7 @@ func (h *QuadletHandler) Start(w http.ResponseWriter, r *http.Request) {
 
 // Stop handles stopping a running quadlet-managed resource.
 // Runs `systemctl stop <unit>` over SSH, honouring the `force` and `timeout`
-// query params (doku/description_api.md:1019-1022).
+// query params (doku/description_quadlets_api.md:194-196).
 func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	userID, machineID, quadletID, err := parseLifecyclePath(r)
 	if err != nil {
@@ -354,7 +354,7 @@ func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
 
 // Restart handles restarting a quadlet-managed resource.
 // Runs `systemctl restart <unit>` over SSH, honouring the `force` and `timeout`
-// query params (doku/description_api.md:1048-1050).
+// query params (doku/description_quadlets_api.md:223-225).
 func (h *QuadletHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	userID, machineID, quadletID, err := parseLifecyclePath(r)
 	if err != nil {

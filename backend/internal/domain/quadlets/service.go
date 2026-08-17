@@ -208,7 +208,7 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 //
 // Podman has no dedicated update primitive, so the service composes
 // QuadletRemove + QuadletInstall (with Replace: true) of the new content
-// (doku/description_api.md:939-961):
+// (doku/description_quadlets_api.md:114-138):
 //
 //  1. Existence check: locate the quadlet via QuadletList. A missing quadlet
 //     maps to ErrQuadletNotFound (404). The list result also supplies the
@@ -224,7 +224,7 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 // removed. The returned error reflects the install failure, but the caller
 // cannot assume the original quadlet is still present.
 //
-// The response reuses the Get shape (doku/description_api.md:953). State is
+// The response reuses the Get shape (doku/description_quadlets_api.md:128). State is
 // reported as "unknown" immediately after the reinstall because systemd has not
 // yet reloaded to report a fresh status — matching the Create slice's behaviour.
 func (s *QuadletService) Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
@@ -299,7 +299,7 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 // Delete removes a quadlet by name on the specified machine.
 //
 // The flow honours the contract's `force` and `stop` query parameters
-// (doku/description_api.md:965-984):
+// (doku/description_quadlets_api.md:140-161):
 //
 //   - The quadlet is located via a QuadletList pre-check. A missing quadlet
 //     maps to ErrQuadletNotFound (404).
@@ -499,7 +499,7 @@ func isResourceRunningError(err error) bool {
 // 060-04 image-pull NDJSON pattern. The non-streaming mode returns a single
 // multiline string; the streaming mode emits NDJSON events via callback.
 //
-// The flow (doku/description_api.md:1072-1109):
+// The flow (doku/description_quadlets_api.md:247-285):
 //
 //  1. Resolve the quadlet via QuadletList — existence check (404 if absent)
 //     and managed container name resolution (prefer the Pod container name,

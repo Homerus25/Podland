@@ -63,7 +63,7 @@ type QuadletCreateRequest struct {
 
 // QuadletCreateResponse represents a quadlet in the API create response.
 // Per the epic's no-persistence ruling, generation/createdAt/updatedAt are
-// omitted (documented deviation from the contract at doku/description_api.md:914-925).
+// omitted (documented deviation from the contract at doku/description_quadlets_api.md:89-110).
 type QuadletCreateResponse struct {
 	// Unique identifier for the quadlet (the quadlet name)
 	ID string `json:"id"`
@@ -83,7 +83,7 @@ type QuadletCreateResponse struct {
 }
 
 // LifecycleOptions carries the optional force/timeout parameters for stop and
-// restart operations (doku/description_api.md:1019-1022, 1048-1050). Start has
+// restart operations (doku/description_quadlets_api.md:194-196, 223-225). Start has
 // no options per the contract.
 type LifecycleOptions struct {
 	// Force requests an aggressive stop/restart. Maps to `systemctl --force`.
@@ -94,7 +94,7 @@ type LifecycleOptions struct {
 }
 
 // QuadletLifecycleResponse is the success body for the start/stop/restart
-// endpoints (doku/description_api.md:994-1001, 1023-1030, 1052-1060). The shape
+// endpoints (doku/description_quadlets_api.md:178-184, 207-213, 237-243). The shape
 // is intentionally narrow: id + state + unit, with restartedAt on restart only.
 type QuadletLifecycleResponse struct {
 	// Unique identifier for the quadlet (the quadlet name)

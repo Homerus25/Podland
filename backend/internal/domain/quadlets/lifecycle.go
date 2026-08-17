@@ -82,7 +82,7 @@ func (a lifecycleAction) buildResponse(name, unit string) *QuadletLifecycleRespo
 // start starts a stopped quadlet-managed resource by running
 // `systemctl start <unit>` over SSH (via SSHExecInterface from 070-10).
 //
-// The flow (doku/description_api.md:988-1010):
+// The flow (doku/description_quadlets_api.md:163-185):
 //
 //  1. Resolve the quadlet via QuadletList — existence check (404 if absent)
 //     and unit-name resolution (prefer the quadlet's UnitName; derive
@@ -113,7 +113,7 @@ func (s *QuadletService) Start(ctx context.Context, userID, machineID, name stri
 }
 
 // Stop stops a running quadlet-managed resource by running
-// `systemctl stop <unit>` over SSH (doku/description_api.md:1013-1039).
+// `systemctl stop <unit>` over SSH (doku/description_quadlets_api.md:188-215).
 //
 // Honours the contract's `force` and `timeout` query params: force maps to
 // `systemctl --force`, timeout maps to `--kill-seconds=<n>`. Refuses a
@@ -139,7 +139,7 @@ func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name strin
 }
 
 // Restart restarts a quadlet-managed resource by running
-// `systemctl restart <unit>` over SSH (doku/description_api.md:1042-1069).
+// `systemctl restart <unit>` over SSH (doku/description_quadlets_api.md:217-244).
 //
 // Supports the same `force`/`timeout` options as Stop. Refuses a non-running
 // resource with QUADLET_NOT_RUNNING (400).

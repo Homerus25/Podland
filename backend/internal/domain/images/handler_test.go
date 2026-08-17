@@ -241,7 +241,7 @@ func TestImageHandler_List_AllQueryParam(t *testing.T) {
 
 // TestImageHandler_List_FiltersQueryParam pins the HTTP seam of the list
 // filters: the `filters` query parameter (a JSON map[string][]string, contract
-// at doku/description_api.md:692-693) must reach the service as flattened
+// at doku/description_images_api.md:15-16) must reach the service as flattened
 // "key=value" entries in ImageListOptions.Filter. The opts are captured via
 // the mock because map iteration order makes the flattened order
 // non-deterministic, so the assertions use ElementsMatch.
