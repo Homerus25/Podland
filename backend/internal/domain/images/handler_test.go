@@ -239,6 +239,81 @@ func TestImageHandler_List_AllQueryParam(t *testing.T) {
 	mockService.AssertExpectations(t)
 }
 
+// TestImageHandler_List_FiltersQueryParam pins the HTTP seam of the list
+// filters: the `filters` query parameter (a JSON map[string][]string, contract
+// at doku/description_api.md:692-693) must reach the service as flattened
+// "key=value" entries in ImageListOptions.Filter. The opts are captured via
+// the mock because map iteration order makes the flattened order
+// non-deterministic, so the assertions use ElementsMatch.
+func TestImageHandler_List_FiltersQueryParam(t *testing.T) {
+	tests := []struct {
+		name        string
+		queryParams string
+		wantFilters []string
+	}{
+		{
+			name:        "single key with single value",
+			queryParams: `?filters={"reference":["busybox:latest"]}`,
+			wantFilters: []string{"reference=busybox:latest"},
+		},
+		{
+			name:        "single key with multiple values",
+			queryParams: `?filters={"label":["maintainer=x","arch=arm64"]}`,
+			wantFilters: []string{"label=maintainer=x", "label=arch=arm64"},
+		},
+		{
+			name:        "multiple keys are all flattened",
+			queryParams: `?filters={"reference":["nginx"],"label":["a=1"]}`,
+			wantFilters: []string{"reference=nginx", "label=a=1"},
+		},
+		{
+			name:        "invalid filters JSON is ignored",
+			queryParams: `?filters=not-json`,
+			wantFilters: nil,
+		},
+		{
+			name:        "filters combine with the all param",
+			queryParams: `?all=true&filters={"dangling":["false"]}`,
+			wantFilters: []string{"dangling=false"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var capturedOpts entities.ImageListOptions
+			mockService := new(MockImageService)
+			mockService.On("List", mock.Anything, "test-user", "test-machine", mock.AnythingOfType("entities.ImageListOptions")).
+				Run(func(args mock.Arguments) {
+					capturedOpts = args.Get(3).(entities.ImageListOptions)
+				}).
+				Return([]*entities.ImageSummary{}, nil)
+
+			handler := NewImageHandler(mockService, nil)
+
+			ctx := context.Background()
+			ctx = contextutils.SetUserID(ctx, "test-user")
+			ctx = contextutils.SetRequestID(ctx, "test-request-id")
+
+			req := httptest.NewRequest("GET", "/api/machines/test-machine/images"+tt.queryParams, nil)
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+
+			r := chi.NewRouter()
+			r.Get("/api/machines/{id}/images", handler.List)
+			r.ServeHTTP(rr, req)
+
+			assert.Equal(t, http.StatusOK, rr.Code, "an (even ignored) filters param must never fail the request")
+			assert.ElementsMatch(t, tt.wantFilters, capturedOpts.Filter,
+				"handler must flatten the filters query param into opts.Filter as key=value entries")
+			if tt.name == "filters combine with the all param" {
+				assert.True(t, capturedOpts.All, "the all param must still be parsed alongside filters")
+			}
+			mockService.AssertExpectations(t)
+		})
+	}
+}
+
 // TestImageHandler_Delete_Success tests successful image deletion
 func TestImageHandler_Delete_Success(t *testing.T) {
 	mockService := new(MockImageService)
