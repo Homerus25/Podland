@@ -552,7 +552,7 @@ func TestImageHandler_Pull_ValidationFailure(t *testing.T) {
 // splitLines splits a string into lines, filtering out empty lines
 func splitLines(s string) []string {
 	lines := []string{}
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.TrimSpace(line) != "" {
 			lines = append(lines, line)
 		}
@@ -641,7 +641,7 @@ func TestImageHandler_Pull_Success_Streaming(t *testing.T) {
 			// Simulate some progress events
 			progressEvents = append(progressEvents, NewProgressEvent("op-1", "test-machine", "pulling", "Downloading layers", 1, 5))
 			progressWriter(progressEvents[len(progressEvents)-1])
-			
+
 			progressEvents = append(progressEvents, NewProgressEvent("op-1", "test-machine", "pulling", "Verifying checksum", 2, 5))
 			progressWriter(progressEvents[len(progressEvents)-1])
 		}).

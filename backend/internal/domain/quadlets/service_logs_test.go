@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/testutils"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -29,7 +29,7 @@ func TestQuadletService_GetLogs_Success(t *testing.T) {
 	t.Run("service structure validation", func(t *testing.T) {
 		// Verify that GetLogs method exists on service
 		assert.NotNil(t, service.GetLogs, "GetLogs method should exist on service")
-		
+
 		// Verify that QuadletLogsResponse DTO exists
 		response := &QuadletLogsResponse{
 			ID:   "test-quadlet",
@@ -192,7 +192,7 @@ func TestQuadletService_GetLogsWithStream_Success(t *testing.T) {
 	t.Run("service structure validation", func(t *testing.T) {
 		// Verify that GetLogsWithStream method exists on service
 		assert.NotNil(t, service.GetLogsWithStream, "GetLogsWithStream method should exist on service")
-		
+
 		// Verify that QuadletLogEvent DTO exists
 		event := QuadletLogEvent{
 			Timestamp: "2024-01-01T00:00:00Z",
@@ -332,14 +332,14 @@ func TestQuadletService_GetLogs_Buffers(t *testing.T) {
 	t.Run("buffer initialization", func(t *testing.T) {
 		// Verify that bytes.Buffer is available for capturing logs
 		var stdoutBuffer, stderrBuffer bytes.Buffer
-		
+
 		testLog := "test log line"
 		stdoutBuffer.WriteString(testLog)
 		stderrBuffer.WriteString(testLog)
-		
+
 		assert.Equal(t, testLog, stdoutBuffer.String(), "Stdout buffer should capture logs")
 		assert.Equal(t, testLog, stderrBuffer.String(), "Stderr buffer should capture logs")
-		
+
 		// Test buffer trimming
 		combinedLogs := stdoutBuffer.String()
 		trimmedBytes := bytes.TrimSuffix(stdoutBuffer.Bytes(), []byte("\n"))
@@ -350,11 +350,11 @@ func TestQuadletService_GetLogs_Buffers(t *testing.T) {
 	t.Run("buffer combination", func(t *testing.T) {
 		// Test the combination logic from GetLogs
 		var stdoutBuffer, stderrBuffer bytes.Buffer
-		
+
 		stdoutBuffer.WriteString("stdout line 1\n")
 		stdoutBuffer.WriteString("stdout line 2\n")
 		stderrBuffer.WriteString("stderr line 1\n")
-		
+
 		combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
 		if stderrBuffer.Len() > 0 {
 			stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
@@ -364,17 +364,17 @@ func TestQuadletService_GetLogs_Buffers(t *testing.T) {
 				combinedLogs = stderrContent
 			}
 		}
-		
+
 		expected := "stdout line 1\nstdout line 2\nstderr line 1"
 		assert.Equal(t, expected, combinedLogs, "Combined logs should match expected format")
 	})
 
 	t.Run("stderr only", func(t *testing.T) {
 		var stdoutBuffer, stderrBuffer bytes.Buffer
-		
+
 		stderrBuffer.WriteString("stderr line 1\n")
 		stderrBuffer.WriteString("stderr line 2\n")
-		
+
 		combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
 		if stderrBuffer.Len() > 0 {
 			stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
@@ -384,7 +384,7 @@ func TestQuadletService_GetLogs_Buffers(t *testing.T) {
 				combinedLogs = stderrContent
 			}
 		}
-		
+
 		expected := "stderr line 1\nstderr line 2"
 		assert.Equal(t, expected, combinedLogs, "Combined logs should handle stderr-only case")
 	})

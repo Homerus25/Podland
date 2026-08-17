@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	"github.com/yourorg/podland/backend/internal/testutils"
-	"github.com/stretchr/testify/assert"
 )
 
 // TestContainerService_Get_Success tests successful container retrieval

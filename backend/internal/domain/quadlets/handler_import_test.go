@@ -44,7 +44,7 @@ func TestHandlerImport_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader(body))
-	
+
 	// Set up chi URL parameters
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "machine-1")
@@ -85,7 +85,7 @@ func TestHandlerImport_InvalidCredentials(t *testing.T) {
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader(body))
-	
+
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "machine-1")
 	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
@@ -115,7 +115,7 @@ func TestHandlerImport_MissingMachineID(t *testing.T) {
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/machines//quadlets/import", bytes.NewReader(body))
-	
+
 	rctx := chi.NewRouteContext()
 	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
 	ctx = contextutils.SetUserID(ctx, "user-1")
@@ -136,7 +136,7 @@ func TestHandlerImport_InvalidRequestBody(t *testing.T) {
 	handler := NewQuadletHandler(mockService, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader([]byte("invalid json")))
-	
+
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "machine-1")
 	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
@@ -171,7 +171,7 @@ func TestHandlerImport_ServiceError(t *testing.T) {
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader(body))
-	
+
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "machine-1")
 	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
@@ -200,7 +200,7 @@ func TestHandlerImport_EmptyQuadletsList(t *testing.T) {
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader(body))
-	
+
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "machine-1")
 	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
@@ -245,7 +245,7 @@ func TestHandlerImport_PartialFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader(body))
-	
+
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "machine-1")
 	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)

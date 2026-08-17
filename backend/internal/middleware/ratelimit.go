@@ -35,7 +35,7 @@ func (rl *RateLimiter) Allow(userID string) bool {
 	entry, exists := rl.store.entries[userID]
 	if !exists {
 		entry = &RateLimitEntry{
-			count:     1,
+			count:       1,
 			windowStart: now,
 		}
 		rl.store.entries[userID] = entry
@@ -118,9 +118,9 @@ type RateLimitEntry struct {
 
 // RateLimitMiddleware creates a middleware for rate limiting
 type RateLimiter struct {
-	store      *RateLimitStore
-	requests   int
-	window     time.Duration
+	store    *RateLimitStore
+	requests int
+	window   time.Duration
 }
 
 // RateLimitMiddleware returns a middleware that limits requests

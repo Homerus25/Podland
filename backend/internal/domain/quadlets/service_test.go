@@ -12,8 +12,8 @@ import (
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	appErrors "github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/testutils"
-	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/libpod/define"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // TestQuadletService_ImplementsInterface is a compile-time check that

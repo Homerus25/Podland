@@ -39,8 +39,8 @@ func (r *MachineRepository) Create(machine *models.Machine) error {
 
 	_, err := r.db.Exec(
 		query,
-		machine.ID, machine.Name, machine.OwnerID, machine.Description, 
-		machine.Hostname, machine.Port, machine.SSHUsername, 
+		machine.ID, machine.Name, machine.OwnerID, machine.Description,
+		machine.Hostname, machine.Port, machine.SSHUsername,
 		machine.SSHKeyEncrypted, machine.SSHKeyFingerprint,
 		machine.PodmanSocketPath, machine.CreatedAt, machine.UpdatedAt,
 	)

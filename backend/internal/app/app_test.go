@@ -177,4 +177,3 @@ func TestApp_Close_ReleasesBackgroundGoroutines(t *testing.T) {
 		t.Fatal("App.Close did not return within 2s; a background goroutine likely hasn't exited")
 	}
 }
-

@@ -12,14 +12,14 @@ import (
 
 // AuthHandler handles authentication requests
 type AuthHandler struct {
-	service *AuthService
+	service  *AuthService
 	userRepo models.UserRepositoryInterface
 }
 
 // NewAuthHandler creates a new AuthHandler
 func NewAuthHandler(service *AuthService, userRepo models.UserRepositoryInterface) *AuthHandler {
 	return &AuthHandler{
-		service: service,
+		service:  service,
 		userRepo: userRepo,
 	}
 }
@@ -92,21 +92,21 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 // StatusResponse represents authentication status response
 type StatusResponse struct {
 	Authenticated bool   `json:"authenticated"`
-	UserID       string `json:"userId,omitempty"`
+	UserID        string `json:"userId,omitempty"`
 }
 
 // Status handles authentication status check
 func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 	// Check if user is authenticated by looking for user ID in context
 	userID := contextutils.GetUserIDFromContext(r.Context())
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	
+
 	if userID != "" {
 		json.NewEncoder(w).Encode(StatusResponse{
 			Authenticated: true,
-			UserID:       userID,
+			UserID:        userID,
 		})
 	} else {
 		json.NewEncoder(w).Encode(StatusResponse{

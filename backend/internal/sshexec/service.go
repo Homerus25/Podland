@@ -161,7 +161,8 @@ func (s *Service) Exec(ctx context.Context, machineID, userID, command string, o
 // metacharacters in arg values cannot break out or be re-interpreted.
 //
 // Example: shellQuote("systemctl", []string{"start", "web.service"})
-//          -> `systemctl 'start' 'web.service'`
+//
+//	-> `systemctl 'start' 'web.service'`
 func shellQuote(command string, args []string) string {
 	if len(args) == 0 {
 		return command

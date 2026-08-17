@@ -80,4 +80,3 @@ func main() {
 
 	log.Printf("Successfully created admin user '%s'", *username)
 }
-

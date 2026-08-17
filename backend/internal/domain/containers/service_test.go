@@ -5,11 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"go.podman.io/podman/v6/pkg/domain/entities"
-	"github.com/yourorg/podland/backend/internal/domain/machines"
-	"github.com/yourorg/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/yourorg/podland/backend/internal/domain/machines"
+	"github.com/yourorg/podland/backend/internal/testutils"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // MockContainerEngine is a mock implementation of the ContainerEngine interface
@@ -102,7 +102,7 @@ func TestContainerService_List_Options(t *testing.T) {
 		opts := entities.ContainerListOptions{
 			Filters: map[string][]string{
 				"status": {"running"},
-				"name":    {"test-*"},
+				"name":   {"test-*"},
 			},
 		}
 		_, err := service.List(ctx, userID, machineID, opts)
@@ -158,8 +158,8 @@ func TestContainerService_Create_Success(t *testing.T) {
 
 	// Create test request
 	request := ContainerCreateRequest{
-		Name:  "test-container",
-		Image: "nginx:latest",
+		Name:    "test-container",
+		Image:   "nginx:latest",
 		Command: []string{"/bin/sh", "-c", "echo hello"},
 		Environment: map[string]string{
 			"ENV1": "value1",

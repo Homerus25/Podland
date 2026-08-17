@@ -162,20 +162,20 @@ func TestQuadletHandler_List(t *testing.T) {
 	}
 }
 
- type MockQuadletService struct {
- 	mockList    func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
- 	mockGet     func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
- 	mockCreate  func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
- 	mockUpdate  func(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
- 	mockDelete  func(ctx context.Context, userID, machineID, name string, force, stop bool) error
- 	mockStart   func(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error)
- 	mockStop    func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
- 	mockRestart func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
- 	mockGetLogs         func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error)
- 	mockGetLogsWithStream func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error
- 	mockGenerate func(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error)
- 	mockImport  func(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error)
- }
+type MockQuadletService struct {
+	mockList              func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
+	mockGet               func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
+	mockCreate            func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
+	mockUpdate            func(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
+	mockDelete            func(ctx context.Context, userID, machineID, name string, force, stop bool) error
+	mockStart             func(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error)
+	mockStop              func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
+	mockRestart           func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
+	mockGetLogs           func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error)
+	mockGetLogsWithStream func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error
+	mockGenerate          func(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error)
+	mockImport            func(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error)
+}
 
 func (m *MockQuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
 	if m.mockList != nil {
@@ -1207,7 +1207,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 			name:           "not running maps to 400",
 			userID:         "user123",
 			machineID:      "machine123",
-			quadletID:       "my-container.container",
+			quadletID:      "my-container.container",
 			mockError:      errors.ErrQuadletNotRunning,
 			expectedStatus: http.StatusBadRequest,
 		},
@@ -1215,7 +1215,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 			name:           "not found maps to 404",
 			userID:         "user123",
 			machineID:      "machine123",
-			quadletID:       "missing.container",
+			quadletID:      "missing.container",
 			mockError:      errors.ErrQuadletNotFound,
 			expectedStatus: http.StatusNotFound,
 		},
@@ -1223,7 +1223,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 			name:           "connection failed maps to 502",
 			userID:         "user123",
 			machineID:      "machine123",
-			quadletID:       "my-container.container",
+			quadletID:      "my-container.container",
 			mockError:      errors.ErrConnectionFailed,
 			expectedStatus: http.StatusBadGateway,
 		},
@@ -1231,7 +1231,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 			name:           "generic error maps to 500",
 			userID:         "user123",
 			machineID:      "machine123",
-			quadletID:       "my-container.container",
+			quadletID:      "my-container.container",
 			mockError:      errGeneric,
 			expectedStatus: http.StatusInternalServerError,
 		},
@@ -1239,14 +1239,14 @@ func TestQuadletHandler_Restart(t *testing.T) {
 			name:           "missing user ID",
 			userID:         "",
 			machineID:      "machine123",
-			quadletID:       "my-container.container",
+			quadletID:      "my-container.container",
 			expectedStatus: http.StatusUnauthorized,
 		},
 		{
 			name:           "missing quadlet ID",
 			userID:         "user123",
 			machineID:      "machine123",
-			quadletID:       "",
+			quadletID:      "",
 			expectedStatus: http.StatusBadRequest,
 		},
 	}
@@ -1493,10 +1493,10 @@ func TestQuadletHandler_Generate(t *testing.T) {
 				}
 			}
 
-		// On success, verify the request was passed through correctly
-		if tt.expectedStatus == http.StatusOK {
-			assert.Equal(t, tt.requestBody, `{"resourceId":"`+capturedReq.ResourceID+`","resourceType":"`+capturedReq.ResourceType+`"}`, "request should be passed through correctly")
-		}
+			// On success, verify the request was passed through correctly
+			if tt.expectedStatus == http.StatusOK {
+				assert.Equal(t, tt.requestBody, `{"resourceId":"`+capturedReq.ResourceID+`","resourceType":"`+capturedReq.ResourceType+`"}`, "request should be passed through correctly")
+			}
 		})
 	}
 }

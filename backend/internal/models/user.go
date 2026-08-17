@@ -11,5 +11,3 @@ type User struct {
 	PasswordHash string    `json:"-"`
 	CreatedAt    time.Time `json:"createdAt"`
 }
-
-

@@ -258,7 +258,7 @@ func TestQuadletImportResponse_Structure(t *testing.T) {
 }
 
 func getValidator() interface {
-	Struct(interface{}) error
+	Struct(any) error
 } {
 	return validator.New()
 }

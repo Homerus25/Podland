@@ -32,12 +32,12 @@ func TestMachineService_Create(t *testing.T) {
 
 		// Create request with valid data
 		req := &CreateMachineRequest{
-			Name:          "test-machine",
-			Description:   "Test description",
-			Hostname:      "example.com",
-			Port:          22,
-			SSHUsername:   "root",
-			SSHPrivateKey: testutils.GenerateValidPEMKey(),
+			Name:             "test-machine",
+			Description:      "Test description",
+			Hostname:         "example.com",
+			Port:             22,
+			SSHUsername:      "root",
+			SSHPrivateKey:    testutils.GenerateValidPEMKey(),
 			PodmanSocketPath: "/run/podman/podman.sock",
 		}
 
@@ -194,11 +194,11 @@ func TestMachineService_Create(t *testing.T) {
 
 		// Add a machine with the same name first
 		existingMachine := &models.Machine{
-			ID:       "existing-machine",
-			Name:     "test-machine",
-			OwnerID:  userID,
-			Hostname: "existing.example.com",
-			Port:     22,
+			ID:        "existing-machine",
+			Name:      "test-machine",
+			OwnerID:   userID,
+			Hostname:  "existing.example.com",
+			Port:      22,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
@@ -310,13 +310,13 @@ func TestMachineService_GetMachineByID(t *testing.T) {
 
 		// Add a machine and access
 		testMachine := &models.Machine{
-			ID:          machineID,
-			Name:        "test-machine",
-			OwnerID:     userID,
-			Hostname:    "example.com",
-			Port:        22,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:        machineID,
+			Name:      "test-machine",
+			OwnerID:   userID,
+			Hostname:  "example.com",
+			Port:      22,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 		mockMachineRepo.AddMachine(testMachine)
 		mockAccessRepo.AddAccess(machineID, userID, models.PermissionAdmin, time.Now())
@@ -361,13 +361,13 @@ func TestMachineService_GetMachineByID(t *testing.T) {
 
 		// Add a machine owned by someone else
 		testMachine := &models.Machine{
-			ID:          machineID,
-			Name:        "other-users-machine",
-			OwnerID:     "other-user",
-			Hostname:    "example.com",
-			Port:        22,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			ID:        machineID,
+			Name:      "other-users-machine",
+			OwnerID:   "other-user",
+			Hostname:  "example.com",
+			Port:      22,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
 		}
 		mockMachineRepo.AddMachine(testMachine)
 		// No access granted for our user
@@ -401,29 +401,29 @@ func TestMachineService_ListMethods(t *testing.T) {
 
 		// Add some machines for our user
 		machine1 := &models.Machine{
-			ID:       "machine-1",
-			Name:     "my-machine-1",
-			OwnerID:  userID,
-			Hostname: "host1.example.com",
-			Port:     22,
+			ID:        "machine-1",
+			Name:      "my-machine-1",
+			OwnerID:   userID,
+			Hostname:  "host1.example.com",
+			Port:      22,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
 		machine2 := &models.Machine{
-			ID:       "machine-2",
-			Name:     "my-machine-2",
-			OwnerID:  userID,
-			Hostname: "host2.example.com",
-			Port:     22,
+			ID:        "machine-2",
+			Name:      "my-machine-2",
+			OwnerID:   userID,
+			Hostname:  "host2.example.com",
+			Port:      22,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
 		machine3 := &models.Machine{
-			ID:       "machine-3",
-			Name:     "other-machine",
-			OwnerID:  "other-user",
-			Hostname: "host3.example.com",
-			Port:     22,
+			ID:        "machine-3",
+			Name:      "other-machine",
+			OwnerID:   "other-user",
+			Hostname:  "host3.example.com",
+			Port:      22,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
@@ -461,20 +461,20 @@ func TestMachineService_ListMethods(t *testing.T) {
 
 		// Add some machines
 		machine1 := &models.Machine{
-			ID:       "machine-1",
-			Name:     "my-machine",
-			OwnerID:  userID,
-			Hostname: "host1.example.com",
-			Port:     22,
+			ID:        "machine-1",
+			Name:      "my-machine",
+			OwnerID:   userID,
+			Hostname:  "host1.example.com",
+			Port:      22,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
 		machine2 := &models.Machine{
-			ID:       "machine-2",
-			Name:     "shared-machine",
-			OwnerID:  "other-user",
-			Hostname: "host2.example.com",
-			Port:     22,
+			ID:        "machine-2",
+			Name:      "shared-machine",
+			OwnerID:   "other-user",
+			Hostname:  "host2.example.com",
+			Port:      22,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
@@ -513,11 +513,11 @@ func TestMachineService_ListMethods(t *testing.T) {
 
 		// Add some machines
 		machine1 := &models.Machine{
-			ID:       "machine-1",
-			Name:     "my-machine",
-			OwnerID:  userID,
-			Hostname: "host1.example.com",
-			Port:     22,
+			ID:        "machine-1",
+			Name:      "my-machine",
+			OwnerID:   userID,
+			Hostname:  "host1.example.com",
+			Port:      22,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
@@ -601,11 +601,11 @@ func TestMachineService_AccessControl(t *testing.T) {
 
 		// Add a machine with the name
 		testMachine := &models.Machine{
-			ID:       machineID,
-			Name:     "test-machine",
-			OwnerID:  userID,
-			Hostname: "example.com",
-			Port:     22,
+			ID:        machineID,
+			Name:      "test-machine",
+			OwnerID:   userID,
+			Hostname:  "example.com",
+			Port:      22,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
@@ -659,19 +659,19 @@ func TestMachineService_FromModel_Full(t *testing.T) {
 	// This test is also in machine_service_test.go but we include it here for completeness
 	// when running all service tests together
 	now := time.Now().UTC()
-	
+
 	machine := &models.Machine{
-		ID:               "test-machine-123",
-		Name:             "Test Machine",
-		Description:      "A test machine",
-		Hostname:         "example.com",
-		Port:             22,
-		SSHUsername:      "root",
-		SSHKeyEncrypted:  []byte("encrypted-key-data"),
+		ID:                "test-machine-123",
+		Name:              "Test Machine",
+		Description:       "A test machine",
+		Hostname:          "example.com",
+		Port:              22,
+		SSHUsername:       "root",
+		SSHKeyEncrypted:   []byte("encrypted-key-data"),
 		SSHKeyFingerprint: "sha256:abc123",
-		PodmanSocketPath: "/run/podman/podman.sock",
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		PodmanSocketPath:  "/run/podman/podman.sock",
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 
 	response := FromModel(machine)

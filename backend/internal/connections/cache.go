@@ -30,8 +30,8 @@ type ConnectionEntry struct {
 
 // NewConnectionCache creates a new connection cache
 type ConnectionCacheOptions struct {
-	MaxSize  int
-	Factory  *ConnectionFactory
+	MaxSize int
+	Factory *ConnectionFactory
 }
 
 func NewConnectionCache(opts ConnectionCacheOptions) *ConnectionCache {

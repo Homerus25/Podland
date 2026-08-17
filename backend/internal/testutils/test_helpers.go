@@ -28,28 +28,28 @@ func GenerateTestUser() *models.User {
 // GenerateTestMachine creates a test machine with random ID
 func GenerateTestMachine() *models.Machine {
 	return &models.Machine{
-		ID:           uuid.New().String(),
-		Name:         fmt.Sprintf("test-machine-%s", uuid.New().String()[:8]),
-		OwnerID:      uuid.New().String(),
-		Hostname:     "example.com",
-		SSHUsername:  "root",
-		Port:         22,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:          uuid.New().String(),
+		Name:        fmt.Sprintf("test-machine-%s", uuid.New().String()[:8]),
+		OwnerID:     uuid.New().String(),
+		Hostname:    "example.com",
+		SSHUsername: "root",
+		Port:        22,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 }
 
 // GenerateTestMachineWithOwner creates a test machine with specified owner ID
 func GenerateTestMachineWithOwner(ownerID string) *models.Machine {
 	return &models.Machine{
-		ID:           uuid.New().String(),
-		Name:         fmt.Sprintf("test-machine-%s", uuid.New().String()[:8]),
-		OwnerID:      ownerID,
-		Hostname:     "example.com",
-		SSHUsername:  "root",
-		Port:         22,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:          uuid.New().String(),
+		Name:        fmt.Sprintf("test-machine-%s", uuid.New().String()[:8]),
+		OwnerID:     ownerID,
+		Hostname:    "example.com",
+		SSHUsername: "root",
+		Port:        22,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 }
 
@@ -114,10 +114,6 @@ func GenerateValidECKey() string {
 	return string(pem.EncodeToMemory(privateKeyPEM))
 }
 
-
-
-
-
 // CreateTestJWTKeys creates test JWT keys for signing and validation
 func CreateTestJWTKeys() (string, string, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -138,8 +134,6 @@ func CreateTestJWTKeys() (string, string, error) {
 	return string(pem.EncodeToMemory(privateKeyPEM)), string(pem.EncodeToMemory(publicKeyPEM)), nil
 }
 
-
-
 // CleanupTestResources cleans up any test resources
 func CleanupTestResources() {
 	// Currently a no-op, but can be extended for actual resource cleanup
@@ -150,10 +144,10 @@ func NewTestMachineService() (*MockMachineService, error) {
 	mockRepo := NewMockMachineRepository()
 	mockEncryption := NewMockEncryptionService()
 	mockCache := NewMockConnectionCache()
-	
+
 	return &MockMachineService{
-		mockMachineRepo:    mockRepo,
-		mockEncryption:     mockEncryption,
+		mockMachineRepo:     mockRepo,
+		mockEncryption:      mockEncryption,
 		mockConnectionCache: mockCache,
 	}, nil
 }
@@ -161,7 +155,7 @@ func NewTestMachineService() (*MockMachineService, error) {
 // NewTestAuthServiceWithMocks creates a test auth service with mock dependencies
 func NewTestAuthServiceWithMocks() (*MockAuthService, error) {
 	mockRepo := NewMockUserRepository()
-	
+
 	return &MockAuthService{
 		mockUserRepo: mockRepo,
 	}, nil
@@ -169,10 +163,10 @@ func NewTestAuthServiceWithMocks() (*MockAuthService, error) {
 
 // MockMachineService is a mock machine service for testing
 type MockMachineService struct {
-	mockMachineRepo    *MockMachineRepository
-	mockEncryption     *MockEncryptionService
+	mockMachineRepo     *MockMachineRepository
+	mockEncryption      *MockEncryptionService
 	mockConnectionCache *MockConnectionCache
-	errors           map[string]error
+	errors              map[string]error
 }
 
 // MockAuthService is a mock auth service for testing

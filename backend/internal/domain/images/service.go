@@ -112,8 +112,8 @@ func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, 
 	// Set up progress writer if callback is provided
 	if progressWriter != nil {
 		opts.Writer = &progressAdapter{
-			writer:     progressWriter,
-			machineID:  machineID,
+			writer:      progressWriter,
+			machineID:   machineID,
 			operationID: generateOperationID(),
 		}
 	}
@@ -131,9 +131,9 @@ func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, 
 
 // progressAdapter adapts podman progress output to our progress event format
 type progressAdapter struct {
-	writer       func(event PullProgressEvent)
-	machineID    string
-	operationID  string
+	writer      func(event PullProgressEvent)
+	machineID   string
+	operationID string
 }
 
 // Write implements io.Writer to capture podman progress output

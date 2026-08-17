@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/yourorg/podland/backend/internal/domain/machines"
 	"github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/testutils"
-	"github.com/stretchr/testify/assert"
 )
 
 // TestContainerService_GetLogs_Success tests successful log retrieval
@@ -69,7 +69,7 @@ func TestContainerService_GetLogs_Success(t *testing.T) {
 	t.Run("service structure validation", func(t *testing.T) {
 		// Verify that GetLogs method exists on service
 		assert.NotNil(t, service.GetLogs, "GetLogs method should exist on service")
-		
+
 		// Verify that ContainerLogsResponse DTO exists
 		response := &ContainerLogsResponse{
 			ID:   "test-container",
@@ -152,14 +152,14 @@ func TestContainerService_GetLogs_Buffers(t *testing.T) {
 	t.Run("buffer initialization", func(t *testing.T) {
 		// Verify that bytes.Buffer is available for capturing logs
 		var stdoutBuffer, stderrBuffer bytes.Buffer
-		
+
 		testLog := "test log line"
 		stdoutBuffer.WriteString(testLog)
 		stderrBuffer.WriteString(testLog)
-		
+
 		assert.Equal(t, testLog, stdoutBuffer.String(), "Stdout buffer should capture logs")
 		assert.Equal(t, testLog, stderrBuffer.String(), "Stderr buffer should capture logs")
-		
+
 		// Test buffer trimming
 		combinedLogs := stdoutBuffer.String()
 		trimmedBytes := bytes.TrimSuffix(stdoutBuffer.Bytes(), []byte("\n"))

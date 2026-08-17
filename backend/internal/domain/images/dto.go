@@ -48,12 +48,12 @@ const (
 
 // PullProgressEvent represents a progress event during image pull
 type PullProgressEvent struct {
-	OperationID string    `json:"operationId"`
-	Type        string    `json:"type"`
-	MachineID   string    `json:"machineId"`
+	OperationID string      `json:"operationId"`
+	Type        string      `json:"type"`
+	MachineID   string      `json:"machineId"`
 	State       *EventState `json:"state,omitempty"`
 	Error       *EventError `json:"error,omitempty"`
-	Timestamp   string    `json:"timestamp"`
+	Timestamp   string      `json:"timestamp"`
 }
 
 // EventState represents the state of a progress event

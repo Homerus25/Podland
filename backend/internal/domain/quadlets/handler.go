@@ -535,7 +535,7 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	case err := <-doneChan:
 		if err != nil {
 			// Emit error event to the stream
-			errorEvent := map[string]interface{}{
+			errorEvent := map[string]any{
 				"timestamp": time.Now().UTC().Format(time.RFC3339),
 				"level":     "ERROR",
 				"message":   err.Error(),
@@ -548,7 +548,7 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	case <-disconnectChan:
 		// Client disconnected, emit cancellation event
-		ndjsonWriter.Write(map[string]interface{}{
+		ndjsonWriter.Write(map[string]any{
 			"timestamp": time.Now().UTC().Format(time.RFC3339),
 			"level":     "ERROR",
 			"code":      "OPERATION_CANCELLED",

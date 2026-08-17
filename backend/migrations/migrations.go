@@ -42,7 +42,7 @@ func Run(db *sql.DB) error {
 
 		// Split into individual statements
 		statements := splitSQLStatements(string(content))
-		
+
 		// Execute in transaction
 		tx, err := db.Begin()
 		if err != nil {

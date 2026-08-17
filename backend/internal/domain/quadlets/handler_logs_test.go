@@ -412,7 +412,7 @@ func TestQuadletHandler_GetLogs_StreamingClientDisconnect(t *testing.T) {
 
 	// Create a channel to signal when the log event is written
 	logWritten := make(chan struct{}, 1)
-	
+
 	// Mock the streaming service call to emit log events and simulate slow operation
 	mockService.mockGetLogsWithStream = func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
 		logCallback(QuadletLogEvent{

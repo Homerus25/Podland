@@ -25,7 +25,7 @@ type TestConfig struct {
 // DefaultTestConfig returns a default test configuration
 func DefaultTestConfig() *TestConfig {
 	return &TestConfig{
-		TestTimeout:    30 * time.Second,
+		TestTimeout:   30 * time.Second,
 		RetryAttempts: 1,
 		VerboseOutput: false,
 		MockResponses: true,
@@ -116,14 +116,14 @@ func RemoveTempDir(dir string) error {
 // WithTimeout runs a function with a timeout
 func WithTimeout(timeout time.Duration, f func() error) error {
 	done := make(chan struct{})
-	
+
 	go func() {
 		defer close(done)
 		if err := f(); err != nil {
 			// Error will be handled by caller
 		}
 	}()
-	
+
 	select {
 	case <-done:
 		return nil
@@ -135,13 +135,13 @@ func WithTimeout(timeout time.Duration, f func() error) error {
 // WaitForCondition waits for a condition to be true with a timeout
 func WaitForCondition(timeout time.Duration, interval time.Duration, condition func() bool) error {
 	endTime := time.Now().Add(timeout)
-	
+
 	for time.Now().Before(endTime) {
 		if condition() {
 			return nil
 		}
 		time.Sleep(interval)
 	}
-	
+
 	return os.ErrDeadlineExceeded
 }
