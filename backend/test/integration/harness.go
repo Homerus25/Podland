@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/yourorg/podland/backend/internal/app"
 )
 
 // Suite is the shared fixture constructed by TestMain and exposed to
@@ -81,6 +82,11 @@ type Suite struct {
 	// that actually answers.
 	goodMachineRegistration reachableTarget
 
+	// application is the in-process backend built by TestMain. It is
+	// held so suite methods can expose narrow seams (e.g. SeedUserWithRole)
+	// without handing every test the whole App.
+	application *app.App
+
 	// skipReason is the reason TestMain decided the suite cannot run
 	// (e.g. podman binary missing, machine unavailable). When non-empty,
 	// SkipIfUnavailable triggers t.Skip so a clean `go test` run on a
@@ -151,6 +157,15 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
 	clone.Header.Set("Authorization", "Bearer "+t.token)
 	return t.base.RoundTrip(clone)
+}
+
+// SeedUserWithRole seeds a user with an explicit role through the
+// in-process app's seeding seam and returns the new user's ID. It lets
+// slices mint, e.g., an admin-role user (mirroring the cmd/initdb
+// bootstrap) without bypassing the real login path — the caller still
+// has to POST /api/auth/login to act as that user.
+func (s *Suite) SeedUserWithRole(username, password, role string) (string, error) {
+	return s.application.SeedUserWithRole(username, password, role)
 }
 
 // RunTag returns the run-scoped tag (e.g. "podland-test-run=a1b2c3d4")

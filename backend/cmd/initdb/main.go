@@ -44,39 +44,45 @@ func main() {
 		log.Fatalf("Failed to run migrations: %v", err)
 	}
 
-	// Create user repository
-	userRepo := models.NewUserRepository(db)
+	// Create the bootstrap admin user
+	if err := createAdminUser(models.NewUserRepository(db), *username, *password); err != nil {
+		log.Fatalf("Failed to create admin user: %v", err)
+	}
+}
 
-	// Check if user already exists
-	exists, err := userRepo.UsernameExists(*username)
+// createAdminUser creates the bootstrap user with the admin role. If the
+// username already exists it is left untouched — re-running the bootstrap
+// tool against an existing admin is an idempotent no-op.
+func createAdminUser(userRepo models.UserRepositoryInterface, username, password string) error {
+	exists, err := userRepo.UsernameExists(username)
 	if err != nil {
-		log.Fatalf("Failed to check if user exists: %v", err)
+		return fmt.Errorf("failed to check if user exists: %w", err)
 	}
 
 	if exists {
-		log.Printf("User '%s' already exists", *username)
-		os.Exit(0)
+		log.Printf("User '%s' already exists", username)
+		return nil
 	}
 
 	// Hash password
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(*password), bcrypt.DefaultCost)
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Fatalf("Failed to hash password: %v", err)
+		return fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	// Create new user
+	// Create new user with the admin role so it can manage other users
 	user := &models.User{
 		ID:           uuid.New().String(),
-		Username:     *username,
+		Username:     username,
 		PasswordHash: string(passwordHash),
+		Role:         models.RoleAdmin,
 		CreatedAt:    time.Now(),
 	}
 
-	// Create user in database
-	err = userRepo.Create(user)
-	if err != nil {
-		log.Fatalf("Failed to create user: %v", err)
+	if err := userRepo.Create(user); err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
 	}
 
-	log.Printf("Successfully created admin user '%s'", *username)
+	log.Printf("Successfully created admin user '%s'", username)
+	return nil
 }

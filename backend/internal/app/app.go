@@ -168,7 +168,9 @@ func New(cfg *config.Config) (*App, error) {
 		// Auth
 		r.Post("/auth/login", authHandler.Login)
 		r.Post("/auth/logout", authHandler.Logout)
-		r.Get("/auth/status", authHandler.Status)
+		// Status serves anonymous callers too (authenticated: false),
+		// so it validates the token only when one is presented.
+		r.With(appmiddleware.OptionalJWTMiddleware(authService)).Get("/auth/status", authHandler.Status)
 
 		// Protected routes
 		r.Group(func(r chi.Router) {
@@ -297,8 +299,16 @@ func (a *App) Close() error {
 // or otherwise grant capabilities the HTTP API wouldn't. It only writes
 // a row that the real login endpoint will then validate against.
 func (a *App) SeedUser(username, password string) (string, error) {
+	return a.SeedUserWithRole(username, password, models.RoleUser)
+}
+
+// SeedUserWithRole is SeedUser with an explicit role, so harness tests
+// can mint users of any role (e.g. an admin mirroring the cmd/initdb
+// bootstrap user) without a backdoor around login. Role values are
+// validated by the repository like any other write.
+func (a *App) SeedUserWithRole(username, password, role string) (string, error) {
 	if a.db == nil {
-		return "", fmt.Errorf("app: SeedUser on closed app")
+		return "", fmt.Errorf("app: SeedUserWithRole on closed app")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -308,6 +318,7 @@ func (a *App) SeedUser(username, password string) (string, error) {
 		ID:           uuid.New().String(),
 		Username:     username,
 		PasswordHash: string(hash),
+		Role:         role,
 		// cmd/initdb uses time.Now() (local); we use UTC for
 		// determinism in tests. The difference is cosmetic — the
 		// column stores whatever time.Now() returns in either case.

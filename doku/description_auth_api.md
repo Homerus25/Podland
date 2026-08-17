@@ -65,15 +65,18 @@ Content-Type: application/json
 - Requires Authorization: Bearer header with valid token
 
 **Response (Success - 200):**
+- Reports whether the caller is authenticated, and if so their ID and role
+- Served without a token too: `{"authenticated": false}` with 200 (an invalid *presented* token still gets 401)
 ```json
 {
-  "user": {
-    "id": "string (uuid)",
-    "username": "string",
-    "createdAt": "ISO8601 timestamp"
-  }
+  "authenticated": true,
+  "userId": "string (uuid)",
+  "role": "string ('user' | 'admin')"
 }
 ```
+
+**Fields:**
+- `role`: The authenticated user's role. `"user"` is the default for all users; `"admin"` is granted to the bootstrap user created by `cmd/initdb`. Role changes take effect immediately (the role is read from the database per request, not embedded in the JWT).
 
 **Response (Error):**
 - 401 Unauthorized: Invalid or missing token (`TOKEN_MISSING` or `TOKEN_INVALID`)

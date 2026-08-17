@@ -171,6 +171,7 @@ func run(m *testing.M) int {
 	if err != nil {
 		return bail("app.New", err)
 	}
+	suite.application = application
 	srv := httptest.NewServer(application.Handler())
 	suite.ServerURL = srv.URL
 	logf("integration: backend up at %s", suite.ServerURL)

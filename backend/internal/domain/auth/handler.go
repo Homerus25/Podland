@@ -90,9 +90,16 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // StatusResponse represents authentication status response
+//
+// Role is the authenticated user's role ("user" or "admin"), read
+// from the database on each call — not a JWT claim — so role changes
+// take effect immediately rather than at token expiry. It is omitted
+// when the user record can no longer be found (e.g. deleted while a
+// token was still valid).
 type StatusResponse struct {
 	Authenticated bool   `json:"authenticated"`
 	UserID        string `json:"userId,omitempty"`
+	Role          string `json:"role,omitempty"`
 }
 
 // Status handles authentication status check
@@ -100,15 +107,27 @@ func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 	// Check if user is authenticated by looking for user ID in context
 	userID := contextutils.GetUserIDFromContext(r.Context())
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-
 	if userID != "" {
-		json.NewEncoder(w).Encode(StatusResponse{
+		user, err := h.userRepo.GetByID(userID)
+		if err != nil {
+			errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+			return
+		}
+
+		resp := StatusResponse{
 			Authenticated: true,
 			UserID:        userID,
-		})
+		}
+		if user != nil {
+			resp.Role = user.Role
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(resp)
 	} else {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(StatusResponse{
 			Authenticated: false,
 		})

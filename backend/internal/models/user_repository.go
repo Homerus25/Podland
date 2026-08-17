@@ -25,11 +25,40 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
+// requireRole rejects any role outside {user, admin}. Unlike
+// normalizeRole it does NOT default an empty role: Update must receive
+// an explicit role so a hand-built User can never silently demote an
+// admin back to "user".
+func requireRole(role string) error {
+	if !validRole(role) {
+		return fmt.Errorf("invalid role %q: must be %q or %q", role, RoleUser, RoleAdmin)
+	}
+	return nil
+}
+
+// normalizeRole validates the role on Create. An unset role defaults to
+// RoleUser, matching the DB column default.
+func normalizeRole(role string) (string, error) {
+	if role == "" {
+		return RoleUser, nil
+	}
+	if err := requireRole(role); err != nil {
+		return "", err
+	}
+	return role, nil
+}
+
 // Create inserts a new user into the database
 func (r *UserRepository) Create(user *User) error {
-	query := `INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)`
+	role, err := normalizeRole(user.Role)
+	if err != nil {
+		return fmt.Errorf("failed to create user: %w", err)
+	}
+	user.Role = role
 
-	_, err := r.db.Exec(query, user.ID, user.Username, user.PasswordHash, user.CreatedAt)
+	query := `INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)`
+
+	_, err = r.db.Exec(query, user.ID, user.Username, user.PasswordHash, user.Role, user.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create user: %w", err)
 	}
@@ -39,10 +68,10 @@ func (r *UserRepository) Create(user *User) error {
 
 // GetByID retrieves a user by their ID
 func (r *UserRepository) GetByID(id string) (*User, error) {
-	query := `SELECT id, username, password_hash, created_at FROM users WHERE id = ?`
+	query := `SELECT id, username, password_hash, role, created_at FROM users WHERE id = ?`
 
 	var user User
-	err := r.db.QueryRow(query, id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
+	err := r.db.QueryRow(query, id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -55,10 +84,10 @@ func (r *UserRepository) GetByID(id string) (*User, error) {
 
 // GetByUsername retrieves a user by their username
 func (r *UserRepository) GetByUsername(username string) (*User, error) {
-	query := `SELECT id, username, password_hash, created_at FROM users WHERE username = ?`
+	query := `SELECT id, username, password_hash, role, created_at FROM users WHERE username = ?`
 
 	var user User
-	err := r.db.QueryRow(query, username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
+	err := r.db.QueryRow(query, username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -69,11 +98,17 @@ func (r *UserRepository) GetByUsername(username string) (*User, error) {
 	return &user, nil
 }
 
-// Update updates an existing user
+// Update updates an existing user. The role must be set explicitly —
+// unlike Create there is no default — so a stale or hand-built User
+// cannot silently overwrite an admin's role.
 func (r *UserRepository) Update(user *User) error {
-	query := `UPDATE users SET username = ?, password_hash = ? WHERE id = ?`
+	if err := requireRole(user.Role); err != nil {
+		return fmt.Errorf("failed to update user: %w", err)
+	}
 
-	_, err := r.db.Exec(query, user.Username, user.PasswordHash, user.ID)
+	query := `UPDATE users SET username = ?, password_hash = ?, role = ? WHERE id = ?`
+
+	_, err := r.db.Exec(query, user.Username, user.PasswordHash, user.Role, user.ID)
 	if err != nil {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
