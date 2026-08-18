@@ -45,8 +45,17 @@ func NewTestAuthService() (*AuthService, error) {
 
 // NewTestAuthServiceWithUserRepo creates a test auth service whose user
 // repository is supplied by the test, so login tests can seed users or
-// inject repository errors.
+// inject repository errors. Session persistence uses a fresh mock
+// session repository and the default 30-day TTL.
 func NewTestAuthServiceWithUserRepo(userRepo models.UserRepositoryInterface) (*AuthService, error) {
+	return NewTestAuthServiceWithSessionRepo(userRepo, testutils.NewMockSessionRepository(), 30*24*time.Hour)
+}
+
+// NewTestAuthServiceWithSessionRepo creates a test auth service with
+// explicit session dependencies, so session-focused tests can inject a
+// pre-seeded session repository, session-repository errors, or a
+// non-default TTL.
+func NewTestAuthServiceWithSessionRepo(userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, sessionTTL time.Duration) (*AuthService, error) {
 	// Create temporary files for test keys
 	privateKeyPEM := testutils.GenerateValidPEMKey()
 	// Generate a proper public key from the private key
@@ -80,7 +89,7 @@ func NewTestAuthServiceWithUserRepo(userRepo models.UserRepositoryInterface) (*A
 		Issuer:         "test-issuer",
 	}
 
-	return NewAuthService(config, userRepo)
+	return NewAuthService(config, userRepo, sessionRepo, sessionTTL)
 }
 
 // Helper function to write string to file

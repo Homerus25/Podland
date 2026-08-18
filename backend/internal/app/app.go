@@ -93,12 +93,13 @@ func New(cfg *config.Config) (*App, error) {
 	}
 
 	// Initialize JWT (load or generate keys)
+	sessionRepo := models.NewSessionRepository(db)
 	authService, err := auth.NewAuthService(auth.JWTConfig{
 		PrivateKeyPath: cfg.JWT.PrivateKeyPath,
 		PublicKeyPath:  cfg.JWT.PublicKeyPath,
 		Expiration:     time.Duration(cfg.JWT.ExpirationMinutes) * time.Minute,
 		Issuer:         cfg.JWT.Issuer,
-	}, models.NewUserRepository(db))
+	}, models.NewUserRepository(db), sessionRepo, time.Duration(cfg.Session.TTLDays)*24*time.Hour)
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("app: failed to initialize auth: %w", err)

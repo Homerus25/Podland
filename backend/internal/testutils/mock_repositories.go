@@ -205,6 +205,90 @@ func (m *MockMachineRepository) NameExistsForUser(userID, name string) (bool, er
 	return false, nil
 }
 
+// MockSessionRepository implements a mock session repository for testing
+type MockSessionRepository struct {
+	sessions         map[string]*models.Session // keyed by token hash
+	createErr        error
+	getByHashErr     error
+	deleteErr        error
+	deleteExpiredErr error
+}
+
+func NewMockSessionRepository() *MockSessionRepository {
+	return &MockSessionRepository{
+		sessions: make(map[string]*models.Session),
+	}
+}
+
+// NewMockSessionRepositoryWithErrors creates a mock session repository
+// with configurable errors
+func NewMockSessionRepositoryWithErrors(createErr, getByHashErr, deleteErr, deleteExpiredErr error) *MockSessionRepository {
+	return &MockSessionRepository{
+		sessions:         make(map[string]*models.Session),
+		createErr:        createErr,
+		getByHashErr:     getByHashErr,
+		deleteErr:        deleteErr,
+		deleteExpiredErr: deleteExpiredErr,
+	}
+}
+
+// AddSession adds a session directly to the mock repository
+func (m *MockSessionRepository) AddSession(session *models.Session) {
+	m.sessions[session.TokenHash] = session
+}
+
+// SessionsForUser returns every stored session belonging to the user,
+// for tests asserting how many rows login created (multi-session).
+func (m *MockSessionRepository) SessionsForUser(userID string) []*models.Session {
+	var result []*models.Session
+	for _, session := range m.sessions {
+		if session.UserID == userID {
+			result = append(result, session)
+		}
+	}
+	return result
+}
+
+func (m *MockSessionRepository) Create(session *models.Session) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
+	m.sessions[session.TokenHash] = session
+	return nil
+}
+
+func (m *MockSessionRepository) GetByTokenHash(tokenHash string) (*models.Session, error) {
+	if m.getByHashErr != nil {
+		return nil, m.getByHashErr
+	}
+	session, exists := m.sessions[tokenHash]
+	if !exists {
+		return nil, nil
+	}
+	return session, nil
+}
+
+func (m *MockSessionRepository) DeleteByTokenHash(tokenHash string) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
+	delete(m.sessions, tokenHash)
+	return nil
+}
+
+func (m *MockSessionRepository) DeleteExpiredForUser(userID string) error {
+	if m.deleteExpiredErr != nil {
+		return m.deleteExpiredErr
+	}
+	now := time.Now().UTC()
+	for hash, session := range m.sessions {
+		if session.UserID == userID && !session.ExpiresAt.After(now) {
+			delete(m.sessions, hash)
+		}
+	}
+	return nil
+}
+
 // MockConnectionCache implements a mock connection cache for testing
 // It simulates the ConnectionCache from connections/cache.go but with simplified interface
 type MockConnectionCache struct {

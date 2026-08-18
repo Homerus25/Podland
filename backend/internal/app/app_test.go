@@ -55,6 +55,7 @@ func newTestConfig(t *testing.T) *config.Config {
 			ExpirationMinutes: 60,
 			Issuer:            "podland-test",
 		},
+		Session:        config.SessionConfig{TTLDays: 30},
 		Connections: config.ConnectionConfig{
 			SSHIdleTimeoutSeconds: 900,
 			MaxConcurrent:         10,

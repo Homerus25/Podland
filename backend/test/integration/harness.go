@@ -64,6 +64,12 @@ type Suite struct {
 	// for them. The second user is never logged in.
 	OtherUserID string
 
+	// DBPath is the filesystem path of the suite's temp SQLite database.
+	// Tests that must assert on persisted state directly (e.g. that only
+	// a refresh token's hash is stored, 100-01) open it read-side via
+	// openSuiteDB rather than reaching into the App.
+	DBPath string
+
 	// RunID is the run-scoped identifier (a short UUID) embedded in
 	// RunTag. Anything the suite creates on the shared machine is tagged
 	// with RunTag so per-run isolation is possible and the suite sweep

@@ -37,10 +37,11 @@ func TestAuthService_Login_Success(t *testing.T) {
 	service, err := NewTestAuthServiceWithUserRepo(repo)
 	require.NoError(t, err, "Should create auth service without error")
 
-	token, user, err := service.Login("testuser", "test-password-123")
+	token, refreshToken, user, err := service.Login("testuser", "test-password-123")
 
 	require.NoError(t, err, "Should log in with correct credentials")
 	assert.NotEmpty(t, token, "Login should return an access token")
+	assert.NotEmpty(t, refreshToken, "Login should return a refresh token")
 	require.NotNil(t, user, "Login should return the authenticated user")
 	assert.Equal(t, "user-testuser", user.ID, "Login should return the matching user")
 
@@ -57,10 +58,11 @@ func TestAuthService_Login_UnknownUsername(t *testing.T) {
 	service, err := NewTestAuthServiceWithUserRepo(repo)
 	require.NoError(t, err, "Should create auth service without error")
 
-	token, user, err := service.Login("nonexistent-user", "some-password")
+	token, refreshToken, user, err := service.Login("nonexistent-user", "some-password")
 
 	assert.ErrorIs(t, err, apperrors.ErrInvalidCredentials, "Unknown username should be rejected as invalid credentials")
 	assert.Empty(t, token, "No token should be issued for an unknown username")
+	assert.Empty(t, refreshToken, "No refresh token should be issued for an unknown username")
 	assert.Nil(t, user, "No user should be returned for an unknown username")
 }
 
@@ -72,10 +74,11 @@ func TestAuthService_Login_WrongPassword(t *testing.T) {
 	service, err := NewTestAuthServiceWithUserRepo(repo)
 	require.NoError(t, err, "Should create auth service without error")
 
-	token, user, err := service.Login("testuser", "wrong-password-456")
+	token, refreshToken, user, err := service.Login("testuser", "wrong-password-456")
 
 	assert.ErrorIs(t, err, apperrors.ErrInvalidCredentials, "Wrong password should be rejected as invalid credentials")
 	assert.Empty(t, token, "No token should be issued for a wrong password")
+	assert.Empty(t, refreshToken, "No refresh token should be issued for a wrong password")
 	assert.Nil(t, user, "No user should be returned for a wrong password")
 }
 
@@ -88,11 +91,12 @@ func TestAuthService_Login_RepositoryError(t *testing.T) {
 	service, err := NewTestAuthServiceWithUserRepo(repo)
 	require.NoError(t, err, "Should create auth service without error")
 
-	token, user, err := service.Login("testuser", "some-password")
+	token, refreshToken, user, err := service.Login("testuser", "some-password")
 
 	assert.ErrorIs(t, err, dbError, "Repository failure should propagate unchanged")
 	assert.NotErrorIs(t, err, apperrors.ErrInvalidCredentials, "Repository failure must not look like bad credentials")
 	assert.Empty(t, token, "No token should be issued on a repository failure")
+	assert.Empty(t, refreshToken, "No refresh token should be issued on a repository failure")
 	assert.Nil(t, user, "No user should be returned on a repository failure")
 }
 

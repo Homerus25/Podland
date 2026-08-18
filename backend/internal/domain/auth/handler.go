@@ -36,8 +36,14 @@ type LoginResponse struct {
 	Token string `json:"token"`
 }
 
+// refreshTokenCookieName is the httpOnly cookie login sets to carry the
+// opaque refresh token. It is scoped to /api/auth so the browser sends
+// it only to the auth endpoints that consume it.
+const refreshTokenCookieName = "refresh_token"
+
 // Login handles user login: it shapes the request and response, while
-// credential verification and token issuance live in AuthService.Login.
+// credential verification, token issuance, and session persistence live
+// in AuthService.Login.
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	requestID := contextutils.GetRequestID(r.Context())
 
@@ -53,11 +59,24 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, _, err := h.service.Login(req.Username, req.Password)
+	token, refreshToken, _, err := h.service.Login(req.Username, req.Password)
 	if err != nil {
 		errors.RespondWithError(w, h.errorHandler.HandleError(err), requestID)
 		return
 	}
+
+	// The refresh token exists only inside this cookie: httpOnly keeps
+	// it out of JavaScript reach, the narrow path keeps it out of every
+	// non-auth request, and SameSite=Strict + Secure harden it against
+	// cross-site sending and plaintext transport.
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshTokenCookieName,
+		Value:    refreshToken,
+		Path:     "/api/auth",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

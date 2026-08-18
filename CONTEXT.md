@@ -46,6 +46,10 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **JWT tokens** (RS256 asymmetric keys)
   - Transported via **Authorization: Bearer** header
   - Frontend redirects to login page on expiration (401 interceptor)
+- **Refresh sessions** (revocable, server-side)
+  - Login additionally sets an **httpOnly refresh cookie**: opaque 256-bit token, `Secure`, `SameSite=Strict`, scoped to `/api/auth`
+  - Only the token's **SHA-256 hash** is persisted (sessions table, one row per login, multi-device)
+  - TTL via `SESSION_TTL_DAYS` (default 30); login lazily purges the user's expired rows
 - **Key Storage**: File-based (PEM files) with auto-generation on startup
 - **CORS**: Environment variables for allowed origins
 - **Sensitive data encryption**: `github.com/secure-systems-lab/go-securesystemslib`

@@ -12,6 +12,7 @@ type Config struct {
 	Port           int
 	Database       DatabaseConfig
 	JWT            JWTConfig
+	Session        SessionConfig
 	Connections    ConnectionConfig
 	RateLimit      RateLimitConfig
 	AllowedOrigins []string
@@ -30,6 +31,13 @@ type JWTConfig struct {
 	PublicKeyPath     string
 	ExpirationMinutes int
 	Issuer            string
+}
+
+// SessionConfig holds refresh-session configuration. The TTL is the
+// window a refresh cookie stays redeemable; a new session is created
+// at every login with this expiry.
+type SessionConfig struct {
+	TTLDays int
 }
 
 // ConnectionConfig holds connection configuration
@@ -79,6 +87,9 @@ func Load() (*Config, error) {
 	cfg.JWT.PublicKeyPath = getEnv("JWT_PUBLIC_KEY_PATH", "./jwt-public.pem")
 	cfg.JWT.ExpirationMinutes = getEnvInt("JWT_EXPIRATION_MINUTES", 60)
 	cfg.JWT.Issuer = getEnv("JWT_ISSUER", "podland")
+
+	// Sessions
+	cfg.Session.TTLDays = getEnvInt("SESSION_TTL_DAYS", 30)
 
 	// Connections
 	cfg.Connections.SSHIdleTimeoutSeconds = getEnvInt("SSH_IDLE_TIMEOUT_SECONDS", 900)
@@ -133,6 +144,9 @@ func NewLogger(config LogConfig) any {
 func (cfg *Config) Validate() error {
 	if cfg.Encryption.Key == "" {
 		return fmt.Errorf("ENCRYPTION_KEY is required")
+	}
+	if cfg.Session.TTLDays <= 0 {
+		return fmt.Errorf("SESSION_TTL_DAYS must be a positive number of days")
 	}
 	return nil
 }

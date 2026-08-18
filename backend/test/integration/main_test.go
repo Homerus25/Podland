@@ -172,6 +172,7 @@ func run(m *testing.M) int {
 		return bail("app.New", err)
 	}
 	suite.application = application
+	suite.DBPath = tempCfg.Database.Path
 	srv := httptest.NewServer(application.Handler())
 	suite.ServerURL = srv.URL
 	logf("integration: backend up at %s", suite.ServerURL)
@@ -614,6 +615,7 @@ func buildTestConfig() (*config.Config, []string, error) {
 			ExpirationMinutes: 60,
 			Issuer:            "podland-it",
 		},
+		Session:        config.SessionConfig{TTLDays: 30},
 		Connections: config.ConnectionConfig{
 			SSHIdleTimeoutSeconds: 900,
 			MaxConcurrent:         10,
