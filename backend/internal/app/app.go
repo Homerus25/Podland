@@ -190,7 +190,13 @@ func New(cfg *config.Config) (*App, error) {
 			r.Route("/machines", func(r chi.Router) {
 				r.Post("/", machineHandler.Create)
 				r.Get("/", machineHandler.List)
-				r.Route("/{id}", func(r chi.Router) {
+				// Every machine-scoped route below is gated on the
+				// caller's machine_access row: 403 ACCESS_DENIED for a
+				// machine the user cannot use, 404 MACHINE_NOT_FOUND
+				// for an unknown ID. One seam covers the machines
+				// endpoints and the containers/images/quadlets/events
+				// families that ride on a machine.
+				r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
 					r.Get("/", machineHandler.Get)
 					r.Put("/", machineHandler.Update)
 					r.Delete("/", machineHandler.Delete)
