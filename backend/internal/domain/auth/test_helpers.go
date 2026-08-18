@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/yourorg/podland/backend/internal/models"
 	"github.com/yourorg/podland/backend/internal/testutils"
 )
 
@@ -39,6 +40,13 @@ func generatePublicKeyFromPrivate(privateKeyPEM string) (string, error) {
 
 // NewTestAuthService creates a test auth service with mock dependencies
 func NewTestAuthService() (*AuthService, error) {
+	return NewTestAuthServiceWithUserRepo(testutils.NewMockUserRepository())
+}
+
+// NewTestAuthServiceWithUserRepo creates a test auth service whose user
+// repository is supplied by the test, so login tests can seed users or
+// inject repository errors.
+func NewTestAuthServiceWithUserRepo(userRepo models.UserRepositoryInterface) (*AuthService, error) {
 	// Create temporary files for test keys
 	privateKeyPEM := testutils.GenerateValidPEMKey()
 	// Generate a proper public key from the private key
@@ -72,9 +80,7 @@ func NewTestAuthService() (*AuthService, error) {
 		Issuer:         "test-issuer",
 	}
 
-	mockRepo := testutils.NewMockUserRepository()
-
-	return NewAuthService(config, mockRepo)
+	return NewAuthService(config, userRepo)
 }
 
 // Helper function to write string to file

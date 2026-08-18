@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	apperrors "github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/models"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // JWTConfig holds JWT configuration
@@ -48,6 +50,35 @@ func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface) (
 		issuer:     config.Issuer,
 		userRepo:   userRepo,
 	}, nil
+}
+
+// Login verifies the given credentials against the user repository and,
+// on success, returns a fresh access token for the authenticated user.
+//
+// Failure mapping (HTTP-facing, via the structured error responder):
+// an unknown username and a wrong password both yield
+// ErrInvalidCredentials (401, indistinguishable to the caller), while
+// repository and token-signing failures are returned as-is so the
+// handler maps them to a generic 500.
+func (s *AuthService) Login(username, password string) (string, *models.User, error) {
+	user, err := s.userRepo.GetByUsername(username)
+	if err != nil {
+		return "", nil, err
+	}
+	if user == nil {
+		return "", nil, apperrors.ErrInvalidCredentials
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		return "", nil, apperrors.ErrInvalidCredentials
+	}
+
+	token, err := s.GenerateToken(user.ID)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return token, user, nil
 }
 
 // loadPrivateKey loads a private key from file

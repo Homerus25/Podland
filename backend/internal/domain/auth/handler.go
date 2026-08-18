@@ -7,20 +7,21 @@ import (
 	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/errors"
 	"github.com/yourorg/podland/backend/internal/models"
-	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthHandler handles authentication requests
 type AuthHandler struct {
-	service  *AuthService
-	userRepo models.UserRepositoryInterface
+	service      *AuthService
+	userRepo     models.UserRepositoryInterface
+	errorHandler *errors.ErrorHandler
 }
 
 // NewAuthHandler creates a new AuthHandler
 func NewAuthHandler(service *AuthService, userRepo models.UserRepositoryInterface) *AuthHandler {
 	return &AuthHandler{
-		service:  service,
-		userRepo: userRepo,
+		service:      service,
+		userRepo:     userRepo,
+		errorHandler: errors.NewErrorHandler(),
 	}
 }
 
@@ -35,46 +36,29 @@ type LoginResponse struct {
 	Token string `json:"token"`
 }
 
-// Login handles user login
+// Login handles user login: it shapes the request and response, while
+// credential verification and token issuance live in AuthService.Login.
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	requestID := contextutils.GetRequestID(r.Context())
+
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithError(w, errors.ErrInvalidRequest, contextutils.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrInvalidRequest, requestID)
 		return
 	}
 
 	// Validate required fields
 	if req.Username == "" || req.Password == "" {
-		errors.RespondWithError(w, errors.ErrMissingRequiredFields, contextutils.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrMissingRequiredFields, requestID)
 		return
 	}
 
-	// Get user from database
-	user, err := h.userRepo.GetByUsername(req.Username)
+	token, _, err := h.service.Login(req.Username, req.Password)
 	if err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		return
-	}
-	if user == nil {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		errors.RespondWithError(w, h.errorHandler.HandleError(err), requestID)
 		return
 	}
 
-	// Verify password hash
-	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password))
-	if err != nil {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	// Generate JWT token
-	token, err := h.service.GenerateToken(user.ID)
-	if err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	// Return token
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(LoginResponse{Token: token})

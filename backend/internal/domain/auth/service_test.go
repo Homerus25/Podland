@@ -6,7 +6,95 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	apperrors "github.com/yourorg/podland/backend/internal/errors"
+	"github.com/yourorg/podland/backend/internal/models"
+	"github.com/yourorg/podland/backend/internal/testutils"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// seedLoginUser adds a user with a bcrypt-hashed password to the mock
+// repository and returns the repository.
+func seedLoginUser(t *testing.T, username, password string) *testutils.MockUserRepository {
+	t.Helper()
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	require.NoError(t, err, "Should hash password without error")
+
+	repo := testutils.NewMockUserRepository()
+	repo.AddUser(&models.User{
+		ID:           "user-" + username,
+		Username:     username,
+		PasswordHash: string(hashedPassword),
+		CreatedAt:    time.Now(),
+	})
+	return repo
+}
+
+// TestAuthService_Login_Success verifies that login with correct
+// credentials returns a valid token for the authenticated user.
+func TestAuthService_Login_Success(t *testing.T) {
+	repo := seedLoginUser(t, "testuser", "test-password-123")
+	service, err := NewTestAuthServiceWithUserRepo(repo)
+	require.NoError(t, err, "Should create auth service without error")
+
+	token, user, err := service.Login("testuser", "test-password-123")
+
+	require.NoError(t, err, "Should log in with correct credentials")
+	assert.NotEmpty(t, token, "Login should return an access token")
+	require.NotNil(t, user, "Login should return the authenticated user")
+	assert.Equal(t, "user-testuser", user.ID, "Login should return the matching user")
+
+	claims, err := service.ValidateToken(token)
+	require.NoError(t, err, "Returned token should validate")
+	assert.Equal(t, user.ID, claims.UserID, "Returned token should be for the authenticated user")
+}
+
+// TestAuthService_Login_UnknownUsername verifies that a username with no
+// matching user record is rejected with ErrInvalidCredentials (not a
+// user-not-found error), so callers cannot probe which usernames exist.
+func TestAuthService_Login_UnknownUsername(t *testing.T) {
+	repo := seedLoginUser(t, "testuser", "test-password-123")
+	service, err := NewTestAuthServiceWithUserRepo(repo)
+	require.NoError(t, err, "Should create auth service without error")
+
+	token, user, err := service.Login("nonexistent-user", "some-password")
+
+	assert.ErrorIs(t, err, apperrors.ErrInvalidCredentials, "Unknown username should be rejected as invalid credentials")
+	assert.Empty(t, token, "No token should be issued for an unknown username")
+	assert.Nil(t, user, "No user should be returned for an unknown username")
+}
+
+// TestAuthService_Login_WrongPassword verifies that a known username with
+// a wrong password is rejected with ErrInvalidCredentials, the same error
+// as an unknown username.
+func TestAuthService_Login_WrongPassword(t *testing.T) {
+	repo := seedLoginUser(t, "testuser", "test-password-123")
+	service, err := NewTestAuthServiceWithUserRepo(repo)
+	require.NoError(t, err, "Should create auth service without error")
+
+	token, user, err := service.Login("testuser", "wrong-password-456")
+
+	assert.ErrorIs(t, err, apperrors.ErrInvalidCredentials, "Wrong password should be rejected as invalid credentials")
+	assert.Empty(t, token, "No token should be issued for a wrong password")
+	assert.Nil(t, user, "No user should be returned for a wrong password")
+}
+
+// TestAuthService_Login_RepositoryError verifies that a repository
+// failure surfaces as-is (so the handler maps it to a generic 500)
+// rather than masquerading as invalid credentials.
+func TestAuthService_Login_RepositoryError(t *testing.T) {
+	dbError := assert.AnError
+	repo := testutils.NewMockUserRepositoryWithErrors(nil, nil, dbError, nil, nil, nil)
+	service, err := NewTestAuthServiceWithUserRepo(repo)
+	require.NoError(t, err, "Should create auth service without error")
+
+	token, user, err := service.Login("testuser", "some-password")
+
+	assert.ErrorIs(t, err, dbError, "Repository failure should propagate unchanged")
+	assert.NotErrorIs(t, err, apperrors.ErrInvalidCredentials, "Repository failure must not look like bad credentials")
+	assert.Empty(t, token, "No token should be issued on a repository failure")
+	assert.Nil(t, user, "No user should be returned on a repository failure")
+}
 
 // TestGenerateToken_ValidUserID tests token generation with a valid user ID
 func TestGenerateToken_ValidUserID(t *testing.T) {
