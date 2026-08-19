@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/yourorg/podland/backend/internal/contextutils"
 	"github.com/yourorg/podland/backend/internal/errors"
@@ -41,19 +42,27 @@ type LoginResponse struct {
 // it only to the auth endpoints that consume it.
 const refreshTokenCookieName = "refresh_token"
 
-// setRefreshCookie writes the refresh token as the httpOnly cookie
-// login and refresh hand to the client. The attributes are the spec's
-// four: httpOnly (out of JavaScript reach), Secure, SameSite=Strict,
-// and Path=/api/auth so the browser sends it only to auth endpoints.
-func setRefreshCookie(w http.ResponseWriter, refreshToken string) {
-	http.SetCookie(w, &http.Cookie{
+// newRefreshCookie builds the refresh cookie carrying the spec's four
+// attributes — httpOnly (out of JavaScript reach), Secure,
+// SameSite=Strict, and Path=/api/auth so the browser sends it only to
+// auth endpoints. The cookie login and refresh hand out and the one
+// logout clears with are built here, so their attributes can never
+// drift apart.
+func newRefreshCookie(value string) *http.Cookie {
+	return &http.Cookie{
 		Name:     refreshTokenCookieName,
-		Value:    refreshToken,
+		Value:    value,
 		Path:     "/api/auth",
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
-	})
+	}
+}
+
+// setRefreshCookie writes the refresh token as the httpOnly cookie
+// login and refresh hand to the client.
+func setRefreshCookie(w http.ResponseWriter, refreshToken string) {
+	http.SetCookie(w, newRefreshCookie(refreshToken))
 }
 
 // Login handles user login: it shapes the request and response, while
@@ -124,10 +133,36 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(RefreshResponse{Token: token})
 }
 
-// Logout handles user logout
+// clearRefreshCookie expires the refresh cookie: the same name, path,
+// and attributes login and refresh set, but empty and already in the
+// past, so the browser deletes it whether or not a session stood
+// behind it.
+func clearRefreshCookie(w http.ResponseWriter) {
+	cookie := newRefreshCookie("")
+	cookie.Expires = time.Unix(0, 0)
+	cookie.MaxAge = -1
+	http.SetCookie(w, cookie)
+}
+
+// Logout handles user logout. When the request carries a refresh
+// cookie, the session behind it is revoked server-side; the cookie is
+// cleared in every case — before revocation runs — so even a storage
+// failure cannot leave the browser holding a token its user tried to
+// give up. Logout is idempotent: no cookie, or a cookie whose session
+// is already gone, still succeeds with the same response — the end
+// state (no session, no cookie) is what the caller asked for.
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	// For JWT, logout is typically handled client-side by removing the token
-	// Server-side, we could implement token blacklisting if needed
+	requestID := contextutils.GetRequestID(r.Context())
+
+	clearRefreshCookie(w)
+
+	if cookie, err := r.Cookie(refreshTokenCookieName); err == nil {
+		if err := h.service.Logout(cookie.Value); err != nil {
+			errors.RespondWithError(w, h.errorHandler.HandleError(err), requestID)
+			return
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Logged out successfully"})

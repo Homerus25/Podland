@@ -179,6 +179,16 @@ func (s *AuthService) Refresh(refreshToken string) (accessToken, newRefreshToken
 	return accessToken, newRefreshToken, nil
 }
 
+// Logout revokes the refresh session addressed by the presented token:
+// the session row is deleted, so that token — and the device holding
+// it — can no longer refresh. Revoking an unknown token (never issued,
+// already rotated away from, or already revoked) is a no-op rather than
+// an error, which keeps logout idempotent; only storage failures
+// surface to the caller.
+func (s *AuthService) Logout(refreshToken string) error {
+	return s.sessionRepo.DeleteByTokenHash(HashRefreshToken(refreshToken))
+}
+
 // generateRefreshToken mints a new opaque refresh token: 256 bits of
 // crypto-randomness, base64url-encoded. It returns the plaintext token
 // (for the cookie — never persisted) and its SHA-256 hex hash (the only
