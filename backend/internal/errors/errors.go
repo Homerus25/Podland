@@ -72,6 +72,15 @@ var (
 	// UNIQUE constraint can also surface it as a backstop when two
 	// concurrent creations race past the check.
 	ErrUsernameTaken = NewAppError("USERNAME_TAKEN", "Username already exists", http.StatusConflict)
+	// ErrRefreshInvalid is the refresh path's 401 for a missing cookie
+	// or an unknown token hash. Replayed (already-rotated) and revoked
+	// tokens land here too: their rows are gone, so the lookup misses
+	// and the failure is indistinguishable from never-having-had one.
+	ErrRefreshInvalid = NewAppError("AUTH_REFRESH_INVALID", "Invalid refresh token", http.StatusUnauthorized)
+	// ErrSessionExpired is the refresh path's 401 for a session row that
+	// exists but is past its expiry — the row is deleted on encounter as
+	// lazy cleanup, so the next attempt reports ErrRefreshInvalid.
+	ErrSessionExpired = NewAppError("AUTH_SESSION_EXPIRED", "Session expired", http.StatusUnauthorized)
 )
 
 // Rate Limiting

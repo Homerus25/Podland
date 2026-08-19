@@ -212,6 +212,7 @@ type MockSessionRepository struct {
 	getByHashErr     error
 	deleteErr        error
 	deleteExpiredErr error
+	rotateErr        error
 }
 
 func NewMockSessionRepository() *MockSessionRepository {
@@ -230,6 +231,13 @@ func NewMockSessionRepositoryWithErrors(createErr, getByHashErr, deleteErr, dele
 		deleteErr:        deleteErr,
 		deleteExpiredErr: deleteExpiredErr,
 	}
+}
+
+// WithRotateError returns the same repository with Rotate configured to
+// fail, for tests injecting a rotation-time storage failure.
+func (m *MockSessionRepository) WithRotateError(err error) *MockSessionRepository {
+	m.rotateErr = err
+	return m
 }
 
 // AddSession adds a session directly to the mock repository
@@ -274,6 +282,18 @@ func (m *MockSessionRepository) DeleteByTokenHash(tokenHash string) error {
 	}
 	delete(m.sessions, tokenHash)
 	return nil
+}
+
+func (m *MockSessionRepository) Rotate(oldTokenHash string, newSession *models.Session) (bool, error) {
+	if m.rotateErr != nil {
+		return false, m.rotateErr
+	}
+	if _, exists := m.sessions[oldTokenHash]; !exists {
+		return false, nil
+	}
+	delete(m.sessions, oldTokenHash)
+	m.sessions[newSession.TokenHash] = newSession
+	return true, nil
 }
 
 func (m *MockSessionRepository) DeleteExpiredForUser(userID string) error {

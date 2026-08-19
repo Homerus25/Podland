@@ -177,6 +177,11 @@ func New(cfg *config.Config) (*App, error) {
 		// Auth
 		r.Post("/auth/login", authHandler.Login)
 		r.Post("/auth/logout", authHandler.Logout)
+		// Refresh is deliberately public: it authenticates with the httpOnly
+		// refresh cookie instead of a Bearer JWT — presenting that cookie to
+		// a JWT-gated route would be a contradiction (the whole point is
+		// minting a new JWT). Rotation lives inside AuthService.Refresh.
+		r.Post("/auth/refresh", authHandler.Refresh)
 		// Status serves anonymous callers too (authenticated: false),
 		// so it validates the token only when one is presented.
 		r.With(appmiddleware.OptionalJWTMiddleware(authService)).Get("/auth/status", authHandler.Status)

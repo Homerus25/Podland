@@ -1,6 +1,8 @@
 package models
 
 import (
+	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -119,6 +121,127 @@ func TestSessionRepository_DeleteExpiredForUser(t *testing.T) {
 		require.NoError(t, err, "Lookup for %s should not error", hash)
 		assert.Nil(t, stored, "Expired session %s should be gone", hash)
 	}
+}
+
+// TestSessionRepository_RotateReplacesSession asserts rotation is a
+// swap: the row addressed by the old token hash disappears, the new
+// session row takes its place, and sibling sessions are untouched.
+func TestSessionRepository_RotateReplacesSession(t *testing.T) {
+	db := newTestUserDB(t)
+	repo := NewSessionRepository(db)
+	users := NewUserRepository(db)
+
+	user := &User{ID: "session-user-rotate", Username: "rotator", PasswordHash: "hash", CreatedAt: time.Now().UTC()}
+	require.NoError(t, users.Create(user), "Should create user")
+
+	future := time.Now().UTC().Add(24 * time.Hour)
+	require.NoError(t, repo.Create(newSession("session-old", user.ID, "old-hash", future)))
+	require.NoError(t, repo.Create(newSession("session-sibling", user.ID, "sibling-hash", future)))
+
+	replacement := newSession("session-new", user.ID, "new-hash", time.Now().UTC().Add(48*time.Hour).Truncate(time.Second))
+	rotated, err := repo.Rotate("old-hash", replacement)
+	require.NoError(t, err, "Rotate should not error")
+	assert.True(t, rotated, "Existing session should rotate")
+
+	gone, err := repo.GetByTokenHash("old-hash")
+	require.NoError(t, err, "Lookup of rotated-out hash should not error")
+	assert.Nil(t, gone, "Old hash must no longer address a session")
+
+	inserted, err := repo.GetByTokenHash("new-hash")
+	require.NoError(t, err, "Lookup of rotated-in hash should not error")
+	require.NotNil(t, inserted, "New hash should address the rotated session")
+	assert.Equal(t, "session-new", inserted.ID, "Rotated session ID should round-trip")
+	assert.Equal(t, replacement.ExpiresAt.UTC(), inserted.ExpiresAt.UTC(), "Rotated expiry should round-trip")
+
+	sibling, err := repo.GetByTokenHash("sibling-hash")
+	require.NoError(t, err, "Sibling lookup should not error")
+	assert.NotNil(t, sibling, "Sibling session must survive another session's rotation")
+}
+
+// TestSessionRepository_RotateUnknownHashIsNoOp asserts a rotation whose
+// old hash addresses nothing reports false, is not an error, and leaves
+// no new row behind (the replay path must not resurrect sessions).
+func TestSessionRepository_RotateUnknownHashIsNoOp(t *testing.T) {
+	db := newTestUserDB(t)
+	repo := NewSessionRepository(db)
+	users := NewUserRepository(db)
+
+	user := &User{ID: "session-user-norot", Username: "norot", PasswordHash: "hash", CreatedAt: time.Now().UTC()}
+	require.NoError(t, users.Create(user), "Should create user")
+
+	replacement := newSession("session-ghost", user.ID, "ghost-hash", time.Now().UTC().Add(24*time.Hour))
+	rotated, err := repo.Rotate("no-such-hash", replacement)
+	require.NoError(t, err, "Unknown hash is not an error")
+	assert.False(t, rotated, "Unknown hash should not rotate")
+
+	ghost, err := repo.GetByTokenHash("ghost-hash")
+	require.NoError(t, err, "Lookup of replacement hash should not error")
+	assert.Nil(t, ghost, "Failed rotation must not leave the new row behind")
+}
+
+// TestSessionRepository_RotateConcurrentExactlyOneWins asserts the
+// atomicity the refresh endpoint relies on: two concurrent rotations of
+// the same token hash cannot both succeed. Exactly one goroutine swaps
+// the row; the loser reports false, and the table is left with exactly
+// one live row (the winner's) — never zero, never two.
+func TestSessionRepository_RotateConcurrentExactlyOneWins(t *testing.T) {
+	db := newTestUserDB(t)
+	repo := NewSessionRepository(db)
+	users := NewUserRepository(db)
+
+	user := &User{ID: "session-user-race", Username: "racer", PasswordHash: "hash", CreatedAt: time.Now().UTC()}
+	require.NoError(t, users.Create(user), "Should create user")
+
+	require.NoError(t, repo.Create(newSession("session-raced", user.ID, "raced-hash", time.Now().UTC().Add(24*time.Hour))))
+
+	winners := make(chan bool, 2)
+	for i := 0; i < 2; i++ {
+		go func(i int) {
+			replacement := newSession(
+				fmt.Sprintf("session-winner-%d", i),
+				user.ID,
+				fmt.Sprintf("winner-hash-%d", i),
+				time.Now().UTC().Add(48*time.Hour),
+			)
+			rotated, err := repo.Rotate("raced-hash", replacement)
+			if err != nil {
+				t.Errorf("concurrent Rotate failed: %v", err)
+				winners <- false
+				return
+			}
+			winners <- rotated
+		}(i)
+	}
+
+	first := <-winners
+	second := <-winners
+	assert.NotEqual(t, first, second,
+		"Exactly one concurrent rotation must win (got %t and %t)", first, second)
+
+	sessions := sessionRowsForUser(t, db, user.ID)
+	assert.Len(t, sessions, 1, "The race must leave exactly one live session row")
+	assert.NotEqual(t, "raced-hash", sessions[0],
+		"The surviving row must be a winner's replacement, not the raced original")
+}
+
+// sessionRowsForUser reads the given user's token hashes straight from
+// the sessions table, ordered by creation, so rotation tests can assert
+// on committed state rather than going through the repository again.
+func sessionRowsForUser(t *testing.T, db *sql.DB, userID string) []string {
+	t.Helper()
+
+	rows, err := db.Query(`SELECT token_hash FROM sessions WHERE user_id = ? ORDER BY created_at, id`, userID)
+	require.NoError(t, err, "Should query sessions for user")
+	defer rows.Close()
+
+	var hashes []string
+	for rows.Next() {
+		var hash string
+		require.NoError(t, rows.Scan(&hash), "Should scan token hash")
+		hashes = append(hashes, hash)
+	}
+	require.NoError(t, rows.Err(), "Should iterate session rows")
+	return hashes
 }
 
 // TestMigrations_SessionsTableIdempotent asserts the migration runner

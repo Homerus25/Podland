@@ -4,6 +4,7 @@ package integration
 
 import (
 	"net/http"
+	"net/http/cookiejar"
 	"strings"
 	"sync"
 	"testing"
@@ -163,6 +164,28 @@ func (t *bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	clone := req.Clone(req.Context())
 	clone.Header.Set("Authorization", "Bearer "+t.token)
 	return t.base.RoundTrip(clone)
+}
+
+// CookieJarClient returns an *http.Client that persists Set-Cookie
+// headers in a standard-library cookie jar across requests — the shape a
+// browser session has. The refresh-cookie suite (100-02) is its first
+// consumer: log in through one jar client and the refresh cookie rides
+// along to every subsequent /api/auth request without tests hand-parsing
+// Set-Cookie headers.
+//
+// Each call returns a fresh jar around the existing transport, so two
+// clients behave like two devices: cookies earned by one are invisible
+// to the other. The jar is a plain cookiejar (no public-suffix list);
+// the suite talks to a loopback httptest origin where that suffices.
+func (s *Suite) CookieJarClient() *http.Client {
+	// cookiejar.New(nil) cannot fail for a nil-options call; it returns
+	// the error solely to allow future option validation.
+	jar, _ := cookiejar.New(nil)
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: http.DefaultTransport,
+		Jar:       jar,
+	}
 }
 
 // SeedUserWithRole seeds a user with an explicit role through the

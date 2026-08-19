@@ -41,6 +41,21 @@ type LoginResponse struct {
 // it only to the auth endpoints that consume it.
 const refreshTokenCookieName = "refresh_token"
 
+// setRefreshCookie writes the refresh token as the httpOnly cookie
+// login and refresh hand to the client. The attributes are the spec's
+// four: httpOnly (out of JavaScript reach), Secure, SameSite=Strict,
+// and Path=/api/auth so the browser sends it only to auth endpoints.
+func setRefreshCookie(w http.ResponseWriter, refreshToken string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshTokenCookieName,
+		Value:    refreshToken,
+		Path:     "/api/auth",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
 // Login handles user login: it shapes the request and response, while
 // credential verification, token issuance, and session persistence live
 // in AuthService.Login.
@@ -69,18 +84,44 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// it out of JavaScript reach, the narrow path keeps it out of every
 	// non-auth request, and SameSite=Strict + Secure harden it against
 	// cross-site sending and plaintext transport.
-	http.SetCookie(w, &http.Cookie{
-		Name:     refreshTokenCookieName,
-		Value:    refreshToken,
-		Path:     "/api/auth",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
-	})
+	setRefreshCookie(w, refreshToken)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(LoginResponse{Token: token})
+}
+
+// RefreshResponse represents a refresh response. It intentionally
+// matches the login body: exactly the new access JWT — the refresh
+// token lives only in the rotated cookie.
+type RefreshResponse = LoginResponse
+
+// Refresh handles the unauthenticated renewal path: it exchanges the
+// httpOnly refresh cookie for a new access JWT in the body and a
+// rotated refresh cookie. A missing cookie, an unknown token (replayed
+// or revoked), and an expired session are all 401s in the structured
+// error envelope — the browser-facing behavior is a silent re-login
+// prompt, not an error screen.
+func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
+	requestID := contextutils.GetRequestID(r.Context())
+
+	cookie, err := r.Cookie(refreshTokenCookieName)
+	if err != nil {
+		errors.RespondWithError(w, errors.ErrRefreshInvalid, requestID)
+		return
+	}
+
+	token, refreshToken, err := h.service.Refresh(cookie.Value)
+	if err != nil {
+		errors.RespondWithError(w, h.errorHandler.HandleError(err), requestID)
+		return
+	}
+
+	setRefreshCookie(w, refreshToken)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(RefreshResponse{Token: token})
 }
 
 // Logout handles user logout
