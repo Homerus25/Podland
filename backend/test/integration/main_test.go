@@ -615,22 +615,25 @@ func buildTestConfig() (*config.Config, []string, error) {
 			ExpirationMinutes: 60,
 			Issuer:            "podland-it",
 		},
-		Session:        config.SessionConfig{TTLDays: 30},
+		Session: config.SessionConfig{TTLDays: 30},
 		Connections: config.ConnectionConfig{
 			SSHIdleTimeoutSeconds: 900,
 			MaxConcurrent:         10,
 			QueueTimeoutSeconds:   30,
 			TestTimeoutSeconds:    10,
 		},
-		// The rate limiter is a production abuse guard keyed per user;
-		// the whole suite authenticates as ONE user and legitimately
-		// issues hundreds of requests per minute (state-transition
-		// polls alone fire ~2/s for up to 30s each), so the 60/min
-		// production default causes spurious 429s that poison every
-		// test after the first poll-heavy slice. The limiter has no
-		// coverage here by design — it is not under test — so the
-		// ceiling is raised out of the way instead.
-		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 100000},
+		// The rate limiters are production abuse guards, not the system
+		// under test for most slices: the per-user limiter sees the
+		// suite authenticate as ONE user and legitimately issue
+		// hundreds of requests per minute (state-transition polls alone
+		// fire ~2/s for up to 30s each), and the per-IP auth limiter
+		// sees every login/refresh in the suite arrive from 127.0.0.1.
+		// Both 60/min-class production defaults would cause spurious
+		// 429s that poison every test after the first poll-heavy slice,
+		// so both ceilings are raised out of the way. The auth limiter
+		// gets its own dedicated coverage from a separate low-limit
+		// app instance in ratelimit_auth_test.go.
+		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 100000, AuthRequestsPerMinute: 100000},
 		AllowedOrigins: []string{},
 		Log:            config.LogConfig{Level: "info", Format: "json"},
 		Encryption:     config.EncryptionConfig{Key: encKey},

@@ -48,9 +48,13 @@ type ConnectionConfig struct {
 	TestTimeoutSeconds    int
 }
 
-// RateLimitConfig holds rate limiting configuration
+// RateLimitConfig holds rate limiting configuration. RequestsPerMinute
+// budgets the authenticated API surface per user; AuthRequestsPerMinute
+// budgets the unauthenticated auth surface (login, refresh) per client
+// IP — those routes have no user to key on.
 type RateLimitConfig struct {
-	RequestsPerMinute int
+	RequestsPerMinute     int
+	AuthRequestsPerMinute int
 }
 
 // LogConfig holds logging configuration
@@ -99,6 +103,8 @@ func Load() (*Config, error) {
 
 	// Rate Limiting
 	cfg.RateLimit.RequestsPerMinute = getEnvInt("RATE_LIMIT_REQUESTS_PER_USER_PER_MINUTE", 60)
+	// Brute-force-hostile default: login+refresh share one per-IP bucket.
+	cfg.RateLimit.AuthRequestsPerMinute = getEnvInt("RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE", 10)
 
 	// CORS
 	if origins := os.Getenv("ALLOWED_ORIGINS"); origins != "" {

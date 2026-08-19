@@ -163,6 +163,13 @@ func New(cfg *config.Config) (*App, error) {
 		cfg.RateLimit.RequestsPerMinute,
 		time.Minute,
 	)
+	// Separate instance with its own budget: login and refresh are
+	// unauthenticated, so the per-user limiter has no key for them —
+	// the auth limiter keys by client IP instead.
+	authRateLimiter := appmiddleware.NewRateLimiter(
+		cfg.RateLimit.AuthRequestsPerMinute,
+		time.Minute,
+	)
 
 	// Create router
 	router := chi.NewRouter()
@@ -175,13 +182,22 @@ func New(cfg *config.Config) (*App, error) {
 	// Routes
 	router.Route("/api", func(r chi.Router) {
 		// Auth
-		r.Post("/auth/login", authHandler.Login)
+		//
+		// Login and refresh are the unauthenticated entry points of the
+		// auth surface, so they share an IP-keyed rate-limit group —
+		// brute-force protection that needs no user to key on. Logout
+		// stays outside the group: it is idempotent and revokes only the
+		// cookie it is handed, so there is nothing to brute-force.
+		r.Group(func(r chi.Router) {
+			r.Use(appmiddleware.AuthRateLimitMiddleware(authRateLimiter))
+			r.Post("/auth/login", authHandler.Login)
+			// Refresh is deliberately public: it authenticates with the httpOnly
+			// refresh cookie instead of a Bearer JWT — presenting that cookie to
+			// a JWT-gated route would be a contradiction (the whole point is
+			// minting a new JWT). Rotation lives inside AuthService.Refresh.
+			r.Post("/auth/refresh", authHandler.Refresh)
+		})
 		r.Post("/auth/logout", authHandler.Logout)
-		// Refresh is deliberately public: it authenticates with the httpOnly
-		// refresh cookie instead of a Bearer JWT — presenting that cookie to
-		// a JWT-gated route would be a contradiction (the whole point is
-		// minting a new JWT). Rotation lives inside AuthService.Refresh.
-		r.Post("/auth/refresh", authHandler.Refresh)
 		// Status serves anonymous callers too (authenticated: false),
 		// so it validates the token only when one is presented.
 		r.With(appmiddleware.OptionalJWTMiddleware(authService)).Get("/auth/status", authHandler.Status)
