@@ -21,12 +21,14 @@
     "framer-motion": "^11.11.17",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-hook-form": "^7.85.0",
     "react-router-dom": "^6.28.0"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.6.5",
     "@types/node": "^22.10.1",
     "@types/react": "^18.3.14",
     "@types/react-dom": "^18.3.2",

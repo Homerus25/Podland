@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { App } from './App'
 import { theme } from './theme'
+import { AuthProvider } from '@shared/context/AuthContext'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,7 +25,9 @@ createRoot(document.getElementById('root')!).render(
     <ColorModeScript initialColorMode={theme.config.initialColorMode} />
     <ChakraProvider theme={theme}>
       <BrowserRouter>
-        <App />
+        <AuthProvider>
+          <App />
+        </AuthProvider>
       </BrowserRouter>
     </ChakraProvider>
     {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
