@@ -6,4 +6,9 @@ export const authApi = {
     const response = await api.post<LoginResponse>('/auth/login', credentials)
     return response.data
   },
+
+  // Revokes the refresh session behind the httpOnly cookie; idempotent.
+  logout: async (): Promise<void> => {
+    await api.post('/auth/logout')
+  },
 }

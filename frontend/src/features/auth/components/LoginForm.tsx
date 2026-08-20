@@ -1,7 +1,8 @@
 import { useForm } from 'react-hook-form'
 import { Button, FormControl, FormErrorMessage, FormLabel, Input, VStack } from '@chakra-ui/react'
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import type { Location } from 'react-router-dom'
 import { useAuth } from '@features/auth/hooks/useAuth'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { getApiError } from '@shared/utils/api'
@@ -13,6 +14,8 @@ const required = (label: string) => (value: string) =>
 export function LoginForm() {
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const from = (location.state as { from?: Location } | null)?.from
   const [envelopeError, setEnvelopeError] = useState<ApiError | null>(null)
   const {
     register,
@@ -24,7 +27,7 @@ export function LoginForm() {
     setEnvelopeError(null)
     try {
       await login(credentials)
-      navigate('/')
+      navigate(from ?? '/', { replace: true })
     } catch (error) {
       setEnvelopeError(getApiError(error))
     }
