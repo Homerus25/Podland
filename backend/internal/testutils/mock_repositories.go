@@ -182,15 +182,16 @@ func (m *MockMachineRepository) ListByOwner(ownerID string) ([]*models.Machine, 
 	return result, nil
 }
 
-func (m *MockMachineRepository) ListAccessible(userID string) ([]*models.Machine, error) {
+func (m *MockMachineRepository) ListAccessible(userID string) ([]models.AccessibleMachine, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
-	// For simplicity, return all machines - in real tests you can customize this behavior
-	var result []*models.Machine
+	// For simplicity, return all machines - in real tests you can customize this behavior.
+	// Owners are granted admin, mirroring the access row Create grants.
+	var result []models.AccessibleMachine
 	for _, machine := range m.machines {
 		if machine.OwnerID == userID {
-			result = append(result, machine)
+			result = append(result, models.AccessibleMachine{Machine: machine, Permission: models.PermissionAdmin})
 		}
 	}
 	return result, nil

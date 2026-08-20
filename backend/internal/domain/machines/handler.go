@@ -106,10 +106,11 @@ func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert to responses
+	// Convert to responses, carrying the caller's permission on each
 	responses := make([]MachineResponse, len(machines))
 	for i, machine := range machines {
-		responses[i] = FromModel(machine)
+		responses[i] = FromModel(machine.Machine)
+		responses[i].Permission = machine.Permission
 	}
 
 	// Return success response

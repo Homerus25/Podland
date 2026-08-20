@@ -105,11 +105,20 @@ func (r *MachineRepository) ListByOwner(ownerID string) ([]*Machine, error) {
 	return machines, nil
 }
 
-// ListAccessible retrieves all machines a user has access to
-func (r *MachineRepository) ListAccessible(userID string) ([]*Machine, error) {
-	query := `SELECT m.id, m.name, m.owner_id, m.description, m.hostname, m.port, m.ssh_username, m.ssh_key_encrypted, m.ssh_key_fingerprint, m.podman_socket_path, m.created_at, m.updated_at 
-		FROM machines m 
-		JOIN machine_access ma ON m.id = ma.machine_id 
+// AccessibleMachine pairs a machine with the caller's permission on it.
+// Owners implicitly hold admin via the machine_access row created at
+// registration; shared users hold their granted permission.
+type AccessibleMachine struct {
+	*Machine
+	Permission string
+}
+
+// ListAccessible retrieves all machines a user has access to, each with
+// the caller's permission from machine_access
+func (r *MachineRepository) ListAccessible(userID string) ([]AccessibleMachine, error) {
+	query := `SELECT m.id, m.name, m.owner_id, m.description, m.hostname, m.port, m.ssh_username, m.ssh_key_encrypted, m.ssh_key_fingerprint, m.podman_socket_path, m.created_at, m.updated_at, ma.permission
+		FROM machines m
+		JOIN machine_access ma ON m.id = ma.machine_id
 		WHERE ma.user_id = ?`
 	rows, err := r.db.Query(query, userID)
 	if err != nil {
@@ -117,16 +126,18 @@ func (r *MachineRepository) ListAccessible(userID string) ([]*Machine, error) {
 	}
 	defer rows.Close()
 
-	var machines []*Machine
+	var machines []AccessibleMachine
 	for rows.Next() {
 		machine := &Machine{}
+		var permission string
 		if err := rows.Scan(
 			&machine.ID, &machine.Name, &machine.OwnerID, &machine.Description,
 			&machine.Hostname, &machine.Port, &machine.SSHUsername, &machine.SSHKeyEncrypted,
-			&machine.SSHKeyFingerprint, &machine.PodmanSocketPath, &machine.CreatedAt, &machine.UpdatedAt); err != nil {
+			&machine.SSHKeyFingerprint, &machine.PodmanSocketPath, &machine.CreatedAt, &machine.UpdatedAt,
+			&permission); err != nil {
 			return nil, err
 		}
-		machines = append(machines, machine)
+		machines = append(machines, AccessibleMachine{Machine: machine, Permission: permission})
 	}
 	return machines, nil
 }

@@ -46,7 +46,8 @@ type CreateMachineRequest struct {
 	PodmanSocketPath string `json:"podmanSocketPath"`
 }
 
-// MachineResponse represents a machine in API responses
+// MachineResponse represents a machine in API responses. Permission is
+// the caller's permission and is only populated by the list endpoint.
 type MachineResponse struct {
 	ID                string `json:"id"`
 	Name              string `json:"name"`
@@ -56,6 +57,8 @@ type MachineResponse struct {
 	SSHUsername       string `json:"sshUsername"`
 	SSHKeyFingerprint string `json:"sshKeyFingerprint"`
 	PodmanSocketPath  string `json:"podmanSocketPath"`
+	OwnerID           string `json:"ownerId"`
+	Permission        string `json:"permission,omitempty"`
 	CreatedAt         string `json:"createdAt"`
 	UpdatedAt         string `json:"updatedAt"`
 }
@@ -71,6 +74,7 @@ func FromModel(machine *models.Machine) MachineResponse {
 		SSHUsername:       machine.SSHUsername,
 		SSHKeyFingerprint: machine.SSHKeyFingerprint,
 		PodmanSocketPath:  machine.PodmanSocketPath,
+		OwnerID:           machine.OwnerID,
 		CreatedAt:         machine.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:         machine.UpdatedAt.Format(time.RFC3339),
 	}
@@ -235,8 +239,9 @@ func (s *MachineService) GetMachineByID(userID, machineID string) (*models.Machi
 	return machine, nil
 }
 
-// ListAccessibleMachines retrieves all machines a user has access to
-func (s *MachineService) ListAccessibleMachines(userID string) ([]*models.Machine, error) {
+// ListAccessibleMachines retrieves all machines a user has access to,
+// each paired with the caller's permission
+func (s *MachineService) ListAccessibleMachines(userID string) ([]models.AccessibleMachine, error) {
 	return s.machineRepo.ListAccessible(userID)
 }
 
@@ -245,8 +250,9 @@ func (s *MachineService) ListOwnedMachines(userID string) ([]*models.Machine, er
 	return s.machineRepo.ListByOwner(userID)
 }
 
-// ListAllMachines retrieves all machines accessible to a user (owned + shared)
-func (s *MachineService) ListAllMachines(userID string) ([]*models.Machine, error) {
+// ListAllMachines retrieves all machines accessible to a user (owned + shared),
+// each paired with the caller's permission
+func (s *MachineService) ListAllMachines(userID string) ([]models.AccessibleMachine, error) {
 	return s.machineRepo.ListAccessible(userID)
 }
 

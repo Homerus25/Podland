@@ -19,7 +19,7 @@ type MachineRepositoryInterface interface {
 	Update(machine *models.Machine) error
 	Delete(id string) error
 	ListByOwner(ownerID string) ([]*models.Machine, error)
-	ListAccessible(userID string) ([]*models.Machine, error)
+	ListAccessible(userID string) ([]models.AccessibleMachine, error)
 	NameExistsForUser(userID, name string) (bool, error)
 }
 
@@ -163,35 +163,38 @@ func (r *MachineRepository) ListByOwner(ownerID string) ([]*models.Machine, erro
 }
 
 // ListAccessible retrieves all machines accessible to a user (owned + shared)
-func (r *MachineRepository) ListAccessible(userID string) ([]*models.Machine, error) {
+// along with the caller's permission on each
+func (r *MachineRepository) ListAccessible(userID string) ([]models.AccessibleMachine, error) {
 	query := `
 		SELECT DISTINCT m.id, m.name, m.owner_id, m.description, m.hostname, m.port,
 			m.ssh_username, m.ssh_key_encrypted, m.ssh_key_fingerprint,
-			m.podman_socket_path, m.created_at, m.updated_at
+			m.podman_socket_path, m.created_at, m.updated_at, ma.permission
 		FROM machines m
-		LEFT JOIN machine_access ma ON m.id = ma.machine_id
-		WHERE m.owner_id = ? OR ma.user_id = ?
+		JOIN machine_access ma ON m.id = ma.machine_id
+		WHERE ma.user_id = ?
 		ORDER BY m.name
 	`
 
-	rows, err := r.db.Query(query, userID, userID)
+	rows, err := r.db.Query(query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list accessible machines: %w", err)
 	}
 	defer rows.Close()
 
-	var machines []*models.Machine
+	var machines []models.AccessibleMachine
 	for rows.Next() {
 		var machine models.Machine
+		var permission string
 		if err := rows.Scan(
 			&machine.ID, &machine.Name, &machine.OwnerID, &machine.Description,
 			&machine.Hostname, &machine.Port, &machine.SSHUsername,
 			&machine.SSHKeyEncrypted, &machine.SSHKeyFingerprint,
 			&machine.PodmanSocketPath, &machine.CreatedAt, &machine.UpdatedAt,
+			&permission,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan machine: %w", err)
 		}
-		machines = append(machines, &machine)
+		machines = append(machines, models.AccessibleMachine{Machine: &machine, Permission: permission})
 	}
 
 	if err := rows.Err(); err != nil {

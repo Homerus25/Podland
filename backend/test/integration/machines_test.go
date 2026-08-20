@@ -226,7 +226,14 @@ func Test_Integration_Machines_CRUDAccessTripwire(t *testing.T) {
 		// Prove the throwaway is also present before delete, so the
 		// post-delete absence check is meaningful.
 		require.True(t, machineListed(t, crudHostID),
-			"throwaway machine must be listed before delete (precondition)")
+			"reachable throwaway must appear in the owner's list")
+
+		// The list entry must carry the caller's permission; the owner
+		// implicitly holds admin via the machine_access row Create grants.
+		entry, ok := findMachineInList(t, crudHostID)
+		require.True(t, ok, "reachable throwaway must be findable in the list")
+		require.Equal(t, "admin", entry.Permission,
+			"owner's list entry must carry admin permission")
 
 		// DELETE the throwaway.
 		url := suite.ServerURL + "/api/machines/" + crudHostID + "/"
@@ -528,6 +535,8 @@ type machineDTO struct {
 	SSHUsername       string `json:"sshUsername"`
 	SSHKeyFingerprint string `json:"sshKeyFingerprint"`
 	PodmanSocketPath  string `json:"podmanSocketPath"`
+	OwnerID           string `json:"ownerId"`
+	Permission        string `json:"permission"`
 	CreatedAt         string `json:"createdAt"`
 	UpdatedAt         string `json:"updatedAt"`
 }
@@ -568,12 +577,20 @@ func listMachines(t *testing.T) []machineDTO {
 // about ordering or other entries.
 func machineListed(t *testing.T, machineID string) bool {
 	t.Helper()
+	_, listed := findMachineInList(t, machineID)
+	return listed
+}
+
+// findMachineInList returns the caller's machine-list entry for the given
+// ID, proving presence and exposing the caller's permission.
+func findMachineInList(t *testing.T, machineID string) (machineDTO, bool) {
+	t.Helper()
 	for _, m := range listMachines(t) {
 		if m.ID == machineID {
-			return true
+			return m, true
 		}
 	}
-	return false
+	return machineDTO{}, false
 }
 
 // machineListedByName reports whether any machine with the given name

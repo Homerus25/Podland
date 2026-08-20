@@ -1,5 +1,6 @@
 import userEvent from '@testing-library/user-event'
 import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ChakraProvider } from '@chakra-ui/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { useAuth } from '@features/auth/hooks/useAuth'
@@ -36,15 +37,20 @@ export function renderApp(
   options: { resolveInitialState?: () => Promise<User | null>; usernameProbe?: boolean } = {},
 ) {
   const { resolveInitialState, usernameProbe = true } = options
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
   return render(
-    <ChakraProvider theme={theme}>
-      <MemoryRouter initialEntries={[at]}>
-        <AuthProvider resolveInitialState={resolveInitialState}>
-          <LocationProbe />
-          {usernameProbe && <UsernameProbe />}
-          <App />
-        </AuthProvider>
-      </MemoryRouter>
-    </ChakraProvider>,
-  )
-}
+    <QueryClientProvider client={queryClient}>
+      <ChakraProvider theme={theme}>
+        <MemoryRouter initialEntries={[at]}>
+          <AuthProvider resolveInitialState={resolveInitialState}>
+            <LocationProbe />
+            {usernameProbe && <UsernameProbe />}
+            <App />
+          </AuthProvider>
+        </MemoryRouter>
+      </ChakraProvider>
+    </QueryClientProvider>,
+    )
+  }
