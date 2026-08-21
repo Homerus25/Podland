@@ -1,5 +1,5 @@
 import { api } from '@shared/utils/api'
-import type { Machine } from '@shared/types/api'
+import type { AccessGrant, Machine, MachinePermission } from '@shared/types/api'
 
 // CreateMachineRequest (backend/internal/domain/machines/service.go):
 // the SSH private key contents are read client-side via the File API and
@@ -44,6 +44,27 @@ export async function updateMachine(id: string, input: UpdateMachineInput): Prom
 
 export async function deleteMachine(id: string): Promise<void> {
   await api.delete(`/machines/${id}`)
+}
+
+export async function listMachineAccess(machineId: string): Promise<AccessGrant[]> {
+  const response = await api.get<AccessGrant[]>(`/machines/${machineId}/access`)
+  return response.data
+}
+
+export async function grantMachineAccess(
+  machineId: string,
+  userId: string,
+  permission: MachinePermission,
+): Promise<AccessGrant> {
+  const response = await api.post<AccessGrant>(`/machines/${machineId}/access`, {
+    userId,
+    permission,
+  })
+  return response.data
+}
+
+export async function revokeMachineAccess(machineId: string, userId: string): Promise<void> {
+  await api.delete(`/machines/${machineId}/access/${userId}`)
 }
 
 export async function createMachine(input: CreateMachineInput): Promise<Machine> {

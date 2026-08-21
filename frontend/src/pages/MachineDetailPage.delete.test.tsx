@@ -43,6 +43,7 @@ function deleteHandler(machine: Machine, status = 204, delayMs = 0) {
 async function renderSettingsTab(machine: Machine = machineFixture) {
   deleteRequested = false
   server.use(machineHandler(machine))
+  server.use(http.get('*/api/machines/m-1/access', () => HttpResponse.json([])))
   server.use(http.get('*/api/machines', () => {
     machinesListRequests++
     return HttpResponse.json([machine])

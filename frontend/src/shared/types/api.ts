@@ -30,6 +30,15 @@ export interface Machine {
   updatedAt: string
 }
 
+// Access grant as returned by GET /api/machines/{id}/access
+// (backend/internal/domain/machines/handler.go AccessResponse). The API
+// identifies users by id only.
+export interface AccessGrant {
+  userId: string
+  permission: MachinePermission
+  grantedAt: string
+}
+
 // Backend error envelope (backend/internal/errors/handlers.go ErrorResponse)
 export interface ApiErrorEnvelope {
   requestId: string

@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useDeleteMachine, useMachine, useUpdateMachine } from '@features/machines/hooks/useMachines'
 import { MachineForm } from '@features/machines/components/MachineForm'
 import { PermissionBadge } from '@features/machines/components/PermissionBadge'
+import { ShareMachineSection } from '@features/machines/components/ShareMachineSection'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { Modal } from '@shared/components/Modal'
 import { getApiError } from '@shared/utils/api'
@@ -99,10 +100,14 @@ function SettingsTab({ machine }: { machine: Machine }) {
         isSubmitting={updateMachine.isPending}
       />
       {machine.permission === 'admin' ? (
-        <DeleteMachineSection machine={machine} />
+        <>
+          <Text fontWeight="bold">Sharing</Text>
+          <ShareMachineSection machineId={machine.id} />
+          <DeleteMachineSection machine={machine} />
+        </>
       ) : (
         <Text color="gray.500" data-testid="delete-not-permitted">
-          Only the owner or an admin can delete this machine.
+          Only the owner or an admin can delete or share this machine.
         </Text>
       )}
     </VStack>
