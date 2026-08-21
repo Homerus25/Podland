@@ -1,5 +1,8 @@
-import { Badge, Card, CardBody, CardHeader, Heading, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
-import { useMachines } from '@features/machines/hooks/useMachines'
+import { useState } from 'react'
+import { Badge, Button, Card, CardBody, CardHeader, Heading, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
+import { useCreateMachine, useMachines } from '@features/machines/hooks/useMachines'
+import { MachineForm } from '@features/machines/components/MachineForm'
+import { Modal } from '@shared/components/Modal'
 import type { Machine } from '@shared/types/api'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { getApiError } from '@shared/utils/api'
@@ -30,10 +33,28 @@ function MachineCard({ machine }: { machine: Machine }) {
 
 export function MachinesPage() {
   const { data: machines, isPending, error } = useMachines()
+  const createMachine = useCreateMachine()
+  const [isAddOpen, setIsAddOpen] = useState(false)
+
+  // Clearing the mutation on open/close means a stale error from a previous
+  // attempt never bleeds into a fresh form.
+  const openAddModal = () => {
+    createMachine.reset()
+    setIsAddOpen(true)
+  }
+  const closeAddModal = () => {
+    createMachine.reset()
+    setIsAddOpen(false)
+  }
 
   return (
     <VStack spacing={4} align="stretch">
-      <Heading size="lg">Machines</Heading>
+      <HStack justify="space-between">
+        <Heading size="lg">Machines</Heading>
+        <Button colorScheme="blue" onClick={openAddModal} data-testid="add-machine-button">
+          Add Machine
+        </Button>
+      </HStack>
       {isPending && <Text data-testid="machines-loading">Loading machines…</Text>}
       {error && <ErrorDisplay error={getApiError(error)} />}
       {machines &&
@@ -50,6 +71,21 @@ export function MachinesPage() {
             ))}
           </SimpleGrid>
         ))}
+      <Modal isOpen={isAddOpen} onClose={closeAddModal} title="Add Machine">
+        <MachineForm
+          onSubmit={
+            (input) =>
+              new Promise<void>((resolve) =>
+                createMachine.mutate(input, {
+                  onSuccess: () => setIsAddOpen(false),
+                  onSettled: () => resolve(),
+                }),
+              )
+          }
+          submitError={createMachine.error}
+          isSubmitting={createMachine.isPending}
+        />
+      </Modal>
     </VStack>
   )
 }
