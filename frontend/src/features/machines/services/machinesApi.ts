@@ -42,6 +42,10 @@ export async function updateMachine(id: string, input: UpdateMachineInput): Prom
   return response.data
 }
 
+export async function deleteMachine(id: string): Promise<void> {
+  await api.delete(`/machines/${id}`)
+}
+
 export async function createMachine(input: CreateMachineInput): Promise<Machine> {
   const response = await api.post<Machine>('/machines', input)
   return response.data

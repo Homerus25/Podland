@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getMachine, listMachines } from '@features/machines/services/machinesApi'
-import { updateMachine, type UpdateMachineInput } from '@features/machines/services/machinesApi'
-import { createMachine, type CreateMachineInput } from '@features/machines/services/machinesApi'
+import {
+  createMachine,
+  deleteMachine,
+  updateMachine,
+  type CreateMachineInput,
+  type UpdateMachineInput,
+} from '@features/machines/services/machinesApi'
 
 export function useMachines() {
   return useQuery({ queryKey: ['machines'], queryFn: listMachines })
@@ -15,6 +20,16 @@ export function useUpdateMachine(id: string) {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (input: UpdateMachineInput) => updateMachine(id, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['machines'] })
+    },
+  })
+}
+
+export function useDeleteMachine() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => deleteMachine(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['machines'] })
     },

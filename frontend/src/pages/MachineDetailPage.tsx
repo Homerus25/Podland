@@ -1,14 +1,73 @@
-import { Heading, HStack, Tab, TabList, TabPanel, TabPanels, Tabs, Text, VStack } from '@chakra-ui/react'
-import { useParams } from 'react-router-dom'
-import { useMachine, useUpdateMachine } from '@features/machines/hooks/useMachines'
+import { useState } from 'react'
+import { Button, Heading, HStack, Tab, TabList, TabPanel, TabPanels, Tabs, Text, VStack } from '@chakra-ui/react'
+import { useNavigate, useParams } from 'react-router-dom'
+import { useDeleteMachine, useMachine, useUpdateMachine } from '@features/machines/hooks/useMachines'
 import { MachineForm } from '@features/machines/components/MachineForm'
 import { PermissionBadge } from '@features/machines/components/PermissionBadge'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
+import { Modal } from '@shared/components/Modal'
 import { getApiError } from '@shared/utils/api'
 import type { Machine } from '@shared/types/api'
 
 function TabPlaceholder({ label }: { label: string }) {
   return <Text data-testid={`tab-${label.toLowerCase()}-placeholder`}>Nothing here yet.</Text>
+}
+
+function DeleteMachineSection({ machine }: { machine: Machine }) {
+  const navigate = useNavigate()
+  const deleteMachine = useDeleteMachine()
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false)
+
+  // Deleting the machine destroys the page's subject, so success always
+  // navigates back to the machines list.
+  const confirmDelete = () => {
+    deleteMachine.mutate(machine.id, {
+      onSuccess: () => navigate('/machines'),
+      onSettled: () => setIsConfirmOpen(false),
+    })
+  }
+
+  return (
+    <>
+      <Button
+        colorScheme="red"
+        variant="outline"
+        onClick={() => {
+          deleteMachine.reset()
+          setIsConfirmOpen(true)
+        }}
+        data-testid="delete-machine-button"
+      >
+        Delete machine
+      </Button>
+      {deleteMachine.error ? <ErrorDisplay error={getApiError(deleteMachine.error)} /> : null}
+      <Modal
+        isOpen={isConfirmOpen}
+        onClose={() => setIsConfirmOpen(false)}
+        title="Delete machine"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setIsConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              colorScheme="red"
+              onClick={confirmDelete}
+              isLoading={deleteMachine.isPending}
+              data-testid="confirm-delete-button"
+            >
+              Delete machine
+            </Button>
+          </>
+        }
+      >
+        <Text>
+          Delete “{machine.name}” ({machine.hostname}:{machine.port})? This removes the
+          machine registration and all access grants. The remote host is not touched.
+        </Text>
+      </Modal>
+    </>
+  )
 }
 
 function SettingsTab({ machine }: { machine: Machine }) {
@@ -39,6 +98,13 @@ function SettingsTab({ machine }: { machine: Machine }) {
         submitError={updateMachine.error}
         isSubmitting={updateMachine.isPending}
       />
+      {machine.permission === 'admin' ? (
+        <DeleteMachineSection machine={machine} />
+      ) : (
+        <Text color="gray.500" data-testid="delete-not-permitted">
+          Only the owner or an admin can delete this machine.
+        </Text>
+      )}
     </VStack>
   )
 }
