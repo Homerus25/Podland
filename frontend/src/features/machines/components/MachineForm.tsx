@@ -9,7 +9,14 @@ import {
 } from '@chakra-ui/react'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { getApiError } from '@shared/utils/api'
-import type { CreateMachineInput } from '@features/machines/services/machinesApi'
+import type { UpdateMachineInput } from '@features/machines/services/machinesApi'
+import type { Machine } from '@shared/types/api'
+
+// What the form produces: all metadata fields plus the key only when a file
+// was selected (create mode validates its presence before submit).
+export type MachineFormPayload = Omit<UpdateMachineInput, 'sshPrivateKey'> & {
+  sshPrivateKey?: string
+}
 
 interface MachineFormValues {
   name: string
@@ -18,7 +25,7 @@ interface MachineFormValues {
   port: string
   sshUsername: string
   podmanSocketPath: string
-  sshPrivateKeyFile: FileList
+  sshPrivateKeyFile?: FileList
 }
 
 const portPattern = /^(0|[1-9]\d{0,4})$/
@@ -43,30 +50,49 @@ function readFile(file: File): Promise<string> {
 interface MachineFormProps {
   // Returns a promise that settles when the request finishes so the form's
   // submit state spans the whole mutation, not just the file read.
-  onSubmit: (input: CreateMachineInput) => Promise<void>
+  onSubmit: (input: MachineFormPayload) => Promise<void>
   submitError: unknown
   isSubmitting: boolean
+  mode?: 'create' | 'edit'
+  machine?: Machine
 }
 
-// MachineForm in create mode: name/hostname/port/sshUsername plus the SSH
-// private key file are required; description and podman socket path are
-// optional. The key file is read client-side via the File API.
-export function MachineForm({ onSubmit, submitError, isSubmitting }: MachineFormProps) {
+// MachineForm serves both create and edit mode. In create mode the SSH
+// private key file is required; in edit mode it is optional — omitting it
+// leaves the stored key untouched, uploading a new file re-sends it. The key
+// file is read client-side via the File API.
+export function MachineForm({ onSubmit, submitError, isSubmitting, mode = 'create', machine }: MachineFormProps) {
+  const isEdit = mode === 'edit'
   const {
     register,
     handleSubmit,
     setError,
     formState: { errors, isSubmitting: isValidatingAndReading },
   } = useForm<MachineFormValues>({
-    defaultValues: { port: '22', description: '', podmanSocketPath: '' },
+    defaultValues: machine
+      ? {
+          name: machine.name,
+          description: machine.description ?? '',
+          hostname: machine.hostname,
+          port: String(machine.port),
+          sshUsername: machine.sshUsername,
+          podmanSocketPath: machine.podmanSocketPath ?? '',
+        }
+      : { port: '22', description: '', podmanSocketPath: '' },
   })
 
   const submit = handleSubmit(async (values) => {
-    let sshPrivateKey: string
-    try {
-      sshPrivateKey = await readFile(values.sshPrivateKeyFile[0])
-    } catch {
-      setError('sshPrivateKeyFile', { message: 'Could not read the selected key file' })
+    const keyFile = values.sshPrivateKeyFile?.[0]
+    let sshPrivateKey: string | undefined
+    if (keyFile) {
+      try {
+        sshPrivateKey = await readFile(keyFile)
+      } catch {
+        setError('sshPrivateKeyFile', { message: 'Could not read the selected key file' })
+        return
+      }
+    } else if (!isEdit) {
+      setError('sshPrivateKeyFile', { message: 'SSH private key file is required' })
       return
     }
     await onSubmit({
@@ -75,7 +101,7 @@ export function MachineForm({ onSubmit, submitError, isSubmitting }: MachineForm
       hostname: values.hostname,
       port: toPort(values.port),
       sshUsername: values.sshUsername,
-      sshPrivateKey,
+      ...(sshPrivateKey !== undefined ? { sshPrivateKey } : {}),
       podmanSocketPath: values.podmanSocketPath,
     })
   })
@@ -125,12 +151,16 @@ export function MachineForm({ onSubmit, submitError, isSubmitting }: MachineForm
           <Input id="machine-podman-socket" {...register('podmanSocketPath')} />
           <FormErrorMessage>{errors.podmanSocketPath?.message}</FormErrorMessage>
         </FormControl>
-        <FormControl isInvalid={!!errors.sshPrivateKeyFile} isRequired>
-          <FormLabel htmlFor="machine-ssh-key">SSH private key</FormLabel>
+        <FormControl isInvalid={!!errors.sshPrivateKeyFile} isRequired={!isEdit}>
+          <FormLabel htmlFor="machine-ssh-key">
+            {isEdit ? 'SSH private key (optional — leave empty to keep the current key)' : 'SSH private key'}
+          </FormLabel>
           <Input
             id="machine-ssh-key"
             type="file"
-            {...register('sshPrivateKeyFile', { required: 'SSH private key file is required' })}
+            {...register('sshPrivateKeyFile', {
+              required: !isEdit ? 'SSH private key file is required' : false,
+            })}
           />
           <FormErrorMessage>{errors.sshPrivateKeyFile?.message}</FormErrorMessage>
         </FormControl>
@@ -140,7 +170,7 @@ export function MachineForm({ onSubmit, submitError, isSubmitting }: MachineForm
           isLoading={isValidatingAndReading || isSubmitting}
           data-testid="machine-form-submit"
         >
-          Add machine
+          {isEdit ? 'Save changes' : 'Add machine'}
         </Button>
       </VStack>
     </form>

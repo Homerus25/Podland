@@ -80,7 +80,7 @@ describe('MachineDetailPage', () => {
     expect(screen.getByTestId('tab-quadlets-placeholder')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('tab', { name: /settings/i }))
-    expect(screen.getByTestId('tab-settings-placeholder')).toBeInTheDocument()
+    expect(screen.getByTestId('machine-form-submit')).toBeInTheDocument()
   })
 
   it('renders the error envelope for an unknown machine id', async () => {

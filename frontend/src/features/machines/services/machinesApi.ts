@@ -19,8 +19,26 @@ export async function listMachines(): Promise<Machine[]> {
   return response.data
 }
 
+// UpdateMachineRequest mirrors the backend PUT /machines/{id} body: empty or
+// omitted fields are left untouched, so the SSH key is only sent when a new
+// file was uploaded.
+export interface UpdateMachineInput {
+  name: string
+  description: string
+  hostname: string
+  port: number
+  sshUsername: string
+  sshPrivateKey?: string
+  podmanSocketPath: string
+}
+
 export async function getMachine(id: string): Promise<Machine> {
   const response = await api.get<Machine>(`/machines/${id}`)
+  return response.data
+}
+
+export async function updateMachine(id: string, input: UpdateMachineInput): Promise<Machine> {
+  const response = await api.put<Machine>(`/machines/${id}`, input)
   return response.data
 }
 

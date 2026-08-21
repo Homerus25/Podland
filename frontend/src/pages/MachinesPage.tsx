@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Card, CardBody, CardHeader, Heading, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
 import { useCreateMachine, useMachines } from '@features/machines/hooks/useMachines'
+import type { CreateMachineInput } from '@features/machines/services/machinesApi'
 import { MachineForm } from '@features/machines/components/MachineForm'
 import { PermissionBadge } from '@features/machines/components/PermissionBadge'
 import { Modal } from '@shared/components/Modal'
@@ -83,7 +84,9 @@ export function MachinesPage() {
           onSubmit={
             (input) =>
               new Promise<void>((resolve) =>
-                createMachine.mutate(input, {
+                // Create mode always carries the key: the form rejects an
+                // empty file input before submit.
+                createMachine.mutate(input as CreateMachineInput, {
                   onSuccess: () => setIsAddOpen(false),
                   onSettled: () => resolve(),
                 }),
