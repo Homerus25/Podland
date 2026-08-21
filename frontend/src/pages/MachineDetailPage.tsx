@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, Heading, HStack, Tab, TabList, TabPanel, TabPanels, Tabs, Text, VStack } from '@chakra-ui/react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useDeleteMachine, useMachine, useUpdateMachine } from '@features/machines/hooks/useMachines'
+import { ImageList } from '@features/images/components/ImageList'
 import { canDeleteMachine, canEditMachine, canShareMachine, effectivePermission } from '@features/machines/permissions'
 import { MachineForm } from '@features/machines/components/MachineForm'
 import { PermissionBadge } from '@features/machines/components/PermissionBadge'
@@ -159,7 +160,7 @@ export function MachineDetailPage() {
             <TabPlaceholder label="containers" />
           </TabPanel>
           <TabPanel>
-            <TabPlaceholder label="images" />
+            <ImageList machineId={machine.id} />
           </TabPanel>
           <TabPanel>
             <TabPlaceholder label="quadlets" />

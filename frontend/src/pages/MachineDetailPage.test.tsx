@@ -68,19 +68,42 @@ describe('MachineDetailPage', () => {
 
   it('switches between the Containers, Images, Quadlets, and Settings tabs', async () => {
     server.use(machineHandler(machineFixture))
+    server.use(http.get('*/api/machines/m-1/images', () => HttpResponse.json([])))
     renderMachineDetailPage()
 
     await screen.findByText('prod-web-01')
     expect(screen.getByTestId('tab-containers-placeholder')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('tab', { name: /images/i }))
-    expect(screen.getByTestId('tab-images-placeholder')).toBeInTheDocument()
+    expect(await screen.findByTestId('images-empty')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('tab', { name: /quadlets/i }))
     expect(screen.getByTestId('tab-quadlets-placeholder')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('tab', { name: /settings/i }))
     expect(screen.getByTestId('machine-form-submit')).toBeInTheDocument()
+  })
+
+  it('renders the image list inside the Images tab', async () => {
+    server.use(machineHandler(machineFixture))
+    server.use(
+      http.get('*/api/machines/m-1/images', () =>
+        HttpResponse.json([
+          {
+            id: 'sha256:abc123def4567890abc123def4567890abc123def4567890abc123def4567890',
+            repoTags: ['docker.io/library/nginx:1.27'],
+            repoDigests: [],
+            createdAt: '2026-08-18T10:00:00Z',
+            size: 157286400,
+          },
+        ]),
+      ),
+    )
+    renderMachineDetailPage()
+
+    await userEvent.click(await screen.findByRole('tab', { name: /images/i }))
+    expect(await screen.findByText('docker.io/library/nginx:1.27')).toBeInTheDocument()
+    expect(screen.getByText('157.3 MB')).toBeInTheDocument()
   })
 
   it('renders the error envelope for an unknown machine id', async () => {
