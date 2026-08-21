@@ -38,13 +38,20 @@ describe('ImageList', () => {
     expect(screen.getByText('157.3 MB')).toBeInTheDocument()
   })
 
-  it('shows <none> and the short id for a dangling untagged image', async () => {
+  it('shows all repo tags and falls back to <none> with the short id for a dangling image', async () => {
     server.use(
       http.get('*/api/machines/m-1/images', () =>
         HttpResponse.json([
           {
+            id: 'sha256:abc123def4567890abc123def4567890abc123def4567890abc123def4567890',
+            repoTags: ['docker.io/library/nginx:1.27', 'docker.io/library/nginx:latest'],
+            repoDigests: [],
+            createdAt: '2026-08-18T10:00:00Z',
+            size: 157286400,
+          },
+          {
             id: 'sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321',
-            repoTags: [],
+            repoTags: null,
             repoDigests: [],
             createdAt: '2026-08-20T10:00:00Z',
             size: 3145728,
@@ -57,7 +64,10 @@ describe('ImageList', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('images-loading')).not.toBeInTheDocument()
     })
-    expect(await screen.findByText('<none>')).toBeInTheDocument()
+    expect(
+      await screen.findByText('docker.io/library/nginx:1.27, docker.io/library/nginx:latest'),
+    ).toBeInTheDocument()
+    expect(screen.getAllByText('<none>')).toHaveLength(1)
     expect(screen.getByText('fedcba098765')).toBeInTheDocument()
     expect(screen.getByText('3.1 MB')).toBeInTheDocument()
   })

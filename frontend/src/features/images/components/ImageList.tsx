@@ -5,9 +5,9 @@ import { getApiError } from '@shared/utils/api'
 import { formatBytes, formatRelativeDate, shortImageId } from '@shared/utils/format'
 import type { ImageSummary } from '@features/images/services/imagesApi'
 
-function primaryTag(image: ImageSummary): string {
-  const tag = image.repoTags.find((t) => t !== '<none>:<none>')
-  return tag ?? '<none>'
+function imageTags(image: ImageSummary): string[] {
+  const tags = (image.repoTags ?? []).filter((tag) => tag !== '<none>:<none>')
+  return tags.length > 0 ? tags : ['<none>']
 }
 
 export function ImageList({ machineId }: { machineId: string }) {
@@ -41,7 +41,7 @@ export function ImageList({ machineId }: { machineId: string }) {
         <Tbody>
           {images.map((image) => (
             <Tr key={image.id} data-testid="image-row">
-              <Td fontFamily="mono">{primaryTag(image)}</Td>
+              <Td fontFamily="mono">{imageTags(image).join(', ')}</Td>
               <Td fontFamily="mono" color="gray.500">
                 {shortImageId(image.id)}
               </Td>
