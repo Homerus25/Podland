@@ -19,6 +19,11 @@ export async function listMachines(): Promise<Machine[]> {
   return response.data
 }
 
+export async function getMachine(id: string): Promise<Machine> {
+  const response = await api.get<Machine>(`/machines/${id}`)
+  return response.data
+}
+
 export async function createMachine(input: CreateMachineInput): Promise<Machine> {
   const response = await api.post<Machine>('/machines', input)
   return response.data

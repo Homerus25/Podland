@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { MachinesPage } from '@/pages/MachinesPage'
+import { MachineDetailPage } from '@/pages/MachineDetailPage'
 import { Layout } from '@shared/components/Layout'
 import { ProtectedRoute } from '@shared/components/ProtectedRoute'
 
@@ -19,6 +20,7 @@ export function App() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="machines" element={<MachinesPage />} />
+        <Route path="machines/:machineId" element={<MachineDetailPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

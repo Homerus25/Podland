@@ -1,18 +1,16 @@
 import { useState } from 'react'
-import { Badge, Button, Card, CardBody, CardHeader, Heading, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
+import { useNavigate } from 'react-router-dom'
+import { Button, Card, CardBody, CardHeader, Heading, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
 import { useCreateMachine, useMachines } from '@features/machines/hooks/useMachines'
 import { MachineForm } from '@features/machines/components/MachineForm'
+import { PermissionBadge } from '@features/machines/components/PermissionBadge'
 import { Modal } from '@shared/components/Modal'
 import type { Machine } from '@shared/types/api'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { getApiError } from '@shared/utils/api'
 
-function PermissionBadge({ permission }: { permission: Machine['permission'] }) {
-  const colorScheme = permission === 'admin' ? 'purple' : permission === 'write' ? 'blue' : 'gray'
-  return <Badge colorScheme={colorScheme} data-testid="machine-permission">{permission}</Badge>
-}
-
 function MachineCard({ machine }: { machine: Machine }) {
+  const navigate = useNavigate()
   return (
     <Card data-testid="machine-card">
       <CardHeader>
@@ -26,6 +24,15 @@ function MachineCard({ machine }: { machine: Machine }) {
         <Text fontFamily="mono">
           {machine.hostname}:{machine.port}
         </Text>
+        <Button
+          size="sm"
+          colorScheme="blue"
+          variant="outline"
+          onClick={() => navigate(`/machines/${machine.id}`)}
+          data-testid="view-machine-button"
+        >
+          View
+        </Button>
       </CardBody>
     </Card>
   )
