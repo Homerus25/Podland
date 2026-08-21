@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, Heading, HStack, Tab, TabList, TabPanel, TabPanels, Tabs, Text, VStack } from '@chakra-ui/react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useDeleteMachine, useMachine, useUpdateMachine } from '@features/machines/hooks/useMachines'
+import { canDeleteMachine, canEditMachine, canShareMachine, effectivePermission } from '@features/machines/permissions'
 import { MachineForm } from '@features/machines/components/MachineForm'
 import { PermissionBadge } from '@features/machines/components/PermissionBadge'
 import { ShareMachineSection } from '@features/machines/components/ShareMachineSection'
@@ -73,9 +74,11 @@ function DeleteMachineSection({ machine }: { machine: Machine }) {
 
 function SettingsTab({ machine }: { machine: Machine }) {
   const updateMachine = useUpdateMachine(machine.id)
-  if (machine.permission === 'read') {
+  const permission = effectivePermission(machine)
+
+  if (!canEditMachine(permission)) {
     return (
-      <Text data-testid="settings-read-only">
+      <Text color="gray.500" data-testid="permission-hint" data-permission="read">
         You have read-only access to this machine. Ask an owner or admin for write access to edit it.
       </Text>
     )
@@ -99,15 +102,17 @@ function SettingsTab({ machine }: { machine: Machine }) {
         submitError={updateMachine.error}
         isSubmitting={updateMachine.isPending}
       />
-      {machine.permission === 'admin' ? (
+      {canShareMachine(permission) ? (
         <>
           <Text fontWeight="bold">Sharing</Text>
           <ShareMachineSection machineId={machine.id} />
-          <DeleteMachineSection machine={machine} />
         </>
+      ) : null}
+      {canDeleteMachine(permission) ? (
+        <DeleteMachineSection machine={machine} />
       ) : (
-        <Text color="gray.500" data-testid="delete-not-permitted">
-          Only the owner or an admin can delete or share this machine.
+        <Text color="gray.500" data-testid="permission-hint" data-permission="write">
+          Only the owner or an admin can share or delete this machine.
         </Text>
       )}
     </VStack>
