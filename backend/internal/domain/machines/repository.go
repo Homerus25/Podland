@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/yourorg/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/models"
 )
 
 // MachineRepository handles database operations for machines

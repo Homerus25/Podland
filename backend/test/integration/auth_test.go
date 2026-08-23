@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yourorg/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/models"
 )
 
 // TestAuth_Login_WrongPassword asserts that POST /api/auth/login returns 401

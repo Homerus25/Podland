@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/yourorg/podland/backend/internal/domain/machines"
-	"github.com/yourorg/podland/backend/internal/testutils"
+	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 

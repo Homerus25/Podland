@@ -3,7 +3,7 @@ package users
 import (
 	"time"
 
-	"github.com/yourorg/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/models"
 )
 
 // CreateUserRequest is the body of POST /api/users. There is

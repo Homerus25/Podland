@@ -13,8 +13,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"github.com/yourorg/podland/backend/internal/contextutils"
-	appErrors "github.com/yourorg/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/contextutils"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 

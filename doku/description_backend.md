@@ -1204,7 +1204,7 @@ CMD ["/app/podland"]
 
 ```
 # go.mod
-module github.com/yourorg/podland/backend
+module github.com/Homerus25/podland/backend
 
 go 1.21
 

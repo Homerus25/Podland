@@ -6,10 +6,10 @@ import (
 	"log"
 	"os"
 
-	"github.com/yourorg/podland/backend/internal/domain/users"
-	"github.com/yourorg/podland/backend/internal/errors"
-	"github.com/yourorg/podland/backend/internal/models"
-	"github.com/yourorg/podland/backend/migrations"
+	"github.com/Homerus25/podland/backend/internal/domain/users"
+	"github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/migrations"
 )
 
 func main() {

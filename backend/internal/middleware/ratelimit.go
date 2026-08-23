@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yourorg/podland/backend/internal/contextutils"
-	apperrors "github.com/yourorg/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/contextutils"
+	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 )
 
 // RateLimiter implements a token bucket rate limiter

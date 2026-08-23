@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/yourorg/podland/backend/internal/app"
-	"github.com/yourorg/podland/backend/internal/config"
+	"github.com/Homerus25/podland/backend/internal/app"
+	"github.com/Homerus25/podland/backend/internal/config"
 )
 
 // main is now a thin wrapper that owns the *http.Server and its signal-

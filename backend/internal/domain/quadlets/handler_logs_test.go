@@ -10,8 +10,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
-	"github.com/yourorg/podland/backend/internal/contextutils"
-	appErrors "github.com/yourorg/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/contextutils"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 )
 
 // TestQuadletHandler_GetLogs_Success tests successful log retrieval

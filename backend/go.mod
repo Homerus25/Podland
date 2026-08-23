@@ -1,4 +1,4 @@
-module github.com/yourorg/podland/backend
+module github.com/Homerus25/podland/backend
 
 go 1.26.4
 

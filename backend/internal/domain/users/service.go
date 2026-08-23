@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/mattn/go-sqlite3"
-	apperrors "github.com/yourorg/podland/backend/internal/errors"
-	"github.com/yourorg/podland/backend/internal/models"
+	apperrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/models"
 	"golang.org/x/crypto/bcrypt"
 )
 

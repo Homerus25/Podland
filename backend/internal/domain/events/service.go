@@ -1,7 +1,7 @@
 package events
 
 import (
-	"github.com/yourorg/podland/backend/internal/connections"
+	"github.com/Homerus25/podland/backend/internal/connections"
 )
 
 // EventService provides business logic for event streaming

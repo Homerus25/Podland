@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	appErrors "github.com/yourorg/podland/backend/internal/errors"
-	"github.com/yourorg/podland/backend/internal/sshexec"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )

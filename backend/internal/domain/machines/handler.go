@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/yourorg/podland/backend/internal/contextutils"
-	"github.com/yourorg/podland/backend/internal/errors"
-	"github.com/yourorg/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/contextutils"
+	"github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/models"
 )
 
 // MachineHandler handles machine requests

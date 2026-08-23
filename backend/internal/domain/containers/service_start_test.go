@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/yourorg/podland/backend/internal/domain/machines"
-	"github.com/yourorg/podland/backend/internal/testutils"
+	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
 // TestContainerService_Start_ConnectionError tests that Start returns error when connection fails

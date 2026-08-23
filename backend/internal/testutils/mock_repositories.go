@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/yourorg/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/models"
 )
 
 // MockUserRepository implements a mock user repository for testing

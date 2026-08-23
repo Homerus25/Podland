@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yourorg/podland/backend/internal/testutils"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
 func TestAuthHandler_Login_Success(t *testing.T) {

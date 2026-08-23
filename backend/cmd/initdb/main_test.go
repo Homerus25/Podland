@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yourorg/podland/backend/internal/models"
-	"github.com/yourorg/podland/backend/migrations"
+	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/migrations"
 )
 
 // newBootstrapDB opens a temp SQLite database with all migrations

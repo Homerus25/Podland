@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	appErrors "github.com/yourorg/podland/backend/internal/errors"
-	"github.com/yourorg/podland/backend/internal/models"
-	"github.com/yourorg/podland/backend/internal/testutils"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
 // TestMachineService_Create_ConnectionTest covers the synchronous

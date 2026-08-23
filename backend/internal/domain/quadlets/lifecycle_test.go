@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/yourorg/podland/backend/internal/domain/machines"
-	appErrors "github.com/yourorg/podland/backend/internal/errors"
-	"github.com/yourorg/podland/backend/internal/sshexec"
-	"github.com/yourorg/podland/backend/internal/testutils"
+	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/sshexec"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 

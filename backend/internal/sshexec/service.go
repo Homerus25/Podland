@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yourorg/podland/backend/internal/encryption"
-	"github.com/yourorg/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/encryption"
+	"github.com/Homerus25/podland/backend/internal/models"
 )
 
 // Compile-time check that *Service satisfies SSHExecInterface.

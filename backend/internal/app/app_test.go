@@ -23,8 +23,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yourorg/podland/backend/internal/app"
-	"github.com/yourorg/podland/backend/internal/config"
+	"github.com/Homerus25/podland/backend/internal/app"
+	"github.com/Homerus25/podland/backend/internal/config"
 )
 
 // newTestConfig builds a fully-controlled *config.Config pointing at temp

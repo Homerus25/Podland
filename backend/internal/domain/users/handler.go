@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/yourorg/podland/backend/internal/contextutils"
-	"github.com/yourorg/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/contextutils"
+	"github.com/Homerus25/podland/backend/internal/errors"
 )
 
 // UserHandler handles user management requests.

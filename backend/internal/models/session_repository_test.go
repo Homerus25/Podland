@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yourorg/podland/backend/migrations"
+	"github.com/Homerus25/podland/backend/migrations"
 )
 
 // newSession builds a session row with sensible test defaults; callers

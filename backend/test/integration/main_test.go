@@ -27,9 +27,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/yourorg/podland/backend/internal/app"
-	"github.com/yourorg/podland/backend/internal/config"
-	"github.com/yourorg/podland/backend/internal/testutils"
+	"github.com/Homerus25/podland/backend/internal/app"
+	"github.com/Homerus25/podland/backend/internal/config"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
 // suite is the shared fixture built by TestMain and consumed by every

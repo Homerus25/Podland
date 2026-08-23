@@ -11,10 +11,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/yourorg/podland/backend/internal/domain/auth"
-	appmiddleware "github.com/yourorg/podland/backend/internal/middleware"
-	"github.com/yourorg/podland/backend/internal/models"
-	"github.com/yourorg/podland/backend/internal/testutils"
+	"github.com/Homerus25/podland/backend/internal/domain/auth"
+	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
+	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
 // newUsersTestRouter wires POST /api/users exactly like internal/app:

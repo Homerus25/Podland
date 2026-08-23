@@ -6,9 +6,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	apperrors "github.com/yourorg/podland/backend/internal/errors"
-	"github.com/yourorg/podland/backend/internal/models"
-	"github.com/yourorg/podland/backend/internal/testutils"
+	apperrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
 // TestAuthService_Refresh_UnknownTokenIsInvalid asserts a refresh token

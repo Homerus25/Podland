@@ -9,10 +9,10 @@ import (
 	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	apperrors "github.com/yourorg/podland/backend/internal/errors"
-	"github.com/yourorg/podland/backend/internal/models"
-	"github.com/yourorg/podland/backend/internal/testutils"
-	"github.com/yourorg/podland/backend/migrations"
+	apperrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/testutils"
+	"github.com/Homerus25/podland/backend/migrations"
 	"golang.org/x/crypto/bcrypt"
 )
 
