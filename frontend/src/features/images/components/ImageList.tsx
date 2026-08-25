@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button, Table, TableContainer, Tbody, Td, Text, Th, Thead, Tr } from '@chakra-ui/react'
 import { useDeleteImage, useImages } from '@features/images/hooks/useImages'
+import { PullImageForm } from '@features/images/components/PullImageForm'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { Modal } from '@shared/components/Modal'
 import { getApiError } from '@shared/utils/api'
@@ -112,6 +113,7 @@ export function ImageList({ machineId }: { machineId: string }) {
 
   return (
     <>
+      <PullImageForm machineId={machineId} />
       <TableContainer>
         <Table data-testid="images-table" variant="simple">
           <Thead>

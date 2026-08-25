@@ -14,6 +14,12 @@ export function setBearerToken(token: string | null) {
   bearerToken = token
 }
 
+// Streaming endpoints use plain fetch (axios buffers responses), so they
+// need read access to the same bearer credential.
+export function getBearerToken(): string | null {
+  return bearerToken
+}
+
 api.interceptors.request.use((config) => {
   if (bearerToken) {
     config.headers.Authorization = `Bearer ${bearerToken}`
