@@ -18,3 +18,9 @@ export async function listImages(machineId: string): Promise<ImageSummary[]> {
   const response = await api.get<ImageSummary[]>(`/machines/${machineId}/images`)
   return response.data
 }
+
+export async function deleteImage(machineId: string, imageId: string, force = false): Promise<void> {
+  await api.delete(`/machines/${machineId}/images/${encodeURIComponent(imageId)}`, {
+    params: force ? { force: true } : undefined,
+  })
+}
