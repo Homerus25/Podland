@@ -25,6 +25,10 @@ function machineHandler(machine: Machine) {
   return http.get(`*/api/machines/${machine.id}`, () => HttpResponse.json(machine))
 }
 
+const emptyContainersHandler = http.get('*/api/machines/m-1/containers', () =>
+  HttpResponse.json({ containers: [], total: 0, timestamp: '2026-08-26T00:00:00Z' }),
+)
+
 function renderMachineDetailPage(id = 'm-1') {
   return renderApp(`/machines/${id}`, {
     resolveInitialState: async () => ({ username: 'alice' }),
@@ -34,7 +38,7 @@ function renderMachineDetailPage(id = 'm-1') {
 describe('MachineDetailPage', () => {
   it('navigates from the machines list into the detail page via the View action', async () => {
     server.use(http.get('*/api/machines', () => HttpResponse.json([machineFixture])))
-    server.use(machineHandler(machineFixture))
+    server.use(machineHandler(machineFixture), emptyContainersHandler)
     renderApp('/machines', {
       resolveInitialState: async () => ({ username: 'alice' }),
     })
@@ -57,7 +61,7 @@ describe('MachineDetailPage', () => {
   })
 
   it('renders machine identity with permission badge', async () => {
-    server.use(machineHandler(machineFixture))
+    server.use(machineHandler(machineFixture), emptyContainersHandler)
     renderMachineDetailPage()
 
     expect(await screen.findByText('prod-web-01')).toBeInTheDocument()
@@ -67,12 +71,13 @@ describe('MachineDetailPage', () => {
   })
 
   it('switches between the Containers, Images, Quadlets, and Settings tabs', async () => {
-    server.use(machineHandler(machineFixture))
+    server.use(machineHandler(machineFixture), emptyContainersHandler)
     server.use(http.get('*/api/machines/m-1/images', () => HttpResponse.json([])))
     renderMachineDetailPage()
 
     await screen.findByText('prod-web-01')
-    expect(screen.getByTestId('tab-containers-placeholder')).toBeInTheDocument()
+    expect(await screen.findByTestId('containers-empty')).toBeInTheDocument()
+    expect(screen.queryByTestId('tab-containers-placeholder')).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('tab', { name: /images/i }))
     expect(await screen.findByTestId('images-empty')).toBeInTheDocument()
@@ -84,8 +89,35 @@ describe('MachineDetailPage', () => {
     expect(screen.getByTestId('machine-form-submit')).toBeInTheDocument()
   })
 
-  it('renders the image list inside the Images tab', async () => {
+  it('renders the container list inside the Containers tab', async () => {
     server.use(machineHandler(machineFixture))
+    server.use(
+      http.get('*/api/machines/m-1/containers', () =>
+        HttpResponse.json({
+          containers: [
+            {
+              id: 'abc123def4567890',
+              names: ['/prod-web'],
+              image: 'docker.io/library/nginx:1.27',
+              createdAt: '2026-08-20T10:00:00Z',
+              state: 'running',
+              status: 'Up 2 hours',
+            },
+          ],
+          total: 1,
+          timestamp: '2026-08-26T00:00:00Z',
+        }),
+      ),
+    )
+    renderMachineDetailPage()
+
+    expect(await screen.findByText('prod-web')).toBeInTheDocument()
+    expect(screen.getByText('docker.io/library/nginx:1.27')).toBeInTheDocument()
+    expect(screen.getByTestId('state-badge')).toHaveTextContent('running')
+  })
+
+  it('renders the image list inside the Images tab', async () => {
+    server.use(machineHandler(machineFixture), emptyContainersHandler)
     server.use(
       http.get('*/api/machines/m-1/images', () =>
         HttpResponse.json([
