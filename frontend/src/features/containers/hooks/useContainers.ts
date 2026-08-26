@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  deleteContainer,
   listContainers,
   startContainer,
   stopContainer,
@@ -41,5 +42,11 @@ export function useStartContainer(machineId: string) {
 export function useStopContainer(machineId: string) {
   return useContainerLifecycle(machineId, (containerId) =>
     stopContainer(machineId, containerId),
+  )
+}
+
+export function useDeleteContainer(machineId: string) {
+  return useContainerLifecycle(machineId, (containerId) =>
+    deleteContainer(machineId, containerId),
   )
 }

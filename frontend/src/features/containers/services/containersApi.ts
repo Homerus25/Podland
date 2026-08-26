@@ -35,14 +35,25 @@ export async function listContainers(machineId: string): Promise<ContainerSummar
   return response.data.containers
 }
 
+function containerUrl(machineId: string, containerId: string): string {
+  return `/machines/${machineId}/containers/${encodeURIComponent(containerId)}`
+}
+
 // POST /api/machines/{id}/containers/{containerId}/start
 // (backend/internal/domain/containers/handler.go ContainerHandler.Start).
 export async function startContainer(machineId: string, containerId: string): Promise<void> {
-  await api.post(`/machines/${machineId}/containers/${encodeURIComponent(containerId)}/start`)
+  await api.post(`${containerUrl(machineId, containerId)}/start`)
 }
 
 // POST /api/machines/{id}/containers/{containerId}/stop
 // (backend/internal/domain/containers/handler.go ContainerHandler.Stop).
 export async function stopContainer(machineId: string, containerId: string): Promise<void> {
-  await api.post(`/machines/${machineId}/containers/${encodeURIComponent(containerId)}/stop`)
+  await api.post(`${containerUrl(machineId, containerId)}/stop`)
+}
+
+// DELETE /api/machines/{id}/containers/{containerId} -> 204
+// (backend/internal/domain/containers/handler.go ContainerHandler.Delete).
+// The force query param exists on the endpoint but is out of scope for now.
+export async function deleteContainer(machineId: string, containerId: string): Promise<void> {
+  await api.delete(containerUrl(machineId, containerId))
 }

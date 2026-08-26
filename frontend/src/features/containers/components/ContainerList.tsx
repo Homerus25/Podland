@@ -1,10 +1,13 @@
-import { Button, Table, TableContainer, Tbody, Td, Text, Th, Thead, Tr } from '@chakra-ui/react'
+import { useState } from 'react'
+import { Box, Button, Table, TableContainer, Tbody, Td, Text, Th, Thead, Tr } from '@chakra-ui/react'
 import {
   useContainers,
+  useDeleteContainer,
   useStartContainer,
   useStopContainer,
 } from '@features/containers/hooks/useContainers'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
+import { Modal } from '@shared/components/Modal'
 import { StateBadge } from '@shared/components/StateBadge'
 import { getApiError } from '@shared/utils/api'
 import { shortImageId } from '@shared/utils/format'
@@ -17,17 +20,68 @@ function displayName(container: ContainerSummary): string {
   return name ? name : shortImageId(container.id)
 }
 
+// No delete request leaves the browser until the user explicitly confirms.
+function DeleteContainerModal({
+  container,
+  deleteContainer,
+  onClose,
+}: {
+  container: ContainerSummary
+  deleteContainer: ReturnType<typeof useDeleteContainer>
+  onClose: () => void
+}) {
+  const name = displayName(container)
+  const confirmDelete = () => {
+    deleteContainer.mutate(container.id, { onSuccess: onClose })
+  }
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title="Delete container"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            colorScheme="red"
+            onClick={confirmDelete}
+            isLoading={deleteContainer.isPending}
+            data-testid="confirm-delete-button"
+          >
+            Delete container
+          </Button>
+        </>
+      }
+    >
+      <Text>
+        Delete “{name}” ({container.image})? This cannot be undone.
+      </Text>
+      {deleteContainer.error ? (
+        <Box mt={2}>
+          <ErrorDisplay error={getApiError(deleteContainer.error)} />
+        </Box>
+      ) : null}
+    </Modal>
+  )
+}
+
 // Each row owns its lifecycle mutation instances, so pending state and
 // errors are scoped to the affected container and other rows stay usable.
 function ContainerRow({
   machineId,
   container,
+  onDelete,
 }: {
   machineId: string
   container: ContainerSummary
+  onDelete: (container: ContainerSummary) => void
 }) {
   const startContainer = useStartContainer(machineId)
   const stopContainer = useStopContainer(machineId)
+  const name = displayName(container)
   const action =
     container.state === 'running'
       ? {
@@ -63,10 +117,21 @@ function ContainerRow({
             {action.label}
           </Button>
         </Td>
+        <Td>
+          <Button
+            size="xs"
+            colorScheme="red"
+            variant="outline"
+            aria-label={`Delete ${name}`}
+            onClick={() => onDelete(container)}
+          >
+            Delete
+          </Button>
+        </Td>
       </Tr>
       {action.lifecycle.error ? (
         <Tr>
-          <Td colSpan={4}>
+          <Td colSpan={5}>
             <ErrorDisplay error={getApiError(action.lifecycle.error)} />
           </Td>
         </Tr>
@@ -77,6 +142,8 @@ function ContainerRow({
 
 export function ContainerList({ machineId }: { machineId: string }) {
   const { data: containers, isPending, error } = useContainers(machineId)
+  const deleteContainer = useDeleteContainer(machineId)
+  const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(null)
 
   if (isPending) {
     return <Text data-testid="containers-loading">Loading containers…</Text>
@@ -93,22 +160,43 @@ export function ContainerList({ machineId }: { machineId: string }) {
   }
 
   return (
-    <TableContainer>
-      <Table data-testid="containers-table" variant="simple">
-        <Thead>
-          <Tr>
-            <Th>Name</Th>
-            <Th>Image</Th>
-            <Th>State</Th>
-            <Th />
-          </Tr>
-        </Thead>
-        <Tbody>
-          {containers.map((container) => (
-            <ContainerRow key={container.id} machineId={machineId} container={container} />
-          ))}
-        </Tbody>
-      </Table>
-    </TableContainer>
+    <>
+      <TableContainer>
+        <Table data-testid="containers-table" variant="simple">
+          <Thead>
+            <Tr>
+              <Th>Name</Th>
+              <Th>Image</Th>
+              <Th>State</Th>
+              <Th />
+              <Th />
+            </Tr>
+          </Thead>
+          <Tbody>
+            {containers.map((container) => (
+              <ContainerRow
+                key={container.id}
+                machineId={machineId}
+                container={container}
+                onDelete={(target) => {
+                  deleteContainer.reset()
+                  setPendingDelete(target)
+                }}
+              />
+            ))}
+          </Tbody>
+        </Table>
+      </TableContainer>
+      {pendingDelete ? (
+        <DeleteContainerModal
+          container={pendingDelete}
+          deleteContainer={deleteContainer}
+          onClose={() => {
+            deleteContainer.reset()
+            setPendingDelete(null)
+          }}
+        />
+      ) : null}
+    </>
   )
 }
