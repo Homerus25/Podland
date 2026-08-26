@@ -35,6 +35,34 @@ export async function listContainers(machineId: string): Promise<ContainerSummar
   return response.data.containers
 }
 
+// Body of POST /api/machines/{id}/containers
+// (backend/internal/domain/containers/dto.go ContainerCreateRequest; only the
+// fields the create form exposes — everything else is optional server-side).
+export interface CreateContainerInput {
+  image: string
+  name?: string
+  command?: string[]
+}
+
+// Response of POST /api/machines/{id}/containers -> 201
+// (backend/internal/domain/containers/dto.go ContainerCreateResponse).
+export interface ContainerCreated {
+  id: string
+  name: string
+  state: string
+  image: string
+  imageId?: string
+  createdAt: string
+}
+
+export async function createContainer(
+  machineId: string,
+  input: CreateContainerInput,
+): Promise<ContainerCreated> {
+  const response = await api.post<ContainerCreated>(`/machines/${machineId}/containers`, input)
+  return response.data
+}
+
 function containerUrl(machineId: string, containerId: string): string {
   return `/machines/${machineId}/containers/${encodeURIComponent(containerId)}`
 }

@@ -1,5 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { CreateContainerInput } from '@features/containers/services/containersApi'
 import {
+  createContainer,
   deleteContainer,
   listContainers,
   startContainer,
@@ -49,4 +51,14 @@ export function useDeleteContainer(machineId: string) {
   return useContainerLifecycle(machineId, (containerId) =>
     deleteContainer(machineId, containerId),
   )
+}
+
+export function useCreateContainer(machineId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: CreateContainerInput) => createContainer(machineId, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: containersQueryKey(machineId) })
+    },
+  })
 }

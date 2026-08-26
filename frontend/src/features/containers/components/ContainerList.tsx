@@ -1,11 +1,13 @@
 import { useState } from 'react'
-import { Box, Button, Table, TableContainer, Tbody, Td, Text, Th, Thead, Tr } from '@chakra-ui/react'
+import { Box, Button, HStack, Table, TableContainer, Tbody, Td, Text, Th, Thead, Tr } from '@chakra-ui/react'
 import {
   useContainers,
+  useCreateContainer,
   useDeleteContainer,
   useStartContainer,
   useStopContainer,
 } from '@features/containers/hooks/useContainers'
+import { CreateContainerForm } from '@features/containers/components/CreateContainerForm'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { Modal } from '@shared/components/Modal'
 import { StateBadge } from '@shared/components/StateBadge'
@@ -143,25 +145,39 @@ function ContainerRow({
 export function ContainerList({ machineId }: { machineId: string }) {
   const { data: containers, isPending, error } = useContainers(machineId)
   const deleteContainer = useDeleteContainer(machineId)
+  const createContainer = useCreateContainer(machineId)
   const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(null)
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
 
   if (isPending) {
     return <Text data-testid="containers-loading">Loading containers…</Text>
   }
-  if (error) {
-    return <ErrorDisplay error={getApiError(error)} />
-  }
-  if (!containers || containers.length === 0) {
-    return (
-      <Text color="gray.500" data-testid="containers-empty">
-        No containers on this machine yet.
-      </Text>
-    )
-  }
 
+  // The create action stays reachable even on an empty or errored list —
+  // creating the first container on a fresh machine is the primary flow.
   return (
     <>
-      <TableContainer>
+      <HStack justify="flex-end" mb={2}>
+        <Button
+          size="sm"
+          colorScheme="blue"
+          onClick={() => {
+            createContainer.reset()
+            setIsCreateOpen(true)
+          }}
+          data-testid="create-container-button"
+        >
+          Create container
+        </Button>
+      </HStack>
+      {error ? (
+        <ErrorDisplay error={getApiError(error)} />
+      ) : !containers || containers.length === 0 ? (
+        <Text color="gray.500" data-testid="containers-empty">
+          No containers on this machine yet.
+        </Text>
+      ) : (
+        <TableContainer>
         <Table data-testid="containers-table" variant="simple">
           <Thead>
             <Tr>
@@ -187,6 +203,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
           </Tbody>
         </Table>
       </TableContainer>
+      )}
       {pendingDelete ? (
         <DeleteContainerModal
           container={pendingDelete}
@@ -196,6 +213,29 @@ export function ContainerList({ machineId }: { machineId: string }) {
             setPendingDelete(null)
           }}
         />
+      ) : null}
+      {isCreateOpen ? (
+        <Modal
+          isOpen
+          onClose={() => {
+            createContainer.reset()
+            setIsCreateOpen(false)
+          }}
+          title="Create container"
+        >
+          <CreateContainerForm
+            onSubmit={(input) =>
+              new Promise<void>((resolve) =>
+                createContainer.mutate(input, {
+                  onSuccess: () => setIsCreateOpen(false),
+                  onSettled: () => resolve(),
+                }),
+              )
+            }
+            submitError={createContainer.error}
+            isSubmitting={createContainer.isPending}
+          />
+        </Modal>
       ) : null}
     </>
   )
