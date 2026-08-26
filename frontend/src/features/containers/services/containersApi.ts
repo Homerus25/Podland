@@ -34,3 +34,15 @@ export async function listContainers(machineId: string): Promise<ContainerSummar
   })
   return response.data.containers
 }
+
+// POST /api/machines/{id}/containers/{containerId}/start
+// (backend/internal/domain/containers/handler.go ContainerHandler.Start).
+export async function startContainer(machineId: string, containerId: string): Promise<void> {
+  await api.post(`/machines/${machineId}/containers/${encodeURIComponent(containerId)}/start`)
+}
+
+// POST /api/machines/{id}/containers/{containerId}/stop
+// (backend/internal/domain/containers/handler.go ContainerHandler.Stop).
+export async function stopContainer(machineId: string, containerId: string): Promise<void> {
+  await api.post(`/machines/${machineId}/containers/${encodeURIComponent(containerId)}/stop`)
+}

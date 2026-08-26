@@ -1,5 +1,9 @@
-import { Table, TableContainer, Tbody, Td, Text, Th, Thead, Tr } from '@chakra-ui/react'
-import { useContainers } from '@features/containers/hooks/useContainers'
+import { Button, Table, TableContainer, Tbody, Td, Text, Th, Thead, Tr } from '@chakra-ui/react'
+import {
+  useContainers,
+  useStartContainer,
+  useStopContainer,
+} from '@features/containers/hooks/useContainers'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { StateBadge } from '@shared/components/StateBadge'
 import { getApiError } from '@shared/utils/api'
@@ -11,6 +15,64 @@ import type { ContainerSummary } from '@features/containers/services/containersA
 function displayName(container: ContainerSummary): string {
   const name = container.names?.[0]?.replace(/^\//, '')
   return name ? name : shortImageId(container.id)
+}
+
+// Each row owns its lifecycle mutation instances, so pending state and
+// errors are scoped to the affected container and other rows stay usable.
+function ContainerRow({
+  machineId,
+  container,
+}: {
+  machineId: string
+  container: ContainerSummary
+}) {
+  const startContainer = useStartContainer(machineId)
+  const stopContainer = useStopContainer(machineId)
+  const action =
+    container.state === 'running'
+      ? {
+          lifecycle: stopContainer,
+          testId: 'stop-container-button',
+          label: 'Stop',
+          colorScheme: undefined,
+        }
+      : {
+          lifecycle: startContainer,
+          testId: 'start-container-button',
+          label: 'Start',
+          colorScheme: 'green' as const,
+        }
+
+  return (
+    <>
+      <Tr data-testid="container-row">
+        <Td fontFamily="mono">{displayName(container)}</Td>
+        <Td fontFamily="mono">{container.image}</Td>
+        <Td>
+          <StateBadge state={container.state} />
+        </Td>
+        <Td>
+          <Button
+            size="xs"
+            variant="outline"
+            colorScheme={action.colorScheme}
+            onClick={() => action.lifecycle.mutate(container.id)}
+            isLoading={action.lifecycle.isPending}
+            data-testid={action.testId}
+          >
+            {action.label}
+          </Button>
+        </Td>
+      </Tr>
+      {action.lifecycle.error ? (
+        <Tr>
+          <Td colSpan={4}>
+            <ErrorDisplay error={getApiError(action.lifecycle.error)} />
+          </Td>
+        </Tr>
+      ) : null}
+    </>
+  )
 }
 
 export function ContainerList({ machineId }: { machineId: string }) {
@@ -38,17 +100,12 @@ export function ContainerList({ machineId }: { machineId: string }) {
             <Th>Name</Th>
             <Th>Image</Th>
             <Th>State</Th>
+            <Th />
           </Tr>
         </Thead>
         <Tbody>
           {containers.map((container) => (
-            <Tr key={container.id} data-testid="container-row">
-              <Td fontFamily="mono">{displayName(container)}</Td>
-              <Td fontFamily="mono">{container.image}</Td>
-              <Td>
-                <StateBadge state={container.state} />
-              </Td>
-            </Tr>
+            <ContainerRow key={container.id} machineId={machineId} container={container} />
           ))}
         </Tbody>
       </Table>
