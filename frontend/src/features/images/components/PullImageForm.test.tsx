@@ -2,37 +2,28 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PullImageForm } from '@features/images/components/PullImageForm'
 import { ImageList } from '@features/images/components/ImageList'
 import { server } from '@/test/server'
-import { streamFixtures, type StreamEvent } from '@/test/stream'
+import {
+  abortableNdjsonResponse,
+  liveNdjsonResponse,
+  streamFixtures,
+  type StreamEvent,
+} from '@/test/stream'
 
 const { progressEvent, completeEvent, errorEvent } = streamFixtures
 
-let fetchSignals: AbortSignal[] = []
+const pullUrl = '*/api/machines/:machineId/images/pull'
 
-function stubFetch(events: StreamEvent[] | string[]) {
-  fetchSignals = []
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (_url: string | URL, init: RequestInit = {}) => {
-      fetchSignals.push(init.signal as AbortSignal)
-      const encoder = new TextEncoder()
-      const body = new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          for (const event of events) {
-            // Yield to the event loop between events so the UI renders each
-            // progress update live, as it would over a real network.
-            await new Promise((resolve) => setTimeout(resolve, 100))
-            const line = typeof event === 'string' ? event : `${JSON.stringify(event)}\n`
-            controller.enqueue(encoder.encode(line))
-          }
-          controller.close()
-        },
-      })
-      return new Response(body, { status: 200, headers: { 'Content-Type': 'application/json' } })
-    }),
+// Routes the pull endpoint through MSW (the repo's single test seam); chunks
+// are emitted one per macrotask so the UI renders progress updates live.
+function mockPullStream(chunks: Array<StreamEvent | string>) {
+  server.use(
+    http.post(pullUrl, () =>
+      liveNdjsonResponse(chunks.map((chunk) => (typeof chunk === 'string' ? chunk : `${JSON.stringify(chunk)}\n`))),
+    ),
   )
 }
 
@@ -61,20 +52,15 @@ async function startPull(imageRef = 'nginx:latest') {
   await userEvent.click(screen.getByRole('button', { name: /pull/i }))
 }
 
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
-
 describe('PullImageForm', () => {
   it('requires an image reference before starting a pull', async () => {
-    stubFetch([completeEvent()])
     renderForm()
 
     expect(screen.getByRole('button', { name: /pull/i })).toBeDisabled()
   })
 
   it('streams live status text and a byte progress bar during the pull', async () => {
-    stubFetch([
+    mockPullStream([
       progressEvent({ state: { current: 30, total: 100, status: 'Downloading layers', message: 'layer 1/2' } }),
       progressEvent({ state: { current: 80, total: 100, status: 'Downloading layers', message: 'layer 2/2' } }),
       completeEvent(),
@@ -90,17 +76,12 @@ describe('PullImageForm', () => {
     await waitFor(() => expect(screen.queryByRole('progressbar')).not.toBeInTheDocument())
   })
 
-  it('cancels the in-flight pull via the cancel button', async () => {
-    fetchSignals = []
-    let releaseStream: (() => void) | undefined
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (_url: string | URL, init: RequestInit = {}) => {
-        fetchSignals.push(init.signal as AbortSignal)
-        await new Promise<void>((resolve) => {
-          releaseStream = resolve
-        })
-        return new Response(null, { status: 200 })
+  it('cancels the in-flight pull via the cancel button, tearing down the stream', async () => {
+    let requestSignal: AbortSignal | undefined
+    server.use(
+      http.post(pullUrl, ({ request }) => {
+        requestSignal = request.signal
+        return abortableNdjsonResponse([progressEvent()], request.signal)
       }),
     )
     renderForm()
@@ -108,9 +89,11 @@ describe('PullImageForm', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: /cancel/i }))
 
-    expect(fetchSignals[0].aborted).toBe(true)
+    // Aborting errors the body stream, so the pull ends cancelled: the form
+    // leaves its pulling state and no error is shown.
+    expect(requestSignal?.aborted).toBe(true)
     await waitFor(() => expect(screen.queryByRole('button', { name: /cancel/i })).not.toBeInTheDocument())
-    releaseStream?.()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('invalidates the images query on complete so the list refetches', async () => {
@@ -133,7 +116,7 @@ describe('PullImageForm', () => {
         return HttpResponse.json(list)
       }),
     )
-    stubFetch([
+    mockPullStream([
       progressEvent({ state: { current: 1, total: 2, status: 'Downloading layers' } }),
       completeEvent(),
     ])
@@ -147,7 +130,7 @@ describe('PullImageForm', () => {
   })
 
   it('renders the streamed error envelope through the shared error display', async () => {
-    stubFetch([errorEvent('REGISTRY_AUTH_FAILED', 'Invalid registry credentials')])
+    mockPullStream([errorEvent('REGISTRY_AUTH_FAILED', 'Invalid registry credentials')])
     renderForm()
     await startPull()
 
@@ -160,7 +143,7 @@ describe('PullImageForm', () => {
     const good = JSON.stringify(progressEvent({ state: { current: 5, total: 10, status: 'Copying blobs' } }))
     const complete = JSON.stringify(completeEvent())
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    stubFetch([
+    mockPullStream([
       'garbage\n',
       `${good.slice(0, 20)}`,
       `${good.slice(20)}\n${complete.slice(0, 3)}`,

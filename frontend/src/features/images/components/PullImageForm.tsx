@@ -48,6 +48,9 @@ export function PullImageForm({ machineId }: { machineId: string }) {
       {isPulling ? (
         <VStack spacing={1} align="stretch" data-testid="pull-progress">
           <Text fontSize="sm">{progress?.state?.status ?? 'Starting pull…'}</Text>
+          {progress?.state?.message ? (
+            <Text fontSize="sm" color="gray.500">{progress.state.message}</Text>
+          ) : null}
           {percent !== undefined ? (
             <>
               <Progress value={percent} size="sm" />

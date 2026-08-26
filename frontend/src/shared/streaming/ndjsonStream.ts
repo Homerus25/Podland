@@ -67,6 +67,12 @@ export async function consumeNdjsonStream(
       }
     }
   } finally {
+    // Cancelling closes the reader and the underlying stream. On abort the
+    // pending read() above rejects before we get here; cancelling propagates
+    // the teardown so the connection is actually closed (the backend's
+    // OPERATION_CANCELLED path). It is a no-op on already-done streams, and
+    // must complete before releaseLock, which throws while a read is pending.
+    await reader.cancel().catch(() => undefined)
     reader.releaseLock()
   }
 }

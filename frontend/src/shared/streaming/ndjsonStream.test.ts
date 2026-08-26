@@ -42,4 +42,31 @@ describe('consumeNdjsonStream', () => {
     expect(warn).toHaveBeenCalledTimes(2)
     warn.mockRestore()
   })
+
+  it('cancels the reader and rethrows when the stream errors (abort path)', async () => {
+    const encoder = new TextEncoder()
+    let errorStream: ((reason: Error) => void) | undefined
+    let streamCancelled = false
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(`${JSON.stringify(progressEvent())}\n`))
+        errorStream = (reason) => controller.error(reason)
+      },
+      cancel() {
+        streamCancelled = true
+      },
+    })
+
+    const events: unknown[] = []
+    const consumption = consumeNdjsonStream(stream, (event) => events.push(event))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    errorStream?.(new Error('aborted'))
+
+    await expect(consumption).rejects.toThrow('aborted')
+    expect(events).toHaveLength(1)
+    expect(streamCancelled).toBe(false)
+    // After the rejection the reader is released and the stream is cancelled,
+    // so it is no longer readable or locked.
+    expect(stream.locked).toBe(false)
+  })
 })

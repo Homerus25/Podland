@@ -27,7 +27,7 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-const genericError: ApiError = { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' }
+export const genericError: ApiError = { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' }
 
 // Error codes that indicate server-internal failures. The backend already
 // rewrites 5xx responses to these, but the code is what the spec keys on:
@@ -55,6 +55,24 @@ export function getApiError(error: unknown): ApiError {
     ) {
       return { code: envelope.error.code, message: envelope.error.message }
     }
+  }
+  return { ...genericError }
+}
+
+// Fetch-based counterpart of getApiError for streaming endpoints, which use
+// plain fetch (axios buffers responses). Same rules: client errors (4xx) with
+// a non-internal envelope code pass through; server errors (5xx), internal
+// error codes, non-envelope bodies, and network failures collapse to the
+// generic message.
+export async function getApiErrorFromResponse(response: Response): Promise<ApiError> {
+  const envelope = (await response.json().catch(() => null)) as ApiErrorEnvelope | null
+  if (
+    response.status < 500 &&
+    envelope?.error?.code &&
+    envelope.error.message &&
+    !isInternalCode(envelope.error.code)
+  ) {
+    return { code: envelope.error.code, message: envelope.error.message }
   }
   return { ...genericError }
 }
