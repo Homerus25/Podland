@@ -29,6 +29,8 @@ const emptyContainersHandler = http.get('*/api/machines/m-1/containers', () =>
   HttpResponse.json({ containers: [], total: 0, timestamp: '2026-08-26T00:00:00Z' }),
 )
 
+const emptyQuadletsHandler = http.get('*/api/machines/m-1/quadlets', () => HttpResponse.json([]))
+
 function renderMachineDetailPage(id = 'm-1') {
   return renderApp(`/machines/${id}`, {
     resolveInitialState: async () => ({ username: 'alice' }),
@@ -38,7 +40,7 @@ function renderMachineDetailPage(id = 'm-1') {
 describe('MachineDetailPage', () => {
   it('navigates from the machines list into the detail page via the View action', async () => {
     server.use(http.get('*/api/machines', () => HttpResponse.json([machineFixture])))
-    server.use(machineHandler(machineFixture), emptyContainersHandler)
+    server.use(machineHandler(machineFixture), emptyContainersHandler, emptyQuadletsHandler)
     renderApp('/machines', {
       resolveInitialState: async () => ({ username: 'alice' }),
     })
@@ -61,7 +63,7 @@ describe('MachineDetailPage', () => {
   })
 
   it('renders machine identity with permission badge', async () => {
-    server.use(machineHandler(machineFixture), emptyContainersHandler)
+    server.use(machineHandler(machineFixture), emptyContainersHandler, emptyQuadletsHandler)
     renderMachineDetailPage()
 
     expect(await screen.findByText('prod-web-01')).toBeInTheDocument()
@@ -71,7 +73,7 @@ describe('MachineDetailPage', () => {
   })
 
   it('switches between the Containers, Images, Quadlets, and Settings tabs', async () => {
-    server.use(machineHandler(machineFixture), emptyContainersHandler)
+    server.use(machineHandler(machineFixture), emptyContainersHandler, emptyQuadletsHandler)
     server.use(http.get('*/api/machines/m-1/images', () => HttpResponse.json([])))
     renderMachineDetailPage()
 
@@ -83,14 +85,15 @@ describe('MachineDetailPage', () => {
     expect(await screen.findByTestId('images-empty')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('tab', { name: /quadlets/i }))
-    expect(screen.getByTestId('tab-quadlets-placeholder')).toBeInTheDocument()
+    expect(await screen.findByTestId('quadlets-empty')).toBeInTheDocument()
+    expect(screen.queryByTestId('tab-quadlets-placeholder')).not.toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('tab', { name: /settings/i }))
     expect(screen.getByTestId('machine-form-submit')).toBeInTheDocument()
   })
 
   it('renders the container list inside the Containers tab', async () => {
-    server.use(machineHandler(machineFixture))
+    server.use(machineHandler(machineFixture), emptyQuadletsHandler)
     server.use(
       http.get('*/api/machines/m-1/containers', () =>
         HttpResponse.json({
@@ -117,7 +120,7 @@ describe('MachineDetailPage', () => {
   })
 
   it('renders the image list inside the Images tab', async () => {
-    server.use(machineHandler(machineFixture), emptyContainersHandler)
+    server.use(machineHandler(machineFixture), emptyContainersHandler, emptyQuadletsHandler)
     server.use(
       http.get('*/api/machines/m-1/images', () =>
         HttpResponse.json([
@@ -136,6 +139,29 @@ describe('MachineDetailPage', () => {
     await userEvent.click(await screen.findByRole('tab', { name: /images/i }))
     expect(await screen.findByText('docker.io/library/nginx:1.27')).toBeInTheDocument()
     expect(screen.getByText('157.3 MB')).toBeInTheDocument()
+  })
+
+  it('renders the quadlet list inside the Quadlets tab', async () => {
+    server.use(machineHandler(machineFixture), emptyContainersHandler)
+    server.use(
+      http.get('*/api/machines/m-1/quadlets', () =>
+        HttpResponse.json([
+          {
+            id: 'web',
+            name: 'web',
+            path: '/etc/containers/systemd/web.container',
+            unit: 'web.service',
+            resource: 'container',
+            state: 'running',
+          },
+        ]),
+      ),
+    )
+    renderMachineDetailPage()
+
+    await userEvent.click(await screen.findByRole('tab', { name: /quadlets/i }))
+    expect(await screen.findByText('web')).toBeInTheDocument()
+    expect(screen.getByTestId('state-badge')).toHaveTextContent('running')
   })
 
   it('renders the error envelope for an unknown machine id', async () => {

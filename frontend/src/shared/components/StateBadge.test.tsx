@@ -27,6 +27,18 @@ describe('stateColorScheme', () => {
     expect(stateColorScheme('restarting')).toBe('orange')
   })
 
+  it('maps stopped to gray', () => {
+    expect(stateColorScheme('stopped')).toBe('gray')
+  })
+
+  it('maps error to red', () => {
+    expect(stateColorScheme('error')).toBe('red')
+  })
+
+  it('maps unknown to the neutral fallback', () => {
+    expect(stateColorScheme('unknown')).toBe('gray')
+  })
+
   it('falls back to a neutral scheme for unrecognized states', () => {
     expect(stateColorScheme('configured')).toBe('gray')
     expect(stateColorScheme('whatever')).toBe('gray')

@@ -1,8 +1,9 @@
 import { Badge } from '@chakra-ui/react'
 
-// Color palette for container/pod states, defined once so every tab shares
-// the same vocabulary: running green, exited gray, paused yellow, dead red.
-// Anything unrecognized falls back to a neutral gray badge.
+// Color palette for state badges, defined once so every tab shares the same
+// vocabulary. Containers: running green, exited gray, paused yellow, dead red.
+// Quadlets: running green, stopped gray, error red, unknown falls back to
+// neutral gray like every unrecognized value.
 const STATE_COLOR_SCHEMES: Record<string, string> = {
   running: 'green',
   exited: 'gray',
@@ -10,6 +11,8 @@ const STATE_COLOR_SCHEMES: Record<string, string> = {
   dead: 'red',
   created: 'blue',
   restarting: 'orange',
+  stopped: 'gray',
+  error: 'red',
 }
 
 export function stateColorScheme(state: string): string {

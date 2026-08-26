@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useDeleteMachine, useMachine, useUpdateMachine } from '@features/machines/hooks/useMachines'
 import { ContainerList } from '@features/containers/components/ContainerList'
 import { ImageList } from '@features/images/components/ImageList'
+import { QuadletList } from '@features/quadlets/components/QuadletList'
 import { canDeleteMachine, canEditMachine, canShareMachine, effectivePermission } from '@features/machines/permissions'
 import { MachineForm } from '@features/machines/components/MachineForm'
 import { PermissionBadge } from '@features/machines/components/PermissionBadge'
@@ -12,10 +13,6 @@ import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { Modal } from '@shared/components/Modal'
 import { getApiError } from '@shared/utils/api'
 import type { Machine } from '@shared/types/api'
-
-function TabPlaceholder({ label }: { label: string }) {
-  return <Text data-testid={`tab-${label.toLowerCase()}-placeholder`}>Nothing here yet.</Text>
-}
 
 function DeleteMachineSection({ machine }: { machine: Machine }) {
   const navigate = useNavigate()
@@ -164,7 +161,7 @@ export function MachineDetailPage() {
             <ImageList machineId={machine.id} />
           </TabPanel>
           <TabPanel>
-            <TabPlaceholder label="quadlets" />
+            <QuadletList machineId={machine.id} />
           </TabPanel>
           <TabPanel>
             <SettingsTab machine={machine} />
