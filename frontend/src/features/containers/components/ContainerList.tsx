@@ -9,10 +9,15 @@ import {
 } from '@features/containers/hooks/useContainers'
 import { CreateContainerForm } from '@features/containers/components/CreateContainerForm'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
+import { LogViewer, type LogSource } from '@shared/components/LogViewer'
 import { Modal } from '@shared/components/Modal'
 import { StateBadge } from '@shared/components/StateBadge'
 import { getApiError } from '@shared/utils/api'
 import { shortImageId } from '@shared/utils/format'
+import {
+  fetchContainerLogs,
+  followContainerLogs,
+} from '@features/containers/services/containersApi'
 import type { ContainerSummary } from '@features/containers/services/containersApi'
 
 // Podman reports container names with a leading slash; display them bare and
@@ -70,16 +75,50 @@ function DeleteContainerModal({
   )
 }
 
+// Bridges the generic LogViewer onto this container's log endpoint; the
+// viewer itself stays source-agnostic so quadlets logs can reuse it. The
+// tail fetch goes through axios, so its errors are converted to the ApiError
+// shape the viewer displays.
+function ContainerLogsModal({
+  machineId,
+  container,
+  onClose,
+}: {
+  machineId: string
+  container: ContainerSummary
+  onClose: () => void
+}) {
+  const source: LogSource = {
+    fetchTail: async (tail) => {
+      try {
+        return await fetchContainerLogs(machineId, container.id, tail)
+      } catch (error) {
+        throw getApiError(error)
+      }
+    },
+    follow: (tail, onEvent, signal) =>
+      followContainerLogs(machineId, container.id, tail, onEvent, signal),
+  }
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Logs — ${displayName(container)}`}>
+      <LogViewer source={source} />
+    </Modal>
+  )
+}
+
 // Each row owns its lifecycle mutation instances, so pending state and
 // errors are scoped to the affected container and other rows stay usable.
 function ContainerRow({
   machineId,
   container,
   onDelete,
+  onShowLogs,
 }: {
   machineId: string
   container: ContainerSummary
   onDelete: (container: ContainerSummary) => void
+  onShowLogs: (container: ContainerSummary) => void
 }) {
   const startContainer = useStartContainer(machineId)
   const stopContainer = useStopContainer(machineId)
@@ -108,16 +147,26 @@ function ContainerRow({
           <StateBadge state={container.state} />
         </Td>
         <Td>
-          <Button
-            size="xs"
-            variant="outline"
-            colorScheme={action.colorScheme}
-            onClick={() => action.lifecycle.mutate(container.id)}
-            isLoading={action.lifecycle.isPending}
-            data-testid={action.testId}
-          >
-            {action.label}
-          </Button>
+          <HStack spacing={2}>
+            <Button
+              size="xs"
+              variant="outline"
+              colorScheme={action.colorScheme}
+              onClick={() => action.lifecycle.mutate(container.id)}
+              isLoading={action.lifecycle.isPending}
+              data-testid={action.testId}
+            >
+              {action.label}
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              aria-label={`Logs ${name}`}
+              onClick={() => onShowLogs(container)}
+            >
+              Logs
+            </Button>
+          </HStack>
         </Td>
         <Td>
           <Button
@@ -147,6 +196,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
   const deleteContainer = useDeleteContainer(machineId)
   const createContainer = useCreateContainer(machineId)
   const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(null)
+  const [logsTarget, setLogsTarget] = useState<ContainerSummary | null>(null)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
 
   if (isPending) {
@@ -198,6 +248,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
                   deleteContainer.reset()
                   setPendingDelete(target)
                 }}
+                onShowLogs={setLogsTarget}
               />
             ))}
           </Tbody>
@@ -212,6 +263,13 @@ export function ContainerList({ machineId }: { machineId: string }) {
             deleteContainer.reset()
             setPendingDelete(null)
           }}
+        />
+      ) : null}
+      {logsTarget ? (
+        <ContainerLogsModal
+          machineId={machineId}
+          container={logsTarget}
+          onClose={() => setLogsTarget(null)}
         />
       ) : null}
       {isCreateOpen ? (

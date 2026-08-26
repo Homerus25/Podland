@@ -1,4 +1,7 @@
 import { api } from '@shared/utils/api'
+import { followLogStream, type LogEvent } from '@shared/streaming/logStream'
+
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
 
 // Container as returned by GET /api/machines/{id}/containers
 // (backend/internal/domain/containers/dto.go ContainerListResponse).
@@ -84,4 +87,35 @@ export async function stopContainer(machineId: string, containerId: string): Pro
 // The force query param exists on the endpoint but is out of scope for now.
 export async function deleteContainer(machineId: string, containerId: string): Promise<void> {
   await api.delete(containerUrl(machineId, containerId))
+}
+
+// GET /api/machines/{id}/containers/{containerId}/logs?tail=N (no follow)
+// returns the last lines as one multiline string
+// (backend/internal/domain/containers/dto.go ContainerLogsResponse).
+export async function fetchContainerLogs(
+  machineId: string,
+  containerId: string,
+  tail: number,
+): Promise<string[]> {
+  const response = await api.get<{ id: string; logs: string }>(
+    `${containerUrl(machineId, containerId)}/logs`,
+    { params: { tail } },
+  )
+  return response.data.logs.split('\n').filter((line) => line !== '')
+}
+
+// Same endpoint with follow=true: NDJSON stream of ContainerLogEvent values.
+// Uses plain fetch via the shared stream helper (axios buffers responses).
+export async function followContainerLogs(
+  machineId: string,
+  containerId: string,
+  tail: number,
+  onEvent: (event: LogEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  await followLogStream(
+    `${apiBaseUrl}${containerUrl(machineId, containerId)}/logs?tail=${tail}&follow=true`,
+    onEvent,
+    signal,
+  )
 }

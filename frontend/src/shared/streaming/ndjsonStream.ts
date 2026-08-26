@@ -1,8 +1,8 @@
-// Parses a Newline-delimited JSON (NDJSON) byte stream into typed events,
-// as produced by the backend's streaming endpoints (e.g. image pull).
+// Shared machinery for Newline-delimited JSON (NDJSON) byte streams, as
+// produced by the backend's streaming endpoints (image pull, container logs).
 // Malformed lines are logged and skipped so one bad line never kills a
-// long-running stream; events split across reads are reassembled by
-// buffering until a newline arrives.
+// long-running stream; values split across reads are reassembled by buffering
+// until a newline arrives.
 
 export interface StreamEventState {
   current?: number
@@ -34,9 +34,11 @@ export function isStreamEvent(value: unknown): value is StreamEvent {
   )
 }
 
-export async function consumeNdjsonStream(
+// Parses a newline-delimited JSON byte stream into raw JSON values. Callers
+// apply their own event-shape validation on top.
+export async function consumeNdjsonValues(
   stream: ReadableStream<Uint8Array>,
-  onEvent: (event: StreamEvent) => void,
+  onValue: (value: unknown) => void,
 ): Promise<void> {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
@@ -53,12 +55,7 @@ export async function consumeNdjsonStream(
         buffer = buffer.slice(newlineIndex + 1)
         if (line) {
           try {
-            const parsed: unknown = JSON.parse(line)
-            if (isStreamEvent(parsed)) {
-              onEvent(parsed)
-            } else {
-              console.warn('Skipping malformed stream event (unexpected shape):', line)
-            }
+            onValue(JSON.parse(line))
           } catch {
             console.warn('Skipping malformed stream line (invalid JSON):', line)
           }
@@ -75,4 +72,17 @@ export async function consumeNdjsonStream(
     await reader.cancel().catch(() => undefined)
     reader.releaseLock()
   }
+}
+
+export async function consumeNdjsonStream(
+  stream: ReadableStream<Uint8Array>,
+  onEvent: (event: StreamEvent) => void,
+): Promise<void> {
+  await consumeNdjsonValues(stream, (value) => {
+    if (isStreamEvent(value)) {
+      onEvent(value)
+    } else {
+      console.warn('Skipping malformed stream event (unexpected shape):', value)
+    }
+  })
 }
