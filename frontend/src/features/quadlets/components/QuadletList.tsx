@@ -29,9 +29,14 @@ import {
 } from '@features/quadlets/hooks/useQuadlets'
 import { QuadletForm } from '@features/quadlets/components/QuadletForm'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
+import { LogViewer, type LogSource } from '@shared/components/LogViewer'
 import { Modal } from '@shared/components/Modal'
 import { StateBadge } from '@shared/components/StateBadge'
 import { getApiError } from '@shared/utils/api'
+import {
+  fetchQuadletLogs,
+  followQuadletLogs,
+} from '@features/quadlets/services/quadletsApi'
 import type { QuadletSummary } from '@features/quadlets/services/quadletsApi'
 
 // Stop and restart share the backend's option set (force, timeout), so one
@@ -127,11 +132,13 @@ function QuadletRow({
   quadlet,
   onEdit,
   onDelete,
+  onShowLogs,
 }: {
   machineId: string
   quadlet: QuadletSummary
   onEdit: (quadlet: QuadletSummary) => void
   onDelete: (quadlet: QuadletSummary) => void
+  onShowLogs: (quadlet: QuadletSummary) => void
 }) {
   const startQuadlet = useStartQuadlet(machineId)
   const stopQuadlet = useStopQuadlet(machineId)
@@ -202,6 +209,14 @@ function QuadletRow({
               data-testid="restart-quadlet-button"
             >
               Restart
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              aria-label={`Logs ${quadlet.name}`}
+              onClick={() => onShowLogs(quadlet)}
+            >
+              Logs
             </Button>
           </HStack>
         </Td>
@@ -293,6 +308,37 @@ function EditQuadletModal({
   )
 }
 
+// Bridges the generic LogViewer onto this quadlet's journalctl endpoint;
+// the tail fetch goes through axios, so its errors are converted to the
+// ApiError shape the viewer displays.
+function QuadletLogsModal({
+  machineId,
+  quadlet,
+  onClose,
+}: {
+  machineId: string
+  quadlet: QuadletSummary
+  onClose: () => void
+}) {
+  const source: LogSource = {
+    fetchTail: async (tail) => {
+      try {
+        return await fetchQuadletLogs(machineId, quadlet.id, tail)
+      } catch (error) {
+        throw getApiError(error)
+      }
+    },
+    follow: (tail, onEvent, signal) =>
+      followQuadletLogs(machineId, quadlet.id, tail, onEvent, signal),
+  }
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Logs — ${quadlet.name}`}>
+      <LogViewer source={source} />
+    </Modal>
+  )
+}
+
 // No delete request leaves the browser until the user explicitly confirms.
 // Stop-first defaults to on and force to off, matching the backend
 // contract's defaults, so confirming without touching anything behaves like
@@ -371,6 +417,7 @@ export function QuadletList({ machineId }: { machineId: string }) {
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<QuadletSummary | null>(null)
+  const [logsTarget, setLogsTarget] = useState<QuadletSummary | null>(null)
 
   if (isPending) {
     return <Text data-testid="quadlets-loading">Loading quadlets…</Text>
@@ -423,6 +470,7 @@ export function QuadletList({ machineId }: { machineId: string }) {
                     deleteQuadlet.reset()
                     setDeleteTarget(target)
                   }}
+                  onShowLogs={setLogsTarget}
                 />
               ))}
             </Tbody>
@@ -448,6 +496,13 @@ export function QuadletList({ machineId }: { machineId: string }) {
             deleteQuadlet.reset()
             setDeleteTarget(null)
           }}
+        />
+      ) : null}
+      {logsTarget ? (
+        <QuadletLogsModal
+          machineId={machineId}
+          quadlet={logsTarget}
+          onClose={() => setLogsTarget(null)}
         />
       ) : null}
       {isCreateOpen ? (

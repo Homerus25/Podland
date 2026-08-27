@@ -6,7 +6,7 @@ import { genericError } from '@shared/utils/api'
 import type { ApiError } from '@shared/types/api'
 
 // How a log viewer obtains its lines. The same component serves any backend
-// log endpoint (container logs today, quadlet logs later): the caller wires
+// log endpoint (container and quadlet logs today): the caller wires
 // the two calls to its own URLs and params.
 export interface LogSource {
   // Fetches the last `tail` lines without following.

@@ -1,4 +1,7 @@
 import { api } from '@shared/utils/api'
+import { followLogStream, type LogEvent } from '@shared/streaming/logStream'
+
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api'
 
 // Quadlet as returned by GET /api/machines/{id}/quadlets
 // (backend/internal/domain/quadlets/dto.go QuadletListResponse; raw is omitted
@@ -159,4 +162,35 @@ function lifecycleParams(options: QuadletLifecycleOptions) {
   return options.timeout === undefined
     ? { force: options.force }
     : { force: options.force, timeout: options.timeout }
+}
+
+// GET /api/machines/{id}/quadlets/{quadletId}/logs?tail=N (no follow)
+// returns the journal's last lines as one multiline string
+// (backend/internal/domain/quadlets/dto.go QuadletLogsResponse).
+export async function fetchQuadletLogs(
+  machineId: string,
+  quadletId: string,
+  tail: number,
+): Promise<string[]> {
+  const response = await api.get<{ id: string; logs: string }>(
+    `${quadletUrl(machineId, quadletId)}/logs`,
+    { params: { tail } },
+  )
+  return response.data.logs.split('\n').filter((line) => line !== '')
+}
+
+// Same endpoint with follow=true: NDJSON stream of QuadletLogEvent values.
+// Uses plain fetch via the shared stream helper (axios buffers responses).
+export async function followQuadletLogs(
+  machineId: string,
+  quadletId: string,
+  tail: number,
+  onEvent: (event: LogEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  await followLogStream(
+    `${apiBaseUrl}${quadletUrl(machineId, quadletId)}/logs?tail=${tail}&follow=true`,
+    onEvent,
+    signal,
+  )
 }
