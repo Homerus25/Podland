@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, HStack, Table, TableContainer, Tbody, Td, Text, Th, Thead, Tr } from '@chakra-ui/react'
-import { useCreateQuadlet, useQuadlets } from '@features/quadlets/hooks/useQuadlets'
+import { useCreateQuadlet, useQuadlet, useQuadlets, useUpdateQuadlet } from '@features/quadlets/hooks/useQuadlets'
 import { QuadletForm } from '@features/quadlets/components/QuadletForm'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { Modal } from '@shared/components/Modal'
@@ -8,7 +8,7 @@ import { StateBadge } from '@shared/components/StateBadge'
 import { getApiError } from '@shared/utils/api'
 import type { QuadletSummary } from '@features/quadlets/services/quadletsApi'
 
-function QuadletRow({ quadlet }: { quadlet: QuadletSummary }) {
+function QuadletRow({ quadlet, onEdit }: { quadlet: QuadletSummary; onEdit: (quadlet: QuadletSummary) => void }) {
   return (
     <Tr data-testid="quadlet-row">
       <Td fontFamily="mono">{quadlet.name}</Td>
@@ -16,14 +16,72 @@ function QuadletRow({ quadlet }: { quadlet: QuadletSummary }) {
       <Td>
         <StateBadge state={quadlet.state} />
       </Td>
+      <Td>
+        <Button
+          size="xs"
+          variant="outline"
+          aria-label={`Edit ${quadlet.name}`}
+          onClick={() => onEdit(quadlet)}
+          data-testid="edit-quadlet-button"
+        >
+          Edit
+        </Button>
+      </Td>
     </Tr>
+  )
+}
+
+// The editor seeds the shared quadlet form from the get endpoint. Loading
+// and error states cover the fetch: the quadlet may have disappeared or the
+// ssh connection may fail between listing and opening.
+function EditQuadletModal({
+  machineId,
+  quadlet,
+  updateQuadlet,
+  onClose,
+}: {
+  machineId: string
+  quadlet: QuadletSummary
+  updateQuadlet: ReturnType<typeof useUpdateQuadlet>
+  onClose: () => void
+}) {
+  const { data, isPending, error } = useQuadlet(machineId, quadlet.id)
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Edit quadlet — ${quadlet.name}`}>
+      {isPending ? (
+        <Text data-testid="quadlet-edit-loading">Loading content…</Text>
+      ) : error ? (
+        <ErrorDisplay error={getApiError(error)} />
+      ) : data ? (
+        <QuadletForm
+          mode="edit"
+          seed={{ name: data.name, resource: data.resource, content: data.content }}
+          onSubmit={({ content }) =>
+            new Promise<void>((resolve) =>
+              updateQuadlet.mutate(
+                { quadletId: quadlet.id, content },
+                {
+                  onSuccess: onClose,
+                  onSettled: () => resolve(),
+                },
+              ),
+            )
+          }
+          submitError={updateQuadlet.error}
+          isSubmitting={updateQuadlet.isPending}
+        />
+      ) : null}
+    </Modal>
   )
 }
 
 export function QuadletList({ machineId }: { machineId: string }) {
   const { data: quadlets, isPending, error } = useQuadlets(machineId)
   const createQuadlet = useCreateQuadlet(machineId)
+  const updateQuadlet = useUpdateQuadlet(machineId)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null)
 
   if (isPending) {
     return <Text data-testid="quadlets-loading">Loading quadlets…</Text>
@@ -60,16 +118,28 @@ export function QuadletList({ machineId }: { machineId: string }) {
                 <Th>Name</Th>
                 <Th>Resource</Th>
                 <Th>State</Th>
+                <Th />
               </Tr>
             </Thead>
             <Tbody>
               {quadlets.map((quadlet) => (
-                <QuadletRow key={quadlet.id} quadlet={quadlet} />
+                <QuadletRow key={quadlet.id} quadlet={quadlet} onEdit={setEditTarget} />
               ))}
             </Tbody>
           </Table>
         </TableContainer>
       )}
+      {editTarget ? (
+        <EditQuadletModal
+          machineId={machineId}
+          quadlet={editTarget}
+          updateQuadlet={updateQuadlet}
+          onClose={() => {
+            updateQuadlet.reset()
+            setEditTarget(null)
+          }}
+        />
+      ) : null}
       {isCreateOpen ? (
         <Modal
           isOpen

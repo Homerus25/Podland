@@ -55,3 +55,40 @@ export async function createQuadlet(
   const response = await api.post<QuadletCreated>(`/machines/${machineId}/quadlets`, input)
   return response.data
 }
+
+// Response of GET /api/machines/{id}/quadlets/{quadletId} and of a successful
+// update (backend/internal/domain/quadlets/dto.go QuadletGetResponse).
+export interface QuadletDetail {
+  id: string
+  name: string
+  path: string
+  unit: string
+  resource: string
+  state: string
+  content: string
+}
+
+export async function getQuadlet(machineId: string, quadletId: string): Promise<QuadletDetail> {
+  const response = await api.get<QuadletDetail>(`/machines/${machineId}/quadlets/${quadletId}`)
+  return response.data
+}
+
+// Body of PUT /api/machines/{id}/quadlets/{quadletId}
+// (backend/internal/domain/quadlets/dto.go QuadletUpdateRequest). Content
+// only: the name comes from the URL path and the resource type is derived
+// from the existing quadlet file path, so neither is sent.
+export interface UpdateQuadletInput {
+  content: string
+}
+
+export async function updateQuadlet(
+  machineId: string,
+  quadletId: string,
+  input: UpdateQuadletInput,
+): Promise<QuadletDetail> {
+  const response = await api.put<QuadletDetail>(
+    `/machines/${machineId}/quadlets/${quadletId}`,
+    input,
+  )
+  return response.data
+}
