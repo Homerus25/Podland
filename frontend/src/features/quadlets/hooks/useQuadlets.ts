@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { CreateQuadletInput, UpdateQuadletInput } from '@features/quadlets/services/quadletsApi'
+import type {
+  CreateQuadletInput,
+  DeleteQuadletOptions,
+  UpdateQuadletInput,
+} from '@features/quadlets/services/quadletsApi'
 import {
   createQuadlet,
+  deleteQuadlet,
   getQuadlet,
   listQuadlets,
   updateQuadlet,
@@ -22,16 +27,25 @@ export function useQuadlets(machineId: string) {
   })
 }
 
-// Create invalidates the machine's quadlets query on success so the list
-// refetches and the new unit appears.
-export function useCreateQuadlet(machineId: string) {
+// Mutations invalidate the machine's quadlets query on success so the list
+// refetches and shows the server's post-action state; no optimistic updates.
+function useQuadletMutation<TInput>(
+  machineId: string,
+  run: (input: TInput) => Promise<unknown>,
+) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: CreateQuadletInput) => createQuadlet(machineId, input),
+    mutationFn: run,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: quadletsQueryKey(machineId) })
     },
   })
+}
+
+export function useCreateQuadlet(machineId: string) {
+  return useQuadletMutation(machineId, (input: CreateQuadletInput) =>
+    createQuadlet(machineId, input),
+  )
 }
 
 export function useQuadlet(machineId: string, quadletId: string) {
@@ -48,12 +62,19 @@ export function useQuadlet(machineId: string, quadletId: string) {
 // A content update can change the quadlet's systemd state, so the list
 // refetches on success.
 export function useUpdateQuadlet(machineId: string) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: ({ quadletId, content }: { quadletId: string } & UpdateQuadletInput) =>
+  return useQuadletMutation(
+    machineId,
+    ({ quadletId, content }: { quadletId: string } & UpdateQuadletInput) =>
       updateQuadlet(machineId, quadletId, { content }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: quadletsQueryKey(machineId) })
-    },
-  })
+  )
+}
+
+// A delete removes the unit from the machine, so the list refetches on
+// success and the quadlet disappears.
+export function useDeleteQuadlet(machineId: string) {
+  return useQuadletMutation(
+    machineId,
+    ({ quadletId, ...options }: { quadletId: string } & DeleteQuadletOptions) =>
+      deleteQuadlet(machineId, quadletId, options),
+  )
 }

@@ -69,7 +69,7 @@ export interface QuadletDetail {
 }
 
 export async function getQuadlet(machineId: string, quadletId: string): Promise<QuadletDetail> {
-  const response = await api.get<QuadletDetail>(`/machines/${machineId}/quadlets/${quadletId}`)
+  const response = await api.get<QuadletDetail>(quadletUrl(machineId, quadletId))
   return response.data
 }
 
@@ -86,9 +86,30 @@ export async function updateQuadlet(
   quadletId: string,
   input: UpdateQuadletInput,
 ): Promise<QuadletDetail> {
-  const response = await api.put<QuadletDetail>(
-    `/machines/${machineId}/quadlets/${quadletId}`,
-    input,
-  )
+  const response = await api.put<QuadletDetail>(quadletUrl(machineId, quadletId), input)
   return response.data
+}
+
+function quadletUrl(machineId: string, quadletId: string): string {
+  return `/machines/${machineId}/quadlets/${encodeURIComponent(quadletId)}`
+}
+
+// DELETE /api/machines/{id}/quadlets/{quadletId} -> 204
+// (backend/internal/domain/quadlets/handler.go QuadletHandler.Delete).
+// stop stops the unit before the quadlet file is removed and defaults to
+// true in the backend; force enables aggressive teardown and defaults to
+// false. Both are always sent so the request reflects the chosen options.
+export interface DeleteQuadletOptions {
+  stop: boolean
+  force: boolean
+}
+
+export async function deleteQuadlet(
+  machineId: string,
+  quadletId: string,
+  options: DeleteQuadletOptions,
+): Promise<void> {
+  await api.delete(quadletUrl(machineId, quadletId), {
+    params: { stop: options.stop, force: options.force },
+  })
 }
