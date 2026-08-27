@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
   CreateQuadletInput,
   DeleteQuadletOptions,
+  QuadletLifecycleOptions,
   UpdateQuadletInput,
 } from '@features/quadlets/services/quadletsApi'
 import {
@@ -9,6 +10,9 @@ import {
   deleteQuadlet,
   getQuadlet,
   listQuadlets,
+  restartQuadlet,
+  startQuadlet,
+  stopQuadlet,
   updateQuadlet,
 } from '@features/quadlets/services/quadletsApi'
 
@@ -76,5 +80,29 @@ export function useDeleteQuadlet(machineId: string) {
     machineId,
     ({ quadletId, ...options }: { quadletId: string } & DeleteQuadletOptions) =>
       deleteQuadlet(machineId, quadletId, options),
+  )
+}
+
+// Lifecycle actions change the unit's systemd state, so the list refetches on
+// success and the state badge reflects what the machine now reports.
+export function useStartQuadlet(machineId: string) {
+  return useQuadletMutation(machineId, (quadletId: string) =>
+    startQuadlet(machineId, quadletId),
+  )
+}
+
+export function useStopQuadlet(machineId: string) {
+  return useQuadletMutation(
+    machineId,
+    ({ quadletId, ...options }: { quadletId: string } & QuadletLifecycleOptions) =>
+      stopQuadlet(machineId, quadletId, options),
+  )
+}
+
+export function useRestartQuadlet(machineId: string) {
+  return useQuadletMutation(
+    machineId,
+    ({ quadletId, ...options }: { quadletId: string } & QuadletLifecycleOptions) =>
+      restartQuadlet(machineId, quadletId, options),
   )
 }

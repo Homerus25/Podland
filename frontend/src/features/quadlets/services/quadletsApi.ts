@@ -113,3 +113,50 @@ export async function deleteQuadlet(
     params: { stop: options.stop, force: options.force },
   })
 }
+
+// POST /api/machines/{id}/quadlets/{quadletId}/start -> 200
+// (backend/internal/domain/quadlets/handler.go QuadletHandler.Start).
+// Start takes no options per the backend contract.
+export async function startQuadlet(machineId: string, quadletId: string): Promise<void> {
+  await api.post(`${quadletUrl(machineId, quadletId)}/start`)
+}
+
+// Query parameters for the stop and restart endpoints
+// (backend/internal/domain/quadlets/handler.go parseLifecycleOptions). force
+// defaults to false; timeout is seconds and unset by default, in which case
+// it is omitted from the request entirely so systemd's own default applies.
+export interface QuadletLifecycleOptions {
+  force: boolean
+  timeout?: number
+}
+
+// POST /api/machines/{id}/quadlets/{quadletId}/stop -> 200
+// (backend/internal/domain/quadlets/handler.go QuadletHandler.Stop).
+export async function stopQuadlet(
+  machineId: string,
+  quadletId: string,
+  options: QuadletLifecycleOptions,
+): Promise<void> {
+  await api.post(`${quadletUrl(machineId, quadletId)}/stop`, undefined, {
+    params: lifecycleParams(options),
+  })
+}
+
+// POST /api/machines/{id}/quadlets/{quadletId}/restart -> 200
+// (backend/internal/domain/quadlets/handler.go QuadletHandler.Restart);
+// same option set as stop.
+export async function restartQuadlet(
+  machineId: string,
+  quadletId: string,
+  options: QuadletLifecycleOptions,
+): Promise<void> {
+  await api.post(`${quadletUrl(machineId, quadletId)}/restart`, undefined, {
+    params: lifecycleParams(options),
+  })
+}
+
+function lifecycleParams(options: QuadletLifecycleOptions) {
+  return options.timeout === undefined
+    ? { force: options.force }
+    : { force: options.force, timeout: options.timeout }
+}
