@@ -54,6 +54,32 @@ func FromSecretInfoReport(report *entities.SecretInfoReport) SecretListResponse 
 	}
 }
 
+// SecretInspectResponse is the single-secret inspect response: the list
+// DTO's metadata fields plus the value. SecretData is present ONLY on an
+// admin reveal — mapping never copies it otherwise, and the omitempty tag
+// drops an empty value from the JSON entirely, so a metadata inspect
+// answers with no secretData field at all.
+type SecretInspectResponse struct {
+	SecretListResponse
+	// SecretData carries the secret's value. Populated exclusively by the
+	// admin reveal path; must never be logged at any level.
+	SecretData string `json:"secretData,omitempty"`
+}
+
+// ToSecretInspectResponse converts a podman entities.SecretInfoReport to
+// the inspect response. SecretData is copied ONLY when includeValue is
+// true (the admin reveal path); a metadata inspect cannot leak the value
+// because it is simply never copied.
+func ToSecretInspectResponse(report *entities.SecretInfoReport, includeValue bool) *SecretInspectResponse {
+	resp := &SecretInspectResponse{
+		SecretListResponse: FromSecretInfoReport(report),
+	}
+	if includeValue && report != nil {
+		resp.SecretData = report.SecretData
+	}
+	return resp
+}
+
 // formatSecretTime renders a podman timestamp as an ISO8601 string,
 // yielding "" for the zero time (mirroring the images DTO convention).
 func formatSecretTime(ts time.Time) string {

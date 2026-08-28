@@ -148,7 +148,7 @@ func New(cfg *config.Config) (*App, error) {
 	containerService := containers.NewContainerService(connectionManager)
 	imageService := images.NewImageService(connectionManager)
 	quadletService := quadlets.NewQuadletService(connectionManager, sshExecService)
-	secretService := secrets.NewSecretService(connectionManager)
+	secretService := secrets.NewSecretService(connectionManager, accessRepo)
 	eventService := events.NewEventService(connectionManager)
 
 	// Initialize handlers
@@ -273,11 +273,19 @@ func New(cfg *config.Config) (*App, error) {
 						})
 					})
 
-					// Secrets — read-level: secret METADATA is visible to any
-					// grantee (subtree membership is the read gate); the
-					// level-aware gates for inspect-reveal (admin) and
-					// create/delete (write) arrive with slices 160-02..160-04.
-					r.Get("/secrets", secretHandler.List)
+					// Secrets — read-level subtree: secret METADATA (list +
+					// inspect) is visible to any grantee (subtree membership
+					// is the read gate). The value reveal is NOT a
+					// route-level gate: ?reveal=true is a query param, so
+					// Service.Get checks the caller's level itself and
+					// answers 403 ACCESS_DENIED below admin. The write-level
+					// gates for create/delete arrive with slices 160-03/04.
+					r.Route("/secrets", func(r chi.Router) {
+						r.Get("/", secretHandler.List)
+						r.Route("/{secretId}", func(r chi.Router) {
+							r.Get("/", secretHandler.Get)
+						})
+					})
 
 					// Events
 					r.Get("/events", eventHandler.HandleEvents)

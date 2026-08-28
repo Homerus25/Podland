@@ -15,6 +15,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // errGeneric is a non-AppError used to exercise the handler's generic
@@ -139,11 +140,19 @@ func TestSecretHandler_List(t *testing.T) {
 
 type MockSecretService struct {
 	mockList func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error)
+	mockGet  func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error)
 }
 
 func (m *MockSecretService) List(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
 	if m.mockList != nil {
 		return m.mockList(ctx, userID, machineID)
+	}
+	return nil, nil
+}
+
+func (m *MockSecretService) Get(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
+	if m.mockGet != nil {
+		return m.mockGet(ctx, userID, machineID, secretID, reveal)
 	}
 	return nil, nil
 }
@@ -178,6 +187,258 @@ func TestSecretHandler_List_ForwardsCallerAndMachine(t *testing.T) {
 	assert.Equal(t, "machine123", gotMachine, "handler must forward the machine ID URL param")
 }
 
+// --- Inspect (GET /api/machines/{id}/secrets/{secretId}) ---
+
+// TestSecretHandler_Get_MetadataOnly pins the happy path of a metadata
+// inspect: 200 with the metadata JSON and NO secretData field, exactly as
+// the omitempty-tagged DTO renders it.
+func TestSecretHandler_Get_MetadataOnly(t *testing.T) {
+	mockService := &MockSecretService{
+		mockGet: func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
+			return &SecretInspectResponse{
+				SecretListResponse: SecretListResponse{
+					ID:        "3f2e1d0c",
+					Name:      "db-password",
+					Driver:    "file",
+					CreatedAt: "2026-01-02T15:04:05Z",
+					UpdatedAt: "2026-01-03T16:05:06Z",
+				},
+			}, nil
+		},
+	}
+	handler := NewSecretHandler(mockService)
+
+	req := httptest.NewRequest("GET", "/api/machines/machine123/secrets/3f2e1d0c", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "machine123")
+	rctx.URLParams.Add("secretId", "3f2e1d0c")
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	handler.Get(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.JSONEq(t, `{
+		"id": "3f2e1d0c",
+		"name": "db-password",
+		"driver": "file",
+		"createdAt": "2026-01-02T15:04:05Z",
+		"updatedAt": "2026-01-03T16:05:06Z"
+	}`, rr.Body.String(), "a metadata inspect must answer WITHOUT a secretData field")
+}
+
+// TestSecretHandler_Get_RevealReturnsValue pins that a successful reveal's
+// JSON carries the secretData field next to the metadata.
+func TestSecretHandler_Get_RevealReturnsValue(t *testing.T) {
+	mockService := &MockSecretService{
+		mockGet: func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
+			return &SecretInspectResponse{
+				SecretListResponse: SecretListResponse{ID: "3f2e1d0c", Name: "db-password", Driver: "file"},
+				SecretData:         "hunter2",
+			}, nil
+		},
+	}
+	handler := NewSecretHandler(mockService)
+
+	req := httptest.NewRequest("GET", "/api/machines/machine123/secrets/db-password?reveal=true", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "machine123")
+	rctx.URLParams.Add("secretId", "db-password")
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
+	req = req.WithContext(ctx)
+
+	rr := httptest.NewRecorder()
+	handler.Get(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.JSONEq(t, `{
+		"id": "3f2e1d0c",
+		"name": "db-password",
+		"driver": "file",
+		"createdAt": "",
+		"updatedAt": "",
+		"secretData": "hunter2"
+	}`, rr.Body.String(), "a reveal must answer with the secretData field")
+}
+
+// TestSecretHandler_Get_ForwardsArgs pins the handler→service seam: the
+// authenticated user ID, the {id} and {secretId} URL params, and the
+// reveal flag parsed from ?reveal= must reach Service.Get unchanged
+// (?reveal=false and a missing param are both false).
+func TestSecretHandler_Get_ForwardsArgs(t *testing.T) {
+	calls := []struct {
+		userID   string
+		machine  string
+		secretID string
+		reveal   bool
+	}{}
+	mockService := &MockSecretService{
+		mockGet: func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
+			calls = append(calls, struct {
+				userID   string
+				machine  string
+				secretID string
+				reveal   bool
+			}{userID, machineID, secretID, reveal})
+			return &SecretInspectResponse{}, nil
+		},
+	}
+	handler := NewSecretHandler(mockService)
+
+	for _, target := range []string{
+		"/api/machines/machine123/secrets/db-password?reveal=true",
+		"/api/machines/machine123/secrets/db-password?reveal=false",
+		"/api/machines/machine123/secrets/3f2e1d0c",
+	} {
+		req := httptest.NewRequest("GET", target, nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "machine123")
+		rctx.URLParams.Add("secretId", "db-password")
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+		ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
+		req = req.WithContext(ctx)
+
+		rr := httptest.NewRecorder()
+		handler.Get(rr, req)
+		require.Equal(t, http.StatusOK, rr.Code, "target %s must succeed", target)
+	}
+
+	require.Len(t, calls, 3, "every request must reach the service")
+	for _, call := range calls {
+		assert.Equal(t, "user123", call.userID, "handler must forward the authenticated user ID")
+		assert.Equal(t, "machine123", call.machine, "handler must forward the machine ID URL param")
+		assert.Equal(t, "db-password", call.secretID, "handler must forward the secret ID URL param")
+	}
+	assert.True(t, calls[0].reveal, "?reveal=true must reach the service as true")
+	assert.False(t, calls[1].reveal, "?reveal=false must reach the service as false")
+	assert.False(t, calls[2].reveal, "a missing reveal param must reach the service as false")
+}
+
+// TestSecretHandler_Get_ErrorMapping pins the error pass-throughs: the
+// service's AppErrors keep their HTTP status (403 ACCESS_DENIED for a
+// below-admin reveal, 404 SECRET_NOT_FOUND for an unknown secret, 502
+// CONNECTION_FAILED for a dead tunnel) and a non-AppError falls back to
+// 500.
+func TestSecretHandler_Get_ErrorMapping(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockError      error
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:           "below-admin reveal is access denied",
+			mockError:      errors.ErrAccessDenied,
+			expectedStatus: http.StatusForbidden,
+			expectedBody:   "ACCESS_DENIED",
+		},
+		{
+			name:           "unknown secret is not found",
+			mockError:      errors.ErrSecretNotFound,
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   "SECRET_NOT_FOUND",
+		},
+		{
+			// 5xx bodies are rewritten generic by RespondWithError
+			// (handlers.go), so the 502 is asserted via status alone.
+			name:           "connection failed",
+			mockError:      errors.ErrConnectionFailed,
+			expectedStatus: http.StatusBadGateway,
+			expectedBody:   "",
+		},
+		{
+			name:           "non-app error falls back to internal error",
+			mockError:      errGeneric,
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody:   "INTERNAL_ERROR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockService := &MockSecretService{
+				mockGet: func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
+					return nil, tt.mockError
+				},
+			}
+			handler := NewSecretHandler(mockService)
+
+			req := httptest.NewRequest("GET", "/api/machines/machine123/secrets/db-password", nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", "machine123")
+			rctx.URLParams.Add("secretId", "db-password")
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+			handler.Get(rr, req)
+
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+			assert.Contains(t, rr.Body.String(), tt.expectedBody)
+		})
+	}
+}
+
+// TestSecretHandler_Get_MissingContextAndParams pins the request-shape
+// guards: no authenticated user → 401, no {secretId} URL param → 400.
+func TestSecretHandler_Get_MissingContextAndParams(t *testing.T) {
+	newReq := func(userID, secretID string) *http.Request {
+		req := httptest.NewRequest("GET", "/api/machines/machine123/secrets/"+secretID, nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", "machine123")
+		if secretID != "" {
+			rctx.URLParams.Add("secretId", secretID)
+		}
+		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+		if userID != "" {
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, userID)
+		}
+		return req.WithContext(ctx)
+	}
+
+	t.Run("missing user ID", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		NewSecretHandler(&MockSecretService{}).Get(rr, newReq("", "db-password"))
+		assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	})
+
+	t.Run("missing secret ID", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		NewSecretHandler(&MockSecretService{}).Get(rr, newReq("user123", ""))
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+}
+
+// TestSecretHandler_Get_ReadLevelGranteeReachesInspectRoute pins the
+// route mounting: GET /api/machines/{id}/secrets/{secretId} rides the
+// RequireMachineAccess subtree, so a read-level grantee reaches the
+// inspect handler (metadata is visible at read; the reveal gate is the
+// service's, not the route's).
+func TestSecretHandler_Get_ReadLevelGranteeReachesInspectRoute(t *testing.T) {
+	machineRepo := testutils.NewMockMachineRepository()
+	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
+	accessRepo := testutils.NewMockMachineAccessRepository()
+	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
+	var called bool
+	service := &MockSecretService{mockGet: func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
+		called = true
+		return &SecretInspectResponse{SecretListResponse: SecretListResponse{ID: "3f2e1d0c", Name: "db-password"}}, nil
+	}}
+	router := secretsAccessRouter(machineRepo, accessRepo, service)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/secrets/db-password", "reader-1"))
+
+	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "a read-level grantee must reach the inspect endpoint")
+	assert.True(t, called, "the inspect handler must run for a read-level grantee")
+	assert.NotContains(t, w.Body.String(), "secretData",
+		"the metadata answer must not carry a secretData field")
+}
+
 // --- Route wiring: the RequireMachineAccess subtree is the read gate ---
 //
 // These tests mount the secrets route on a chi subtree exactly the way
@@ -188,12 +449,17 @@ func TestSecretHandler_List_ForwardsCallerAndMachine(t *testing.T) {
 // access row → 403 ACCESS_DENIED, and a read-level grantee through to the
 // handler (metadata is visible at read).
 
-// secretsAccessRouter mirrors app.go's mounting of the secrets route.
+// secretsAccessRouter mirrors app.go's mounting of the secrets routes.
 func secretsAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service SecretServiceInterface) http.Handler {
 	r := chi.NewRouter()
 	r.Route("/api/machines", func(r chi.Router) {
 		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			r.Get("/secrets", NewSecretHandler(service).List)
+			r.Route("/secrets", func(r chi.Router) {
+				r.Get("/", NewSecretHandler(service).List)
+				r.Route("/{secretId}", func(r chi.Router) {
+					r.Get("/", NewSecretHandler(service).Get)
+				})
+			})
 		})
 	})
 	return r
