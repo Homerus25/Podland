@@ -8,6 +8,8 @@ import { server } from '@/test/server'
 import {
   canDeleteMachine,
   canEditMachine,
+  canManageSecrets,
+  canRevealSecrets,
   canShareMachine,
   effectivePermission,
 } from '@features/machines/permissions'
@@ -105,5 +107,15 @@ describe('permissions module', () => {
     expect(canEditMachine('write')).toBe(true)
     expect(canShareMachine('write')).toBe(false)
     expect(canDeleteMachine('write')).toBe(false)
+  })
+
+  it('gates secret management at write and secret reveal at admin', () => {
+    expect(canManageSecrets('read')).toBe(false)
+    expect(canManageSecrets('write')).toBe(true)
+    expect(canManageSecrets('admin')).toBe(true)
+
+    expect(canRevealSecrets('read')).toBe(false)
+    expect(canRevealSecrets('write')).toBe(false)
+    expect(canRevealSecrets('admin')).toBe(true)
   })
 })

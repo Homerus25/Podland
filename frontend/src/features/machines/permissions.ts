@@ -28,3 +28,14 @@ export function canShareMachine(permission: EffectivePermission): boolean {
 export function canDeleteMachine(permission: EffectivePermission): boolean {
   return permission === 'admin'
 }
+
+// Secret creation/deletion change the machine's remote state (write+).
+export function canManageSecrets(permission: EffectivePermission): boolean {
+  return permission === 'admin' || permission === 'write'
+}
+
+// Revealing a secret's value is the admin-only capability (the backend's
+// reveal gate answers 403 below admin).
+export function canRevealSecrets(permission: EffectivePermission): boolean {
+  return permission === 'admin'
+}

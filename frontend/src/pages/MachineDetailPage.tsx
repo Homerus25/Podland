@@ -5,7 +5,13 @@ import { useDeleteMachine, useMachine, useUpdateMachine } from '@features/machin
 import { ContainerList } from '@features/containers/components/ContainerList'
 import { ImageList } from '@features/images/components/ImageList'
 import { QuadletList } from '@features/quadlets/components/QuadletList'
-import { canDeleteMachine, canEditMachine, canShareMachine, effectivePermission } from '@features/machines/permissions'
+import { SecretList } from '@features/secrets/components/SecretList'
+import {
+  canDeleteMachine,
+  canEditMachine,
+  canShareMachine,
+  effectivePermission,
+} from '@features/machines/permissions'
 import { MachineForm } from '@features/machines/components/MachineForm'
 import { PermissionBadge } from '@features/machines/components/PermissionBadge'
 import { ShareMachineSection } from '@features/machines/components/ShareMachineSection'
@@ -151,6 +157,7 @@ export function MachineDetailPage() {
           <Tab>Containers</Tab>
           <Tab>Images</Tab>
           <Tab>Quadlets</Tab>
+          <Tab>Secrets</Tab>
           <Tab>Settings</Tab>
         </TabList>
         <TabPanels>
@@ -162,6 +169,9 @@ export function MachineDetailPage() {
           </TabPanel>
           <TabPanel>
             <QuadletList machineId={machine.id} />
+          </TabPanel>
+          <TabPanel>
+            <SecretList machineId={machine.id} permission={effectivePermission(machine)} />
           </TabPanel>
           <TabPanel>
             <SettingsTab machine={machine} />

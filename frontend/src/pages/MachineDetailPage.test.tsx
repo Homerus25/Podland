@@ -31,6 +31,8 @@ const emptyContainersHandler = http.get('*/api/machines/m-1/containers', () =>
 
 const emptyQuadletsHandler = http.get('*/api/machines/m-1/quadlets', () => HttpResponse.json([]))
 
+const emptySecretsHandler = http.get('*/api/machines/m-1/secrets', () => HttpResponse.json([]))
+
 function renderMachineDetailPage(id = 'm-1') {
   return renderApp(`/machines/${id}`, {
     resolveInitialState: async () => ({ username: 'alice' }),
@@ -72,8 +74,13 @@ describe('MachineDetailPage', () => {
     expect(screen.getByTestId('machine-permission')).toHaveTextContent('admin')
   })
 
-  it('switches between the Containers, Images, Quadlets, and Settings tabs', async () => {
-    server.use(machineHandler(machineFixture), emptyContainersHandler, emptyQuadletsHandler)
+  it('switches between the Containers, Images, Quadlets, Secrets, and Settings tabs', async () => {
+    server.use(
+      machineHandler(machineFixture),
+      emptyContainersHandler,
+      emptyQuadletsHandler,
+      emptySecretsHandler,
+    )
     server.use(http.get('*/api/machines/m-1/images', () => HttpResponse.json([])))
     renderMachineDetailPage()
 
@@ -87,6 +94,9 @@ describe('MachineDetailPage', () => {
     await userEvent.click(screen.getByRole('tab', { name: /quadlets/i }))
     expect(await screen.findByTestId('quadlets-empty')).toBeInTheDocument()
     expect(screen.queryByTestId('tab-quadlets-placeholder')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('tab', { name: /secrets/i }))
+    expect(await screen.findByTestId('secrets-empty')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('tab', { name: /settings/i }))
     expect(screen.getByTestId('machine-form-submit')).toBeInTheDocument()
@@ -162,6 +172,32 @@ describe('MachineDetailPage', () => {
     await userEvent.click(await screen.findByRole('tab', { name: /quadlets/i }))
     expect(await screen.findByText('web')).toBeInTheDocument()
     expect(screen.getByTestId('state-badge')).toHaveTextContent('running')
+  })
+
+  it('renders the secret list inside the Secrets tab', async () => {
+    server.use(
+      machineHandler(machineFixture),
+      emptyContainersHandler,
+      emptyQuadletsHandler,
+    )
+    server.use(
+      http.get('*/api/machines/m-1/secrets', () =>
+        HttpResponse.json([
+          {
+            id: '3f2e1d0c',
+            name: 'db-password',
+            driver: 'file',
+            createdAt: '2026-08-20T10:00:00Z',
+            updatedAt: '2026-08-20T10:00:00Z',
+          },
+        ]),
+      ),
+    )
+    renderMachineDetailPage()
+
+    await userEvent.click(await screen.findByRole('tab', { name: /secrets/i }))
+    expect(await screen.findByText('db-password')).toBeInTheDocument()
+    expect(screen.getByText('file')).toBeInTheDocument()
   })
 
   it('renders the error envelope for an unknown machine id', async () => {
