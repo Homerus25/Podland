@@ -225,15 +225,23 @@ func New(cfg *config.Config) (*App, error) {
 					r.Post("/access", machineHandler.GrantAccess)
 					r.Delete("/access/{userId}", machineHandler.RevokeAccess)
 
+					// requireWrite is the level-aware gate for mutating
+					// routes: the subtree-level RequireMachineAccess above
+					// only proves an access row exists, so without this a
+					// read-level grantee could change remote state. Read-only
+					// routes (lists, gets, logs, generate, events) stay at
+					// the subtree level.
+					requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
+
 					// Containers
 					r.Route("/containers", func(r chi.Router) {
 						r.Get("/", containerHandler.List)
-						r.Post("/", containerHandler.Create)
+						r.With(requireWrite).Post("/", containerHandler.Create)
 						r.Route("/{containerId}", func(r chi.Router) {
 							r.Get("/", containerHandler.Get)
-							r.Post("/start", containerHandler.Start)
-							r.Post("/stop", containerHandler.Stop)
-							r.Delete("/", containerHandler.Delete)
+							r.With(requireWrite).Post("/start", containerHandler.Start)
+							r.With(requireWrite).Post("/stop", containerHandler.Stop)
+							r.With(requireWrite).Delete("/", containerHandler.Delete)
 							r.Get("/logs", containerHandler.Logs)
 						})
 					})
@@ -241,22 +249,22 @@ func New(cfg *config.Config) (*App, error) {
 					// Images
 					r.Route("/images", func(r chi.Router) {
 						r.Get("/", imageHandler.List)
-						r.Post("/pull", imageHandler.Pull)
-						r.Delete("/{imageId}", imageHandler.Delete)
+						r.With(requireWrite).Post("/pull", imageHandler.Pull)
+						r.With(requireWrite).Delete("/{imageId}", imageHandler.Delete)
 					})
 
 					// Quadlets
 					r.Route("/quadlets", func(r chi.Router) {
 						r.Get("/", quadletHandler.List)
-						r.Post("/", quadletHandler.Create)
-						r.Post("/import", quadletHandler.Import)
+						r.With(requireWrite).Post("/", quadletHandler.Create)
+						r.With(requireWrite).Post("/import", quadletHandler.Import)
 						r.Route("/{quadletId}", func(r chi.Router) {
 							r.Get("/", quadletHandler.Get)
-							r.Put("/", quadletHandler.Update)
-							r.Delete("/", quadletHandler.Delete)
-							r.Post("/start", quadletHandler.Start)
-							r.Post("/stop", quadletHandler.Stop)
-							r.Post("/restart", quadletHandler.Restart)
+							r.With(requireWrite).Put("/", quadletHandler.Update)
+							r.With(requireWrite).Delete("/", quadletHandler.Delete)
+							r.With(requireWrite).Post("/start", quadletHandler.Start)
+							r.With(requireWrite).Post("/stop", quadletHandler.Stop)
+							r.With(requireWrite).Post("/restart", quadletHandler.Restart)
 							r.Get("/logs", quadletHandler.GetLogs)
 							r.Post("/generate", quadletHandler.Generate)
 						})

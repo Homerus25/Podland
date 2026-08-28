@@ -377,6 +377,7 @@ type MockMachineAccessRepository struct {
 	updateErr              error
 	deleteErr              error
 	hasAccessErr           error
+	getPermissionErr       error
 }
 
 // MockMachineAccessEntry represents a mock machine access entry
@@ -509,6 +510,29 @@ func (m *MockMachineAccessRepository) HasAccess(machineID, userID string) (bool,
 	key := m.createKey(machineID, userID)
 	_, exists := m.accesses[key]
 	return exists, nil
+}
+
+// GetPermission returns the stored permission level for the pair, or
+// "" when no entry exists — mirroring the repository's no-row contract
+// that models.HasAtLeast consumes.
+func (m *MockMachineAccessRepository) GetPermission(machineID, userID string) (string, error) {
+	if m.getPermissionErr != nil {
+		return "", m.getPermissionErr
+	}
+	key := m.createKey(machineID, userID)
+	entry, exists := m.accesses[key]
+	if !exists {
+		return "", nil
+	}
+	return entry.permission, nil
+}
+
+// WithGetPermissionError returns the same repository with GetPermission
+// configured to fail, for tests injecting a permission-lookup storage
+// failure (mirrors MockSessionRepository.WithRotateError).
+func (m *MockMachineAccessRepository) WithGetPermissionError(err error) *MockMachineAccessRepository {
+	m.getPermissionErr = err
+	return m
 }
 
 // AddAccess adds access directly without going through Create

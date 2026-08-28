@@ -12,6 +12,26 @@ const (
 	PermissionAdmin = "admin"
 )
 
+// permissionRank fixes the permission ladder read < write < admin. It is
+// the single source of truth for ordering: middleware and handlers
+// compare levels through HasAtLeast instead of re-deriving the order.
+var permissionRank = map[string]int{
+	PermissionRead:  1,
+	PermissionWrite: 2,
+	PermissionAdmin: 3,
+}
+
+// HasAtLeast reports whether the actual permission a caller holds is at
+// or above the required one (read < write < admin). An unknown level on
+// either side — including the empty string the access repository
+// returns when no row exists — denies, so a missing or malformed grant
+// never escalates.
+func HasAtLeast(required, actual string) bool {
+	reqRank, reqOK := permissionRank[required]
+	actRank, actOK := permissionRank[actual]
+	return reqOK && actOK && actRank >= reqRank
+}
+
 // Machine represents a machine/host that can be managed
 type Machine struct {
 	ID                string    `json:"id"`

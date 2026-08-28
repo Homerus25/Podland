@@ -11,10 +11,11 @@ import (
 	"github.com/Homerus25/podland/backend/migrations"
 )
 
-// newTestUserDB opens a temp SQLite database and runs the real
-// migrations, so user repository tests exercise the actual schema
-// (including column defaults) rather than hand-rolled CREATE TABLEs.
-func newTestUserDB(t *testing.T) *sql.DB {
+// newTestDB opens a temp SQLite database and runs the real migrations,
+// so repository tests exercise the actual schema (including column
+// defaults) rather than hand-rolled CREATE TABLEs. Shared by the user
+// and machine-access repository tests.
+func newTestDB(t *testing.T, filename string) *sql.DB {
 	t.Helper()
 
 	// migrations.Run reads SQL files from a "migrations/" directory
@@ -22,11 +23,17 @@ func newTestUserDB(t *testing.T) *sql.DB {
 	// backend root is two levels up (same approach as app_test.go).
 	t.Chdir("../..")
 
-	db, err := NewDatabase(filepath.Join(t.TempDir(), "users.db"))
+	db, err := NewDatabase(filepath.Join(t.TempDir(), filename))
 	require.NoError(t, err, "Should open temp database")
 	require.NoError(t, migrations.Run(db), "Should run migrations")
 	t.Cleanup(func() { _ = db.Close() })
 	return db
+}
+
+// newTestUserDB is newTestDB with the user-suite's filename.
+func newTestUserDB(t *testing.T) *sql.DB {
+	t.Helper()
+	return newTestDB(t, "users.db")
 }
 
 // TestUserRepository_RoleRoundTrip asserts that a user created with the

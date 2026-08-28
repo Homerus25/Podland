@@ -19,6 +19,7 @@ type MachineAccessRepositoryInterface interface {
 	Update(access *MachineAccess) error
 	Delete(machineID, userID string) error
 	HasAccess(machineID, userID string) (bool, error)
+	GetPermission(machineID, userID string) (string, error)
 }
 
 // NewMachineAccessRepository creates a new MachineAccessRepository
@@ -141,4 +142,23 @@ func (r *MachineAccessRepository) HasAccess(machineID, userID string) (bool, err
 	}
 
 	return count > 0, nil
+}
+
+// GetPermission returns the permission level a user holds on a machine,
+// or the empty string when no machine_access row exists. Level-aware
+// gates compare this value through models.HasAtLeast; a missing row is
+// the bottom of the ladder, not an error.
+func (r *MachineAccessRepository) GetPermission(machineID, userID string) (string, error) {
+	query := `SELECT permission FROM machine_access WHERE machine_id = ? AND user_id = ?`
+
+	var permission string
+	err := r.db.QueryRow(query, machineID, userID).Scan(&permission)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to get permission: %w", err)
+	}
+
+	return permission, nil
 }

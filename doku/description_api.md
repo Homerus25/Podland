@@ -120,6 +120,10 @@ All error responses follow this structure:
 | `SERVICE_UNAVAILABLE` | 503 | Service temporarily unavailable |
 | `NOT_IMPLEMENTED` | 501 | Endpoint not yet implemented |
 
+### Machine Permission Levels
+
+Access to a machine is granted at one of three levels: `read` < `write` < `admin` (owners implicitly hold `admin`). Every endpoint under `/api/machines/{id}` requires at least `read`. Mutating endpoints — container create/delete/start/stop, image pull/delete, quadlet create/import/update/delete/start/stop/restart — additionally require `write` or above and answer 403 `ACCESS_DENIED` for lower levels. Read-only endpoints (lists, gets, logs, quadlet generate, events) remain available at `read`.
+
 ---
 
 ## Examples
