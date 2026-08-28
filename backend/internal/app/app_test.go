@@ -21,10 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"github.com/Homerus25/podland/backend/internal/app"
 	"github.com/Homerus25/podland/backend/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // newTestConfig builds a fully-controlled *config.Config pointing at temp
@@ -55,7 +55,7 @@ func newTestConfig(t *testing.T) *config.Config {
 			ExpirationMinutes: 60,
 			Issuer:            "podland-test",
 		},
-		Session:        config.SessionConfig{TTLDays: 30},
+		Session: config.SessionConfig{TTLDays: 30},
 		Connections: config.ConnectionConfig{
 			SSHIdleTimeoutSeconds: 900,
 			MaxConcurrent:         10,
@@ -201,4 +201,29 @@ func TestApp_Close_ReleasesBackgroundGoroutines(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("App.Close did not return within 2s; a background goroutine likely hasn't exited")
 	}
+}
+
+// TestApp_Handler_SecretsRouteIsProtected pins the 160-01 wiring: GET
+// /api/machines/{id}/secrets must exist behind the JWT middleware, so an
+// anonymous caller gets 401 (not 404). If the route is dropped or
+// registered outside the protected group, this fails. The deeper gates
+// (404 unknown machine / 403 no-access via RequireMachineAccess, which
+// runs only for authenticated callers) are covered by the domain-level
+// wiring tests in internal/domain/secrets.
+func TestApp_Handler_SecretsRouteIsProtected(t *testing.T) {
+	cfg := newTestConfig(t)
+
+	a, err := app.New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = a.Close() })
+
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/api/machines/some-machine/secrets")
+	require.NoError(t, err, "GET /api/machines/{id}/secrets must connect")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"GET /api/machines/{id}/secrets must sit behind the JWT middleware (401, not 404)")
 }

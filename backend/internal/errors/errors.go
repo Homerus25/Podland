@@ -115,6 +115,14 @@ var (
 	ErrQuadletGenerationFailed = NewAppError("QUADLET_GENERATION_FAILED", "Failed to generate quadlet", http.StatusInternalServerError)
 )
 
+// Secrets
+var (
+	ErrSecretNotFound       = NewAppError("SECRET_NOT_FOUND", "Secret not found", http.StatusNotFound)
+	ErrSecretAlreadyExists  = NewAppError("SECRET_ALREADY_EXISTS", "Secret with this name already exists", http.StatusConflict)
+	ErrSecretInUse          = NewAppError("SECRET_IN_USE", "Secret is in use by one or more containers", http.StatusConflict)
+	ErrSecretCreationFailed = NewAppError("SECRET_CREATION_FAILED", "Failed to create secret", http.StatusInternalServerError)
+)
+
 // Access
 var (
 	ErrAccessDenied         = NewAppError("ACCESS_DENIED", "User does not have permission to access this resource", http.StatusForbidden)

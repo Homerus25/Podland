@@ -22,8 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	chimid "github.com/go-chi/chi/v5/middleware"
 	"github.com/Homerus25/podland/backend/internal/config"
 	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/domain/auth"
@@ -32,6 +30,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/domain/images"
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	"github.com/Homerus25/podland/backend/internal/domain/quadlets"
+	"github.com/Homerus25/podland/backend/internal/domain/secrets"
 	"github.com/Homerus25/podland/backend/internal/domain/users"
 	"github.com/Homerus25/podland/backend/internal/encryption"
 	"github.com/Homerus25/podland/backend/internal/errors"
@@ -39,6 +38,8 @@ import (
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/migrations"
+	"github.com/go-chi/chi/v5"
+	chimid "github.com/go-chi/chi/v5/middleware"
 )
 
 // App owns every backend resource and background goroutine constructed by
@@ -147,6 +148,7 @@ func New(cfg *config.Config) (*App, error) {
 	containerService := containers.NewContainerService(connectionManager)
 	imageService := images.NewImageService(connectionManager)
 	quadletService := quadlets.NewQuadletService(connectionManager, sshExecService)
+	secretService := secrets.NewSecretService(connectionManager)
 	eventService := events.NewEventService(connectionManager)
 
 	// Initialize handlers
@@ -156,6 +158,7 @@ func New(cfg *config.Config) (*App, error) {
 	containerHandler := containers.NewContainerHandler(containerService, machineService)
 	imageHandler := images.NewImageHandler(imageService, machineService)
 	quadletHandler := quadlets.NewQuadletHandler(quadletService, machineService)
+	secretHandler := secrets.NewSecretHandler(secretService)
 	eventHandler := events.NewEventHandler(eventService, machineService, errors.NewErrorHandler())
 
 	// Initialize middleware
@@ -269,6 +272,12 @@ func New(cfg *config.Config) (*App, error) {
 							r.Post("/generate", quadletHandler.Generate)
 						})
 					})
+
+					// Secrets — read-level: secret METADATA is visible to any
+					// grantee (subtree membership is the read gate); the
+					// level-aware gates for inspect-reveal (admin) and
+					// create/delete (write) arrive with slices 160-02..160-04.
+					r.Get("/secrets", secretHandler.List)
 
 					// Events
 					r.Get("/events", eventHandler.HandleEvents)
