@@ -21,6 +21,27 @@ export async function listSecrets(machineId: string): Promise<SecretSummary[]> {
   return response.data
 }
 
+// Response of GET /api/machines/{id}/secrets/{secretId}
+// (backend SecretInspectResponse). secretData is present ONLY when the
+// request carried ?reveal=true and the caller is admin; the backend omits
+// the field entirely otherwise.
+export interface SecretInspect extends SecretSummary {
+  // The secret's value. Only ever populated by the admin reveal path.
+  secretData?: string
+}
+
+export async function getSecret(
+  machineId: string,
+  secretId: string,
+  reveal = false,
+): Promise<SecretInspect> {
+  const response = await api.get<SecretInspect>(
+    `/machines/${machineId}/secrets/${encodeURIComponent(secretId)}`,
+    { params: reveal ? { reveal: 'true' } : undefined },
+  )
+  return response.data
+}
+
 // Body of POST /api/machines/{id}/secrets
 // (backend/internal/domain/secrets/dto.go SecretCreateRequest). The backend
 // trims the name; the value must arrive byte-identical — meaningful

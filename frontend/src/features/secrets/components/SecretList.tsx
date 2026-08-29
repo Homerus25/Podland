@@ -17,9 +17,13 @@ import {
   useDeleteSecret,
   useSecrets,
 } from '@features/secrets/hooks/useSecrets'
+import { SecretDetailModal } from '@features/secrets/components/SecretDetailModal'
 import { SecretForm } from '@features/secrets/components/SecretForm'
 import type { SecretSummary } from '@features/secrets/services/secretsApi'
-import { canManageSecrets, type EffectivePermission } from '@features/machines/permissions'
+import {
+  canManageSecrets,
+  type EffectivePermission,
+} from '@features/machines/permissions'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { Modal } from '@shared/components/Modal'
 import { getApiError } from '@shared/utils/api'
@@ -77,19 +81,31 @@ function DeleteSecretModal({
 function SecretRow({
   machineId,
   secret,
+  permission,
   canDelete,
 }: {
   machineId: string
   secret: SecretSummary
+  permission: EffectivePermission
   canDelete: boolean
 }) {
   const deleteSecret = useDeleteSecret(machineId)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+  const [isDetailOpen, setIsDetailOpen] = useState(false)
 
   return (
     <>
       <Tr data-testid="secret-row">
-        <Td fontFamily="mono">{secret.name}</Td>
+        <Td fontFamily="mono">
+          <Button
+            size="xs"
+            variant="link"
+            onClick={() => setIsDetailOpen(true)}
+            data-testid="secret-detail-button"
+          >
+            {secret.name}
+          </Button>
+        </Td>
         <Td>{secret.driver}</Td>
         <Td>{formatRelativeDate(secret.createdAt)}</Td>
         {canDelete ? (
@@ -110,6 +126,14 @@ function SecretRow({
           </Td>
         ) : null}
       </Tr>
+      {isDetailOpen ? (
+        <SecretDetailModal
+          machineId={machineId}
+          secret={secret}
+          permission={permission}
+          onClose={() => setIsDetailOpen(false)}
+        />
+      ) : null}
       {isDeleteOpen ? (
         <DeleteSecretModal
           secret={secret}
@@ -194,6 +218,7 @@ export function SecretList({
                   key={secret.id}
                   machineId={machineId}
                   secret={secret}
+                  permission={permission}
                   canDelete={canManageSecrets(permission)}
                 />
               ))}

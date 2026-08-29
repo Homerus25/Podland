@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createSecret,
   deleteSecret,
+  getSecret,
   listSecrets,
   type CreateSecretInput,
 } from '@features/secrets/services/secretsApi'
@@ -26,6 +27,29 @@ export function useCreateSecret(machineId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: secretsQueryKey(machineId) })
     },
+  })
+}
+
+function secretQueryKey(machineId: string, secretId: string) {
+  return [...secretsQueryKey(machineId), secretId] as const
+}
+
+// Detail view metadata. gcTime: 0 drops the cache entry the moment the
+// detail view unmounts, so reopening always refetches the current state.
+export function useSecret(machineId: string, secretId: string) {
+  return useQuery({
+    queryKey: secretQueryKey(machineId, secretId),
+    queryFn: () => getSecret(machineId, secretId),
+    gcTime: 0,
+  })
+}
+
+// The revealed value travels through a mutation so React Query never caches
+// it; it lives only in the component that owns the mutation and is dropped
+// when the detail view closes.
+export function useRevealSecret(machineId: string) {
+  return useMutation({
+    mutationFn: (secretId: string) => getSecret(machineId, secretId, true),
   })
 }
 
