@@ -73,6 +73,9 @@ type fakePodman struct {
 	// the latest one, so tests can assert the value wiring byte-for-byte.
 	createCalls int
 	createBody  string
+	// removeCalls counts requests served on the delete endpoint
+	// (DELETE /libpod/secrets/{id}).
+	removeCalls int
 }
 
 // startRecordingPodman starts an HTTP test server performing the
@@ -637,4 +640,119 @@ func TestFromSecretInfoReport_ZeroTimesAndNilReport(t *testing.T) {
 // `[]` rather than `null`.
 func TestToSecretListResponse_NilSliceKeepsEmptyArray(t *testing.T) {
 	assert.Equal(t, []SecretListResponse{}, ToSecretListResponse(nil))
+}
+
+// --- Service seam: Delete ---
+
+// newSecretDeleteServer starts a fake podman speaking enough of the service
+// API for secrets.Remove: /_ping (the connection handshake, via
+// startRecordingPodman) and DELETE /libpod/secrets/{id}. The remove call's
+// method and path are recorded for wiring assertions; the endpoint answers
+// with the configured status and canned body — podman's error wire shape
+// (errorhandling.ErrorModel JSON) when status >= 400.
+func newSecretDeleteServer(t *testing.T, status int, body string) (*fakePodman, *httptest.Server) {
+	t.Helper()
+	fake, server := startRecordingPodman(t, func(w http.ResponseWriter, r *http.Request, fake *fakePodman) {
+		if r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/libpod/secrets/") {
+			fake.mu.Lock()
+			fake.removeCalls++
+			fake.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		t.Errorf("fake podman received unexpected request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	})
+	return fake, server
+}
+
+// TestSecretService_Delete_Success pins the delete wiring: the service must
+// issue a DELETE against podman's single-secret endpoint (the URL param
+// accepts a name or an ID) and release the connection lease afterwards. A
+// successful removal answers 204 with no body.
+func TestSecretService_Delete_Success(t *testing.T) {
+	fake, server := newSecretDeleteServer(t, http.StatusNoContent, "")
+	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
+	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+
+	err := service.Delete(context.Background(), "writer-1", "test-machine", "db-password")
+
+	require.NoError(t, err, "a podman 204 must delete cleanly")
+
+	fake.mu.Lock()
+	gotMethod, gotPath := fake.method, fake.path
+	fake.mu.Unlock()
+	assert.Equal(t, http.MethodDelete, gotMethod, "bindings must issue a DELETE")
+	assert.True(t, strings.HasSuffix(gotPath, "/libpod/secrets/db-password"),
+		"bindings must hit the single-secret endpoint, got %q", gotPath)
+
+	assert.Equal(t, []string{"test-machine"}, connManager.released,
+		"the connection lease must be released after the call")
+}
+
+// TestSecretService_Delete_UnknownSecretIsNotFound pins the 404 mapping: a
+// podman not-found answer (errorhandling.ErrorModel with response 404)
+// surfaces as the domain's SECRET_NOT_FOUND sentinel.
+func TestSecretService_Delete_UnknownSecretIsNotFound(t *testing.T) {
+	notFoundBody := `{"cause":"no such secret","message":"no such secret with name or id \"nope\"","response":404}`
+	_, server := newSecretDeleteServer(t, http.StatusNotFound, notFoundBody)
+	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
+	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+
+	err := service.Delete(context.Background(), "writer-1", "test-machine", "nope")
+
+	assert.Equal(t, appErrors.ErrSecretNotFound, err, "a podman 404 must map to SECRET_NOT_FOUND")
+	assert.Equal(t, []string{"test-machine"}, connManager.released,
+		"the lease must still be released on a podman 404")
+}
+
+// TestSecretService_Delete_InUseConflict pins the in-use mapping: podman
+// refuses to remove a secret referenced by a container, surfacing it as a
+// 500 ErrorModel whose message names the usage (the compat handler funnels
+// every non-"no such secret" removal failure through InternalServerError).
+// The service must map that to SECRET_IN_USE (409), not a generic 500.
+func TestSecretService_Delete_InUseConflict(t *testing.T) {
+	inUseBody := `{"cause":"secret in use","message":"secret \"db-password\" is in use by container 3f2e1d0c","response":500}`
+	_, server := newSecretDeleteServer(t, http.StatusInternalServerError, inUseBody)
+	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
+	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+
+	err := service.Delete(context.Background(), "writer-1", "test-machine", "db-password")
+
+	assert.Equal(t, appErrors.ErrSecretInUse.Code, err.(*appErrors.AppError).Code,
+		"an in-use refusal must map to SECRET_IN_USE")
+	assert.Contains(t, err.(*appErrors.AppError).Message, "in use by container 3f2e1d0c",
+		"the 409 must surface podman's own refusal message for the frontend")
+	assert.Equal(t, []string{"test-machine"}, connManager.released,
+		"the lease must still be released on an in-use refusal")
+}
+
+// TestSecretService_Delete_OtherPodmanErrorsStayGeneric pins that only 404
+// and the in-use message are special-cased: any other podman failure stays
+// a non-AppError the handler maps to 500.
+func TestSecretService_Delete_OtherPodmanErrorsStayGeneric(t *testing.T) {
+	_, server := newSecretDeleteServer(t, http.StatusInternalServerError,
+		`{"cause":"boom","message":"internal podman error","response":500}`)
+	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
+	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+
+	err := service.Delete(context.Background(), "writer-1", "test-machine", "db-password")
+
+	var appErr *appErrors.AppError
+	assert.NotErrorAs(t, err, &appErr, "the raw error stays non-AppError so the handler 500s it")
+}
+
+// TestSecretService_Delete_ConnectionFailure pins the connection seam for
+// delete: a failed tunnel maps to ErrConnectionFailed (502), mirroring
+// List/Get/Create.
+func TestSecretService_Delete_ConnectionFailure(t *testing.T) {
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewSecretService(mockConnManager, testutils.NewMockMachineAccessRepository())
+
+	err := service.Delete(context.Background(), "writer-1", "test-machine", "db-password")
+
+	assert.Equal(t, appErrors.ErrConnectionFailed, err, "a failed connection must map to ErrConnectionFailed")
 }

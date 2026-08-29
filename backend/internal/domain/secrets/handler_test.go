@@ -143,6 +143,7 @@ type MockSecretService struct {
 	mockList   func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error)
 	mockGet    func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error)
 	mockCreate func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error)
+	mockDelete func(ctx context.Context, userID, machineID, secretID string) error
 }
 
 func (m *MockSecretService) List(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
@@ -164,6 +165,13 @@ func (m *MockSecretService) Create(ctx context.Context, userID, machineID string
 		return m.mockCreate(ctx, userID, machineID, req)
 	}
 	return nil, nil
+}
+
+func (m *MockSecretService) Delete(ctx context.Context, userID, machineID, secretID string) error {
+	if m.mockDelete != nil {
+		return m.mockDelete(ctx, userID, machineID, secretID)
+	}
+	return nil
 }
 
 // TestSecretHandler_List_ForwardsCallerAndMachine pins the handler→service
@@ -707,6 +715,7 @@ func secretsAccessRouter(machineRepo *testutils.MockMachineRepository, accessRep
 				r.With(requireWrite).Post("/", NewSecretHandler(service).Create)
 				r.Route("/{secretId}", func(r chi.Router) {
 					r.Get("/", NewSecretHandler(service).Get)
+					r.With(requireWrite).Delete("/", NewSecretHandler(service).Delete)
 				})
 			})
 		})
@@ -772,4 +781,195 @@ func TestSecretHandler_List_ReadLevelGranteeReachesHandler(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "secret metadata is visible at read level")
 	assert.True(t, called, "handler must run for a read-level grantee")
+}
+
+// TestSecretHandler_Delete_SuccessAndErrorMapping pins the delete contract:
+// a successful removal answers 204 with an empty body (the frontend series
+// (170) invalidates the list on the 204 — there is nothing to parse), the
+// service's AppErrors keep their HTTP status (404 SECRET_NOT_FOUND, 409
+// SECRET_IN_USE, 502 CONNECTION_FAILED), and a non-AppError falls back to
+// 500.
+func TestSecretHandler_Delete_SuccessAndErrorMapping(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockError      error
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:           "successful delete",
+			expectedStatus: http.StatusNoContent,
+			expectedBody:   "",
+		},
+		{
+			name:           "unknown secret is not found",
+			mockError:      errors.ErrSecretNotFound,
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   "SECRET_NOT_FOUND",
+		},
+		{
+			name:           "in-use secret is a conflict",
+			mockError:      errors.ErrSecretInUse,
+			expectedStatus: http.StatusConflict,
+			expectedBody:   "SECRET_IN_USE",
+		},
+		{
+			name:           "connection failed",
+			mockError:      errors.ErrConnectionFailed,
+			expectedStatus: http.StatusBadGateway,
+			expectedBody:   "",
+		},
+		{
+			name:           "non-app error falls back to internal error",
+			mockError:      errGeneric,
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody:   "INTERNAL_ERROR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			mockService := &MockSecretService{
+				mockDelete: func(ctx context.Context, userID, machineID, secretID string) error {
+					called = true
+					return tt.mockError
+				},
+			}
+			handler := NewSecretHandler(mockService)
+
+			req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/db-password", nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", "machine123")
+			rctx.URLParams.Add("secretId", "db-password")
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+			handler.Delete(rr, req)
+
+			assert.True(t, called, "the request must reach the service")
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+			assert.Contains(t, rr.Body.String(), tt.expectedBody)
+			if tt.expectedStatus == http.StatusNoContent {
+				assert.Empty(t, rr.Body.String(), "a 204 must carry no body")
+			}
+		})
+	}
+}
+
+// TestSecretHandler_Delete_MissingContextAndParams pins the request-shape
+// guards for delete: no authenticated user → 401, no {secretId} URL param
+// → 400.
+func TestSecretHandler_Delete_MissingContextAndParams(t *testing.T) {
+	tests := []struct {
+		name           string
+		userID         string
+		secretID       string
+		expectedStatus int
+	}{
+		{name: "missing user ID", userID: "", secretID: "db-password", expectedStatus: http.StatusUnauthorized},
+		{name: "missing secret ID", userID: "user123", secretID: "", expectedStatus: http.StatusBadRequest},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			called := false
+			mockService := &MockSecretService{
+				mockDelete: func(ctx context.Context, userID, machineID, secretID string) error {
+					called = true
+					return nil
+				},
+			}
+			handler := NewSecretHandler(mockService)
+
+			req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/"+tt.secretID, nil)
+			rctx := chi.NewRouteContext()
+			rctx.URLParams.Add("id", "machine123")
+			rctx.URLParams.Add("secretId", tt.secretID)
+			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
+			req = req.WithContext(ctx)
+
+			rr := httptest.NewRecorder()
+			handler.Delete(rr, req)
+
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+			assert.False(t, called, "a malformed request must never reach the service")
+		})
+	}
+}
+
+// TestSecretHandler_Delete_RouteLevelGating pins the mounted-route contract
+// for delete (the DELETE route rides RequireMachinePermission(write), so a
+// read-level grantee is refused 403 before the handler runs, a write-level
+// grantee goes through, and an unknown machine is 404'd by
+// RequireMachineAccess).
+func TestSecretHandler_Delete_RouteLevelGating(t *testing.T) {
+	newRouter := func() (http.Handler, *int) {
+		calls := 0
+		service := &MockSecretService{mockDelete: func(ctx context.Context, userID, machineID, secretID string) error {
+			calls++
+			return nil
+		}}
+		machineRepo := testutils.NewMockMachineRepository()
+		machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
+		accessRepo := testutils.NewMockMachineAccessRepository()
+		accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
+		accessRepo.AddAccess("machine-1", "writer-1", models.PermissionWrite, time.Now())
+		return secretsAccessRouter(machineRepo, accessRepo, service), &calls
+	}
+
+	t.Run("read-level grantee is forbidden", func(t *testing.T) {
+		router, calls := newRouter()
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, requestAsUser(http.MethodDelete, "/api/machines/machine-1/secrets/db-password", "reader-1"))
+		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "a read-level grantee must be refused")
+		assert.Zero(t, *calls, "a refused delete must never reach the handler")
+	})
+
+	t.Run("write-level grantee goes through", func(t *testing.T) {
+		router, calls := newRouter()
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, requestAsUser(http.MethodDelete, "/api/machines/machine-1/secrets/db-password", "writer-1"))
+		assert.Equal(t, http.StatusNoContent, w.Result().StatusCode, "a write-level grantee must reach the 204")
+		assert.Equal(t, 1, *calls, "the handler must run once for a write-level grantee")
+	})
+
+	t.Run("unknown machine is not found", func(t *testing.T) {
+		router, calls := newRouter()
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, requestAsUser(http.MethodDelete, "/api/machines/no-such-machine/secrets/db-password", "writer-1"))
+		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode, "an unknown machine must be refused before the handler")
+		assert.Zero(t, *calls, "a 404 machine must never reach the handler")
+	})
+}
+
+// TestSecretHandler_Delete_InUseSurfacesPodmanMessage pins that the 409
+// body carries podman's own refusal text (a 4xx, so it is NOT rewritten
+// generic) — the frontend surfaces which container holds the secret.
+func TestSecretHandler_Delete_InUseSurfacesPodmanMessage(t *testing.T) {
+	podmanMessage := "secret db-password is in use by container 3f2e1d0c"
+	mockService := &MockSecretService{
+		mockDelete: func(ctx context.Context, userID, machineID, secretID string) error {
+			return errors.ErrSecretInUse.WithMessage(podmanMessage)
+		},
+	}
+	handler := NewSecretHandler(mockService)
+
+	req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/db-password", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "machine123")
+	rctx.URLParams.Add("secretId", "db-password")
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	req = req.WithContext(context.WithValue(ctx, contextutils.UserIDContextKey, "user123"))
+
+	rr := httptest.NewRecorder()
+	handler.Delete(rr, req)
+
+	assert.Equal(t, http.StatusConflict, rr.Code)
+	assert.Contains(t, rr.Body.String(), "SECRET_IN_USE")
+	assert.Contains(t, rr.Body.String(), podmanMessage,
+		"the 409 body must surface podman's refusal message")
 }

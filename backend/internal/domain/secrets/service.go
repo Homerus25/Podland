@@ -24,6 +24,7 @@ type SecretServiceInterface interface {
 	List(ctx context.Context, userID, machineID string) ([]SecretListResponse, error)
 	Get(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error)
 	Create(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error)
+	Delete(ctx context.Context, userID, machineID, secretID string) error
 }
 
 // accessPermissionGetter is the slice of the machine-access repository
@@ -190,6 +191,53 @@ func isPodmanSecretNameInUse(err error) bool {
 		return errModel.Because == "secret name in use"
 	}
 	return false
+}
+
+// Delete removes a secret (by name or ID) from the specified machine.
+// Podman answers 204 with no body on success, and the API's response body
+// is empty too — the frontend series (170) invalidates the list on the 204.
+func (s *SecretService) Delete(ctx context.Context, userID, machineID, secretID string) error {
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
+	if err != nil {
+		return appErrors.ErrConnectionFailed
+	}
+
+	defer s.connManager.Release(machineID)
+
+	if err := podmanSecrets.Remove(connCtx, secretID); err != nil {
+		if isPodmanNotFound(err) {
+			return appErrors.ErrSecretNotFound
+		}
+		if isPodmanSecretInUse(err) {
+			// Surface podman's own refusal text (which container holds the
+			// secret) — a 4xx, so the message reaches the frontend.
+			return appErrors.ErrSecretInUse.WithMessage(podmanErrorMessage(err))
+		}
+		return fmt.Errorf("failed to delete secret: %w", err)
+	}
+
+	return nil
+}
+
+// isPodmanSecretInUse reports whether err is podman's refusal to remove a
+// secret still referenced by a container. Podman surfaces that refusal as a
+// 500 ErrorModel (the compat handler funnels every non-"no such secret"
+// removal failure through InternalServerError), so detection rides on the
+// message/cause text — podman carries no distinct status for the in-use
+// case.
+func isPodmanSecretInUse(err error) bool {
+	return strings.Contains(strings.ToLower(podmanErrorMessage(err)), "in use")
+}
+
+// podmanErrorMessage digs the human-readable text out of a podman
+// errorhandling.ErrorModel. The refusal text rides in Message; the Create
+// duplicate-name path instead shows up under Because, so both are checked.
+func podmanErrorMessage(err error) string {
+	var errModel *errorhandling.ErrorModel
+	if errors.As(err, &errModel) {
+		return errModel.Message + " " + errModel.Because
+	}
+	return ""
 }
 
 // isPodmanNotFound reports whether err is podman's typed not-found answer.

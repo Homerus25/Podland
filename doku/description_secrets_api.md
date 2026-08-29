@@ -121,4 +121,15 @@ The response carries only the created ID — never the value.
 
 ### DELETE /api/machines/{id}/secrets/{secretId}
 
-Not yet implemented (planned slice 160-04). Podman secrets are immutable — an update is a conscious non-goal in v1; replacing a value means delete + recreate.
+Removes a secret from the machine. The `{secretId}` path segment accepts a secret name or ID. Gated at **write** level: `read` → 403, `write`/`admin` → proceed.
+
+**Responses**
+
+- 204: removed successfully. The response body is **empty** — the frontend (series 170) should invalidate its secrets list on the 204, there is nothing to parse.
+- 403: `ACCESS_DENIED` (caller below write level)
+- 404: `SECRET_NOT_FOUND` (no such secret on the machine)
+- 409: `SECRET_IN_USE` (podman refuses to remove a secret referenced by a container; podman's own message is not forwarded — 5xx bodies are rewritten generic)
+- 500: `INTERNAL_ERROR` (other podman failures; 5xx bodies are rewritten generic)
+- 502: `CONNECTION_FAILED`
+
+Podman secrets are immutable — an update is a conscious non-goal in v1; replacing a value means delete + recreate.

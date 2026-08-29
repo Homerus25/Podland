@@ -17,6 +17,17 @@ func (e *AppError) Error() string {
 	return fmt.Sprintf("%s: %s", e.Code, e.Message)
 }
 
+// WithMessage returns a copy of the error carrying the given message.
+// The sentinels are shared pointers, so callers must never mutate them in
+// place; a copy keeps the sentinel (and its code/status) intact while the
+// message carries per-request detail. Only for non-5xx codes:
+// RespondWithError rewrites 5xx messages as generic.
+func (e *AppError) WithMessage(message string) *AppError {
+	copied := *e
+	copied.Message = message
+	return &copied
+}
+
 // NewAppError creates a new AppError
 func NewAppError(code, message string, status int) *AppError {
 	return &AppError{

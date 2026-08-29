@@ -112,6 +112,46 @@ func (h *SecretHandler) Create(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(secret)
 }
 
+// Delete handles removing a secret by name or ID. Route-level
+// RequireMachinePermission(write) (app.go) gates it at write; on success
+// podman answers 204 and this handler echoes that with an empty body —
+// the frontend series (170) invalidates the list on the 204.
+func (h *SecretHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	slog.InfoContext(r.Context(), "Delete secret")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	secretID := chi.URLParam(r, "secretId")
+	if secretID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_SECRET_ID", "Secret ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	err := h.service.Delete(r.Context(), userID, machineID, secretID)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "delete", slog.Any("error", err), slog.String("userID", userID), slog.String("machineID", machineID), slog.String("secretId", secretID))
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // List handles listing secret metadata
 func (h *SecretHandler) List(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "List secrets")
