@@ -5,7 +5,7 @@ Part of the [API contract](description_api.md). See the main document for base U
 Secrets live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. The permission model maps onto the machine levels:
 
 - **read** — see secret **metadata** (name, ID, driver, timestamps, labels)
-- **write** — additionally create (and, in a later slice, delete) secrets
+- **write** — additionally create and delete secrets
 - **admin** — additionally **reveal secret values** (`?reveal=true`)
 
 **Redaction discipline:** a secret's value travels exactly twice — in the create request and in an admin reveal response. It is never persisted by the backend, never logged at any level, and never appears in any other response (list and metadata inspect responses have no value field at all).
@@ -128,7 +128,7 @@ Removes a secret from the machine. The `{secretId}` path segment accepts a secre
 - 204: removed successfully. The response body is **empty** — the frontend (series 170) should invalidate its secrets list on the 204, there is nothing to parse.
 - 403: `ACCESS_DENIED` (caller below write level)
 - 404: `SECRET_NOT_FOUND` (no such secret on the machine)
-- 409: `SECRET_IN_USE` (podman refuses to remove a secret referenced by a container; podman's own message is not forwarded — 5xx bodies are rewritten generic)
+- 409: `SECRET_IN_USE` (podman refuses to remove a secret referenced by a container; podman's own refusal message — naming the container that holds the secret — is forwarded in the 409 body since it is a 4xx, not rewritten generic)
 - 500: `INTERNAL_ERROR` (other podman failures; 5xx bodies are rewritten generic)
 - 502: `CONNECTION_FAILED`
 
