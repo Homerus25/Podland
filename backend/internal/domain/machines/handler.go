@@ -90,6 +90,49 @@ func (h *MachineHandler) Get(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(FromModel(machine))
 }
 
+// MachineStatusResponse is the payload of GET /api/machines/{id}/status.
+// checkedAt is RFC3339 UTC. There is no third state: any probe failure is
+// reported as "offline" and the underlying connection error is never
+// included (machines are shared; SSH-level errors describe the owner's
+// infrastructure).
+type MachineStatusResponse struct {
+	Status    string `json:"status"`
+	CheckedAt string `json:"checkedAt"`
+}
+
+// Status handles the live status check for a machine
+func (h *MachineHandler) Status(w http.ResponseWriter, r *http.Request) {
+	// Get user ID from context
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	// Get machine ID from URL parameter
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	status, checkedAt, err := h.service.GetMachineStatus(r.Context(), userID, machineID)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(MachineStatusResponse{
+		Status:    status,
+		CheckedAt: checkedAt.Format(time.RFC3339),
+	})
+}
+
 // List handles listing machines
 func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 	// Get user ID from context

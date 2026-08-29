@@ -162,10 +162,28 @@ type MockConnectionManager struct {
 	getConnectionErr    error
 	testConnectionErr   error
 	testConnectionCalls []MockTestConnectionCall
+	probeErr            error
+	probeCalls          []MockProbeCall
+}
+
+// MockProbeCall records a single ProbeMachine invocation.
+type MockProbeCall struct {
+	MachineID string
+	UserID    string
 }
 
 func NewMockConnectionManager() *MockConnectionManager {
 	return &MockConnectionManager{}
+}
+
+// NewMockConnectionManagerWithProbeError returns a MockConnectionManager
+// whose ProbeMachine always fails with the given error. Use this to
+// exercise the live status probe's failure branch (probe error and probe
+// timeout both map to "offline").
+func NewMockConnectionManagerWithProbeError(probeErr error) *MockConnectionManager {
+	return &MockConnectionManager{
+		probeErr: probeErr,
+	}
 }
 
 func NewMockConnectionManagerWithError(getConnectionErr error) *MockConnectionManager {
@@ -196,6 +214,20 @@ func (m *MockConnectionManager) GetConnection(machineID, userID string) (context
 }
 
 func (m *MockConnectionManager) Release(machineID string) {
+}
+
+// ProbeMachine records the call and returns the injected error. The
+// default — no error set — is success (the machine is online).
+func (m *MockConnectionManager) ProbeMachine(machineID, userID string) error {
+	m.probeCalls = append(m.probeCalls, MockProbeCall{MachineID: machineID, UserID: userID})
+	return m.probeErr
+}
+
+// ProbeCalls returns a snapshot of every ProbeMachine invocation.
+func (m *MockConnectionManager) ProbeCalls() []MockProbeCall {
+	out := make([]MockProbeCall, len(m.probeCalls))
+	copy(out, m.probeCalls)
+	return out
 }
 
 // TestConnection records the probe arguments and returns the injected

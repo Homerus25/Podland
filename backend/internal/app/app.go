@@ -222,6 +222,7 @@ func New(cfg *config.Config) (*App, error) {
 				// families that ride on a machine.
 				r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
 					r.Get("/", machineHandler.Get)
+					r.Get("/status", machineHandler.Status)
 					r.Put("/", machineHandler.Update)
 					r.Delete("/", machineHandler.Delete)
 					r.Get("/access", machineHandler.ListAccess)

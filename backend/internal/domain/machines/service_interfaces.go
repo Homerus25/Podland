@@ -9,6 +9,14 @@ import (
 type ConnectionManagerInterface interface {
 	GetConnection(machineID, userID string) (context.Context, error)
 	Release(machineID string)
+	// ProbeMachine performs a live status probe for an already-persisted
+	// machine: it reuses the cached per-machine connection when present
+	// (a full SSH dial only when cold) and pings the Podman service API
+	// through it. The implementation is responsible for bounding the
+	// probe by the same timeout regime as the registration TestConnection
+	// (MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS). Any error — including
+	// timeout — means the machine is offline; there is no third state.
+	ProbeMachine(machineID, userID string) error
 	// TestConnection probes an SSH/podman connection using raw credentials,
 	// without requiring the machine to be persisted first. It is called from
 	// MachineService.Create during registration (description_backend.md

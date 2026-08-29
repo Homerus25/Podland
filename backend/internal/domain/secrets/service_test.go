@@ -143,6 +143,10 @@ func (m *stubConnManager) TestConnection(ctx context.Context, hostname string, p
 	return nil
 }
 
+func (m *stubConnManager) ProbeMachine(machineID, userID string) error {
+	return nil
+}
+
 // tunnelCtxTo builds a context carrying a bindings connection to the given
 // HTTP server, the way the real connection factory does for SSH tunnels.
 func tunnelCtxTo(t *testing.T, server *httptest.Server) context.Context {

@@ -2,12 +2,14 @@ package machines
 
 import (
 	"context"
+	"log/slog"
 	stderrors "errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
 )
@@ -237,6 +239,39 @@ func (s *MachineService) GetMachineByID(userID, machineID string) (*models.Machi
 	}
 
 	return machine, nil
+}
+
+// Machine status values returned by GetMachineStatus. There is no third
+// server-side state: any probe failure is simply "offline".
+const (
+	StatusOnline  = "online"
+	StatusOffline = "offline"
+)
+
+// GetMachineStatus performs a live probe of a machine the user can access
+// and reports whether it is currently reachable. Access rules match
+// GetMachineByID (404 for unknown machine, 403 without access; read level
+// suffices). Offline is a valid answer, not an error: any probe failure —
+// dial failure, auth failure, missing socket, ping failure, or timeout —
+// yields StatusOffline. The detailed failure reason is logged server-side
+// (with the requestId when present) and never returned to the caller,
+// because SSH-level errors describe the owner's infrastructure and
+// machines can be shared with read-only users.
+func (s *MachineService) GetMachineStatus(ctx context.Context, userID, machineID string) (string, time.Time, error) {
+	if _, err := s.GetMachineByID(userID, machineID); err != nil {
+		return "", time.Time{}, err
+	}
+
+	checkedAt := time.Now().UTC()
+	if err := s.connManager.ProbeMachine(machineID, userID); err != nil {
+		slog.ErrorContext(ctx, "machine status probe failed",
+			"error", err,
+			"machineID", machineID,
+			"userID", userID,
+			"requestID", contextutils.GetRequestID(ctx))
+		return StatusOffline, checkedAt, nil
+	}
+	return StatusOnline, checkedAt, nil
 }
 
 // ListAccessibleMachines retrieves all machines a user has access to,

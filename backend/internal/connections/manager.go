@@ -3,11 +3,13 @@ package connections
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/encryption"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"go.podman.io/podman/v6/pkg/bindings"
 )
 
 // ConnectionManager manages SSH connections to machines
@@ -178,6 +180,67 @@ func (m *ConnectionManager) Stop() {
 
 func (m *ConnectionManager) Release(machineID string) {
 	m.cache.Release(machineID)
+}
+
+// ProbeMachine performs a live status probe of a persisted machine: it
+// reuses the cached per-machine connection when one exists (a full SSH
+// dial only happens when cold, via GetConnection) and pings the Podman
+// service API through it. The probe is bounded by the same timeout regime
+// as the registration TestConnection (testTimeout /
+// MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS).
+//
+// Return contract for the caller (machines.MachineService.GetMachineStatus):
+//   - nil: SSH reachable AND the Podman API answered its ping → online.
+//   - any error, including context.DeadlineExceeded: offline. There is no
+//     third state and the error is the connection layer's own wording —
+//     callers must not surface it to API clients.
+func (m *ConnectionManager) ProbeMachine(machineID, userID string) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- m.probe(machineID, userID)
+	}()
+
+	timer := time.NewTimer(m.testTimeout)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return context.DeadlineExceeded
+	case err := <-done:
+		return err
+	}
+}
+
+// probe runs the actual dial-or-reuse plus ping. Both legs live inside the
+// raced goroutine so a slow cold dial is bounded by testTimeout too, not
+// just the ping — matching the registration TestConnection regime.
+func (m *ConnectionManager) probe(machineID, userID string) error {
+	connCtx, err := m.GetConnection(machineID, userID)
+	if err != nil {
+		return fmt.Errorf("probe connection: %w", err)
+	}
+	defer m.Release(machineID)
+	return pingPodman(connCtx)
+}
+
+// pingPodman issues GET /_ping over an established podman bindings
+// connection, mirroring the implicit ping bindings.NewConnectionWithOptions
+// performs at dial time (connection_factory.go). A 200 means the Podman
+// service API is answering over the SSH connection.
+func pingPodman(ctx context.Context) error {
+	conn, err := bindings.GetClient(ctx)
+	if err != nil {
+		return fmt.Errorf("probe client: %w", err)
+	}
+	response, err := conn.DoRequest(ctx, nil, http.MethodGet, "/_ping", nil, nil)
+	if err != nil {
+		return fmt.Errorf("probe ping: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("probe ping: unexpected status %d", response.StatusCode)
+	}
+	return nil
 }
 
 // TestConnection probes an SSH/podman connection for a not-yet-persisted

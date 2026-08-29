@@ -126,6 +126,31 @@ Get details of a specific machine.
 
 ---
 
+### GET /api/machines/{id}/status
+
+Perform a live status check of a machine. The machine is online when the SSH connection to the host succeeds AND the Podman service API answers its ping over that connection; anything else — dial failure, auth failure, missing socket, ping failure, or timeout — is reported as `offline`. There is no third server-side state. A cached per-machine connection is reused when present; a full SSH dial only happens when cold. The probe is bounded by the same timeout regime as the registration connection test (`MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS`, 10 seconds default). Any user with access may check status (read level suffices). Connection error details are never included in the response; they are logged server-side only, because SSH-level errors describe the owner's infrastructure and machines can be shared.
+
+**Authentication:** Required
+
+**Response (Success - 200):**
+```json
+{
+  "status": "online",
+  "checkedAt": "2026-08-29T12:00:00Z"
+}
+```
+
+- `status`: `"online"` or `"offline"` (offline is a valid answer, not an error)
+- `checkedAt`: RFC3339 UTC timestamp
+
+**Response (Error):**
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+
+---
+
 ### PUT /api/machines/{id}
 
 Update an existing machine's connection details.
