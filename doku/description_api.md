@@ -12,6 +12,7 @@ Endpoint documentation is split by domain:
 - [Containers](description_containers_api.md) - Container CRUD, lifecycle, logs
 - [Images](description_images_api.md) - Image listing, pull, removal
 - [Quadlets](description_quadlets_api.md) - Quadlet CRUD, lifecycle, generate, import
+- [Secrets](description_secrets_api.md) - Secret list/inspect/create with admin-only value reveal
 
 Authentication uses JWT Bearer tokens; see the [Auth](description_auth_api.md) document for details.
 
@@ -113,6 +114,10 @@ All error responses follow this structure:
 | `QUADLET_RESOURCE_RUNNING` | 400 | Quadlet-managed resource is running |
 | `QUADLET_ALREADY_RUNNING` | 400 | Quadlet is already running |
 | `QUADLET_NOT_RUNNING` | 400 | Quadlet is not running |
+| `SECRET_NOT_FOUND` | 404 | Secret does not exist |
+| `SECRET_ALREADY_EXISTS` | 409 | Secret with this name already exists |
+| `SECRET_IN_USE` | 409 | Secret is in use by one or more containers |
+| `SECRET_CREATION_FAILED` | 500 | Failed to create secret |
 | `VALIDATION_FAILED` | 400 | Request data failed validation |
 | `INVALID_REQUEST` | 400 | Malformed request body |
 | `INVALID_SSH_KEY` | 400 | Invalid SSH private key format |
@@ -122,7 +127,7 @@ All error responses follow this structure:
 
 ### Machine Permission Levels
 
-Access to a machine is granted at one of three levels: `read` < `write` < `admin` (owners implicitly hold `admin`). Every endpoint under `/api/machines/{id}` requires at least `read`. Mutating endpoints — container create/delete/start/stop, image pull/delete, quadlet create/import/update/delete/start/stop/restart — additionally require `write` or above and answer 403 `ACCESS_DENIED` for lower levels. Read-only endpoints (lists, gets, logs, quadlet generate, events) remain available at `read`.
+Access to a machine is granted at one of three levels: `read` < `write` < `admin` (owners implicitly hold `admin`). Every endpoint under `/api/machines/{id}` requires at least `read`. Mutating endpoints — container create/delete/start/stop, image pull/delete, quadlet create/import/update/delete/start/stop/restart, secret create — additionally require `write` or above and answer 403 `ACCESS_DENIED` for lower levels. Read-only endpoints (lists, gets, logs, quadlet generate, events, secret metadata list/inspect) remain available at `read`. Secret value reveal (`GET .../secrets/{secretId}?reveal=true`) is the one `admin`-only operation and answers 403 `ACCESS_DENIED` below admin.
 
 ---
 

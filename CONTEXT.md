@@ -69,7 +69,7 @@ A full-stack web application for managing Podman on remote machines. This docume
   - Context-based error display
   - Global 401 interceptor for token expiration
 - **Backend**:
-  - Logs via Logrus
+  - Logs via slog
   - Fail fast on SSH/Podman failures
   - Structured error responses with requestId
 
@@ -126,7 +126,7 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **API**: RESTful endpoints
 - **Database**: SQLite (via `github.com/mattn/go-sqlite3`)
 - **Authentication**: JWT (RS256) with Authorization: Bearer header
-- **Logging**: Logrus
+- **Logging**: slog (structured, `log/slog`)
 - **Validation**: `go-playground/validator`
 - **SSH**: `golang.org/x/crypto/ssh` via forked Podman's connection.go
 - **Containerization**: Podman (for integration tests and deployment)
@@ -192,7 +192,9 @@ Podland/
 │   ├── description_machines_api.md   # Machine + event endpoints
 │   ├── description_containers_api.md # Container endpoints
 │   ├── description_images_api.md     # Image endpoints
-│   └── description_quadlets_api.md   # Quadlet endpoints
+│   ├── description_quadlets_api.md   # Quadlet endpoints
+│   ├── description_users_api.md      # User endpoints
+│   └── description_secrets_api.md    # Secret endpoints
 ├── backend/
 │   ├── cmd/
 │   │   └── server/
@@ -202,6 +204,9 @@ Podland/
 │   │   │   ├── machines/
 │   │   │   ├── containers/
 │   │   │   ├── images/
+│   │   │   ├── quadlets/
+│   │   │   ├── secrets/
+│   │   │   ├── users/
 │   │   │   ├── auth/
 │   │   │   └── events/
 │   │   ├── middleware/
@@ -219,6 +224,8 @@ Podland/
         │   ├── machines/
         │   ├── containers/
         │   ├── images/
+        │   ├── quadlets/
+        │   ├── secrets/
         │   └── events/
         ├── shared/
         ├── pages/

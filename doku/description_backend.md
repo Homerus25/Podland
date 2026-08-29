@@ -35,6 +35,10 @@ backend/
 │   │   │   ├── service.go
 │   │   │   ├── repository.go
 │   │   │   └── types.go
+│   │   ├── secrets/             # Secret management domain (proxied to podman; no local repository — secrets are never persisted by the backend)
+│   │   │   ├── handler.go      # HTTP handlers for secret endpoints
+│   │   │   ├── service.go      # Business logic: podman bindings calls + permission gate for reveal
+│   │   │   └── dto.go          # Request/response DTOs (metadata-only by default; value only on admin reveal)
 │   │   ├── auth/               # Authentication domain
 │   │   │   ├── handler.go
 │   │   │   ├── service.go
@@ -445,6 +449,16 @@ func GetUserIDFromContext(ctx context.Context) (string, error)
 | POST | `/api/machines/{id}/quadlets/{quadletId}/generate` | Generate quadlet from resource | Yes |
 | POST | `/api/machines/{id}/quadlets/import` | Import quadlets from directory | Yes |
 
+### Secrets
+
+| Method | Endpoint | Description | Auth Required |
+|--------|----------|-------------|---------------|
+| GET | `/api/machines/{id}/secrets` | List secret metadata on machine | Yes |
+| GET | `/api/machines/{id}/secrets/{secretId}` | Inspect secret; `?reveal=true` (admin-only) includes the value | Yes |
+| POST | `/api/machines/{id}/secrets` | Create secret (name + value; write level) | Yes |
+
+See [description_secrets_api.md](description_secrets_api.md) for the full contract. Secret deletion is planned (slice 160-04); updates are a conscious non-goal (podman secrets are immutable).
+
 ### Events
 
 | Method | Endpoint | Description | Auth Required |
@@ -491,6 +505,12 @@ var (
     ErrQuadletResourceRunning  = NewAppError("QUADLET_RESOURCE_RUNNING", "Quadlet-managed resource is running", http.StatusBadRequest)
     ErrQuadletAlreadyRunning    = NewAppError("QUADLET_ALREADY_RUNNING", "Quadlet is already running", http.StatusBadRequest)
     ErrQuadletNotRunning        = NewAppError("QUADLET_NOT_RUNNING", "Quadlet is not running", http.StatusBadRequest)
+    
+    // Secrets
+    ErrSecretNotFound       = NewAppError("SECRET_NOT_FOUND", "Secret not found", http.StatusNotFound)
+    ErrSecretAlreadyExists  = NewAppError("SECRET_ALREADY_EXISTS", "Secret with this name already exists", http.StatusConflict)
+    ErrSecretInUse          = NewAppError("SECRET_IN_USE", "Secret is in use by one or more containers", http.StatusConflict)
+    ErrSecretCreationFailed = NewAppError("SECRET_CREATION_FAILED", "Failed to create secret", http.StatusInternalServerError)
     
     // Generic
     ErrInternalError      = NewAppError("INTERNAL_ERROR", "An unexpected error occurred", http.StatusInternalServerError)
