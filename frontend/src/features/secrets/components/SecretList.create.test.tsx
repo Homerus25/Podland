@@ -89,16 +89,25 @@ describe('SecretList create', () => {
     expect(value).toHaveAttribute('type', 'password')
   })
 
-  it('blocks submit with both fields empty and sends no request', async () => {
+  it('shows inline errors for empty fields and keeps the request unsent', async () => {
     server.use(secretsHandler(() => [existing]), createHandler())
     const user = await openCreateModal()
 
-    await user.click(screen.getByTestId('secret-form-submit'))
+    // The submit button is disabled while invalid, so the empty-field
+    // errors surface through onChange validation: touch both fields, then
+    // clear them.
+    const submit = screen.getByTestId('secret-form-submit')
+    expect(submit).toBeDisabled()
+
+    await user.type(screen.getByLabelText(/^name/i), 'x')
+    await user.type(screen.getByLabelText(/^value/i), 'x')
+    await user.clear(screen.getByLabelText(/^name/i))
+    await user.clear(screen.getByLabelText(/^value/i))
 
     expect(await screen.findByText('Name is required')).toBeInTheDocument()
     expect(screen.getByText('Value is required')).toBeInTheDocument()
+    expect(submit).toBeDisabled()
     expect(createRequests.count).toBe(0)
-    expect(screen.getByTestId('modal')).toBeInTheDocument()
   })
 
   it('blocks submit with a whitespace-only value and sends no request', async () => {
@@ -127,6 +136,23 @@ describe('SecretList create', () => {
 
     expect(await screen.findByText(expectedFragment, { exact: false })).toBeInTheDocument()
     expect(createRequests.count).toBe(0)
+  })
+
+  it('disables the submit button while the form is invalid and enables it once valid', async () => {
+    server.use(secretsHandler(() => [existing]), createHandler())
+    const user = await openCreateModal()
+
+    const submit = screen.getByTestId('secret-form-submit')
+    expect(submit).toBeDisabled()
+
+    await user.type(screen.getByLabelText(/^name/i), 'db-password')
+    await user.type(screen.getByLabelText(/^value/i), 'hunter2')
+    await waitFor(() => expect(submit).toBeEnabled())
+
+    // The eye toggle must never submit the form, whatever its default type.
+    await user.click(screen.getByTestId('toggle-value-visibility'))
+    expect(createRequests.count).toBe(0)
+    expect(screen.getByTestId('modal')).toBeInTheDocument()
   })
 
   it('sends the trimmed name and the byte-identical untrimmed value', async () => {

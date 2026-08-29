@@ -43,9 +43,12 @@ export function SecretForm({ onSubmit, submitError, isSubmitting }: SecretFormPr
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting: isSubmittingForm },
+    formState: { errors, isSubmitting: isSubmittingForm, isValid },
   } = useForm<SecretFormValues>({
     defaultValues: { name: '', value: '' },
+    // onChange so the submit button's disabled state tracks validity as
+    // the user types, not only after a failed submit attempt.
+    mode: 'onChange',
   })
 
   const submit = handleSubmit(async (values) => {
@@ -93,6 +96,7 @@ export function SecretForm({ onSubmit, submitError, isSubmitting }: SecretFormPr
             />
             <InputRightElement width="2.75rem">
               <Button
+                type="button"
                 h="1.5rem"
                 size="xs"
                 p={0}
@@ -110,6 +114,7 @@ export function SecretForm({ onSubmit, submitError, isSubmitting }: SecretFormPr
           type="submit"
           colorScheme="blue"
           isLoading={isSubmittingForm || isSubmitting}
+          isDisabled={!isValid || isSubmittingForm || isSubmitting}
           data-testid="secret-form-submit"
         >
           Create secret
