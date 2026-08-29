@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw'
 import { describe, expect, it } from 'vitest'
-import { createSecret, listSecrets } from '@features/secrets/services/secretsApi'
+import { createSecret, deleteSecret, listSecrets } from '@features/secrets/services/secretsApi'
 import { server } from '@/test/server'
 
 describe('secretsApi', () => {
@@ -56,5 +56,40 @@ describe('secretsApi', () => {
       name: 'pem-key',
       value: '  line-one\nline-two=rsa...\n',
     })
+  })
+
+  // The list DTO's name is the natural row key, so deletion addresses the
+  // secret by name; the endpoint returns 204 with no body.
+  it('deletes a secret by name on the machine-scoped endpoint', async () => {
+    let method: string | undefined
+    let url: URL | undefined
+    server.use(
+      http.delete('*/api/machines/m-1/secrets/:secretId', ({ request }) => {
+        method = request.method
+        url = new URL(request.url)
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    await deleteSecret('m-1', 'db-password')
+
+    expect(method).toBe('DELETE')
+    expect(url?.pathname).toBe('/api/machines/m-1/secrets/db-password')
+  })
+
+  // Names are user-controlled, so they are URL-encoded on the way out;
+  // the backend decodes the path segment back to the raw name.
+  it('URL-encodes the secret name in the delete path', async () => {
+    let url: URL | undefined
+    server.use(
+      http.delete('*/api/machines/m-1/secrets/:secretId', ({ request }) => {
+        url = new URL(request.url)
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    await deleteSecret('m-1', 'db password/2')
+
+    expect(url?.pathname).toBe('/api/machines/m-1/secrets/db%20password%2F2')
   })
 })

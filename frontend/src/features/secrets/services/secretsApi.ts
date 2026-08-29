@@ -43,3 +43,10 @@ export async function createSecret(
   const response = await api.post<SecretCreated>(`/machines/${machineId}/secrets`, input)
   return response.data
 }
+
+// DELETE /api/machines/{id}/secrets/{secretId} -> 204. The list DTO's name
+// is the natural row key, so the secret is addressed by name. The backend
+// rejects deletion with 409 SECRET_IN_USE when a container references it.
+export async function deleteSecret(machineId: string, secretId: string): Promise<void> {
+  await api.delete(`/machines/${machineId}/secrets/${encodeURIComponent(secretId)}`)
+}

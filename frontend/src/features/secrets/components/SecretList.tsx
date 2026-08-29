@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  Box,
   Button,
   HStack,
   Table,
@@ -11,13 +12,117 @@ import {
   Thead,
   Tr,
 } from '@chakra-ui/react'
-import { useCreateSecret, useSecrets } from '@features/secrets/hooks/useSecrets'
+import {
+  useCreateSecret,
+  useDeleteSecret,
+  useSecrets,
+} from '@features/secrets/hooks/useSecrets'
 import { SecretForm } from '@features/secrets/components/SecretForm'
+import type { SecretSummary } from '@features/secrets/services/secretsApi'
 import { canManageSecrets, type EffectivePermission } from '@features/machines/permissions'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { Modal } from '@shared/components/Modal'
 import { getApiError } from '@shared/utils/api'
 import { formatRelativeDate } from '@shared/utils/format'
+
+// No delete request leaves the browser until the user explicitly confirms.
+// There are no options in v1: the backend exposes no force parameter.
+function DeleteSecretModal({
+  secret,
+  deleteSecret,
+  onClose,
+}: {
+  secret: SecretSummary
+  deleteSecret: ReturnType<typeof useDeleteSecret>
+  onClose: () => void
+}) {
+  const confirmDelete = () => {
+    deleteSecret.mutate(secret.name, { onSuccess: onClose })
+  }
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title="Delete secret"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            colorScheme="red"
+            onClick={confirmDelete}
+            isLoading={deleteSecret.isPending}
+            data-testid="confirm-delete-button"
+          >
+            Delete secret
+          </Button>
+        </>
+      }
+    >
+      <Text>Delete “{secret.name}”? This cannot be undone.</Text>
+      {deleteSecret.error ? (
+        <Box mt={2}>
+          <ErrorDisplay error={getApiError(deleteSecret.error)} />
+        </Box>
+      ) : null}
+    </Modal>
+  )
+}
+
+// Each row owns its delete mutation instance, so pending state and errors
+// (e.g. 409 SECRET_IN_USE) stay scoped to this secret's modal and other
+// rows stay usable.
+function SecretRow({
+  machineId,
+  secret,
+  canDelete,
+}: {
+  machineId: string
+  secret: SecretSummary
+  canDelete: boolean
+}) {
+  const deleteSecret = useDeleteSecret(machineId)
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+
+  return (
+    <>
+      <Tr data-testid="secret-row">
+        <Td fontFamily="mono">{secret.name}</Td>
+        <Td>{secret.driver}</Td>
+        <Td>{formatRelativeDate(secret.createdAt)}</Td>
+        {canDelete ? (
+          <Td>
+            <Button
+              size="xs"
+              colorScheme="red"
+              variant="outline"
+              aria-label={`Delete ${secret.name}`}
+              onClick={() => {
+                deleteSecret.reset()
+                setIsDeleteOpen(true)
+              }}
+              data-testid="delete-secret-button"
+            >
+              Delete
+            </Button>
+          </Td>
+        ) : null}
+      </Tr>
+      {isDeleteOpen ? (
+        <DeleteSecretModal
+          secret={secret}
+          deleteSecret={deleteSecret}
+          onClose={() => {
+            deleteSecret.reset()
+            setIsDeleteOpen(false)
+          }}
+        />
+      ) : null}
+    </>
+  )
+}
 
 // The Secrets tab body. Metadata is visible to any grantee (the backend's
 // read level); write affordances are gated on `permission`, which the page
@@ -80,15 +185,17 @@ export function SecretList({
                 <Th>Name</Th>
                 <Th>Driver</Th>
                 <Th>Created</Th>
+                {canManageSecrets(permission) ? <Th /> : null}
               </Tr>
             </Thead>
             <Tbody>
               {secrets.map((secret) => (
-                <Tr key={secret.id} data-testid="secret-row">
-                  <Td fontFamily="mono">{secret.name}</Td>
-                  <Td>{secret.driver}</Td>
-                  <Td>{formatRelativeDate(secret.createdAt)}</Td>
-                </Tr>
+                <SecretRow
+                  key={secret.id}
+                  machineId={machineId}
+                  secret={secret}
+                  canDelete={canManageSecrets(permission)}
+                />
               ))}
             </Tbody>
           </Table>
