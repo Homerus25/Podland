@@ -20,3 +20,26 @@ export async function listSecrets(machineId: string): Promise<SecretSummary[]> {
   const response = await api.get<SecretSummary[]>(`/machines/${machineId}/secrets`)
   return response.data
 }
+
+// Body of POST /api/machines/{id}/secrets
+// (backend/internal/domain/secrets/dto.go SecretCreateRequest). The backend
+// trims the name; the value must arrive byte-identical — meaningful
+// whitespace is the whole point of the no-trim rule.
+export interface CreateSecretInput {
+  name: string
+  value: string
+}
+
+// Response of POST /api/machines/{id}/secrets -> 201
+// (backend SecretCreateResponse: entities.SecretCreateReport's ID).
+export interface SecretCreated {
+  id: string
+}
+
+export async function createSecret(
+  machineId: string,
+  input: CreateSecretInput,
+): Promise<SecretCreated> {
+  const response = await api.post<SecretCreated>(`/machines/${machineId}/secrets`, input)
+  return response.data
+}

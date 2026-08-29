@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Button,
   HStack,
@@ -10,9 +11,11 @@ import {
   Thead,
   Tr,
 } from '@chakra-ui/react'
-import { useSecrets } from '@features/secrets/hooks/useSecrets'
+import { useCreateSecret, useSecrets } from '@features/secrets/hooks/useSecrets'
+import { SecretForm } from '@features/secrets/components/SecretForm'
 import { canManageSecrets, type EffectivePermission } from '@features/machines/permissions'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
+import { Modal } from '@shared/components/Modal'
 import { getApiError } from '@shared/utils/api'
 import { formatRelativeDate } from '@shared/utils/format'
 
@@ -29,6 +32,8 @@ export function SecretList({
   permission: EffectivePermission
 }) {
   const { data: secrets, isPending, error } = useSecrets(machineId)
+  const createSecret = useCreateSecret(machineId)
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
 
   if (isPending) {
     return <Text data-testid="secrets-loading">Loading secrets…</Text>
@@ -38,7 +43,15 @@ export function SecretList({
     <>
       {canManageSecrets(permission) ? (
         <HStack justify="flex-end" mb={2}>
-          <Button size="sm" colorScheme="blue" data-testid="create-secret-button">
+          <Button
+            size="sm"
+            colorScheme="blue"
+            onClick={() => {
+              createSecret.reset()
+              setIsCreateOpen(true)
+            }}
+            data-testid="create-secret-button"
+          >
             Create secret
           </Button>
         </HStack>
@@ -81,6 +94,29 @@ export function SecretList({
           </Table>
         </TableContainer>
       )}
+      {isCreateOpen ? (
+        <Modal
+          isOpen
+          onClose={() => {
+            createSecret.reset()
+            setIsCreateOpen(false)
+          }}
+          title="Create secret"
+        >
+          <SecretForm
+            onSubmit={(input) =>
+              new Promise<void>((resolve) =>
+                createSecret.mutate(input, {
+                  onSuccess: () => setIsCreateOpen(false),
+                  onSettled: () => resolve(),
+                }),
+              )
+            }
+            submitError={createSecret.error}
+            isSubmitting={createSecret.isPending}
+          />
+        </Modal>
+      ) : null}
     </>
   )
 }

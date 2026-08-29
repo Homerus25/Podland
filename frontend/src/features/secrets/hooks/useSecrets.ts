@@ -1,5 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
-import { listSecrets } from '@features/secrets/services/secretsApi'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  createSecret,
+  listSecrets,
+  type CreateSecretInput,
+} from '@features/secrets/services/secretsApi'
 
 function secretsQueryKey(machineId: string) {
   return ['machines', machineId, 'secrets'] as const
@@ -9,5 +13,17 @@ export function useSecrets(machineId: string) {
   return useQuery({
     queryKey: secretsQueryKey(machineId),
     queryFn: () => listSecrets(machineId),
+  })
+}
+
+// A create extends the machine's secret list, so the list refetches on
+// success and shows the server's post-action state; no optimistic updates.
+export function useCreateSecret(machineId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: CreateSecretInput) => createSecret(machineId, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: secretsQueryKey(machineId) })
+    },
   })
 }
