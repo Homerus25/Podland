@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,8 +140,9 @@ func TestSecretHandler_List(t *testing.T) {
 }
 
 type MockSecretService struct {
-	mockList func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error)
-	mockGet  func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error)
+	mockList   func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error)
+	mockGet    func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error)
+	mockCreate func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error)
 }
 
 func (m *MockSecretService) List(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
@@ -153,6 +155,13 @@ func (m *MockSecretService) List(ctx context.Context, userID, machineID string) 
 func (m *MockSecretService) Get(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
 	if m.mockGet != nil {
 		return m.mockGet(ctx, userID, machineID, secretID, reveal)
+	}
+	return nil, nil
+}
+
+func (m *MockSecretService) Create(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
+	if m.mockCreate != nil {
+		return m.mockCreate(ctx, userID, machineID, req)
 	}
 	return nil, nil
 }
@@ -439,6 +448,244 @@ func TestSecretHandler_Get_ReadLevelGranteeReachesInspectRoute(t *testing.T) {
 		"the metadata answer must not carry a secretData field")
 }
 
+// --- Create (POST /api/machines/{id}/secrets) ---
+
+// newCreateRequest builds a POST secrets request with the given JSON body,
+// carrying the given user ID and machine ID the way the mounted route
+// would extract them.
+func newCreateRequest(userID, machineID, body string) *http.Request {
+	req := httptest.NewRequest("POST", "/api/machines/"+machineID+"/secrets", strings.NewReader(body))
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", machineID)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	if userID != "" {
+		ctx = context.WithValue(ctx, contextutils.UserIDContextKey, userID)
+	}
+	return req.WithContext(ctx)
+}
+
+// TestSecretHandler_Create_HappyPath pins the happy path AND the
+// handler→service seam: 201 with only {id} in the body, the authenticated
+// user ID and machine ID forwarded, the name forwarded TRIMMED, and the
+// value forwarded byte-identical (significant whitespace intact).
+func TestSecretHandler_Create_HappyPath(t *testing.T) {
+	var gotUser, gotMachine string
+	var gotReq SecretCreateRequest
+	mockService := &MockSecretService{
+		mockCreate: func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
+			gotUser, gotMachine, gotReq = userID, machineID, req
+			return &SecretCreateResponse{ID: "3f2e1d0c"}, nil
+		},
+	}
+	handler := NewSecretHandler(mockService)
+
+	rr := httptest.NewRecorder()
+	handler.Create(rr, newCreateRequest("user123", "machine123",
+		`{"name":"  db-password  ","value":"  hunter2 \nnext line\n"}`))
+
+	assert.Equal(t, http.StatusCreated, rr.Code, "a successful create must answer 201")
+	assert.JSONEq(t, `{"id":"3f2e1d0c"}`, rr.Body.String(),
+		"the create response must carry the created ID only — never the value")
+	assert.Equal(t, "user123", gotUser, "handler must forward the authenticated user ID")
+	assert.Equal(t, "machine123", gotMachine, "handler must forward the machine ID URL param")
+	assert.Equal(t, "db-password", gotReq.Name, "handler must trim the name before forwarding")
+	assert.Equal(t, "  hunter2 \nnext line\n", gotReq.Value,
+		"handler must forward the value byte-identical — never trimmed")
+}
+
+// TestSecretHandler_Create_ValidationFailures pins the 400 contract: a
+// missing/oversized/pattern-breaking name or an empty/oversized value is
+// refused with VALIDATION_FAILED before the service runs, and a malformed
+// body is refused with INVALID_REQUEST.
+func TestSecretHandler_Create_ValidationFailures(t *testing.T) {
+	oversizedName := strings.Repeat("a", 256)
+	oversizedValue := strings.Repeat("v", 1048576+1)
+	tests := []struct {
+		name       string
+		body       string
+		expectCode string
+	}{
+		{name: "missing name", body: `{"value":"hunter2"}`, expectCode: "VALIDATION_FAILED"},
+		{name: "whitespace-only name", body: `{"name":"   ","value":"hunter2"}`, expectCode: "VALIDATION_FAILED"},
+		{name: "oversized name", body: `{"name":"` + oversizedName + `","value":"hunter2"}`, expectCode: "VALIDATION_FAILED"},
+		{name: "name with leading dash", body: `{"name":"-db-password","value":"hunter2"}`, expectCode: "VALIDATION_FAILED"},
+		{name: "name with space", body: `{"name":"db password","value":"hunter2"}`, expectCode: "VALIDATION_FAILED"},
+		{name: "name with slash", body: `{"name":"db/password","value":"hunter2"}`, expectCode: "VALIDATION_FAILED"},
+		{name: "missing value", body: `{"name":"db-password"}`, expectCode: "VALIDATION_FAILED"},
+		{name: "empty value", body: `{"name":"db-password","value":""}`, expectCode: "VALIDATION_FAILED"},
+		{name: "oversized value", body: `{"name":"db-password","value":"` + oversizedValue + `"}`, expectCode: "VALIDATION_FAILED"},
+		// The cap is BYTES: a rune count under the limit must still be
+		// refused when its UTF-8 encoding exceeds it (validator's
+		// min/max would count runes and wave this through).
+		{
+			name:       "multi-byte value under the rune cap but over the byte cap",
+			body:       `{"name":"db-password","value":"` + strings.Repeat("€", 600000) + `"}`,
+			expectCode: "VALIDATION_FAILED",
+		},
+		{name: "malformed body", body: `{"name":`, expectCode: "INVALID_REQUEST"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var called bool
+			mockService := &MockSecretService{
+				mockCreate: func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
+					called = true
+					return &SecretCreateResponse{ID: "3f2e1d0c"}, nil
+				},
+			}
+			handler := NewSecretHandler(mockService)
+
+			rr := httptest.NewRecorder()
+			handler.Create(rr, newCreateRequest("user123", "machine123", tt.body))
+
+			assert.Equal(t, http.StatusBadRequest, rr.Code, "invalid input must be refused with 400")
+			assert.Contains(t, rr.Body.String(), tt.expectCode, "error body should carry the %s code", tt.expectCode)
+			assert.False(t, called, "an invalid request must never reach the service")
+		})
+	}
+}
+
+// TestSecretHandler_Create_RejectsValueWithoutEchoingIt pins the redaction
+// discipline at the validation boundary: a rejected request's response (and
+// thus nothing the handler could log from it) must not echo the submitted
+// value — only the failing field is named.
+func TestSecretHandler_Create_RejectsValueWithoutEchoingIt(t *testing.T) {
+	handler := NewSecretHandler(&MockSecretService{})
+
+	rr := httptest.NewRecorder()
+	handler.Create(rr, newCreateRequest("user123", "machine123",
+		`{"name":"-bad-name","value":"top-secret-payload"}`))
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+	assert.NotContains(t, rr.Body.String(), "top-secret-payload",
+		"a validation failure must never echo the submitted value")
+}
+
+// TestSecretHandler_Create_MissingContextAndParams pins the request-shape
+// guards: no authenticated user → 401, no {id} URL param → 400.
+func TestSecretHandler_Create_MissingContextAndParams(t *testing.T) {
+	t.Run("missing user ID", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		NewSecretHandler(&MockSecretService{}).Create(rr,
+			newCreateRequest("", "machine123", `{"name":"db-password","value":"hunter2"}`))
+		assert.Equal(t, http.StatusUnauthorized, rr.Code)
+	})
+
+	t.Run("missing machine ID", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		NewSecretHandler(&MockSecretService{}).Create(rr,
+			newCreateRequest("user123", "", `{"name":"db-password","value":"hunter2"}`))
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+}
+
+// TestSecretHandler_Create_ErrorMapping pins the error pass-throughs: the
+// service's AppErrors keep their HTTP status (409 SECRET_ALREADY_EXISTS,
+// 502 CONNECTION_FAILED) and a non-AppError falls back to 500. The 500
+// SECRET_CREATION_FAILED path is asserted via status alone —
+// RespondWithError rewrites 5xx bodies generic.
+func TestSecretHandler_Create_ErrorMapping(t *testing.T) {
+	tests := []struct {
+		name           string
+		mockError      error
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:           "duplicate name is conflict",
+			mockError:      errors.ErrSecretAlreadyExists,
+			expectedStatus: http.StatusConflict,
+			expectedBody:   "SECRET_ALREADY_EXISTS",
+		},
+		{
+			name:           "creation failed",
+			mockError:      errors.ErrSecretCreationFailed,
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody:   "",
+		},
+		{
+			name:           "connection failed",
+			mockError:      errors.ErrConnectionFailed,
+			expectedStatus: http.StatusBadGateway,
+			expectedBody:   "",
+		},
+		{
+			name:           "non-app error falls back to internal error",
+			mockError:      errGeneric,
+			expectedStatus: http.StatusInternalServerError,
+			expectedBody:   "INTERNAL_ERROR",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockService := &MockSecretService{
+				mockCreate: func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
+					return nil, tt.mockError
+				},
+			}
+			handler := NewSecretHandler(mockService)
+
+			rr := httptest.NewRecorder()
+			handler.Create(rr, newCreateRequest("user123", "machine123",
+				`{"name":"db-password","value":"hunter2"}`))
+
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+			if tt.expectedBody != "" {
+				assert.Contains(t, rr.Body.String(), tt.expectedBody)
+			}
+		})
+	}
+}
+
+// TestSecretHandler_Create_WriteGate pins the route mounting for the
+// create route: POST /secrets is gated at write level, so a read-level
+// grantee (who keeps metadata visibility) is refused with 403 in
+// middleware — podman is never asked to store anything — while write- and
+// admin-level grantees reach the handler.
+func TestSecretHandler_Create_WriteGate(t *testing.T) {
+	tests := []struct {
+		name         string
+		level        string
+		expectStatus int
+		expectCalled bool
+	}{
+		{name: "read-level grantee is denied", level: models.PermissionRead, expectStatus: http.StatusForbidden, expectCalled: false},
+		{name: "write-level grantee passes", level: models.PermissionWrite, expectStatus: http.StatusCreated, expectCalled: true},
+		{name: "admin-level grantee passes", level: models.PermissionAdmin, expectStatus: http.StatusCreated, expectCalled: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			machineRepo := testutils.NewMockMachineRepository()
+			machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
+			accessRepo := testutils.NewMockMachineAccessRepository()
+			accessRepo.AddAccess("machine-1", "grantee-1", tt.level, time.Now())
+			var called bool
+			service := &MockSecretService{mockCreate: func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
+				called = true
+				return &SecretCreateResponse{ID: "3f2e1d0c"}, nil
+			}}
+			router := secretsAccessRouter(machineRepo, accessRepo, service)
+
+			req := httptest.NewRequest("POST", "/api/machines/machine-1/secrets",
+				strings.NewReader(`{"name":"db-password","value":"hunter2"}`))
+			req = req.WithContext(contextutils.SetUserID(req.Context(), "grantee-1"))
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expectStatus, w.Result().StatusCode,
+				"level %s must answer %d", tt.level, tt.expectStatus)
+			assert.Equal(t, tt.expectCalled, called,
+				"handler must run=%v for level %s", tt.expectCalled, tt.level)
+			if tt.expectStatus == http.StatusForbidden {
+				assert.Contains(t, w.Body.String(), "ACCESS_DENIED",
+					"the deny must carry the ACCESS_DENIED code")
+			}
+		})
+	}
+}
+
 // --- Route wiring: the RequireMachineAccess subtree is the read gate ---
 //
 // These tests mount the secrets route on a chi subtree exactly the way
@@ -454,8 +701,10 @@ func secretsAccessRouter(machineRepo *testutils.MockMachineRepository, accessRep
 	r := chi.NewRouter()
 	r.Route("/api/machines", func(r chi.Router) {
 		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
+			requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
 			r.Route("/secrets", func(r chi.Router) {
 				r.Get("/", NewSecretHandler(service).List)
+				r.With(requireWrite).Post("/", NewSecretHandler(service).Create)
 				r.Route("/{secretId}", func(r chi.Router) {
 					r.Get("/", NewSecretHandler(service).Get)
 				})

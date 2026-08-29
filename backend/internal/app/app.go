@@ -278,10 +278,12 @@ func New(cfg *config.Config) (*App, error) {
 					// is the read gate). The value reveal is NOT a
 					// route-level gate: ?reveal=true is a query param, so
 					// Service.Get checks the caller's level itself and
-					// answers 403 ACCESS_DENIED below admin. The write-level
-					// gates for create/delete arrive with slices 160-03/04.
+					// answers 403 ACCESS_DENIED below admin. Creating a
+					// secret is remote-state mutation, so POST is gated at
+					// write (secret delete arrives with slice 160-04).
 					r.Route("/secrets", func(r chi.Router) {
 						r.Get("/", secretHandler.List)
+						r.With(requireWrite).Post("/", secretHandler.Create)
 						r.Route("/{secretId}", func(r chi.Router) {
 							r.Get("/", secretHandler.Get)
 						})

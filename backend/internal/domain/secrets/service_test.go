@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -67,6 +68,11 @@ type fakePodman struct {
 	// endpoint (/libpod/secrets/{id}/json), so a test can pin that a
 	// denied reveal never reached podman at all.
 	inspectCalls int
+	// createCalls counts requests served on the create endpoint
+	// (/libpod/secrets/create) and createBody holds the raw body bytes of
+	// the latest one, so tests can assert the value wiring byte-for-byte.
+	createCalls int
+	createBody  string
 }
 
 // startRecordingPodman starts an HTTP test server performing the
@@ -454,6 +460,134 @@ func TestSecretService_Get_ConnectionFailure(t *testing.T) {
 	service := NewSecretService(mockConnManager, testutils.NewMockMachineAccessRepository())
 
 	result, err := service.Get(context.Background(), "reader-1", "test-machine", "db-password", false)
+
+	assert.Equal(t, appErrors.ErrConnectionFailed, err, "a failed connection must map to ErrConnectionFailed")
+	assert.Nil(t, result)
+}
+
+// --- Service seam: Create (the body-reader op) ---
+
+// newSecretCreateServer starts a fake podman speaking enough of the service
+// API for secrets.Create: /_ping (the connection handshake, via
+// startRecordingPodman) and POST /libpod/secrets/create. The create call's
+// query and raw body bytes are recorded for wiring assertions; the endpoint
+// answers with the configured status and canned body — podman's error wire
+// shape (errorhandling.ErrorModel JSON) when status >= 400, and the
+// SecretCreateReport JSON ({"ID": "..."}) on success.
+func newSecretCreateServer(t *testing.T, status int, body string) (*fakePodman, *httptest.Server) {
+	t.Helper()
+	fake, server := startRecordingPodman(t, func(w http.ResponseWriter, r *http.Request, fake *fakePodman) {
+		if strings.HasSuffix(r.URL.Path, "/libpod/secrets/create") {
+			raw, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("fake podman failed to read create body: %v", err)
+			}
+			fake.mu.Lock()
+			fake.createCalls++
+			fake.createBody = string(raw)
+			fake.mu.Unlock()
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		t.Errorf("fake podman received unexpected request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	})
+	return fake, server
+}
+
+// TestSecretService_Create_SendsNameAndByteIdenticalBody pins the create
+// wiring: the name rides the query (podman takes it in options, not the
+// body), the value rides the raw request body byte-identical — leading and
+// trailing whitespace and embedded newlines are significant and must arrive
+// unmutated — and the created ID maps into the response.
+func TestSecretService_Create_SendsNameAndByteIdenticalBody(t *testing.T) {
+	fake, server := newSecretCreateServer(t, http.StatusOK, `{"ID":"3f2e1d0c"}`)
+	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
+	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+
+	value := "  padded value \nwith embedded newline\n"
+	result, err := service.Create(context.Background(), "writer-1", "test-machine",
+		SecretCreateRequest{Name: "db-password", Value: value})
+
+	require.NoError(t, err, "create against the fake podman must succeed")
+	require.NotNil(t, result, "a successful create must return a response")
+	assert.Equal(t, "3f2e1d0c", result.ID, "the report ID must map to the response")
+
+	fake.mu.Lock()
+	gotMethod, gotPath, gotQuery, gotBody, gotCreateCalls :=
+		fake.method, fake.path, fake.query, fake.createBody, fake.createCalls
+	fake.mu.Unlock()
+	assert.Equal(t, http.MethodPost, gotMethod, "bindings must issue a POST")
+	assert.True(t, strings.HasSuffix(gotPath, "/libpod/secrets/create"),
+		"bindings must hit the podman secret create endpoint, got %q", gotPath)
+	assert.Equal(t, 1, gotCreateCalls, "exactly one create call must reach podman")
+	require.NotNil(t, gotQuery, "the create request must carry a query")
+	assert.Equal(t, "db-password", gotQuery.Get("name"),
+		"the secret name must ride the name option, exactly once")
+	for _, absent := range []string{"driver", "driveropts", "labels", "replace", "ignore"} {
+		assert.NotContains(t, gotQuery, absent,
+			"v1 create must not set %s (file driver default, no labels — deferred by ruling)", absent)
+	}
+	assert.Equal(t, value, gotBody,
+		"the value must reach podman byte-identical — never trimmed or mutated")
+
+	assert.Equal(t, []string{"test-machine"}, connManager.released,
+		"the connection lease must be released after the call")
+}
+
+// TestSecretService_Create_DuplicateNameIsConflict pins the 409 mapping:
+// podman reports a duplicate secret name as a 500 ErrorModel whose cause is
+// the common package's "secret name in use" sentinel, and that must surface
+// as the domain's ErrSecretAlreadyExists — not a generic creation failure.
+func TestSecretService_Create_DuplicateNameIsConflict(t *testing.T) {
+	_, server := newSecretCreateServer(t, http.StatusInternalServerError,
+		`{"cause":"secret name in use","message":"db-password: secret name in use","response":500}`)
+	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
+	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+
+	result, err := service.Create(context.Background(), "writer-1", "test-machine",
+		SecretCreateRequest{Name: "db-password", Value: "hunter2"})
+
+	assert.Equal(t, appErrors.ErrSecretAlreadyExists, err,
+		"a podman name-in-use answer must map to ErrSecretAlreadyExists")
+	assert.Nil(t, result)
+	assert.Equal(t, []string{"test-machine"}, connManager.released,
+		"the lease must still be released on a name conflict")
+}
+
+// TestSecretService_Create_OtherPodmanErrorsAreCreationFailed pins that any
+// other podman failure (here a 500 error model with a different cause)
+// surfaces as the domain's ErrSecretCreationFailed sentinel, which the
+// handler answers with 500.
+func TestSecretService_Create_OtherPodmanErrorsAreCreationFailed(t *testing.T) {
+	_, server := newSecretCreateServer(t, http.StatusInternalServerError,
+		`{"cause":"boom","message":"internal podman error","response":500}`)
+	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
+	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+
+	result, err := service.Create(context.Background(), "writer-1", "test-machine",
+		SecretCreateRequest{Name: "db-password", Value: "hunter2"})
+
+	assert.Equal(t, appErrors.ErrSecretCreationFailed, err,
+		"a podman failure other than name-in-use must map to ErrSecretCreationFailed")
+	assert.Nil(t, result)
+	assert.Equal(t, []string{"test-machine"}, connManager.released,
+		"the lease must still be released on a podman failure")
+}
+
+// TestSecretService_Create_ConnectionFailure pins the connection seam for
+// create: a failed tunnel maps to ErrConnectionFailed (502), mirroring
+// List/Get and the other machine-rider services.
+func TestSecretService_Create_ConnectionFailure(t *testing.T) {
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewSecretService(mockConnManager, testutils.NewMockMachineAccessRepository())
+
+	result, err := service.Create(context.Background(), "writer-1", "test-machine",
+		SecretCreateRequest{Name: "db-password", Value: "hunter2"})
 
 	assert.Equal(t, appErrors.ErrConnectionFailed, err, "a failed connection must map to ErrConnectionFailed")
 	assert.Nil(t, result)

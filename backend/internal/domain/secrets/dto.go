@@ -80,6 +80,39 @@ func ToSecretInspectResponse(report *entities.SecretInfoReport, includeValue boo
 	return resp
 }
 
+// SecretCreateRequest is the body of POST /api/machines/{id}/secrets.
+//
+// The Name rules are podman's secret name rules; the handler trims the
+// name before validating (padded-but-valid names must not be rejected for
+// their padding). The Value must NEVER be trimmed or otherwise mutated —
+// leading/trailing whitespace and newlines are significant — and it is
+// never logged at any level.
+//
+// Note: go-playground/validator has no regex tag, so the name's character
+// whitelist (^[a-zA-Z0-9][a-zA-Z0-9_.-]*$) is enforced by an explicit
+// check in the handler next to validate.Struct, mirroring the frontend's
+// SECRET_NAME_PATTERN.
+type SecretCreateRequest struct {
+	// Name of the secret. Required, at most 255 characters, must match
+	// podman's secret name pattern (letter or digit first, then letters,
+	// digits, underscores, dots, dashes).
+	Name string `json:"name" validate:"required,max=255"`
+	// Value is the secret's raw payload. Required, 1..1048576 BYTES
+	// (1 MiB) — enforced as an explicit len() check in the handler
+	// because validator's min/max count runes for strings, and podman
+	// limits the payload in bytes. Sent byte-identical; never trimmed,
+	// never logged.
+	Value string `json:"value" validate:"required"`
+}
+
+// SecretCreateResponse is the create response: the new secret's podman ID
+// only. The value is deliberately absent — it travelled once, in the
+// request, and is only ever returned by the admin-only reveal path.
+type SecretCreateResponse struct {
+	// Unique identifier podman assigned to the created secret
+	ID string `json:"id"`
+}
+
 // formatSecretTime renders a podman timestamp as an ISO8601 string,
 // yielding "" for the zero time (mirroring the images DTO convention).
 func formatSecretTime(ts time.Time) string {

@@ -150,6 +150,13 @@ func Test_Integration_MachinePermission_ReadUserRejectedOnMutatingRoutes(t *test
 		expectAPIError(t, client, http.MethodPost, base+"/quadlets/no-such.container/restart", "",
 			http.StatusForbidden, "ACCESS_DENIED")
 	})
+	t.Run("CreateSecretDenied", func(t *testing.T) {
+		// The 403 fires in middleware before the body is even read, so
+		// the (sensitive) value never travels and the shared machine is
+		// never mutated.
+		expectAPIError(t, client, http.MethodPost, base+"/secrets/", `{"name":"it-denied","value":"nope"}`,
+			http.StatusForbidden, "ACCESS_DENIED")
+	})
 }
 
 // Test_Integration_MachinePermission_ReadUserKeepsReadRoutes pins the
@@ -229,5 +236,13 @@ func Test_Integration_MachinePermission_WriteUserPassesMutatingGates(t *testing.
 	t.Run("StopQuadletReachesHandler", func(t *testing.T) {
 		expectAPIError(t, client, http.MethodPost, base+"/quadlets/no-such.container/stop", "",
 			http.StatusNotFound, "QUADLET_NOT_FOUND")
+	})
+	t.Run("CreateSecretReachesHandler", func(t *testing.T) {
+		// A pattern-invalid name proves the write-level caller passed the
+		// secret-create gate into the handler (the domain's own 400, not
+		// 403) without storing anything on the shared machine — a real
+		// create is the secrets slice's own integration test (160-05).
+		expectAPIError(t, client, http.MethodPost, base+"/secrets/", `{"name":"-invalid","value":"x"}`,
+			http.StatusBadRequest, "VALIDATION_FAILED")
 	})
 }

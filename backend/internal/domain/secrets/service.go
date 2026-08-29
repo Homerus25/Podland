@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -22,6 +23,7 @@ var _ SecretServiceInterface = (*SecretService)(nil)
 type SecretServiceInterface interface {
 	List(ctx context.Context, userID, machineID string) ([]SecretListResponse, error)
 	Get(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error)
+	Create(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error)
 }
 
 // accessPermissionGetter is the slice of the machine-access repository
@@ -127,6 +129,67 @@ func (s *SecretService) Get(ctx context.Context, userID, machineID, secretID str
 	}
 
 	return ToSecretInspectResponse(report, reveal), nil
+}
+
+// Create installs a new secret on the specified machine. Podman takes the
+// secret's value as the raw request body reader and the name in options
+// (secrets.Create), so the value is handed over via strings.NewReader —
+// byte-identical, never trimmed — under the file driver with no labels
+// (v1 ruling: driver/labels deferred). The response carries only the
+// created ID. A duplicate name surfaces as ErrSecretAlreadyExists (podman
+// reports the conflict as a 500 ErrorModel whose cause is the common
+// package's "secret name in use" sentinel); any other creation failure
+// becomes ErrSecretCreationFailed. The value itself never appears in any
+// log statement on this path.
+func (s *SecretService) Create(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
+	if err != nil {
+		return nil, appErrors.ErrConnectionFailed
+	}
+
+	defer s.connManager.Release(machineID)
+
+	opts := new(podmanSecrets.CreateOptions).WithName(req.Name)
+
+	report, err := podmanSecrets.Create(connCtx, strings.NewReader(req.Value), opts)
+	if err != nil {
+		if isPodmanSecretNameInUse(err) {
+			return nil, appErrors.ErrSecretAlreadyExists
+		}
+		// The underlying error is logged here, not returned: the sentinel
+		// is what the handler answers with, and podman's create errors
+		// (name/size/driver) never contain the value — only the name,
+		// which is public metadata.
+		slog.ErrorContext(ctx, "secret creation failed",
+			slog.Any("error", err),
+			slog.String("userID", userID),
+			slog.String("machineID", machineID),
+			slog.String("secretName", req.Name))
+		return nil, appErrors.ErrSecretCreationFailed
+	}
+	if report == nil {
+		slog.ErrorContext(ctx, "secret creation returned no report",
+			slog.String("userID", userID),
+			slog.String("machineID", machineID),
+			slog.String("secretName", req.Name))
+		return nil, appErrors.ErrSecretCreationFailed
+	}
+
+	return &SecretCreateResponse{ID: report.ID}, nil
+}
+
+// isPodmanSecretNameInUse reports whether err is podman's duplicate-name
+// answer for a create. The service API surfaces the common package's
+// errSecretNameInUse sentinel as a 500 ErrorModel whose cause field
+// carries the unwrapped root cause ("secret name in use"), so detection
+// rides on that stable string — mirroring the quadlets slice's
+// isAlreadyExistsError heuristic, which has no typed sentinel either.
+func isPodmanSecretNameInUse(err error) bool {
+	var errModel *errorhandling.ErrorModel
+	if errors.As(err, &errModel) {
+		return errModel.Because == "secret name in use"
+	}
+	return false
 }
 
 // isPodmanNotFound reports whether err is podman's typed not-found answer.
