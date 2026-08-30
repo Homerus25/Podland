@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"log/slog"
 )
 
 // Config holds all application configuration
@@ -139,11 +141,28 @@ func getEnvInt(key string, defaultValue int) int {
 	return defaultValue
 }
 
-// NewLogger creates a new logger based on configuration
-// TODO: Implement proper logging when logrus is added
-func NewLogger(config LogConfig) any {
-	// Placeholder for logger
-	return nil
+// NewLogger creates a new slog.Logger based on configuration
+func NewLogger(config LogConfig) *slog.Logger {
+	var level slog.Level
+	switch strings.ToLower(config.Level) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	var handler slog.Handler
+	if strings.EqualFold(config.Format, "text") {
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	} else {
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	}
+	return slog.New(handler)
 }
 
 // Validate validates the configuration
