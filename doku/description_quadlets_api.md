@@ -369,3 +369,95 @@ Import quadlets from uploaded content.
 - 404: `MACHINE_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
+
+---
+
+### POST /api/machines/{id}/quadlets/auto-update
+
+Run `podman auto-update` on the machine's quadlet-managed containers, streaming
+the remote output live as NDJSON and terminating with a parsed report.
+
+Only quadlets whose unit declares an update policy are visible to
+`podman auto-update` — i.e. the `.container` file carries `AutoUpdate=registry`
+(quadlet naming) and the unit is running. Policy-less quadlets are silently
+skipped by podman.
+
+**Permission level:** Write (read-level grantees receive 403 `ACCESS_DENIED`).
+
+**Authentication:** Required
+
+**Query Parameters:**
+- `dryRun` (boolean, optional, default `false`): when `true`, passes
+  `--dry-run` so podman checks for updates and reports what it *would* do
+  without pulling or restarting anything. The report's `overall` is
+  `dry-run` in that case.
+
+**Response (Success - 200):** a live NDJSON stream (`Content-Type: application/json`),
+one JSON event per line. Because registry pulls routinely exceed the global
+write timeout, this endpoint extends its own response write deadline to
+**10 minutes**; the stream stays open until the run finishes.
+
+**Event schema** (all events share `operationId`, `machineId`, `timestamp`):
+
+Log event — one line of remote `podman auto-update` output as it arrives:
+```json
+{
+  "operationId": "uuid",
+  "type": "log",
+  "machineId": "machine uuid",
+  "stream": "stdout|stderr",
+  "line": "human-readable podman output line",
+  "timestamp": "2026-08-30T10:00:00Z"
+}
+```
+
+Complete event — the terminal event on success, always exactly one, carrying
+the parsed report:
+```json
+{
+  "operationId": "uuid",
+  "type": "complete",
+  "machineId": "machine uuid",
+  "report": {
+    "containers": [
+      {
+        "unit": "myapp.service",
+        "containerName": "systemd-myapp",
+        "imageName": "docker.io/library/myapp:latest",
+        "updated": "updated|failed|pending|up-to-date",
+        "error": "optional error text when updated is \"failed\""
+      }
+    ],
+    "overall": "completed|completed-with-failures|dry-run|unparsable-report",
+    "exitCode": 0
+  },
+  "timestamp": "2026-08-30T10:00:05Z"
+}
+```
+
+Error event — the terminal event when the run fails before/instead of a
+report (SSH failure, machine unreachable, or cancellation):
+```json
+{
+  "operationId": "uuid",
+  "type": "error",
+  "machineId": "machine uuid",
+  "error": {
+    "code": "CONNECTION_FAILED|OPERATION_CANCELLED",
+    "message": "human-readable message"
+  },
+  "timestamp": "2026-08-30T10:00:05Z"
+}
+```
+
+**Cancellation semantics:** the run is bound to the request context — if the
+client disconnects, the remote `podman auto-update` is aborted and the
+machine connection released. (The terminal event for the aborted run is
+written to the already-closed connection, so clients observe cancellation
+simply as the stream ending.)
+
+**Response (Error):**
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 500: `INTERNAL_ERROR`, `STREAMING_NOT_SUPPORTED`
+- 502: `CONNECTION_FAILED`
