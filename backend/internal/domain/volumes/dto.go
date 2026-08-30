@@ -49,6 +49,50 @@ func FromPodmanVolume(report *entities.VolumeListReport) VolumeResponse {
 	return response
 }
 
+// VolumeInspectResponse represents a single volume's full config in the API response
+type VolumeInspectResponse struct {
+	// Volume name
+	Name string `json:"name"`
+	// Volume driver
+	Driver string `json:"driver"`
+	// Time when the volume was created (RFC3339)
+	CreatedAt string `json:"createdAt"`
+	// Whether the volume was created anonymously
+	Anonymous bool `json:"anonymous"`
+	// User-defined key/value metadata
+	Labels map[string]string `json:"labels,omitempty"`
+	// Driver options used when creating the volume
+	Options map[string]string `json:"options,omitempty"`
+	// Mountpoint of the volume on the machine
+	Mountpoint string `json:"mountpoint"`
+	// Size/usage, when podman reports it
+	Size *int64 `json:"size,omitempty"`
+}
+
+// FromPodmanVolumeInspect converts a podman VolumeInspectReport to the API response
+func FromPodmanVolumeInspect(report *entities.VolumeInspectReport) VolumeInspectResponse {
+	if report == nil || report.VolumeConfigResponse == nil {
+		return VolumeInspectResponse{}
+	}
+	cfg := report.VolumeConfigResponse
+	response := VolumeInspectResponse{
+		Name:       cfg.Name,
+		Driver:     cfg.Driver,
+		CreatedAt:  cfg.CreatedAt.UTC().Format(time.RFC3339),
+		Anonymous:  cfg.Anonymous,
+		Labels:     cfg.Labels,
+		Options:    cfg.Options,
+		Mountpoint: cfg.Mountpoint,
+	}
+	if response.Labels == nil {
+		response.Labels = map[string]string{}
+	}
+	if response.Options == nil {
+		response.Options = map[string]string{}
+	}
+	return response
+}
+
 // ToVolumeListResponse converts podman volume reports to the API array
 func ToVolumeListResponse(reports []*entities.VolumeListReport) []VolumeResponse {
 	out := make([]VolumeResponse, 0, len(reports))

@@ -134,6 +134,11 @@ var (
 	ErrSecretCreationFailed = NewAppError("SECRET_CREATION_FAILED", "Failed to create secret", http.StatusInternalServerError)
 )
 
+// Volumes
+var (
+	ErrVolumeNotFound = NewAppError("VOLUME_NOT_FOUND", "Volume not found", http.StatusNotFound)
+)
+
 // Access
 var (
 	ErrAccessDenied         = NewAppError("ACCESS_DENIED", "User does not have permission to access this resource", http.StatusForbidden)

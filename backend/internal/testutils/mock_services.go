@@ -456,3 +456,11 @@ func (m *MockVolumeService) List(ctx context.Context, userID, machineID string, 
 	}
 	return nil, args.Error(1)
 }
+
+func (m *MockVolumeService) Get(ctx context.Context, userID, machineID, volumeName string) (*entities.VolumeInspectReport, error) {
+	args := m.Called(ctx, userID, machineID, volumeName)
+	if report, ok := args.Get(0).(*entities.VolumeInspectReport); ok {
+		return report, args.Error(1)
+	}
+	return nil, args.Error(1)
+}

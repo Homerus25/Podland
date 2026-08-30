@@ -40,3 +40,37 @@ Notes:
 - 403: `ACCESS_DENIED`
 - 404: `MACHINE_NOT_FOUND`
 - 500: `INTERNAL_ERROR` (including SSH connection failures to the machine)
+
+### GET /api/machines/{id}/volumes/{volumeName}
+
+Inspect a single volume by exact name, returning its full configuration.
+
+**Authentication:** Required
+
+**Access:** Any user with a machine-access row for `{id}` (read level).
+
+**Response (Success - 200):**
+```json
+{
+  "name": "string",
+  "driver": "string",
+  "createdAt": "ISO8601 timestamp",
+  "anonymous": boolean,
+  "labels": { "key": "value" },
+  "options": { "key": "value" },
+  "mountpoint": "string",
+  "size": integer
+}
+```
+
+Notes:
+- The volume is resolved by exact name; names are case-sensitive.
+- `size` is only present when podman reports usage for the volume.
+- `labels` and `options` are always present; they are `{}` when empty.
+
+**Response (Error):**
+- 400: `MISSING_VOLUME_NAME` (empty volume name)
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND` (unknown machine ID), `VOLUME_NOT_FOUND` (unknown volume name)
+- 500: `INTERNAL_ERROR` (including SSH connection failures to the machine)

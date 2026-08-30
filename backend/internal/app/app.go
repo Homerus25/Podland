@@ -302,6 +302,7 @@ func New(cfg *config.Config) (*App, error) {
 					// their mutating routes in here.
 					r.Route("/volumes", func(r chi.Router) {
 						r.Get("/", volumeHandler.List)
+						r.Get("/{volumeName}", volumeHandler.Get)
 					})
 				})
 			})

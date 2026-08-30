@@ -107,6 +107,62 @@ func Test_Integration_Volumes_List(t *testing.T) {
 	})
 }
 
+// Test_Integration_Volumes_Inspect is the volume inspect vertical slice
+// (200-02). It creates a run-scoped named volume via the podman CLI,
+// then proves the backend resolves it by exact name through
+// GET /api/machines/{id}/volumes/{volumeName}:
+//
+//	GET /api/machines/{id}/volumes/{volumeName} → 200, full config
+//	GET .../volumes/{unknown}                   → 404 VOLUME_NOT_FOUND
+func Test_Integration_Volumes_Inspect(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+	registerVolumesSweep()
+
+	machineID := suite.MachineID
+	volumeName := "it-" + suite.RunID + "-inspect"
+
+	t.Cleanup(func() {
+		if out, err := podmanConnRun("volume", "rm", volumeName); err != nil {
+			t.Logf("cleanup: volume rm %q best-effort failed: %v (%s)", volumeName, err, strings.TrimSpace(out))
+		}
+	})
+
+	out, err := podmanConnRun("volume", "create",
+		"--label", "podland-it="+suite.RunID,
+		"--opt", "type=tmpfs",
+		volumeName)
+	require.NoError(t, err, "volume create must succeed: %s", strings.TrimSpace(out))
+
+	// --- AC: inspect returns 200 with the volume's full config --------
+	t.Run("HappyPath", func(t *testing.T) {
+		resp, err := suite.AuthenticatedClient().Get(
+			suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + volumeName)
+		require.NoError(t, err, "GET volume inspect must connect to the in-process server")
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err, "read volume inspect response body")
+		require.Equalf(t, http.StatusOK, resp.StatusCode,
+			"inspect volume: expected 200, got %d. body: %s", resp.StatusCode, string(body))
+
+		var got volumeDTO
+		require.NoErrorf(t, json.Unmarshal(body, &got),
+			"volume inspect response must decode as the config DTO. body: %s", string(body))
+		assert.Equal(t, volumeName, got.Name)
+		assert.Equal(t, "local", got.Driver)
+		assert.NotEmpty(t, got.CreatedAt, "createdAt must be reported")
+		assert.Equal(t, map[string]string{"podland-it": suite.RunID}, got.Labels)
+		assert.Equal(t, map[string]string{"type": "tmpfs"}, got.Options)
+		assert.NotEmpty(t, got.Mountpoint, "mountpoint must be reported")
+	})
+
+	// --- AC: unknown volume name returns 404 VOLUME_NOT_FOUND ---------
+	t.Run("UnknownNameGets404", func(t *testing.T) {
+		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/it-"+suite.RunID+"-no-such-volume",
+			"", http.StatusNotFound, "VOLUME_NOT_FOUND")
+	})
+}
+
 // --- Access-control behavior (middleware, shared with all downstream
 // families): volumes rides the same RequireMachineAccess subtree, so a
 // no-access user gets 403 ACCESS_DENIED and an unknown machine ID gets
