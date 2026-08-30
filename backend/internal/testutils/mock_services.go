@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"go.podman.io/podman/v6/pkg/bindings"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // MockEncryptionService implements a mock encryption service for testing
@@ -439,4 +441,18 @@ func (m *MockSSHExec) CallCount() int {
 // The MachineService itself is created by the caller to maintain proper package boundaries
 func NewTestMachineServiceComponents() (*MockMachineRepository, *MockMachineAccessRepository, *MockConnectionManager, *MockEncryptionService) {
 	return NewMockMachineRepository(), NewMockMachineAccessRepository(), NewMockConnectionManager(), NewMockEncryptionService()
+}
+
+// MockVolumeService implements a mock volumes.VolumeServiceInterface for
+// handler tests across the volumes domain.
+type MockVolumeService struct {
+	mock.Mock
+}
+
+func (m *MockVolumeService) List(ctx context.Context, userID, machineID string, opts entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
+	args := m.Called(ctx, userID, machineID, opts)
+	if reports, ok := args.Get(0).([]*entities.VolumeListReport); ok {
+		return reports, args.Error(1)
+	}
+	return nil, args.Error(1)
 }

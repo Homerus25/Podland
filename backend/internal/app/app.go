@@ -32,6 +32,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/domain/quadlets"
 	"github.com/Homerus25/podland/backend/internal/domain/secrets"
 	"github.com/Homerus25/podland/backend/internal/domain/users"
+	"github.com/Homerus25/podland/backend/internal/domain/volumes"
 	"github.com/Homerus25/podland/backend/internal/encryption"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
@@ -150,6 +151,7 @@ func New(cfg *config.Config) (*App, error) {
 	quadletService := quadlets.NewQuadletService(connectionManager, sshExecService)
 	secretService := secrets.NewSecretService(connectionManager, accessRepo)
 	eventService := events.NewEventService(connectionManager)
+	volumeService := volumes.NewVolumeService(connectionManager)
 
 	// Initialize handlers
 	authHandler := auth.NewAuthHandler(authService, userRepo)
@@ -160,6 +162,7 @@ func New(cfg *config.Config) (*App, error) {
 	quadletHandler := quadlets.NewQuadletHandler(quadletService, machineService)
 	secretHandler := secrets.NewSecretHandler(secretService)
 	eventHandler := events.NewEventHandler(eventService, machineService, errors.NewErrorHandler())
+	volumeHandler := volumes.NewVolumeHandler(volumeService)
 
 	// Initialize middleware
 	rateLimiter := appmiddleware.NewRateLimiter(
@@ -294,6 +297,12 @@ func New(cfg *config.Config) (*App, error) {
 
 					// Events
 					r.Get("/events", eventHandler.HandleEvents)
+
+					// Volumes — read-level list; later volumes slices plug
+					// their mutating routes in here.
+					r.Route("/volumes", func(r chi.Router) {
+						r.Get("/", volumeHandler.List)
+					})
 				})
 			})
 
