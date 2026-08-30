@@ -1,8 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
 import {
   createMachine,
   deleteMachine,
   getMachine,
+  getMachineStatus,
   grantMachineAccess,
   listMachineAccess,
   listMachines,
@@ -17,8 +19,31 @@ export function useMachines() {
   return useQuery({ queryKey: ['machines'], queryFn: listMachines })
 }
 
+// Per-machine live probe. staleTime 0 and no refetch interval: status is
+// fresh on every mount of the overview and never polled (no-polling
+// precedent). Query key includes the machine id so each card probes
+// independently and the machines list is never blocked.
+export function useMachineStatus(machineId: string) {
+  return useQuery({
+    queryKey: ['machines', machineId, 'status'],
+    queryFn: () => getMachineStatus(machineId),
+    staleTime: 0,
+  })
+}
+
+// The backend populates the caller's `permission` only on the list endpoint
+// (backend/internal/domain/machines/service.go MachineResponse); the detail
+// response omits it. So the list query is consulted to fill in the
+// permission for the detail page's gating (badges, secrets, settings).
 export function useMachine(id: string) {
-  return useQuery({ queryKey: ['machines', id], queryFn: () => getMachine(id) })
+  const detail = useQuery({ queryKey: ['machines', id], queryFn: () => getMachine(id) })
+  const { data: machines } = useMachines()
+
+  return useMemo(() => {
+    const listed = machines?.find((machine) => machine.id === id)
+    if (!detail.data || !listed?.permission) return detail
+    return { ...detail, data: { ...detail.data, permission: listed.permission } }
+  }, [detail, machines, id])
 }
 
 export function useUpdateMachine(id: string) {

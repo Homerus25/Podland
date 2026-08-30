@@ -14,4 +14,9 @@ export const handlers = [
   http.post('*/api/auth/logout', () => {
     return HttpResponse.json({ message: 'Logged out successfully' })
   }),
+  // Default status probe so card-rendering tests see a healthy machine;
+  // individual tests override this with server.use().
+  http.get('*/api/machines/:id/status', () => {
+    return HttpResponse.json({ status: 'online', checkedAt: '2026-08-29T10:00:00Z' })
+  }),
 ]

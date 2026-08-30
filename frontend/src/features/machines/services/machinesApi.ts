@@ -67,6 +67,18 @@ export async function revokeMachineAccess(machineId: string, userId: string): Pr
   await api.delete(`/machines/${machineId}/access/${userId}`)
 }
 
+// MachineStatus mirrors GET /api/machines/{id}/status
+// (backend/internal/domain/machines/handler.go). checkedAt is RFC3339 UTC.
+export interface MachineStatus {
+  status: 'online' | 'offline'
+  checkedAt: string
+}
+
+export async function getMachineStatus(machineId: string): Promise<MachineStatus> {
+  const response = await api.get<MachineStatus>(`/machines/${machineId}/status`)
+  return response.data
+}
+
 export async function createMachine(input: CreateMachineInput): Promise<Machine> {
   const response = await api.post<Machine>('/machines', input)
   return response.data
