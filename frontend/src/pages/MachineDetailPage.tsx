@@ -164,7 +164,7 @@ export function MachineDetailPage() {
             <ImageList machineId={machine.id} />
           </TabPanel>
           <TabPanel>
-            <QuadletList machineId={machine.id} />
+            <QuadletList machineId={machine.id} permission={effectivePermission(machine)} />
           </TabPanel>
           <TabPanel>
             <SecretList machineId={machine.id} permission={effectivePermission(machine)} />

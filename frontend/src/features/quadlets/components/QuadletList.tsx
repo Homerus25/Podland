@@ -28,11 +28,16 @@ import {
   useUpdateQuadlet,
 } from '@features/quadlets/hooks/useQuadlets'
 import { QuadletForm } from '@features/quadlets/components/QuadletForm'
+import { AutoUpdateModal } from '@features/quadlets/components/AutoUpdateModal'
+import { useQuadletAutoUpdate } from '@features/quadlets/hooks/useQuadletAutoUpdate'
+import { canEditMachine } from '@features/machines/permissions'
+import type { EffectivePermission } from '@features/machines/permissions'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { LogViewer, type LogSource } from '@shared/components/LogViewer'
 import { Modal } from '@shared/components/Modal'
 import { StateBadge } from '@shared/components/StateBadge'
 import { getApiError } from '@shared/utils/api'
+import { mutationToPromise } from '@shared/utils/mutationPromise'
 import {
   fetchQuadletLogs,
   followQuadletLogs,
@@ -290,15 +295,10 @@ function EditQuadletModal({
           mode="edit"
           seed={{ name: data.name, resource: data.resource, content: data.content }}
           onSubmit={({ content }) =>
-            new Promise<void>((resolve) =>
-              updateQuadlet.mutate(
-                { quadletId: quadlet.id, content },
-                {
-                  onSuccess: onClose,
-                  onSettled: () => resolve(),
-                },
-              ),
-            )
+            mutationToPromise(updateQuadlet.mutate, {
+              quadletId: quadlet.id,
+              content,
+            }, { onSuccess: onClose })
           }
           submitError={updateQuadlet.error}
           isSubmitting={updateQuadlet.isPending}
@@ -409,11 +409,21 @@ function DeleteQuadletModal({
   )
 }
 
-export function QuadletList({ machineId }: { machineId: string }) {
+export function QuadletList({
+  machineId,
+  permission,
+}: {
+  machineId: string
+  permission?: EffectivePermission
+}) {
   const { data: quadlets, isPending, error } = useQuadlets(machineId)
   const createQuadlet = useCreateQuadlet(machineId)
   const updateQuadlet = useUpdateQuadlet(machineId)
   const deleteQuadlet = useDeleteQuadlet(machineId)
+  const autoUpdate = useQuadletAutoUpdate(machineId)
+  const canAutoUpdate = canEditMachine(permission ?? 'read')
+  const [isConfirmUpdateOpen, setIsConfirmUpdateOpen] = useState(false)
+  const [isAutoUpdateOpen, setIsAutoUpdateOpen] = useState(false)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<QuadletSummary | null>(null)
@@ -439,6 +449,29 @@ export function QuadletList({ machineId }: { machineId: string }) {
         >
           Create quadlet
         </Button>
+        {canAutoUpdate ? (
+          <>
+            <Button
+              size="sm"
+              colorScheme="purple"
+              onClick={() => {
+                autoUpdate.run(true)
+                setIsAutoUpdateOpen(true)
+              }}
+              data-testid="check-updates-button"
+            >
+              Check for updates
+            </Button>
+            <Button
+              size="sm"
+              colorScheme="orange"
+              onClick={() => setIsConfirmUpdateOpen(true)}
+              data-testid="update-all-button"
+            >
+              Update all
+            </Button>
+          </>
+        ) : null}
       </HStack>
       {error ? (
         <ErrorDisplay error={getApiError(error)} />
@@ -505,6 +538,45 @@ export function QuadletList({ machineId }: { machineId: string }) {
           onClose={() => setLogsTarget(null)}
         />
       ) : null}
+      {isConfirmUpdateOpen ? (
+        <Modal
+          isOpen
+          onClose={() => setIsConfirmUpdateOpen(false)}
+          title="Update all"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setIsConfirmUpdateOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                colorScheme="orange"
+                onClick={() => {
+                  setIsConfirmUpdateOpen(false)
+                  autoUpdate.run(false)
+                  setIsAutoUpdateOpen(true)
+                }}
+                data-testid="confirm-auto-update-button"
+              >
+                Update all
+              </Button>
+            </>
+          }
+        >
+          <Text>
+            Containers with an auto-update policy will be updated and restarted. Continue?
+          </Text>
+        </Modal>
+      ) : null}
+      {isAutoUpdateOpen ? (
+        <AutoUpdateModal
+          dryRun={autoUpdate.dryRun}
+          autoUpdate={autoUpdate}
+          onClose={() => {
+            if (autoUpdate.isRunning) autoUpdate.cancel()
+            setIsAutoUpdateOpen(false)
+          }}
+        />
+      ) : null}
       {isCreateOpen ? (
         <Modal
           isOpen
@@ -516,12 +588,9 @@ export function QuadletList({ machineId }: { machineId: string }) {
         >
           <QuadletForm
             onSubmit={(input) =>
-              new Promise<void>((resolve) =>
-                createQuadlet.mutate(input, {
-                  onSuccess: () => setIsCreateOpen(false),
-                  onSettled: () => resolve(),
-                }),
-              )
+            mutationToPromise(createQuadlet.mutate, input, {
+            onSuccess: () => setIsCreateOpen(false),
+            })
             }
             submitError={createQuadlet.error}
             isSubmitting={createQuadlet.isPending}
