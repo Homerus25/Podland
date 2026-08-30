@@ -18,6 +18,7 @@ import { ShareMachineSection } from '@features/machines/components/ShareMachineS
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { Modal } from '@shared/components/Modal'
 import { getApiError } from '@shared/utils/api'
+import { mutationToPromise } from '@shared/utils/mutationPromise'
 import type { Machine } from '@shared/types/api'
 
 function DeleteMachineSection({ machine }: { machine: Machine }) {
@@ -98,12 +99,7 @@ function SettingsTab({ machine }: { machine: Machine }) {
       <MachineForm
         mode="edit"
         machine={machine}
-        onSubmit={
-          (input) =>
-            new Promise<void>((resolve) =>
-              updateMachine.mutate(input, { onSettled: () => resolve() }),
-            )
-        }
+        onSubmit={(input) => mutationToPromise(updateMachine.mutate, input)}
         submitError={updateMachine.error}
         isSubmitting={updateMachine.isPending}
       />

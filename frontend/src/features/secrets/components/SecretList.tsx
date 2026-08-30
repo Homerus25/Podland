@@ -28,6 +28,7 @@ import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { Modal } from '@shared/components/Modal'
 import { getApiError } from '@shared/utils/api'
 import { formatRelativeDate } from '@shared/utils/format'
+import { mutationToPromise } from '@shared/utils/mutationPromise'
 
 // No delete request leaves the browser until the user explicitly confirms.
 // There are no options in v1: the backend exposes no force parameter.
@@ -237,12 +238,9 @@ export function SecretList({
         >
           <SecretForm
             onSubmit={(input) =>
-              new Promise<void>((resolve) =>
-                createSecret.mutate(input, {
-                  onSuccess: () => setIsCreateOpen(false),
-                  onSettled: () => resolve(),
-                }),
-              )
+              mutationToPromise(createSecret.mutate, input, {
+                onSuccess: () => setIsCreateOpen(false),
+              })
             }
             submitError={createSecret.error}
             isSubmitting={createSecret.isPending}

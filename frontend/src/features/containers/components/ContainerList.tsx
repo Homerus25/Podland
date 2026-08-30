@@ -14,6 +14,7 @@ import { Modal } from '@shared/components/Modal'
 import { StateBadge } from '@shared/components/StateBadge'
 import { getApiError } from '@shared/utils/api'
 import { shortImageId } from '@shared/utils/format'
+import { mutationToPromise } from '@shared/utils/mutationPromise'
 import {
   fetchContainerLogs,
   followContainerLogs,
@@ -283,12 +284,9 @@ export function ContainerList({ machineId }: { machineId: string }) {
         >
           <CreateContainerForm
             onSubmit={(input) =>
-              new Promise<void>((resolve) =>
-                createContainer.mutate(input, {
-                  onSuccess: () => setIsCreateOpen(false),
-                  onSettled: () => resolve(),
-                }),
-              )
+              mutationToPromise(createContainer.mutate, input, {
+                onSuccess: () => setIsCreateOpen(false),
+              })
             }
             submitError={createContainer.error}
             isSubmitting={createContainer.isPending}

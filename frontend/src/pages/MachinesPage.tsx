@@ -7,6 +7,7 @@ import { MachineCard } from '@features/machines/components/MachineCard'
 import { Modal } from '@shared/components/Modal'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { getApiError } from '@shared/utils/api'
+import { mutationToPromise } from '@shared/utils/mutationPromise'
 
 export function MachinesPage() {
   const { data: machines, isPending, error } = useMachines()
@@ -50,16 +51,12 @@ export function MachinesPage() {
         ))}
       <Modal isOpen={isAddOpen} onClose={closeAddModal} title="Add Machine">
         <MachineForm
-          onSubmit={
-            (input) =>
-              new Promise<void>((resolve) =>
-                // Create mode always carries the key: the form rejects an
-                // empty file input before submit.
-                createMachine.mutate(input as CreateMachineInput, {
-                  onSuccess: () => setIsAddOpen(false),
-                  onSettled: () => resolve(),
-                }),
-              )
+          onSubmit={(input) =>
+            mutationToPromise(
+              createMachine.mutate,
+              input as CreateMachineInput,
+              { onSuccess: () => setIsAddOpen(false) },
+            )
           }
           submitError={createMachine.error}
           isSubmitting={createMachine.isPending}
