@@ -35,6 +35,7 @@ type QuadletServiceInterface interface {
 	GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error
 	Generate(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error)
 	Import(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error)
+	AutoUpdate(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error)
 }
 
 // ListFilters represents the filters for listing quadlets.

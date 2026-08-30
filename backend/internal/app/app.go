@@ -262,6 +262,7 @@ func New(cfg *config.Config) (*App, error) {
 						r.Get("/", quadletHandler.List)
 						r.With(requireWrite).Post("/", quadletHandler.Create)
 						r.With(requireWrite).Post("/import", quadletHandler.Import)
+						r.With(requireWrite).Post("/auto-update", quadletHandler.AutoUpdate)
 						r.Route("/{quadletId}", func(r chi.Router) {
 							r.Get("/", quadletHandler.Get)
 							r.With(requireWrite).Put("/", quadletHandler.Update)

@@ -1,6 +1,7 @@
 package quadlets
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -8,11 +9,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-playground/validator/v10"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/streaming"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 )
 
 // QuadletHandler handles quadlet requests
@@ -667,4 +670,70 @@ func (h *QuadletHandler) Import(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(result)
+}
+
+// AutoUpdate handles running `podman auto-update` on the machine with live
+// NDJSON streaming of remote output, terminating in a parsed report event.
+// Registry pulls make runs routinely exceed the global 30-second write
+// timeout, so this handler extends its own per-response write deadline to
+// 10 minutes without touching the server-wide setting.
+func (h *QuadletHandler) AutoUpdate(w http.ResponseWriter, r *http.Request) {
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	dryRun, _ := strconv.ParseBool(r.URL.Query().Get("dryRun"))
+
+	operationID := uuid.New().String()
+	slog.InfoContext(r.Context(), "AutoUpdate quadlets",
+		slog.String("requestID", contextutils.GetRequestID(r.Context())),
+		slog.String("userID", userID),
+		slog.String("machineID", machineID),
+		slog.String("operationID", operationID),
+		slog.Bool("dryRun", dryRun))
+
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(10 * time.Minute)); err != nil {
+		slog.WarnContext(r.Context(), "Failed to extend write deadline", slog.Any("error", err))
+	}
+
+	streaming.SetNDJSONHeaders(w)
+
+	ndjsonWriter, err := streaming.NewNDJSONWriter(w)
+	if err != nil {
+		errors.RespondWithHTTPError(w, http.StatusInternalServerError, "STREAMING_NOT_SUPPORTED", "Streaming not supported", contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Streaming not supported")
+		return
+	}
+
+	streaming.Run(r.Context(), ndjsonWriter, streaming.StreamConfig[AutoUpdateEvent, AutoUpdateReport]{
+		Operation: func(ctx context.Context, onProgress func(AutoUpdateEvent)) (AutoUpdateReport, error) {
+			return h.service.AutoUpdate(ctx, userID, machineID, dryRun, func(line sshexec.OutputLine) {
+				onProgress(NewAutoUpdateLogEvent(operationID, machineID, line))
+			})
+		},
+		OnEvent: func(event AutoUpdateEvent) error {
+			return ndjsonWriter.Write(event)
+		},
+		CompleteEvent: func(report AutoUpdateReport) any {
+			return NewAutoUpdateCompleteEvent(operationID, machineID, report)
+		},
+		ErrorEvent: func(err error, cancelled bool) any {
+			if cancelled {
+				return NewAutoUpdateErrorEvent(operationID, machineID, errors.ErrOperationCancelled.Code, errors.ErrOperationCancelled.Message)
+			}
+			if appErr, ok := err.(*errors.AppError); ok {
+				return NewAutoUpdateErrorEvent(operationID, machineID, appErr.Code, appErr.Message)
+			}
+			return NewAutoUpdateErrorEvent(operationID, machineID, errors.ErrConnectionFailed.Code, errors.ErrConnectionFailed.Message)
+		},
+	})
 }

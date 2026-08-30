@@ -327,6 +327,13 @@ func NewMockSSHExecWithStreamError(err error) *MockSSHExec {
 	return &MockSSHExec{streamError: err}
 }
 
+// NewMockSSHExecWithStreamFunc returns a MockSSHExec that delegates each
+// ExecStream to the supplied function, so streaming tests can script exact
+// line emission and per-call results.
+func NewMockSSHExecWithStreamFunc(f func(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error)) *MockSSHExec {
+	return &MockSSHExec{streamFunc: f}
+}
+
 // NewMockSSHExecWithFunc returns a MockSSHExec that delegates each Exec to
 // the supplied function. Use this when a test needs to vary behaviour across
 // calls (e.g. first call returns "already running", second returns success).

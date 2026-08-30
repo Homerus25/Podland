@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/sshexec"
 )
 
 // errGeneric is a non-AppError used to exercise the handler's generic
@@ -241,6 +242,7 @@ type MockQuadletService struct {
 	mockGetLogsWithStream func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error
 	mockGenerate          func(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error)
 	mockImport            func(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error)
+	mockAutoUpdate        func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error)
 }
 
 func (m *MockQuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
@@ -325,6 +327,13 @@ func (m *MockQuadletService) Import(ctx context.Context, userID, machineID strin
 		return m.mockImport(ctx, userID, machineID, req)
 	}
 	return nil, nil
+}
+
+func (m *MockQuadletService) AutoUpdate(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
+	if m.mockAutoUpdate != nil {
+		return m.mockAutoUpdate(ctx, userID, machineID, dryRun, onLine)
+	}
+	return AutoUpdateReport{}, nil
 }
 
 func TestQuadletHandler_Get(t *testing.T) {
