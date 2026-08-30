@@ -3,6 +3,7 @@ package testutils
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"go.podman.io/podman/v6/pkg/bindings"
@@ -265,6 +266,11 @@ type MockSSHExec struct {
 	execError  error
 	execFunc   func(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error)
 	execCalls  []MockSSHExecCall
+
+	streamFunc   func(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error)
+	streamResult *sshexec.ExecResult
+	streamError  error
+	streamCalls  []MockSSHExecStreamCall
 }
 
 // MockSSHExecCall records a single Exec invocation, for assertion in tests.
@@ -273,6 +279,17 @@ type MockSSHExecCall struct {
 	UserID    string
 	Command   string
 	Opts      sshexec.ExecOptions
+}
+
+// MockSSHExecStreamCall records a single ExecStream invocation, for
+// assertion in tests. Lines holds every output line the mock emitted, in
+// emission order.
+type MockSSHExecStreamCall struct {
+	MachineID string
+	UserID    string
+	Command   string
+	Opts      sshexec.ExecOptions
+	Lines     []sshexec.OutputLine
 }
 
 // NewMockSSHExec returns a MockSSHExec whose Exec succeeds with a zero
@@ -293,6 +310,21 @@ func NewMockSSHExecWithResult(result sshexec.ExecResult) *MockSSHExec {
 // callers (e.g. CONNECTION_FAILED mapping).
 func NewMockSSHExecWithError(err error) *MockSSHExec {
 	return &MockSSHExec{execError: err}
+}
+
+// NewMockSSHExecWithStreamResult returns a MockSSHExec whose ExecStream
+// emits the given result's stdout/stderr as streamed lines (stdout first,
+// then stderr) and returns the result with no error. Exec behaviour is
+// unaffected.
+func NewMockSSHExecWithStreamResult(result sshexec.ExecResult) *MockSSHExec {
+	return &MockSSHExec{streamResult: &result}
+}
+
+// NewMockSSHExecWithStreamError returns a MockSSHExec whose ExecStream
+// fails with the given error, for exercising SSH-layer failure handling in
+// streaming callers. Exec behaviour is unaffected.
+func NewMockSSHExecWithStreamError(err error) *MockSSHExec {
+	return &MockSSHExec{streamError: err}
 }
 
 // NewMockSSHExecWithFunc returns a MockSSHExec that delegates each Exec to
@@ -317,6 +349,68 @@ func (m *MockSSHExec) Exec(ctx context.Context, machineID, userID, command strin
 		return sshexec.ExecResult{}, m.execError
 	}
 	return m.execResult, nil
+}
+
+// ExecStream implements sshexec.SSHExecInterface.
+//
+// When a stream func is configured it is invoked as-is. Otherwise the mock
+// uses the configured streaming result/error if any, falling back to the
+// configured Exec result/error — emitting the result's captured stdout and
+// stderr lines through onLine (stdout first, then stderr) so callers that
+// only configured Exec behaviour still work.
+func (m *MockSSHExec) ExecStream(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
+	call := MockSSHExecStreamCall{
+		MachineID: machineID,
+		UserID:    userID,
+		Command:   command,
+		Opts:      opts,
+	}
+	defer func() { m.streamCalls = append(m.streamCalls, call) }()
+
+	if m.streamFunc != nil {
+		result, err := m.streamFunc(ctx, machineID, userID, command, opts, func(line sshexec.OutputLine) {
+			call.Lines = append(call.Lines, line)
+			onLine(line)
+		})
+		return result, err
+	}
+
+	streamErr := m.streamError
+	if streamErr != nil {
+		return sshexec.ExecResult{}, streamErr
+	}
+	result := m.execResult
+	if m.streamResult != nil {
+		result = *m.streamResult
+	}
+	for _, line := range splitLines(result.Stdout) {
+		call.Lines = append(call.Lines, sshexec.OutputLine{Stream: sshexec.StdoutStream, Text: line})
+		onLine(call.Lines[len(call.Lines)-1])
+	}
+	for _, line := range splitLines(result.Stderr) {
+		call.Lines = append(call.Lines, sshexec.OutputLine{Stream: sshexec.StderrStream, Text: line})
+		onLine(call.Lines[len(call.Lines)-1])
+	}
+	return result, nil
+}
+
+// splitLines splits captured output into lines, dropping the empty trailing
+// element produced by a trailing newline (and returning nothing for empty
+// output).
+func splitLines(out string) []string {
+	out = strings.TrimSuffix(out, "\n")
+	if out == "" {
+		return nil
+	}
+	return strings.Split(out, "\n")
+}
+
+// StreamCalls returns a snapshot of every ExecStream invocation recorded by
+// the mock, including the emitted lines.
+func (m *MockSSHExec) StreamCalls() []MockSSHExecStreamCall {
+	out := make([]MockSSHExecStreamCall, len(m.streamCalls))
+	copy(out, m.streamCalls)
+	return out
 }
 
 // Calls returns a snapshot of every Exec invocation recorded by the mock.

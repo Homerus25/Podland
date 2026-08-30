@@ -592,6 +592,7 @@ func TestMockPodmanConnection(t *testing.T) {
 // the call-recording helpers. Mirrors the MockEncryptionService test shape.
 func TestMockSSHExec(t *testing.T) {
 	ctx := context.Background()
+	errBoom := errors.New("boom")
 
 	t.Run("default returns zero-exit empty result with no error", func(t *testing.T) {
 		m := NewMockSSHExec()
@@ -677,6 +678,82 @@ func TestMockSSHExec(t *testing.T) {
 		// mutating the returned slice.
 		fresh := m.Calls()
 		assert.Equal(t, "echo", fresh[0].Command)
+	})
+
+	t.Run("ExecStream falls back to the configured result and emits its lines", func(t *testing.T) {
+		m := NewMockSSHExecWithResult(sshexec.ExecResult{
+			Stdout:   "line 1\nline 2\n",
+			Stderr:   "warn\n",
+			ExitCode: 3,
+		})
+
+		var lines []sshexec.OutputLine
+		res, err := m.ExecStream(ctx, "machine-1", "user-1", "systemctl", sshexec.ExecOptions{}, func(line sshexec.OutputLine) {
+			lines = append(lines, line)
+		})
+
+		assert.NoError(t, err)
+		assert.Equal(t, 3, res.ExitCode)
+		assert.Equal(t, []sshexec.OutputLine{
+			{Stream: sshexec.StdoutStream, Text: "line 1"},
+			{Stream: sshexec.StdoutStream, Text: "line 2"},
+			{Stream: sshexec.StderrStream, Text: "warn"},
+		}, lines)
+	})
+
+	t.Run("ExecStream records calls with emitted lines", func(t *testing.T) {
+		m := NewMockSSHExec()
+		opts := sshexec.ExecOptions{Args: []string{"auto-update", "web"}}
+
+		_, _ = m.ExecStream(ctx, "machine-1", "user-1", "podman", opts, func(sshexec.OutputLine) {})
+
+		calls := m.StreamCalls()
+		assert.Len(t, calls, 1)
+		assert.Equal(t, "machine-1", calls[0].MachineID)
+		assert.Equal(t, "user-1", calls[0].UserID)
+		assert.Equal(t, "podman", calls[0].Command)
+		assert.Equal(t, []string{"auto-update", "web"}, calls[0].Opts.Args)
+		assert.Empty(t, calls[0].Lines, "no lines for a result with empty output")
+
+		// StreamCalls returns a defensive copy.
+		calls[0].Command = "mutated"
+		assert.Equal(t, "podman", m.StreamCalls()[0].Command)
+	})
+
+	t.Run("ExecStream with a configured stream result and stream error", func(t *testing.T) {
+		result := sshexec.ExecResult{Stdout: "report\n", ExitCode: 0}
+		m := NewMockSSHExecWithStreamResult(result)
+
+		var lines []string
+		res, err := m.ExecStream(ctx, "m", "u", "podman", sshexec.ExecOptions{}, func(line sshexec.OutputLine) {
+			lines = append(lines, line.Text)
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, result, res)
+		assert.Equal(t, []string{"report"}, lines)
+
+		wantErr := errors.New("stream dial failed")
+		me := NewMockSSHExecWithStreamError(wantErr)
+		res, err = me.ExecStream(ctx, "m", "u", "podman", sshexec.ExecOptions{}, func(sshexec.OutputLine) {})
+		assert.ErrorIs(t, err, wantErr)
+		assert.Equal(t, sshexec.ExecResult{}, res)
+	})
+
+	t.Run("ExecStream delegates to a configured stream func", func(t *testing.T) {
+		m := &MockSSHExec{streamFunc: func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
+			onLine(sshexec.OutputLine{Stream: sshexec.StdoutStream, Text: "from func"})
+			return sshexec.ExecResult{ExitCode: 2}, errBoom
+		}}
+
+		var lines []string
+		_, err := m.ExecStream(ctx, "m", "u", "podman", sshexec.ExecOptions{}, func(line sshexec.OutputLine) {
+			lines = append(lines, line.Text)
+		})
+
+		assert.ErrorIs(t, err, errBoom)
+		assert.Equal(t, []string{"from func"}, lines)
+		assert.Len(t, m.StreamCalls(), 1)
+		assert.Equal(t, []sshexec.OutputLine{{Stream: sshexec.StdoutStream, Text: "from func"}}, m.StreamCalls()[0].Lines)
 	})
 
 	t.Run("satisfies sshexec.SSHExecInterface", func(t *testing.T) {

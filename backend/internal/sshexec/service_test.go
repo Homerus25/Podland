@@ -48,6 +48,10 @@ func (r *fakeRunner) Run(ctx context.Context, cmd string) (ExecResult, error) {
 
 func (r *fakeRunner) Close() error { return r.closeErr }
 
+func (r *fakeRunner) RunStream(ctx context.Context, cmd string, onLine func(OutputLine)) (ExecResult, error) {
+	return r.Run(ctx, cmd)
+}
+
 // fakeDialer is a scriptable dialer. Dial returns the configured runner (or
 // error); Invalidate records that it was called for a given machineID.
 type fakeDialer struct {
@@ -83,6 +87,15 @@ func (d *fakeDialer) Invalidate(machineID string) {
 // goroutine, so this is a no-op that must be safe to call repeatedly —
 // internal/app.App.Close may call it more than once.
 func (d *fakeDialer) Close() error { return nil }
+
+// Invalidated returns a snapshot of the machine IDs passed to Invalidate.
+func (d *fakeDialer) Invalidated() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]string, len(d.invalidated))
+	copy(out, d.invalidated)
+	return out
+}
 
 // --- Compile-time interface checks ---
 
@@ -238,6 +251,9 @@ func (r *slowRunner) Run(ctx context.Context, _ string) (ExecResult, error) {
 	close(r.started)
 	<-ctx.Done()
 	return ExecResult{}, ctx.Err()
+}
+func (r *slowRunner) RunStream(ctx context.Context, _ string, _ func(OutputLine)) (ExecResult, error) {
+	return r.Run(ctx, "")
 }
 func (r *slowRunner) Close() error { return nil }
 

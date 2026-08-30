@@ -40,6 +40,10 @@ type sessionRunner interface {
 	// cancellation surfacing as something other than an exit code) return
 	// a non-nil error.
 	Run(ctx context.Context, cmd string) (ExecResult, error)
+	// RunStream is the streaming variant of Run: it invokes onLine for each
+	// output line as it arrives (tagged with its stream) while still
+	// capturing the full result. Same error semantics as Run.
+	RunStream(ctx context.Context, cmd string, onLine func(OutputLine)) (ExecResult, error)
 	// Close releases any per-call resources (the underlying sshClient is
 	// managed by the dialer cache and is NOT closed here).
 	Close() error
@@ -327,6 +331,47 @@ func (r *sshSessionRunner) Run(ctx context.Context, cmd string) (ExecResult, err
 
 	runErr := session.Run(cmd)
 	close(done)
+
+	return classifyRunResult(runErr, ctx.Err(), stdout.String(), stderr.String())
+}
+
+// RunStream is the streaming variant of Run: it invokes onLine for each
+// output line as it arrives (tagged with its stream) while still capturing
+// the full result. Same error semantics as Run.
+func (r *sshSessionRunner) RunStream(ctx context.Context, cmd string, onLine func(OutputLine)) (ExecResult, error) {
+	session, err := r.client.NewSession()
+	if err != nil {
+		return ExecResult{}, fmt.Errorf("sshexec: failed to open session: %w", err)
+	}
+	defer session.Close()
+
+	var stdout, stderr bytes.Buffer
+	lineGroup := newLineTeeGroup(onLine)
+	stdoutTee := newLineTeeWriter(StdoutStream, lineGroup, &stdout)
+	stderrTee := newLineTeeWriter(StderrStream, lineGroup, &stderr)
+	session.Stdout = stdoutTee
+	session.Stderr = stderrTee
+
+	// Honour context cancellation by signalling the remote process. The
+	// goroutine exits when Run returns (done) or when ctx is cancelled.
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			// Best-effort kill. Errors are ignored — ctx.Err() is
+			// returned below regardless of whether the signal landed.
+			_ = session.Signal(ssh.SIGKILL)
+		case <-done:
+		}
+	}()
+
+	runErr := session.Run(cmd)
+	close(done)
+
+	// Emit any trailing partial lines so the callback sees the complete
+	// output before the result is returned.
+	stdoutTee.Flush()
+	stderrTee.Flush()
 
 	return classifyRunResult(runErr, ctx.Err(), stdout.String(), stderr.String())
 }

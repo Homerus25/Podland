@@ -38,4 +38,9 @@ type ExecResult struct {
 // See the long comment in internal/domain/machines/service_interfaces.go.)
 type SSHExecInterface interface {
 	Exec(ctx context.Context, machineID, userID, command string, opts ExecOptions) (ExecResult, error)
+	// ExecStream is the streaming variant of Exec: it invokes onLine for
+	// each output line as it arrives, tagged with the stream it came from
+	// (OutputLine.Stream), while still returning the fully captured result
+	// so callers can interpret the exit code as with Exec.
+	ExecStream(ctx context.Context, machineID, userID, command string, opts ExecOptions, onLine func(OutputLine)) (ExecResult, error)
 }
