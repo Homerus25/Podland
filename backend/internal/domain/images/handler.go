@@ -127,10 +127,6 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 	// Generate a unique operation ID for this pull
 	operationID := uuid.New().String()
 
-	// Create a cancelable context for the pull operation
-	pullCtx, cancelPull := context.WithCancel(r.Context())
-	defer cancelPull()
-
 	// Set headers for streaming NDJSON response
 	streaming.SetNDJSONHeaders(w)
 
@@ -141,9 +137,6 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "Streaming not supported")
 		return
 	}
-
-	// Create a channel to detect client disconnect
-	disconnectChan := streaming.DisconnectChan(pullCtx)
 
 	// Prepare pull options
 	var pullOpts entities.ImagePullOptions
@@ -158,70 +151,30 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 		pullOpts.Variant = variant
 	}
 
-	// Create a progress channel
-	progressChan := make(chan PullProgressEvent, 10)
-
-	// Start pull operation in a goroutine
-	resultChan := make(chan *entities.ImagePullReport, 1)
-	errorChan := make(chan error, 1)
-
-	go func() {
-		report, err := h.service.PullWithProgress(pullCtx, userID, machineID, request.Image, pullOpts, func(event PullProgressEvent) {
-			// Update operation ID and machine ID in events
-			event.OperationID = operationID
-			event.MachineID = machineID
-			select {
-			case progressChan <- event:
-			case <-pullCtx.Done():
+	streaming.Run(r.Context(), ndjsonWriter, streaming.StreamConfig[PullProgressEvent, *entities.ImagePullReport]{
+		Operation: func(pullCtx context.Context, onProgress func(PullProgressEvent)) (*entities.ImagePullReport, error) {
+			return h.service.PullWithProgress(pullCtx, userID, machineID, request.Image, pullOpts, func(event PullProgressEvent) {
+				event.OperationID = operationID
+				event.MachineID = machineID
+				onProgress(event)
+			})
+		},
+		OnEvent: func(event PullProgressEvent) error {
+			return ndjsonWriter.Write(event)
+		},
+		CompleteEvent: func(*entities.ImagePullReport) any {
+			return NewCompleteEvent(operationID, machineID)
+		},
+		ErrorEvent: func(err error, cancelled bool) any {
+			if cancelled {
+				return NewErrorEvent(operationID, machineID, errors.ErrOperationCancelled.Code, errors.ErrOperationCancelled.Message)
 			}
-		})
-		if err != nil {
-			errorChan <- err
-		} else {
-			resultChan <- report
-		}
-	}()
-
-	// Stream events to client
-	streamComplete := false
-	for !streamComplete {
-		select {
-		case event := <-progressChan:
-			if err := ndjsonWriter.Write(event); err != nil {
-				slog.ErrorContext(r.Context(), "Failed to write event", slog.Any("error", err))
-				cancelPull()
-				streamComplete = true
+			if appErr, ok := err.(*errors.AppError); ok {
+				return NewErrorEvent(operationID, machineID, appErr.Code, appErr.Message)
 			}
-
-		case <-resultChan:
-			// Pull completed successfully
-			completeEvent := NewCompleteEvent(operationID, machineID)
-			ndjsonWriter.Write(completeEvent)
-			streamComplete = true
-
-		case err := <-errorChan:
-			// Pull failed
-			var errorEvent PullProgressEvent
-			if pullCtx.Err() == context.Canceled {
-				errorEvent = NewErrorEvent(operationID, machineID, errors.ErrOperationCancelled.Code, errors.ErrOperationCancelled.Message)
-			} else if appErr, ok := err.(*errors.AppError); ok {
-				errorEvent = NewErrorEvent(operationID, machineID, appErr.Code, appErr.Message)
-			} else {
-				errorEvent = NewErrorEvent(operationID, machineID, errors.ErrImagePullFailed.Code, errors.ErrImagePullFailed.Message)
-			}
-			ndjsonWriter.Write(errorEvent)
-			streamComplete = true
-
-		case <-disconnectChan:
-			// Client disconnected
-			slog.InfoContext(r.Context(), "Client disconnected, cancelling pull")
-			cancelPull()
-			// Try to send cancellation event (best effort)
-			errorEvent := NewErrorEvent(operationID, machineID, errors.ErrOperationCancelled.Code, errors.ErrOperationCancelled.Message)
-			ndjsonWriter.Write(errorEvent)
-			streamComplete = true
-		}
-	}
+			return NewErrorEvent(operationID, machineID, errors.ErrImagePullFailed.Code, errors.ErrImagePullFailed.Message)
+		},
+	})
 }
 
 // Delete handles deleting an image
