@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Generate JWT keys for Podland backend
 # This script creates RSA private and public keys for JWT token signing
