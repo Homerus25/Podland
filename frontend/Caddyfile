@@ -1,0 +1,6 @@
+:3000 {
+  reverse_proxy /api/* 127.0.0.1:8080
+  file_server {
+    root /app
+  }
+}
