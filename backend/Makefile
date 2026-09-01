@@ -96,11 +96,11 @@ init-db:
 	@echo "Database initialization complete"
 
 # Docker commands
-docker-build:
-	docker build -t podland-backend .
+podman-build:
+	podman build -t podland-backend .
 
-docker-run:
-	docker run -p $(PORT):8080 -v $(PWD)/podland.db:/app/podland.db podland-backend
+podman-run:
+	podman run -p $(PORT):8080 -v $(PWD)/podland.db:/app/podland.db podland-backend
 
 # Help
 help:
@@ -113,5 +113,5 @@ help:
 	@echo "  make test-integration - Run integration tests against a real podman machine"
 	@echo "  make migrate   - Run database migrations"
 	@echo "  make keys      - Generate JWT keys"
-	@echo "  make docker-build - Build Docker image"
-	@echo "  make docker-run  - Run Docker container"
+	@echo "  make podman-build - Build Docker image"
+	@echo "  make podman-run  - Run Docker container"
