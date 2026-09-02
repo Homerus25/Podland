@@ -141,6 +141,8 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **Error Handling**: Context-aware error display with React Query
 - **Build Tool**: Vite
 - **TypeScript**: Strict mode with path aliases
+- **Feature folders**: each feature lives in `src/features/<name>/` with `services/` (API client), `hooks/` (React Query hooks), `components/`
+- **DTO types**: response types for an endpoint live in that feature's `services/<feature>Api.ts`, colocated with the fetch function; `src/shared/types/api.ts` is only for types shared across features (e.g. `Machine`, error envelope)
 
 ### Infrastructure
 - **Reverse Proxy**: Caddy
