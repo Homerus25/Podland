@@ -1,99 +1,120 @@
-import { screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
-import { api, setBearerToken } from '@shared/utils/api'
-import { loginViaForm, renderApp } from '@/test/auth'
-import { server } from '@/test/server'
+import { api, setBearerToken } from "@shared/utils/api";
+import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
+import { afterEach, describe, expect, it } from "vitest";
+import { loginViaForm, renderApp } from "@/test/auth";
+import { server } from "@/test/server";
 
 // Mirrors the backend error envelope (backend/internal/errors/handlers.go)
 function loginFailureHandler(status: number, code: string, message: string) {
-  return http.post('*/api/auth/login', () => {
-    return HttpResponse.json(
-      { requestId: 'req-1', error: { message, code } },
-      { status },
-    )
-  })
+	return http.post("*/api/auth/login", () => {
+		return HttpResponse.json(
+			{ requestId: "req-1", error: { message, code } },
+			{ status },
+		);
+	});
 }
 
 afterEach(() => {
-  setBearerToken(null)
-})
+	setBearerToken(null);
+});
 
-describe('LoginPage', () => {
-  it('logs the user in and lands on the placeholder dashboard', async () => {
-    renderApp('/login')
+describe("LoginPage", () => {
+	it("logs the user in and lands on the placeholder dashboard", async () => {
+		renderApp("/login");
 
-    await loginViaForm()
+		await loginViaForm();
 
-    await waitFor(() => {
-      expect(screen.getByText('Manage Podman on remote machines')).toBeInTheDocument()
-    })
-  })
+		await waitFor(() => {
+			expect(
+				screen.getByText("Manage Podman on remote machines"),
+			).toBeInTheDocument();
+		});
+	});
 
-  it('stores username and memory-only token, and sends the Bearer header on API requests', async () => {
-    let authHeader: string | null = null
-    server.use(
-      http.get('*/api/machines', ({ request }) => {
-        authHeader = request.headers.get('authorization')
-        return HttpResponse.json([])
-      }),
-    )
-    renderApp('/login')
+	it("stores username and memory-only token, and sends the Bearer header on API requests", async () => {
+		let authHeader: string | null = null;
+		server.use(
+			http.get("*/api/machines", ({ request }) => {
+				authHeader = request.headers.get("authorization");
+				return HttpResponse.json([]);
+			}),
+		);
+		renderApp("/login");
 
-    await loginViaForm()
-    await waitFor(() => {
-      expect(screen.getByTestId('auth-user')).toHaveTextContent('alice')
-    })
+		await loginViaForm();
+		await waitFor(() => {
+			expect(screen.getByTestId("auth-user")).toHaveTextContent("alice");
+		});
 
-    await api.get('/machines')
+		await api.get("/machines");
 
-    expect(authHeader).toBe('Bearer test-access-token')
+		expect(authHeader).toBe("Bearer test-access-token");
 
-    // Color-mode preference may live in storage, but no auth material may.
-    const storedValues = [...Object.values(localStorage), ...Object.values(sessionStorage)]
-    expect(storedValues.some((value) => value.includes('test-access-token'))).toBe(false)
-    expect(storedValues.some((value) => value.includes('alice'))).toBe(false)
-  })
+		// Color-mode preference may live in storage, but no auth material may.
+		const storedValues = [
+			...Object.values(localStorage),
+			...Object.values(sessionStorage),
+		];
+		expect(
+			storedValues.some((value) => value.includes("test-access-token")),
+		).toBe(false);
+		expect(storedValues.some((value) => value.includes("alice"))).toBe(false);
+	});
 
-  it('shows the error envelope inline when credentials are rejected', async () => {
-    server.use(loginFailureHandler(401, 'INVALID_CREDENTIALS', 'Invalid username or password'))
-    renderApp('/login')
+	it("shows the error envelope inline when credentials are rejected", async () => {
+		server.use(
+			loginFailureHandler(
+				401,
+				"INVALID_CREDENTIALS",
+				"Invalid username or password",
+			),
+		);
+		renderApp("/login");
 
-    await loginViaForm()
+		await loginViaForm();
 
-    expect(await screen.findByText('Invalid username or password')).toBeInTheDocument()
-    expect(screen.getByText('INVALID_CREDENTIALS')).toBeInTheDocument()
-    expect(screen.queryByText('Manage Podman on remote machines')).not.toBeInTheDocument()
-  })
+		expect(
+			await screen.findByText("Invalid username or password"),
+		).toBeInTheDocument();
+		expect(screen.getByText("INVALID_CREDENTIALS")).toBeInTheDocument();
+		expect(
+			screen.queryByText("Manage Podman on remote machines"),
+		).not.toBeInTheDocument();
+	});
 
-  it('substitutes generic text for internal errors, hiding leaked details', async () => {
-    server.use(loginFailureHandler(500, 'PANIC', 'database is on fire'))
-    renderApp('/login')
+	it("substitutes generic text for internal errors, hiding leaked details", async () => {
+		server.use(loginFailureHandler(500, "PANIC", "database is on fire"));
+		renderApp("/login");
 
-    await loginViaForm()
+		await loginViaForm();
 
-    expect(await screen.findByText('An unexpected error occurred')).toBeInTheDocument()
-    expect(screen.getByText('INTERNAL_ERROR')).toBeInTheDocument()
-    expect(screen.queryByText('database is on fire')).not.toBeInTheDocument()
-  })
+		expect(
+			await screen.findByText("An unexpected error occurred"),
+		).toBeInTheDocument();
+		expect(screen.getByText("INTERNAL_ERROR")).toBeInTheDocument();
+		expect(screen.queryByText("database is on fire")).not.toBeInTheDocument();
+	});
 
-  it('shows inline validation errors and never submits when fields are empty', async () => {
-    renderApp('/login')
+	it("shows inline validation errors and never submits when fields are empty", async () => {
+		renderApp("/login");
 
-    await userEvent.click(screen.getByRole('button', { name: /log in/i }))
+		await userEvent.click(screen.getByRole("button", { name: /log in/i }));
 
-    expect(await screen.findByText('Username is required')).toBeInTheDocument()
-    expect(screen.getByText('Password is required')).toBeInTheDocument()
-    expect(screen.queryByText('Manage Podman on remote machines')).not.toBeInTheDocument()
-  })
+		expect(await screen.findByText("Username is required")).toBeInTheDocument();
+		expect(screen.getByText("Password is required")).toBeInTheDocument();
+		expect(
+			screen.queryByText("Manage Podman on remote machines"),
+		).not.toBeInTheDocument();
+	});
 
-  it('treats whitespace-only credentials as empty', async () => {
-    renderApp('/login')
+	it("treats whitespace-only credentials as empty", async () => {
+		renderApp("/login");
 
-    await loginViaForm('   ', '   ')
+		await loginViaForm("   ", "   ");
 
-    expect(await screen.findByText('Username is required')).toBeInTheDocument()
-    expect(screen.getByText('Password is required')).toBeInTheDocument()
-  })
-})
+		expect(await screen.findByText("Username is required")).toBeInTheDocument();
+		expect(screen.getByText("Password is required")).toBeInTheDocument();
+	});
+});

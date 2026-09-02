@@ -1,41 +1,44 @@
-import axios from 'axios'
-import type { ApiError, ApiErrorEnvelope } from '@shared/types/api'
+import type { ApiError, ApiErrorEnvelope } from "@shared/types/api";
+import axios from "axios";
 
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
-})
+	baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
+});
 
 // The access token is held only in this module variable for the lifetime of
 // the page — never localStorage/sessionStorage — so XSS cannot exfiltrate a
 // persisted bearer credential. The request interceptor attaches it below.
-let bearerToken: string | null = null
+let bearerToken: string | null = null;
 
 export function setBearerToken(token: string | null) {
-  bearerToken = token
+	bearerToken = token;
 }
 
 // Streaming endpoints use plain fetch (axios buffers responses), so they
 // need read access to the same bearer credential.
 export function getBearerToken(): string | null {
-  return bearerToken
+	return bearerToken;
 }
 
 api.interceptors.request.use((config) => {
-  if (bearerToken) {
-    config.headers.Authorization = `Bearer ${bearerToken}`
-  }
-  return config
-})
+	if (bearerToken) {
+		config.headers.Authorization = `Bearer ${bearerToken}`;
+	}
+	return config;
+});
 
-export const genericError: ApiError = { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' }
+export const genericError: ApiError = {
+	code: "INTERNAL_ERROR",
+	message: "An unexpected error occurred",
+};
 
 // Error codes that indicate server-internal failures. The backend already
 // rewrites 5xx responses to these, but the code is what the spec keys on:
 // internal codes never reach the user, whatever status they arrived with.
-const internalCodePrefixes = ['INTERNAL_', 'SERVICE_']
+const internalCodePrefixes = ["INTERNAL_", "SERVICE_"];
 
 function isInternalCode(code: string) {
-  return internalCodePrefixes.some((prefix) => code.startsWith(prefix))
+	return internalCodePrefixes.some((prefix) => code.startsWith(prefix));
 }
 
 // Extracts the backend error envelope for display. Client errors (4xx) with
@@ -43,20 +46,20 @@ function isInternalCode(code: string) {
 // (5xx), internal error codes, non-envelope bodies, and network failures are
 // collapsed to the generic message so internals are never leaked to users.
 export function getApiError(error: unknown): ApiError {
-  if (axios.isAxiosError(error)) {
-    const status = error.response?.status
-    const envelope = error.response?.data as ApiErrorEnvelope | undefined
-    if (
-      status !== undefined &&
-      status < 500 &&
-      envelope?.error?.code &&
-      envelope?.error?.message &&
-      !isInternalCode(envelope.error.code)
-    ) {
-      return { code: envelope.error.code, message: envelope.error.message }
-    }
-  }
-  return { ...genericError }
+	if (axios.isAxiosError(error)) {
+		const status = error.response?.status;
+		const envelope = error.response?.data as ApiErrorEnvelope | undefined;
+		if (
+			status !== undefined &&
+			status < 500 &&
+			envelope?.error?.code &&
+			envelope?.error?.message &&
+			!isInternalCode(envelope.error.code)
+		) {
+			return { code: envelope.error.code, message: envelope.error.message };
+		}
+	}
+	return { ...genericError };
 }
 
 // Fetch-based counterpart of getApiError for streaming endpoints, which use
@@ -64,15 +67,19 @@ export function getApiError(error: unknown): ApiError {
 // a non-internal envelope code pass through; server errors (5xx), internal
 // error codes, non-envelope bodies, and network failures collapse to the
 // generic message.
-export async function getApiErrorFromResponse(response: Response): Promise<ApiError> {
-  const envelope = (await response.json().catch(() => null)) as ApiErrorEnvelope | null
-  if (
-    response.status < 500 &&
-    envelope?.error?.code &&
-    envelope.error.message &&
-    !isInternalCode(envelope.error.code)
-  ) {
-    return { code: envelope.error.code, message: envelope.error.message }
-  }
-  return { ...genericError }
+export async function getApiErrorFromResponse(
+	response: Response,
+): Promise<ApiError> {
+	const envelope = (await response
+		.json()
+		.catch(() => null)) as ApiErrorEnvelope | null;
+	if (
+		response.status < 500 &&
+		envelope?.error?.code &&
+		envelope.error.message &&
+		!isInternalCode(envelope.error.code)
+	) {
+		return { code: envelope.error.code, message: envelope.error.message };
+	}
+	return { ...genericError };
 }

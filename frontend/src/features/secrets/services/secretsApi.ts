@@ -1,4 +1,4 @@
-import { api } from '@shared/utils/api'
+import { api } from "@shared/utils/api";
 
 // Secret as returned by GET /api/machines/{id}/secrets
 // (backend/internal/domain/secrets/dto.go SecretListResponse). The backend
@@ -6,19 +6,21 @@ import { api } from '@shared/utils/api'
 // reveal path (GET .../secrets/{id}?reveal=true), which this type does not
 // model yet.
 export interface SecretSummary {
-  id: string
-  name: string
-  // Name of the driver that stores the secret (e.g. "file")
-  driver: string
-  // ISO8601 creation/update timestamps ("" when the backend reports none)
-  createdAt: string
-  updatedAt: string
-  labels?: Record<string, string>
+	id: string;
+	name: string;
+	// Name of the driver that stores the secret (e.g. "file")
+	driver: string;
+	// ISO8601 creation/update timestamps ("" when the backend reports none)
+	createdAt: string;
+	updatedAt: string;
+	labels?: Record<string, string>;
 }
 
 export async function listSecrets(machineId: string): Promise<SecretSummary[]> {
-  const response = await api.get<SecretSummary[]>(`/machines/${machineId}/secrets`)
-  return response.data
+	const response = await api.get<SecretSummary[]>(
+		`/machines/${machineId}/secrets`,
+	);
+	return response.data;
 }
 
 // Response of GET /api/machines/{id}/secrets/{secretId}
@@ -26,20 +28,20 @@ export async function listSecrets(machineId: string): Promise<SecretSummary[]> {
 // request carried ?reveal=true and the caller is admin; the backend omits
 // the field entirely otherwise.
 export interface SecretInspect extends SecretSummary {
-  // The secret's value. Only ever populated by the admin reveal path.
-  secretData?: string
+	// The secret's value. Only ever populated by the admin reveal path.
+	secretData?: string;
 }
 
 export async function getSecret(
-  machineId: string,
-  secretId: string,
-  reveal = false,
+	machineId: string,
+	secretId: string,
+	reveal = false,
 ): Promise<SecretInspect> {
-  const response = await api.get<SecretInspect>(
-    `/machines/${machineId}/secrets/${encodeURIComponent(secretId)}`,
-    { params: reveal ? { reveal: 'true' } : undefined },
-  )
-  return response.data
+	const response = await api.get<SecretInspect>(
+		`/machines/${machineId}/secrets/${encodeURIComponent(secretId)}`,
+		{ params: reveal ? { reveal: "true" } : undefined },
+	);
+	return response.data;
 }
 
 // Body of POST /api/machines/{id}/secrets
@@ -47,27 +49,35 @@ export async function getSecret(
 // trims the name; the value must arrive byte-identical — meaningful
 // whitespace is the whole point of the no-trim rule.
 export interface CreateSecretInput {
-  name: string
-  value: string
+	name: string;
+	value: string;
 }
 
 // Response of POST /api/machines/{id}/secrets -> 201
 // (backend SecretCreateResponse: entities.SecretCreateReport's ID).
 export interface SecretCreated {
-  id: string
+	id: string;
 }
 
 export async function createSecret(
-  machineId: string,
-  input: CreateSecretInput,
+	machineId: string,
+	input: CreateSecretInput,
 ): Promise<SecretCreated> {
-  const response = await api.post<SecretCreated>(`/machines/${machineId}/secrets`, input)
-  return response.data
+	const response = await api.post<SecretCreated>(
+		`/machines/${machineId}/secrets`,
+		input,
+	);
+	return response.data;
 }
 
 // DELETE /api/machines/{id}/secrets/{secretId} -> 204. The list DTO's name
 // is the natural row key, so the secret is addressed by name. The backend
 // rejects deletion with 409 SECRET_IN_USE when a container references it.
-export async function deleteSecret(machineId: string, secretId: string): Promise<void> {
-  await api.delete(`/machines/${machineId}/secrets/${encodeURIComponent(secretId)}`)
+export async function deleteSecret(
+	machineId: string,
+	secretId: string,
+): Promise<void> {
+	await api.delete(
+		`/machines/${machineId}/secrets/${encodeURIComponent(secretId)}`,
+	);
 }

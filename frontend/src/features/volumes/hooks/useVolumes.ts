@@ -1,9 +1,9 @@
-import { useQuery } from '@tanstack/react-query'
-import { listVolumes } from '@features/volumes/services/volumesApi'
+import { listVolumes } from "@features/volumes/services/volumesApi";
+import { useQuery } from "@tanstack/react-query";
 
 export function useVolumes(machineId: string) {
-  return useQuery({
-    queryKey: ['machines', machineId, 'volumes'],
-    queryFn: () => listVolumes(machineId),
-  })
+	return useQuery({
+		queryKey: ["machines", machineId, "volumes"],
+		queryFn: () => listVolumes(machineId),
+	});
 }

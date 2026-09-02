@@ -1,4 +1,4 @@
-import type { Machine, MachinePermission } from '@shared/types/api'
+import type { Machine, MachinePermission } from "@shared/types/api";
 
 // Single source of truth for permission-derived UI gating. The backend
 // remains the enforcement point; these predicates only decide which
@@ -9,33 +9,33 @@ import type { Machine, MachinePermission } from '@shared/types/api'
 // permission already reads 'admin' for its owner. Effective permission is
 // therefore just the machine permission; owner → admin is handled upstream.
 
-export type EffectivePermission = MachinePermission
+export type EffectivePermission = MachinePermission;
 
 export function effectivePermission(machine: Machine): EffectivePermission {
-  return machine.permission
+	return machine.permission;
 }
 
 // Metadata edits (name, description, hostname, port, SSH username, key).
 export function canEditMachine(permission: EffectivePermission): boolean {
-  return permission === 'admin' || permission === 'write'
+	return permission === "admin" || permission === "write";
 }
 
 // Sharing (grant/revoke access) and deletion are admin/owner-only.
 export function canShareMachine(permission: EffectivePermission): boolean {
-  return permission === 'admin'
+	return permission === "admin";
 }
 
 export function canDeleteMachine(permission: EffectivePermission): boolean {
-  return permission === 'admin'
+	return permission === "admin";
 }
 
 // Secret creation/deletion change the machine's remote state (write+).
 export function canManageSecrets(permission: EffectivePermission): boolean {
-  return permission === 'admin' || permission === 'write'
+	return permission === "admin" || permission === "write";
 }
 
 // Revealing a secret's value is the admin-only capability (the backend's
 // reveal gate answers 403 below admin).
 export function canRevealSecrets(permission: EffectivePermission): boolean {
-  return permission === 'admin'
+	return permission === "admin";
 }

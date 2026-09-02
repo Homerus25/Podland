@@ -1,85 +1,108 @@
-import { api } from '@shared/utils/api'
-import type { AccessGrant, Machine, MachinePermission } from '@shared/types/api'
+import type {
+	AccessGrant,
+	Machine,
+	MachinePermission,
+} from "@shared/types/api";
+import { api } from "@shared/utils/api";
 
 // CreateMachineRequest (backend/internal/domain/machines/service.go):
 // the SSH private key contents are read client-side via the File API and
 // sent in the request body.
 export interface CreateMachineInput {
-  name: string
-  description?: string
-  hostname: string
-  port: number
-  sshUsername: string
-  sshPrivateKey: string
-  podmanSocketPath?: string
+	name: string;
+	description?: string;
+	hostname: string;
+	port: number;
+	sshUsername: string;
+	sshPrivateKey: string;
+	podmanSocketPath?: string;
 }
 
 export async function listMachines(): Promise<Machine[]> {
-  const response = await api.get<Machine[]>('/machines')
-  return response.data
+	const response = await api.get<Machine[]>("/machines");
+	return response.data;
 }
 
 // UpdateMachineRequest mirrors the backend PUT /machines/{id} body: empty or
 // omitted fields are left untouched, so the SSH key is only sent when a new
 // file was uploaded.
 export interface UpdateMachineInput {
-  name: string
-  description: string
-  hostname: string
-  port: number
-  sshUsername: string
-  sshPrivateKey?: string
-  podmanSocketPath: string
+	name: string;
+	description: string;
+	hostname: string;
+	port: number;
+	sshUsername: string;
+	sshPrivateKey?: string;
+	podmanSocketPath: string;
 }
 
 export async function getMachine(id: string): Promise<Machine> {
-  const response = await api.get<Machine>(`/machines/${id}`)
-  return response.data
+	const response = await api.get<Machine>(`/machines/${id}`);
+	return response.data;
 }
 
-export async function updateMachine(id: string, input: UpdateMachineInput): Promise<Machine> {
-  const response = await api.put<Machine>(`/machines/${id}`, input)
-  return response.data
+export async function updateMachine(
+	id: string,
+	input: UpdateMachineInput,
+): Promise<Machine> {
+	const response = await api.put<Machine>(`/machines/${id}`, input);
+	return response.data;
 }
 
 export async function deleteMachine(id: string): Promise<void> {
-  await api.delete(`/machines/${id}`)
+	await api.delete(`/machines/${id}`);
 }
 
-export async function listMachineAccess(machineId: string): Promise<AccessGrant[]> {
-  const response = await api.get<AccessGrant[]>(`/machines/${machineId}/access`)
-  return response.data
+export async function listMachineAccess(
+	machineId: string,
+): Promise<AccessGrant[]> {
+	const response = await api.get<AccessGrant[]>(
+		`/machines/${machineId}/access`,
+	);
+	return response.data;
 }
 
 export async function grantMachineAccess(
-  machineId: string,
-  userId: string,
-  permission: MachinePermission,
+	machineId: string,
+	userId: string,
+	permission: MachinePermission,
 ): Promise<AccessGrant> {
-  const response = await api.post<AccessGrant>(`/machines/${machineId}/access`, {
-    userId,
-    permission,
-  })
-  return response.data
+	const response = await api.post<AccessGrant>(
+		`/machines/${machineId}/access`,
+		{
+			userId,
+			permission,
+		},
+	);
+	return response.data;
 }
 
-export async function revokeMachineAccess(machineId: string, userId: string): Promise<void> {
-  await api.delete(`/machines/${machineId}/access/${userId}`)
+export async function revokeMachineAccess(
+	machineId: string,
+	userId: string,
+): Promise<void> {
+	await api.delete(`/machines/${machineId}/access/${userId}`);
 }
 
 // MachineStatus mirrors GET /api/machines/{id}/status
 // (backend/internal/domain/machines/handler.go). checkedAt is RFC3339 UTC.
 export interface MachineStatus {
-  status: 'online' | 'offline'
-  checkedAt: string
+	status: "online" | "offline";
+	checkedAt: string;
 }
 
-export async function getMachineStatus(machineId: string): Promise<MachineStatus> {
-  const response = await api.get<MachineStatus>(`/machines/${machineId}/status`)
-  return response.data
+export async function getMachineStatus(
+	machineId: string,
+): Promise<MachineStatus> {
+	const response = await api.get<MachineStatus>(
+		`/machines/${machineId}/status`,
+	);
+	return response.data;
 }
 
-export async function createMachine(input: CreateMachineInput): Promise<Machine> {
-  const response = await api.post<Machine>('/machines', input)
-  return response.data
+export async function createMachine(
+	input: CreateMachineInput,
+): Promise<Machine> {
+	const response = await api.post<Machine>("/machines", input);
+	return response.data;
 }
