@@ -6,6 +6,7 @@ import { ContainerList } from '@features/containers/components/ContainerList'
 import { ImageList } from '@features/images/components/ImageList'
 import { QuadletList } from '@features/quadlets/components/QuadletList'
 import { SecretList } from '@features/secrets/components/SecretList'
+import { VolumeList } from '@features/volumes/components/VolumeList'
 import {
   canDeleteMachine,
   canEditMachine,
@@ -151,6 +152,7 @@ export function MachineDetailPage() {
       <Tabs>
         <TabList>
           <Tab>Containers</Tab>
+          <Tab>Volumes</Tab>
           <Tab>Images</Tab>
           <Tab>Quadlets</Tab>
           <Tab>Secrets</Tab>
@@ -159,6 +161,9 @@ export function MachineDetailPage() {
         <TabPanels>
           <TabPanel>
             <ContainerList machineId={machine.id} />
+          </TabPanel>
+          <TabPanel>
+            <VolumeList machineId={machine.id} />
           </TabPanel>
           <TabPanel>
             <ImageList machineId={machine.id} />
