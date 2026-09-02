@@ -84,3 +84,21 @@ func TestValidate_RejectsInvalidSessionTTLEnvValue(t *testing.T) {
 	assert.Equal(t, 30, cfg.Session.TTLDays, "Non-numeric SESSION_TTL_DAYS should fall back to 30")
 	require.NoError(t, cfg.Validate(), "Fallback config should validate")
 }
+
+// TestLoad_VolumeUploadMaxBytes pins the populate upload cap: default
+// 2 GiB, honored override, and fallback to the default on garbage.
+func TestLoad_VolumeUploadMaxBytes(t *testing.T) {
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, int64(2<<30), cfg.Volumes.MaxUploadBytes, "default cap must be 2 GiB")
+
+	t.Setenv("VOLUME_UPLOAD_MAX_BYTES", "1024")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1024), cfg.Volumes.MaxUploadBytes, "env override must be honored")
+
+	t.Setenv("VOLUME_UPLOAD_MAX_BYTES", "not-a-number")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.Equal(t, int64(2<<30), cfg.Volumes.MaxUploadBytes, "garbage values must fall back to the default")
+}

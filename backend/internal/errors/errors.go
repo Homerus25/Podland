@@ -141,6 +141,9 @@ var (
 	// in use by a container unless force is requested. Distinct code so
 	// the UI can explain what depends on the volume.
 	ErrVolumeInUse = NewAppError("VOLUME_IN_USE", "Volume is in use by a container", http.StatusConflict)
+	// ErrVolumeUploadTooLarge is 413: a populate upload exceeded
+	// VOLUME_UPLOAD_MAX_BYTES while streaming to disk.
+	ErrVolumeUploadTooLarge = NewAppError("VOLUME_UPLOAD_TOO_LARGE", "Upload exceeds the maximum allowed size", http.StatusRequestEntityTooLarge)
 )
 
 // Access

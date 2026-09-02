@@ -89,3 +89,8 @@ func (m *MockVolumeService) Export(ctx context.Context, userID, machineID, volum
 	args := m.Called(ctx, userID, machineID, volumeName, w)
 	return args.Error(0)
 }
+
+func (m *MockVolumeService) Import(ctx context.Context, userID, machineID, volumeName string, r io.Reader) error {
+	args := m.Called(ctx, userID, machineID, volumeName, r)
+	return args.Error(0)
+}

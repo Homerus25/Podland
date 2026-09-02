@@ -26,10 +26,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/Homerus25/podland/backend/internal/app"
 	"github.com/Homerus25/podland/backend/internal/config"
 	"github.com/Homerus25/podland/backend/internal/testutils"
+	"github.com/google/uuid"
 )
 
 // suite is the shared fixture built by TestMain and consumed by every
@@ -606,6 +606,9 @@ func buildTestConfig() (*config.Config, []string, error) {
 
 	cfg := &config.Config{
 		Port: 0, // App doesn't bind; httptest.NewServer does.
+		Volumes: config.VolumeConfig{
+			MaxUploadBytes: 2 << 30,
+		},
 		Database: config.DatabaseConfig{
 			Path: dbPath,
 		},

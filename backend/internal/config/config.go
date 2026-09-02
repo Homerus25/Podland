@@ -20,6 +20,14 @@ type Config struct {
 	AllowedOrigins []string
 	Log            LogConfig
 	Encryption     EncryptionConfig
+	Volumes        VolumeConfig
+}
+
+// VolumeConfig holds volume configuration
+type VolumeConfig struct {
+	// MaxUploadBytes bounds populate uploads; parts are streamed to
+	// disk and the cap is enforced while streaming (413 past it).
+	MaxUploadBytes int64
 }
 
 // DatabaseConfig holds database configuration
@@ -120,6 +128,9 @@ func Load() (*Config, error) {
 	// Encryption
 	cfg.Encryption.Key = getEnv("ENCRYPTION_KEY", "")
 
+	// Volumes
+	cfg.Volumes.MaxUploadBytes = getEnvInt64("VOLUME_UPLOAD_MAX_BYTES", 2<<30)
+
 	return cfg, nil
 }
 
@@ -135,6 +146,17 @@ func getEnv(key, defaultValue string) string {
 func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if v, err := strconv.Atoi(value); err == nil {
+			return v
+		}
+	}
+	return defaultValue
+}
+
+// getEnvInt64 returns the value of an environment variable as int64 or
+// a default
+func getEnvInt64(key string, defaultValue int64) int64 {
+	if value := os.Getenv(key); value != "" {
+		if v, err := strconv.ParseInt(value, 10, 64); err == nil {
 			return v
 		}
 	}

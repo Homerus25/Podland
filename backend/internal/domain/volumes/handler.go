@@ -1,11 +1,19 @@
 package volumes
 
 import (
+	"archive/tar"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path"
 	"strconv"
+	"strings"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
@@ -16,13 +24,30 @@ import (
 // VolumeHandler handles volume requests
 type VolumeHandler struct {
 	service VolumeServiceInterface
+	// maxUploadBytes bounds populate uploads; enforced with the
+	// max-bytes reader while streaming parts to disk.
+	maxUploadBytes int64
 }
+
+// DefaultMaxUploadBytes is the populate upload cap when no explicit
+// override is wired in (2 GiB, matching VOLUME_UPLOAD_MAX_BYTES).
+const DefaultMaxUploadBytes int64 = 2 << 30
 
 // NewVolumeHandler creates a new VolumeHandler
 func NewVolumeHandler(service VolumeServiceInterface) *VolumeHandler {
 	return &VolumeHandler{
-		service: service,
+		service:        service,
+		maxUploadBytes: DefaultMaxUploadBytes,
 	}
+}
+
+// WithMaxUploadBytes sets the populate upload cap and returns the
+// handler for chaining.
+func (h *VolumeHandler) WithMaxUploadBytes(max int64) *VolumeHandler {
+	if max > 0 {
+		h.maxUploadBytes = max
+	}
+	return h
 }
 
 // List handles listing volumes on a machine
@@ -279,4 +304,261 @@ func (h *VolumeHandler) Export(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "export", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("volumeName", volumeName))
 		return
 	}
+}
+
+// Populate handles filling a volume from an upload. The body is
+// multipart/form-data in exactly one of two shapes:
+//
+//   - one or more "files" parts: each part's filename is the relative
+//     path inside the volume; the backend assembles a tar on disk
+//   - exactly one "archive" part: a ready-made tar, imported as-is
+//
+// Sending both shapes, or neither, is a 400. Semantics are
+// podman-native MERGE: uploaded paths overwrite same-named files,
+// everything else in the volume is kept — there is NO replace mode.
+//
+// Parts are streamed to temp files (never buffered in RAM); total
+// upload size is capped by VOLUME_UPLOAD_MAX_BYTES (default 2 GiB) via
+// the max-bytes reader, and exceeding it yields 413
+// VOLUME_UPLOAD_TOO_LARGE. Temp files are removed on every path.
+func (h *VolumeHandler) Populate(w http.ResponseWriter, r *http.Request) {
+	slog.InfoContext(r.Context(), "Populate")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	volumeName := chi.URLParam(r, "volumeName")
+	if volumeName == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_VOLUME_NAME", "Volume name is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, h.maxUploadBytes)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "body must be multipart/form-data", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	payload, err := h.collectUpload(mr)
+	if payload != nil {
+		// Every temp file is removed on every path once the handler is
+		// done with it.
+		defer payload.cleanup()
+	}
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		var maxBytesErr *http.MaxBytesError
+		if stderrors.As(err, &maxBytesErr) {
+			errors.RespondWithError(w, errors.ErrVolumeUploadTooLarge, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "populate upload", slog.Any("error", err), slog.Any("machineID", machineID))
+		return
+	}
+
+	if err := h.service.Import(r.Context(), userID, machineID, volumeName, payload.reader()); err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "populate", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("volumeName", volumeName))
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// spooledFile is one part streamed to a temp file: its spool and the
+// byte count written. The spool is removed by the payload's cleanup.
+type spooledFile struct {
+	spool *os.File
+	size  int64
+}
+
+// uploadPayload is the assembled import source in one of the two
+// shapes: a list of spooled files to tar up (files shape) or a single
+// spooled tar (archive shape).
+type uploadPayload struct {
+	files     []spooledFile
+	archive   *os.File
+	spools    []*spooledFile
+	assembled *os.File
+}
+
+// reader returns the import source.
+func (p *uploadPayload) reader() io.Reader {
+	if p.assembled != nil {
+		p.assembled.Seek(0, io.SeekStart)
+		return p.assembled
+	}
+	p.archive.Seek(0, io.SeekStart)
+	return p.archive
+}
+
+// cleanup removes every temp file on the path, success or failure.
+func (p *uploadPayload) cleanup() {
+	for _, f := range p.spools {
+		f.spool.Close()
+		os.Remove(f.spool.Name())
+	}
+	if p.assembled != nil {
+		p.assembled.Close()
+		os.Remove(p.assembled.Name())
+	}
+}
+
+// collectUpload streams the multipart body to temp files and resolves
+// the shape. Both shapes at once, or neither, is a client error; an
+// oversized upload surfaces as the max-bytes error for the caller to
+// map to 413.
+func (h *VolumeHandler) collectUpload(mr *multipart.Reader) (*uploadPayload, error) {
+	payload := &uploadPayload{}
+	var tarWriter *tar.Writer
+
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return payload, err
+		}
+
+		switch part.FormName() {
+		case "files":
+			if payload.archive != nil {
+				return payload, errors.ErrInvalidRequest.WithMessage("send either files or archive, not both")
+			}
+			name, err := rawPartFilename(part)
+			if err != nil {
+				return payload, err
+			}
+			name, err = safeArchivePath(name)
+			if err != nil {
+				return payload, err
+			}
+			spooled, err := spoolPart(part)
+			if err != nil {
+				return payload, err
+			}
+			payload.spools = append(payload.spools, spooled)
+			payload.files = append(payload.files, *spooled)
+
+			// Lazily open the assembled tar over a temp file.
+			if tarWriter == nil {
+				assembled, err := os.CreateTemp("", "podland-populate-*.tar")
+				if err != nil {
+					return payload, err
+				}
+				payload.assembled = assembled
+				tarWriter = tar.NewWriter(assembled)
+			}
+			if err := appendSpooledToTar(tarWriter, name, spooled); err != nil {
+				return payload, err
+			}
+		case "archive":
+			if payload.archive != nil || len(payload.files) > 0 {
+				return payload, errors.ErrInvalidRequest.WithMessage("send either files or archive, not both")
+			}
+			spooled, err := spoolPart(part)
+			if err != nil {
+				return payload, err
+			}
+			payload.spools = append(payload.spools, spooled)
+			payload.archive = spooled.spool
+		}
+		// Other part names are ignored: shape is decided by the named parts.
+	}
+
+	if payload.archive == nil && len(payload.files) == 0 {
+		return payload, errors.ErrInvalidRequest.WithMessage("upload must contain either files parts or exactly one archive part")
+	}
+	if tarWriter != nil {
+		if err := tarWriter.Close(); err != nil {
+			return payload, err
+		}
+	}
+	return payload, nil
+}
+
+// spoolPart streams one part to a temp file. Nothing is buffered in
+// RAM; the cap is enforced by the max-bytes reader wrapping the body.
+func spoolPart(part *multipart.Part) (*spooledFile, error) {
+	spool, err := os.CreateTemp("", "podland-part-*")
+	if err != nil {
+		return nil, err
+	}
+	size, err := io.Copy(spool, part)
+	if err != nil {
+		spool.Close()
+		os.Remove(spool.Name())
+		return nil, err
+	}
+	return &spooledFile{spool: spool, size: size}, nil
+}
+
+// appendSpooledToTar writes one spooled file into the assembled tar
+// under the given relative path.
+func appendSpooledToTar(tw *tar.Writer, name string, spooled *spooledFile) error {
+	if err := tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg,
+		Name:     name,
+		Size:     spooled.size,
+		Mode:     0o644,
+	}); err != nil {
+		return err
+	}
+	if _, err := spooled.spool.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	_, err := io.Copy(tw, spooled.spool)
+	return err
+}
+
+// rawPartFilename extracts the filename parameter straight from the
+// part's Content-Disposition header. mime/multipart's FileName() runs
+// filepath.Base on it, which would destroy the relative paths the
+// files shape must preserve — so the raw value is parsed here instead.
+func rawPartFilename(part *multipart.Part) (string, error) {
+	_, params, err := mime.ParseMediaType(part.Header.Get("Content-Disposition"))
+	if err != nil {
+		return "", err
+	}
+	return params["filename"], nil
+}
+
+// safeArchivePath validates the relative path a files part carries:
+// absolute paths and ".." traversal are rejected so uploads stay inside
+// the volume.
+func safeArchivePath(name string) (string, error) {
+	if name == "" {
+		return "", errors.ErrInvalidRequest.WithMessage("files parts must carry a filename")
+	}
+	for _, segment := range strings.Split(name, "/") {
+		if segment == ".." {
+			return "", errors.ErrInvalidRequest.WithMessage("file paths must be relative and stay inside the volume")
+		}
+	}
+	cleaned := path.Clean("/" + name)
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	if cleaned == "" || cleaned == "." {
+		return "", errors.ErrInvalidRequest.WithMessage("file paths must be relative and stay inside the volume")
+	}
+	return cleaned, nil
 }

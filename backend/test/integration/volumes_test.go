@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -713,5 +714,225 @@ func Test_Integration_Volumes_Export_AccessControl(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
 			suite.ServerURL+"/api/machines/"+machineID+"/volumes/it-"+suite.RunID+"-no-such-volume/export",
 			"", http.StatusNotFound, "VOLUME_NOT_FOUND")
+	})
+}
+
+// Test_Integration_Volumes_Populate is the volume populate vertical
+// slice (200-07) against POST /api/machines/{id}/volumes/{name}/populate.
+// Both shapes are exercised, contents are verified through the export
+// endpoint (untar and compare), and the merge case proves a pre-existing
+// file at an untouched path survives:
+//
+//	POST /api/machines/{id}/volumes/{name}/populate → 204 (merge)
+func Test_Integration_Volumes_Populate(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+	registerVolumesSweep()
+
+	machineID := suite.MachineID
+
+	seed := func(name string, files map[string][]byte) string {
+		t.Helper()
+		var tarBuf bytes.Buffer
+		tw := tar.NewWriter(&tarBuf)
+		for path, content := range files {
+			require.NoError(t, tw.WriteHeader(&tar.Header{
+				Typeflag: tar.TypeReg, Name: path, Size: int64(len(content)), Mode: 0o644,
+			}))
+			_, err := tw.Write(content)
+			require.NoError(t, err)
+		}
+		require.NoError(t, tw.Close())
+		tarFile := filepath.Join(t.TempDir(), "seed.tar")
+		require.NoError(t, os.WriteFile(tarFile, tarBuf.Bytes(), 0o600))
+		out, err := podmanConnRun("volume", "create", name)
+		require.NoError(t, err, "fixture volume create must succeed: %s", strings.TrimSpace(out))
+		t.Cleanup(func() { _, _ = podmanConnRun("volume", "rm", "-f", name) })
+		out, err = podmanConnRun("volume", "import", name, tarFile)
+		require.NoError(t, err, "seeding %q must succeed: %s", name, strings.TrimSpace(out))
+		return tarBuf.String()
+	}
+
+	// volumeContents exports through the API and untars the body.
+	volumeContents := func(t *testing.T, name string) map[string][]byte {
+		t.Helper()
+		resp, err := suite.AuthenticatedClient().Get(
+			suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + name + "/export")
+		require.NoError(t, err, "export for verification must connect")
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, "export must succeed")
+		tr := tar.NewReader(resp.Body)
+		out := map[string][]byte{}
+		for {
+			hdr, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+			if hdr.Typeflag == tar.TypeReg {
+				data, err := io.ReadAll(tr)
+				require.NoError(t, err)
+				out[hdr.Name] = data
+			}
+		}
+		return out
+	}
+
+	// --- AC: files shape lands uploads with relative paths preserved ---
+	t.Run("FilesShape", func(t *testing.T) {
+		volumeName := "it-" + suite.RunID + "-populate-files"
+		seed(volumeName, map[string][]byte{"keep/me.txt": []byte("keep me")})
+
+		body := &bytes.Buffer{}
+		mw := multipart.NewWriter(body)
+		for _, f := range []struct {
+			path    string
+			content []byte
+		}{{"docs/readme.txt", []byte("populate me")}, {"nested/deep/bin.dat", []byte{0xCA, 0xFE}}} {
+			// The raw filename carries the relative path; Go's server
+			// parser preserves what the client sent.
+			fw, err := mw.CreateFormFile("files", f.path)
+			require.NoError(t, err)
+			_, err = fw.Write(f.content)
+			require.NoError(t, err)
+		}
+		require.NoError(t, mw.Close())
+
+		resp, err := suite.AuthenticatedClient().Post(
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/populate",
+			mw.FormDataContentType(), bytes.NewReader(body.Bytes()))
+		require.NoError(t, err, "populate must connect")
+		defer resp.Body.Close()
+		raw, _ := io.ReadAll(resp.Body)
+		require.Equalf(t, http.StatusNoContent, resp.StatusCode,
+			"populate files shape: expected 204, got %d. body: %s", resp.StatusCode, string(raw))
+
+		contents := volumeContents(t, volumeName)
+		assert.Equal(t, []byte("populate me"), contents["docs/readme.txt"], "uploaded file must land with its path")
+		assert.Equal(t, []byte{0xCA, 0xFE}, contents["nested/deep/bin.dat"])
+		assert.Equal(t, []byte("keep me"), contents["keep/me.txt"],
+			"merge semantics: untouched pre-existing files must survive")
+	})
+
+	// --- AC: archive shape imports with structure intact ----------------
+	t.Run("ArchiveShape", func(t *testing.T) {
+		volumeName := "it-" + suite.RunID + "-populate-archive"
+		seed(volumeName, nil)
+
+		var tarBuf bytes.Buffer
+		tw := tar.NewWriter(&tarBuf)
+		require.NoError(t, tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: "dir/a.txt", Size: 5, Mode: 0o644}))
+		_, err := tw.Write([]byte("bingo"))
+		require.NoError(t, err)
+		require.NoError(t, tw.Close())
+
+		body := &bytes.Buffer{}
+		mw := multipart.NewWriter(body)
+		fw, err := mw.CreateFormFile("archive", "upload.tar")
+		require.NoError(t, err)
+		_, err = fw.Write(tarBuf.Bytes())
+		require.NoError(t, err)
+		require.NoError(t, mw.Close())
+
+		resp, err := suite.AuthenticatedClient().Post(
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/populate",
+			mw.FormDataContentType(), bytes.NewReader(body.Bytes()))
+		require.NoError(t, err, "populate must connect")
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusNoContent, resp.StatusCode, "populate archive shape must succeed")
+
+		contents := volumeContents(t, volumeName)
+		assert.Equal(t, []byte("bingo"), contents["dir/a.txt"], "archive structure must be intact")
+	})
+
+	// --- AC: merge semantics end-to-end — overwriting one path while
+	// everything else survives -------------------------------------------
+	t.Run("MergeOverwritesSameNameOnly", func(t *testing.T) {
+		volumeName := "it-" + suite.RunID + "-populate-merge"
+		seed(volumeName, map[string][]byte{
+			"target.txt": []byte("old content"),
+			"other.txt":  []byte("untouched"),
+		})
+
+		body := &bytes.Buffer{}
+		mw := multipart.NewWriter(body)
+		fw, err := mw.CreateFormFile("files", "target.txt")
+		require.NoError(t, err)
+		_, err = fw.Write([]byte("new content"))
+		require.NoError(t, err)
+		require.NoError(t, mw.Close())
+
+		resp, err := suite.AuthenticatedClient().Post(
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/populate",
+			mw.FormDataContentType(), bytes.NewReader(body.Bytes()))
+		require.NoError(t, err, "populate must connect")
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+		contents := volumeContents(t, volumeName)
+		assert.Equal(t, []byte("new content"), contents["target.txt"], "uploaded path must overwrite")
+		assert.Equal(t, []byte("untouched"), contents["other.txt"], "merge must keep everything else")
+	})
+
+	// --- AC: both shapes at once → 400; empty upload → 400 --------------
+	t.Run("ShapeValidation", func(t *testing.T) {
+		volumeName := "it-" + suite.RunID + "-populate-shapes"
+		seed(volumeName, nil)
+
+		body := &bytes.Buffer{}
+		mw := multipart.NewWriter(body)
+		fw, err := mw.CreateFormFile("files", "a.txt")
+		require.NoError(t, err)
+		_, err = fw.Write([]byte("x"))
+		require.NoError(t, err)
+		fw, err = mw.CreateFormFile("archive", "up.tar")
+		require.NoError(t, err)
+		_, err = fw.Write([]byte("tar"))
+		require.NoError(t, err)
+		require.NoError(t, mw.Close())
+
+		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/populate",
+			"", http.StatusBadRequest, "INVALID_REQUEST")
+		_ = body
+
+		empty := &bytes.Buffer{}
+		emptyMw := multipart.NewWriter(empty)
+		require.NoError(t, emptyMw.Close())
+		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/populate",
+			"", http.StatusBadRequest, "INVALID_REQUEST")
+	})
+
+	// --- AC: read-level users get 403; unknown volume 404 ----------------
+	t.Run("AccessControl", func(t *testing.T) {
+		readClient := levelUserClient(t, models.PermissionRead)
+		expectAPIError(t, readClient, http.MethodPost,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/some-volume/populate",
+			"", http.StatusForbidden, "ACCESS_DENIED")
+
+		expectAPIError(t, noAccessUserClient(t), http.MethodPost,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/some-volume/populate",
+			"", http.StatusForbidden, "ACCESS_DENIED")
+
+		// The existence gate runs after the body is parsed, so the 404
+		// probe carries a valid files-shaped multipart body.
+		populateBody := &bytes.Buffer{}
+		populateMw := multipart.NewWriter(populateBody)
+		fw, err := populateMw.CreateFormFile("files", "probe.txt")
+		require.NoError(t, err)
+		_, err = fw.Write([]byte("probe"))
+		require.NoError(t, err)
+		require.NoError(t, populateMw.Close())
+		req, err := http.NewRequest(http.MethodPost,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/it-"+suite.RunID+"-no-such-volume/populate",
+			bytes.NewReader(populateBody.Bytes()))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", populateMw.FormDataContentType())
+		resp, err := suite.AuthenticatedClient().Do(req)
+		require.NoError(t, err, "populate 404 probe must connect")
+		defer resp.Body.Close()
+		rawBody, _ := io.ReadAll(resp.Body)
+		require.Equal(t, http.StatusNotFound, resp.StatusCode, "unknown volume must 404. body: %s", string(rawBody))
+		assert.Contains(t, string(rawBody), "VOLUME_NOT_FOUND")
 	})
 }

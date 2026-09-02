@@ -162,7 +162,8 @@ func New(cfg *config.Config) (*App, error) {
 	quadletHandler := quadlets.NewQuadletHandler(quadletService, machineService)
 	secretHandler := secrets.NewSecretHandler(secretService)
 	eventHandler := events.NewEventHandler(eventService, machineService, errors.NewErrorHandler())
-	volumeHandler := volumes.NewVolumeHandler(volumeService)
+	volumeHandler := volumes.NewVolumeHandler(volumeService).
+		WithMaxUploadBytes(cfg.Volumes.MaxUploadBytes)
 
 	// Initialize middleware
 	rateLimiter := appmiddleware.NewRateLimiter(
@@ -313,6 +314,7 @@ func New(cfg *config.Config) (*App, error) {
 							// Export stays read-level: users who can
 							// read a machine's state can read its data.
 							r.Get("/export", volumeHandler.Export)
+							r.With(requireWrite).Post("/populate", volumeHandler.Populate)
 							r.With(requireWrite).Delete("/", volumeHandler.Delete)
 						})
 					})

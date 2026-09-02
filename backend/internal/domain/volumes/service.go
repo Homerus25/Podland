@@ -27,6 +27,7 @@ type VolumeServiceInterface interface {
 	Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error
 	Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error)
 	Export(ctx context.Context, userID, machineID, volumeName string, w io.Writer) error
+	Import(ctx context.Context, userID, machineID, volumeName string, r io.Reader) error
 }
 
 // VolumeService provides business logic for volumes
@@ -259,4 +260,28 @@ func (s *VolumeService) Export(ctx context.Context, userID, machineID, volumeNam
 	}
 
 	return bindingsVolumes.Export(connCtx, volumeName, w)
+}
+
+// Import streams a tar archive into the volume. Semantics are
+// podman-native MERGE: paths in the archive overwrite same-named files;
+// everything else in the volume is kept. There is no replace mode. The
+// volume's existence is resolved first, so a missing name fails with
+// the clean 404 before the archive is consumed.
+func (s *VolumeService) Import(ctx context.Context, userID, machineID, volumeName string, r io.Reader) error {
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	volumeEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	// Existence gate: fail before consuming the archive.
+	if _, err := s.inspectVolume(ctx, volumeEngine, volumeName); err != nil {
+		return err
+	}
+
+	return bindingsVolumes.Import(connCtx, volumeName, r)
 }
