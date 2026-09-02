@@ -7,12 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/Homerus25/podland/backend/internal/testutils"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -26,7 +25,7 @@ func TestVolumeHandler_List_Success(t *testing.T) {
 		{VolumeConfigResponse: anonymousVolumeFixture()},
 	}
 
-	mockService := new(testutils.MockVolumeService)
+	mockService := new(MockVolumeService)
 	mockService.On("List", mock.Anything, "test-user", "test-machine", mock.Anything).Return(reports, nil)
 	handler := NewVolumeHandler(mockService)
 
@@ -54,7 +53,7 @@ func TestVolumeHandler_List_Success(t *testing.T) {
 }
 
 func TestVolumeHandler_List_ConnectionError(t *testing.T) {
-	mockService := new(testutils.MockVolumeService)
+	mockService := new(MockVolumeService)
 	mockService.On("List", mock.Anything, "test-user", "test-machine", mock.Anything).
 		Return([]*entities.VolumeListReport(nil), assert.AnError)
 	handler := NewVolumeHandler(mockService)
@@ -66,7 +65,7 @@ func TestVolumeHandler_List_ConnectionError(t *testing.T) {
 }
 
 func TestVolumeHandler_List_MissingUserID(t *testing.T) {
-	handler := NewVolumeHandler(new(testutils.MockVolumeService))
+	handler := NewVolumeHandler(new(MockVolumeService))
 	w := recordListRequestAnonymous(handler.List, "test-machine")
 	assert.Equal(t, 401, w.Code, "missing user identity must be rejected")
 }

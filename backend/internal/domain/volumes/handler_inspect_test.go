@@ -7,13 +7,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Homerus25/podland/backend/internal/contextutils"
+	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/Homerus25/podland/backend/internal/testutils"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -23,7 +22,7 @@ func TestVolumeHandler_Get_Success(t *testing.T) {
 	cfg := namedVolumeFixture("2026-08-30T10:00:00Z")
 	report := &entities.VolumeInspectReport{VolumeConfigResponse: &cfg}
 
-	mockService := new(testutils.MockVolumeService)
+	mockService := new(MockVolumeService)
 	mockService.On("Get", mock.Anything, "test-user", "test-machine", "my-volume").Return(report, nil)
 	handler := NewVolumeHandler(mockService)
 
@@ -32,7 +31,7 @@ func TestVolumeHandler_Get_Success(t *testing.T) {
 	assert.Equal(t, 200, w.Code, "inspect should return 200")
 
 	var got VolumeInspectResponse
-	require.NoError(t, json.Unmarshal([]byte(w.Body.String()), &got), "response must decode as a volume config")
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got), "response must decode as a volume config")
 	assert.Equal(t, "my-volume", got.Name)
 	assert.Equal(t, "local", got.Driver)
 	assert.Equal(t, "/var/lib/containers/storage/volumes/my-volume/_data", got.Mountpoint)
@@ -45,7 +44,7 @@ func TestVolumeHandler_Get_Success(t *testing.T) {
 // an unknown volume name must surface as 404 VOLUME_NOT_FOUND in the
 // standard envelope, so stale UI state is diagnosable.
 func TestVolumeHandler_Get_NotFound(t *testing.T) {
-	mockService := new(testutils.MockVolumeService)
+	mockService := new(MockVolumeService)
 	mockService.On("Get", mock.Anything, "test-user", "test-machine", "no-such-volume").
 		Return((*entities.VolumeInspectReport)(nil), errors.ErrVolumeNotFound)
 	handler := NewVolumeHandler(mockService)
@@ -60,7 +59,7 @@ func TestVolumeHandler_Get_NotFound(t *testing.T) {
 // TestVolumeHandler_Get_ConnectionError pins that connection failures
 // surface as 5xx via the standard envelope.
 func TestVolumeHandler_Get_ConnectionError(t *testing.T) {
-	mockService := new(testutils.MockVolumeService)
+	mockService := new(MockVolumeService)
 	mockService.On("Get", mock.Anything, "test-user", "test-machine", "my-volume").
 		Return((*entities.VolumeInspectReport)(nil), assert.AnError)
 	handler := NewVolumeHandler(mockService)
@@ -72,7 +71,7 @@ func TestVolumeHandler_Get_ConnectionError(t *testing.T) {
 }
 
 func TestVolumeHandler_Get_MissingVolumeName(t *testing.T) {
-	handler := NewVolumeHandler(new(testutils.MockVolumeService))
+	handler := NewVolumeHandler(new(MockVolumeService))
 	w := recordGetRequest(handler.Get, "test-machine", "")
 	assert.Equal(t, 400, w.Code, "missing volume name must be rejected")
 }

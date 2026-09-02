@@ -7,9 +7,10 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	"github.com/Homerus25/podland/backend/internal/testutils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
@@ -94,4 +95,47 @@ func TestIsVolumeNotFound(t *testing.T) {
 	assert.True(t, isVolumeNotFound(&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound}), "podman 404 ErrorModel must map to not-found")
 	assert.False(t, isVolumeNotFound(&errorhandling.ErrorModel{ResponseCode: http.StatusInternalServerError}), "podman 500 ErrorModel must not map to not-found")
 	assert.False(t, isVolumeNotFound(assert.AnError), "unrelated errors must not map to not-found")
+}
+
+// TestVolumeService_Create_ConnectionError pins the connection-failure path
+// for create: a GetConnection failure must surface as a wrapped error.
+func TestVolumeService_Create_ConnectionError(t *testing.T) {
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewVolumeService(mockConnManager)
+
+	result, err := service.Create(context.Background(), "test-user", "test-machine", VolumeCreateRequest{Name: "my-volume"})
+
+	assert.Error(t, err, "should return error when connection fails")
+	assert.Contains(t, err.Error(), "failed to get connection to machine", "error should wrap the connection failure")
+	assert.Nil(t, result)
+}
+
+// TestVolumeService_Create_EngineError pins that an engine failure surfaces
+// wrapped as "failed to create volume". The mock connection carries no real
+// podman client, so the tunnel call errors; happy paths are covered by the
+// integration suite.
+func TestVolumeService_Create_EngineError(t *testing.T) {
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	service := NewVolumeService(mockConnManager)
+
+	result, err := service.Create(context.Background(), "test-user", "test-machine", VolumeCreateRequest{})
+
+	assert.Error(t, err, "engine call without a real podman client must fail")
+	assert.Contains(t, err.Error(), "failed to create volume", "engine failures must be wrapped consistently")
+	assert.Nil(t, result)
+}
+
+// TestMapCreateError pins the client-error mapping for create: podman 4xx
+// ErrorModels become INVALID_REQUEST carrying podman's message, while 5xx
+// and unrelated errors stay unmapped (wrapped 5xx at the handler).
+func TestMapCreateError(t *testing.T) {
+	appErr := mapCreateError(&errorhandling.ErrorModel{ResponseCode: http.StatusBadRequest, Message: "volume name invalid"})
+	require.NotNil(t, appErr, "podman 400 must map to a client error")
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Equal(t, "INVALID_REQUEST", appErr.Code)
+	assert.Equal(t, "volume name invalid", appErr.Message)
+
+	assert.Nil(t, mapCreateError(&errorhandling.ErrorModel{ResponseCode: http.StatusInternalServerError}), "podman 5xx must not map to a client error")
+	assert.Nil(t, mapCreateError(assert.AnError), "unrelated errors must not map to a client error")
 }

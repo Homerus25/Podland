@@ -298,10 +298,12 @@ func New(cfg *config.Config) (*App, error) {
 					// Events
 					r.Get("/events", eventHandler.HandleEvents)
 
-					// Volumes — read-level list; later volumes slices plug
-					// their mutating routes in here.
+					// Volumes — list/inspect stay read-level; create (and
+					// later slices) mutate remote state, so they gate at
+					// write (200-03).
 					r.Route("/volumes", func(r chi.Router) {
 						r.Get("/", volumeHandler.List)
+						r.With(requireWrite).Post("/", volumeHandler.Create)
 						r.Get("/{volumeName}", volumeHandler.Get)
 					})
 				})

@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/go-chi/chi/v5"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -98,5 +98,51 @@ func (h *VolumeHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(result)
+}
+
+// Create handles creating a volume on a machine. Route-level
+// RequireMachinePermission(write) (app.go) gates it at write. The body is
+// optional in shape: an absent/empty name creates an anonymous volume.
+// Name-format validation is podman's job; its rejections surface as 400
+// INVALID_REQUEST from the service.
+func (h *VolumeHandler) Create(w http.ResponseWriter, r *http.Request) {
+	slog.InfoContext(r.Context(), "Create")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	var request VolumeCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "Invalid volume create request body")
+		return
+	}
+
+	report, err := h.service.Create(r.Context(), userID, machineID, request)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "create", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
+		return
+	}
+
+	result := FromPodmanVolumeInspect(report)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(result)
 }

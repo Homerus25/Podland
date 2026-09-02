@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -247,4 +248,126 @@ func registerVolumesSweep() {
 			return nil
 		})
 	})
+}
+
+// Test_Integration_Volumes_Create is the volume create vertical slice
+// (200-03) against POST /api/machines/{id}/volumes:
+//
+//	POST /api/machines/{id}/volumes (named)    → 201, full config
+//	POST /api/machines/{id}/volumes (anonymous)→ 201, generated name
+//	POST .../volumes (malformed body)          → 400 INVALID_REQUEST
+//	POST .../volumes as read-level user        → 403
+func Test_Integration_Volumes_Create(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+	registerVolumesSweep()
+
+	machineID := suite.MachineID
+
+	// --- AC: named create returns 201 with the created volume's config,
+	// and labels/driver options round-trip through inspect --------------
+	t.Run("NamedCreateWithLabelsAndOptions", func(t *testing.T) {
+		volumeName := "it-" + suite.RunID + "-create"
+		t.Cleanup(func() {
+			if _, err := podmanConnRun("volume", "rm", volumeName); err != nil {
+				t.Logf("cleanup: rm %q best-effort failed: %v", volumeName, err)
+			}
+		})
+
+		body := `{"name":"` + volumeName + `","labels":{"podland-it":"` + suite.RunID + `"},"options":{"type":"tmpfs"}}`
+		resp := postJSON(t, "/api/machines/"+machineID+"/volumes", body)
+		defer resp.Body.Close()
+		raw, err := io.ReadAll(resp.Body)
+		require.NoError(t, err, "read create response body")
+		require.Equalf(t, http.StatusCreated, resp.StatusCode,
+			"create volume: expected 201, got %d. body: %s", resp.StatusCode, string(raw))
+
+		var created volumeDTO
+		require.NoErrorf(t, json.Unmarshal(raw, &created),
+			"create response must decode as the volume config. body: %s", string(raw))
+		assert.Equal(t, volumeName, created.Name, "name must be echoed")
+		assert.Equal(t, "local", created.Driver, "podman default driver must be reported")
+		assert.Equal(t, map[string]string{"podland-it": suite.RunID}, created.Labels)
+		assert.Equal(t, map[string]string{"type": "tmpfs"}, created.Options)
+
+		// Round-trip: the same facts come back through inspect.
+		resp2, err := suite.AuthenticatedClient().Get(
+			suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + volumeName)
+		require.NoError(t, err, "GET inspect must connect")
+		defer resp2.Body.Close()
+		require.Equal(t, http.StatusOK, resp2.StatusCode, "created volume must be inspectable")
+		var inspected volumeDTO
+		require.NoError(t, json.NewDecoder(resp2.Body).Decode(&inspected))
+		assert.Equal(t, volumeName, inspected.Name)
+		assert.Equal(t, map[string]string{"podland-it": suite.RunID}, inspected.Labels)
+		assert.Equal(t, map[string]string{"type": "tmpfs"}, inspected.Options)
+	})
+
+	// --- AC: omitting the name creates an anonymous volume and the
+	// generated name is present in the response -------------------------
+	t.Run("AnonymousCreate", func(t *testing.T) {
+		resp := postJSON(t, "/api/machines/"+machineID+"/volumes", `{}`)
+		defer resp.Body.Close()
+		raw, err := io.ReadAll(resp.Body)
+		require.NoError(t, err, "read anonymous create response body")
+		require.Equalf(t, http.StatusCreated, resp.StatusCode,
+			"anonymous create: expected 201, got %d. body: %s", resp.StatusCode, string(raw))
+
+		var created volumeDTO
+		require.NoErrorf(t, json.Unmarshal(raw, &created),
+			"anonymous create response must decode as the volume config. body: %s", string(raw))
+		require.NotEmpty(t, created.Name, "generated name must be present so callers can learn it")
+
+		_, err = podmanConnRun("volume", "rm", "-f", created.Name)
+		require.NoError(t, err, "cleaning the created anonymous volume must succeed")
+	})
+
+	// --- AC: podman-rejected names map to client errors, not 5xx -------
+	t.Run("PodmanRejectedNameGets400", func(t *testing.T) {
+		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes",
+			`{"name":"it-`+suite.RunID+`-bad name"}`, http.StatusBadRequest, "INVALID_REQUEST")
+	})
+
+	// --- AC: malformed request bodies produce the standard validation
+	// error response ------------------------------------------------------
+	t.Run("MalformedBodyGets400", func(t *testing.T) {
+		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes",
+			`{"labels": 42}`, http.StatusBadRequest, "INVALID_REQUEST")
+	})
+}
+
+// Test_Integration_Volumes_Create_AccessControl pins the write gate on the
+// create route: read-level grantees and no-access users get 403, unknown
+// machine gets 404.
+func Test_Integration_Volumes_Create_AccessControl(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+
+	t.Run("ReadLevelUserGets403", func(t *testing.T) {
+		client := levelUserClient(t, models.PermissionRead)
+		expectAPIError(t, client, http.MethodPost,
+			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes",
+			`{}`, http.StatusForbidden, "ACCESS_DENIED")
+	})
+
+	t.Run("NoAccessUserGets403", func(t *testing.T) {
+		expectAPIError(t, noAccessUserClient(t), http.MethodPost,
+			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes",
+			`{}`, http.StatusForbidden, "ACCESS_DENIED")
+	})
+
+	t.Run("UnknownMachineGets404", func(t *testing.T) {
+		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
+			suite.ServerURL+"/api/machines/00000000-0000-0000-0000-000000000000/volumes",
+			`{}`, http.StatusNotFound, "MACHINE_NOT_FOUND")
+	})
+}
+
+// postJSON POSTs an authenticated JSON body to a suite-relative path.
+func postJSON(t *testing.T, path, body string) *http.Response {
+	t.Helper()
+	resp, err := suite.AuthenticatedClient().Post(
+		suite.ServerURL+path, "application/json", strings.NewReader(body))
+	require.NoError(t, err, "POST %s must connect to the in-process server", path)
+	return resp
 }

@@ -49,6 +49,32 @@ func FromPodmanVolume(report *entities.VolumeListReport) VolumeResponse {
 	return response
 }
 
+// VolumeCreateRequest is the POST /api/machines/{id}/volumes body.
+// Name is optional: an empty name creates an anonymous volume whose
+// generated name podman reports back. Name-format validation is podman's
+// job — invalid names surface as client errors from the service.
+type VolumeCreateRequest struct {
+	// Volume name; empty means podman generates one (anonymous volume)
+	Name string `json:"name"`
+	// User-defined key/value metadata
+	Labels map[string]string `json:"labels,omitempty"`
+	// Volume driver; podman defaults to its "local" driver
+	Driver string `json:"driver,omitempty"`
+	// Mapping of driver options and values
+	Options map[string]string `json:"options,omitempty"`
+}
+
+// ToPodmanVolumeCreateOptions maps the API request to podman's create
+// options.
+func ToPodmanVolumeCreateOptions(req VolumeCreateRequest) entities.VolumeCreateOptions {
+	return entities.VolumeCreateOptions{
+		Name:    req.Name,
+		Labels:  req.Labels,
+		Driver:  req.Driver,
+		Options: req.Options,
+	}
+}
+
 // VolumeInspectResponse represents a single volume's full config in the API response
 type VolumeInspectResponse struct {
 	// Volume name
