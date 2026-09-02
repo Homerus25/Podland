@@ -9,6 +9,9 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	bindingsVolumes "go.podman.io/podman/v6/pkg/bindings/volumes"
+	"io"
+
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
@@ -23,6 +26,7 @@ type VolumeServiceInterface interface {
 	Create(ctx context.Context, userID, machineID string, req VolumeCreateRequest) (*entities.VolumeInspectReport, error)
 	Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error
 	Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error)
+	Export(ctx context.Context, userID, machineID, volumeName string, w io.Writer) error
 }
 
 // VolumeService provides business logic for volumes
@@ -231,4 +235,28 @@ func (s *VolumeService) Prune(ctx context.Context, userID, machineID string) ([]
 		return nil, fmt.Errorf("failed to prune volumes: %w", err)
 	}
 	return prunes, nil
+}
+
+// Export streams the volume's contents as a tar archive into w. The
+// volume's existence is resolved first, so a missing name fails with the
+// clean 404 before any byte is written — callers can still send error
+// responses when this returns an AppError. Bytes flow straight from the
+// remote podman into w with no server-side buffering.
+func (s *VolumeService) Export(ctx context.Context, userID, machineID, volumeName string, w io.Writer) error {
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	volumeEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	// Existence gate: fail before writing anything to w.
+	if _, err := s.inspectVolume(ctx, volumeEngine, volumeName); err != nil {
+		return err
+	}
+
+	return bindingsVolumes.Export(connCtx, volumeName, w)
 }

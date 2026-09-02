@@ -3,10 +3,14 @@
 package integration
 
 import (
+	"archive/tar"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -601,5 +605,113 @@ func Test_Integration_Volumes_Prune_AccessControl(t *testing.T) {
 		expectAPIError(t, noAccessUserClient(t), http.MethodPost,
 			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes/prune",
 			"", http.StatusForbidden, "ACCESS_DENIED")
+	})
+}
+
+// Test_Integration_Volumes_Export is the volume export vertical slice
+// (200-06) against GET /api/machines/{id}/volumes/{volumeName}/export.
+// It seeds a volume with known files (tar piped through the CLI's
+// volume import, the same tar contract the bindings' Import uses),
+// exports it through the API, and untars the response body to verify
+// the file contents byte-for-byte:
+//
+//	GET /api/machines/{id}/volumes/{volumeName}/export → 200, x-tar
+func Test_Integration_Volumes_Export(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+	registerVolumesSweep()
+
+	machineID := suite.MachineID
+	volumeName := "it-" + suite.RunID + "-export"
+
+	t.Cleanup(func() {
+		_, _ = podmanConnRun("volume", "rm", "-f", volumeName)
+	})
+
+	out, err := podmanConnRun("volume", "create", volumeName)
+	require.NoError(t, err, "fixture volume create must succeed: %s", strings.TrimSpace(out))
+
+	// Fixture: a tar with two known files, seeded via volume import.
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	fileA := []byte("hello from podland\n")
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg, Name: "greeting.txt", Size: int64(len(fileA)), Mode: 0o644,
+	}))
+	_, err = tw.Write(fileA)
+	require.NoError(t, err)
+	fileB := []byte{0x00, 0x01, 0x02, 0xff}
+	require.NoError(t, tw.WriteHeader(&tar.Header{
+		Typeflag: tar.TypeReg, Name: "nested/binary.bin", Size: int64(len(fileB)), Mode: 0o644,
+	}))
+	_, err = tw.Write(fileB)
+	require.NoError(t, err)
+	require.NoError(t, tw.Close())
+
+	tarFile := filepath.Join(t.TempDir(), "seed.tar")
+	require.NoError(t, os.WriteFile(tarFile, tarBuf.Bytes(), 0o600), "writing the seed tar must succeed")
+	out, err = podmanConnRun("volume", "import", volumeName, tarFile)
+	require.NoError(t, err, "seeding the volume via import must succeed: %s", strings.TrimSpace(out))
+
+	// --- AC: export streams a valid tar with the right headers ---------
+	resp, err := suite.AuthenticatedClient().Get(
+		suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + volumeName + "/export")
+	require.NoError(t, err, "GET export must connect to the in-process server")
+	defer resp.Body.Close()
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "export volume: expected 200")
+	assert.Equal(t, "application/x-tar", resp.Header.Get("Content-Type"))
+	assert.Equal(t, `attachment; filename="`+volumeName+`.tar"`, resp.Header.Get("Content-Disposition"))
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err, "read exported tar body")
+
+	// --- AC: untar and verify contents match ----------------------------
+	tr := tar.NewReader(bytes.NewReader(body))
+	found := map[string][]byte{}
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err, "iterating exported tar must not fail")
+		if hdr.Typeflag == tar.TypeReg {
+			data, err := io.ReadAll(tr)
+			require.NoError(t, err, "reading exported file %q", hdr.Name)
+			found[hdr.Name] = data
+		}
+	}
+	assert.Equal(t, fileA, found["greeting.txt"], "exported file content must match the seed")
+	assert.Equal(t, fileB, found["nested/binary.bin"], "binary content must round-trip exactly")
+}
+
+// Test_Integration_Volumes_Export_AccessControl pins export's read-level
+// access ruling: a read-level user can export; no-access users get 403;
+// unknown volume names get 404.
+func Test_Integration_Volumes_Export_AccessControl(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+	machineID := suite.MachineID
+
+	t.Run("ReadLevelUserCanExport", func(t *testing.T) {
+		volumeName := "it-" + suite.RunID + "-export-read"
+		out, err := podmanConnRun("volume", "create", volumeName)
+		require.NoError(t, err, "fixture volume create must succeed: %s", strings.TrimSpace(out))
+		t.Cleanup(func() { _, _ = podmanConnRun("volume", "rm", "-f", volumeName) })
+
+		client := levelUserClient(t, models.PermissionRead)
+		resp, err := client.Get(suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + volumeName + "/export")
+		require.NoError(t, err, "read-level export must connect")
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, "read-level users can export (grilling ruling)")
+	})
+
+	t.Run("NoAccessUserGets403", func(t *testing.T) {
+		expectAPIError(t, noAccessUserClient(t), http.MethodGet,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/some-volume/export",
+			"", http.StatusForbidden, "ACCESS_DENIED")
+	})
+
+	t.Run("UnknownVolumeGets404", func(t *testing.T) {
+		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/it-"+suite.RunID+"-no-such-volume/export",
+			"", http.StatusNotFound, "VOLUME_NOT_FOUND")
 	})
 }

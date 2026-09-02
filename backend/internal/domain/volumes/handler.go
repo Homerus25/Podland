@@ -2,6 +2,7 @@ package volumes
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -234,4 +235,48 @@ func (h *VolumeHandler) Prune(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(result)
+}
+
+// Export handles streaming a volume's contents as a tar download.
+// Read-level permission suffices (subtree RequireMachineAccess): users
+// who can read a machine's state can read its data. Headers are set
+// before the service streams, so the download starts with the right
+// Content-Type/Disposition; a 404/4xx happens before any byte is
+// written (the service resolves existence first), so error envelopes
+// stay intact. Mid-stream failures can't retroactively change the
+// status — the connection just truncates.
+func (h *VolumeHandler) Export(w http.ResponseWriter, r *http.Request) {
+	slog.InfoContext(r.Context(), "Export")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	volumeName := chi.URLParam(r, "volumeName")
+	if volumeName == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_VOLUME_NAME", "Volume name is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-tar")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", volumeName+".tar"))
+
+	if err := h.service.Export(r.Context(), userID, machineID, volumeName, w); err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "export", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("volumeName", volumeName))
+		return
+	}
 }

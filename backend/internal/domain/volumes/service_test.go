@@ -1,6 +1,7 @@
 package volumes
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -148,6 +149,20 @@ func TestVolumeService_Delete_ConnectionError(t *testing.T) {
 	service := NewVolumeService(mockConnManager)
 
 	err := service.Delete(context.Background(), "test-user", "test-machine", "my-volume", false)
+
+	assert.Error(t, err, "should return error when connection fails")
+	assert.Contains(t, err.Error(), "failed to get connection to machine", "error should wrap the connection failure")
+}
+
+// TestVolumeService_Export_ConnectionError pins the connection-failure
+// path for export: a GetConnection failure must surface as a wrapped error.
+func TestVolumeService_Export_ConnectionError(t *testing.T) {
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewVolumeService(mockConnManager)
+
+	var sink bytes.Buffer
+	err := service.Export(context.Background(), "test-user", "test-machine", "my-volume", &sink)
 
 	assert.Error(t, err, "should return error when connection fails")
 	assert.Contains(t, err.Error(), "failed to get connection to machine", "error should wrap the connection failure")

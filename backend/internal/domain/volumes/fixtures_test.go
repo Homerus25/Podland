@@ -2,6 +2,7 @@ package volumes
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/stretchr/testify/mock"
@@ -82,4 +83,9 @@ func (m *MockVolumeService) Prune(ctx context.Context, userID, machineID string)
 		return prunes, args.Error(1)
 	}
 	return nil, args.Error(1)
+}
+
+func (m *MockVolumeService) Export(ctx context.Context, userID, machineID, volumeName string, w io.Writer) error {
+	args := m.Called(ctx, userID, machineID, volumeName, w)
+	return args.Error(0)
 }

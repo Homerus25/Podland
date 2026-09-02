@@ -310,6 +310,9 @@ func New(cfg *config.Config) (*App, error) {
 						r.With(requireWrite).Post("/prune", volumeHandler.Prune)
 						r.Route("/{volumeName}", func(r chi.Router) {
 							r.Get("/", volumeHandler.Get)
+							// Export stays read-level: users who can
+							// read a machine's state can read its data.
+							r.Get("/export", volumeHandler.Export)
 							r.With(requireWrite).Delete("/", volumeHandler.Delete)
 						})
 					})
