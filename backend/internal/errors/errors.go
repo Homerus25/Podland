@@ -137,6 +137,10 @@ var (
 // Volumes
 var (
 	ErrVolumeNotFound = NewAppError("VOLUME_NOT_FOUND", "Volume not found", http.StatusNotFound)
+	// ErrVolumeInUse is 409: podman refuses to remove a volume that is
+	// in use by a container unless force is requested. Distinct code so
+	// the UI can explain what depends on the volume.
+	ErrVolumeInUse = NewAppError("VOLUME_IN_USE", "Volume is in use by a container", http.StatusConflict)
 )
 
 // Access

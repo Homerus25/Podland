@@ -139,3 +139,16 @@ func TestMapCreateError(t *testing.T) {
 	assert.Nil(t, mapCreateError(&errorhandling.ErrorModel{ResponseCode: http.StatusInternalServerError}), "podman 5xx must not map to a client error")
 	assert.Nil(t, mapCreateError(assert.AnError), "unrelated errors must not map to a client error")
 }
+
+// TestVolumeService_Delete_ConnectionError pins the connection-failure
+// path for delete: a GetConnection failure must surface as a wrapped error.
+func TestVolumeService_Delete_ConnectionError(t *testing.T) {
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewVolumeService(mockConnManager)
+
+	err := service.Delete(context.Background(), "test-user", "test-machine", "my-volume", false)
+
+	assert.Error(t, err, "should return error when connection fails")
+	assert.Contains(t, err.Error(), "failed to get connection to machine", "error should wrap the connection failure")
+}

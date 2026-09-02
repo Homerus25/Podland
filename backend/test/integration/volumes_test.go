@@ -371,3 +371,144 @@ func postJSON(t *testing.T, path, body string) *http.Response {
 	require.NoError(t, err, "POST %s must connect to the in-process server", path)
 	return resp
 }
+
+// Test_Integration_Volumes_Delete is the volume delete vertical slice
+// (200-04) against DELETE /api/machines/{id}/volumes/{volumeName}?force=:
+//
+//	DELETE unused volume            → 204, gone from the list
+//	DELETE in-use volume            → 409 VOLUME_IN_USE
+//	DELETE in-use volume ?force=true→ 204, container stopped, volume gone
+//	DELETE unknown volume           → 404 VOLUME_NOT_FOUND
+func Test_Integration_Volumes_Delete(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+	registerVolumesSweep()
+	registerContainersSweep()
+
+	machineID := suite.MachineID
+
+	// --- AC: unused volume deletes with 204 -----------------------------
+	t.Run("UnusedVolumeDeletes204", func(t *testing.T) {
+		volumeName := "it-" + suite.RunID + "-del-unused"
+		out, err := podmanConnRun("volume", "create", volumeName)
+		require.NoError(t, err, "fixture volume create must succeed: %s", strings.TrimSpace(out))
+		t.Cleanup(func() {
+			_, _ = podmanConnRun("volume", "rm", "-f", volumeName)
+		})
+
+		deleteVolume(t, machineID, volumeName, "", http.StatusNoContent)
+
+		assert.NotContains(t, listVolumeNames(t, machineID), volumeName,
+			"deleted volume must disappear from the list")
+	})
+
+	// --- AC: in-use volume without force gets 409; with force succeeds --
+	t.Run("InUseVolume", func(t *testing.T) {
+		volumeName := "it-" + suite.RunID + "-del-inuse"
+		containerName := "it-" + suite.RunID + "-del-inuse-c"
+		out, err := podmanConnRun("volume", "create", volumeName)
+		require.NoError(t, err, "fixture volume create must succeed: %s", strings.TrimSpace(out))
+		t.Cleanup(func() {
+			_, _ = podmanConnRun("rm", "-f", containerName)
+			_, _ = podmanConnRun("volume", "rm", "-f", volumeName)
+		})
+
+		// Fixture: a running container mounting the volume. busybox is
+		// ensured by the shared helper (same prerequisite as containers).
+		ensureBusyboxImage(t)
+		out, err = podmanConnRun("run", "-d", "--name", containerName,
+			"-v", volumeName+":/data", "busybox:latest", "sh", "-c", "sleep 600")
+		require.NoError(t, err, "fixture container create must succeed: %s", strings.TrimSpace(out))
+		require.NotEmpty(t, strings.TrimSpace(out), "fixture container must print an id")
+
+		// Without force: podman refuses → 409 with the distinct code.
+		body := deleteVolume(t, machineID, volumeName, "", http.StatusConflict)
+		assert.Contains(t, body, "VOLUME_IN_USE", "in-use refusal must carry the distinct error code")
+
+		// With force: podman stops the container and removes the volume.
+		deleteVolume(t, machineID, volumeName, "?force=true", http.StatusNoContent)
+
+		assert.NotContains(t, listVolumeNames(t, machineID), volumeName,
+			"force-deleted volume must be gone from the list")
+		state := containerStateByName(t, containerName)
+		assert.NotEqual(t, "running", state, "podman must have stopped the dependent container")
+	})
+
+	// --- AC: unknown volume name returns the clean 404 ------------------
+	t.Run("UnknownNameGets404", func(t *testing.T) {
+		expectAPIError(t, suite.AuthenticatedClient(), http.MethodDelete,
+			suite.ServerURL+"/api/machines/"+machineID+"/volumes/it-"+suite.RunID+"-no-such-volume",
+			"", http.StatusNotFound, "VOLUME_NOT_FOUND")
+	})
+}
+
+// deleteVolume DELETEs a volume with an optional raw query string and
+// asserts the expected status; it returns the response body text.
+func deleteVolume(t *testing.T, machineID, volumeName, query string, wantStatus int) string {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodDelete,
+		suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+query, nil)
+	require.NoError(t, err)
+	resp, err := suite.AuthenticatedClient().Do(req)
+	require.NoError(t, err, "DELETE volume must connect to the in-process server")
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err, "read volume delete response body")
+	require.Equalf(t, wantStatus, resp.StatusCode,
+		"delete volume %q: expected %d, got %d. body: %s", volumeName, wantStatus, resp.StatusCode, string(body))
+	return string(body)
+}
+
+// listVolumeNames lists volumes and returns just their names.
+func listVolumeNames(t *testing.T, machineID string) []string {
+	t.Helper()
+	volumes := listVolumes(t, machineID)
+	names := make([]string, 0, len(volumes))
+	for _, v := range volumes {
+		names = append(names, v.Name)
+	}
+	return names
+}
+
+// containerStateByName inspects a container through the backend by name.
+func containerStateByName(t *testing.T, name string) string {
+	t.Helper()
+	resp, err := suite.AuthenticatedClient().Get(
+		suite.ServerURL + "/api/machines/" + suite.MachineID + "/containers/" + name)
+	require.NoError(t, err, "GET container inspect must connect")
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "missing(" + resp.Status + "): " + string(raw)
+	}
+	var got struct {
+		State string `json:"state"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &got))
+	return got.State
+}
+
+// Test_Integration_Volumes_Delete_AccessControl pins the write gate on
+// the delete route: read-level grantees and no-access users get 403,
+// unknown machine gets 404.
+func Test_Integration_Volumes_Delete_AccessControl(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+
+	t.Run("ReadLevelUserGets403", func(t *testing.T) {
+		client := levelUserClient(t, models.PermissionRead)
+		expectAPIError(t, client, http.MethodDelete,
+			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes/it-"+suite.RunID+"-whatever",
+			"", http.StatusForbidden, "ACCESS_DENIED")
+	})
+
+	t.Run("NoAccessUserGets403", func(t *testing.T) {
+		expectAPIError(t, noAccessUserClient(t), http.MethodDelete,
+			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes/it-"+suite.RunID+"-whatever",
+			"", http.StatusForbidden, "ACCESS_DENIED")
+	})
+
+	t.Run("UnknownMachineGets404", func(t *testing.T) {
+		expectAPIError(t, suite.AuthenticatedClient(), http.MethodDelete,
+			suite.ServerURL+"/api/machines/00000000-0000-0000-0000-000000000000/volumes/whatever",
+			"", http.StatusNotFound, "MACHINE_NOT_FOUND")
+	})
+}

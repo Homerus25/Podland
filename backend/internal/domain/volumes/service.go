@@ -20,6 +20,7 @@ type VolumeServiceInterface interface {
 	List(ctx context.Context, userID, machineID string, opts entities.VolumeListOptions) ([]*entities.VolumeListReport, error)
 	Get(ctx context.Context, userID, machineID, volumeName string) (*entities.VolumeInspectReport, error)
 	Create(ctx context.Context, userID, machineID string, req VolumeCreateRequest) (*entities.VolumeInspectReport, error)
+	Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error
 }
 
 // VolumeService provides business logic for volumes
@@ -66,6 +67,12 @@ func (s *VolumeService) Get(ctx context.Context, userID, machineID, volumeName s
 		ClientCtx: connCtx,
 	}
 
+	return s.inspectVolume(ctx, volumeEngine, volumeName)
+}
+
+// inspectVolume resolves a single volume by exact name through the
+// tunnel engine, mapping a missing volume to the clean 404 sentinel.
+func (s *VolumeService) inspectVolume(ctx context.Context, volumeEngine *tunnel.ContainerEngine, volumeName string) (*entities.VolumeInspectReport, error) {
 	reports, errs, err := volumeEngine.VolumeInspect(ctx, []string{volumeName}, entities.InspectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect volume: %w", err)
@@ -110,25 +117,61 @@ func (s *VolumeService) Create(ctx context.Context, userID, machineID string, re
 
 	// Create only reports the name; the contract is the full config, so
 	// inspect the freshly created volume by its (possibly generated) name.
-	inspect := func(name string) (*entities.VolumeInspectReport, error) {
-		reports, errs, err := volumeEngine.VolumeInspect(ctx, []string{name}, entities.InspectOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("failed to inspect volume: %w", err)
-		}
-		for _, itemErr := range errs {
-			if itemErr != nil {
-				if isVolumeNotFound(itemErr) {
-					return nil, appErrors.ErrVolumeNotFound
-				}
-				return nil, fmt.Errorf("failed to inspect volume: %w", itemErr)
-			}
-		}
-		if len(reports) == 0 || reports[0] == nil {
-			return nil, appErrors.ErrVolumeNotFound
-		}
-		return reports[0], nil
+	return s.inspectVolume(ctx, volumeEngine, report.IDOrName)
+}
+
+// Delete removes a volume by exact name. Without force, podman refuses
+// to remove a volume in use by a container — that refusal surfaces as
+// 409 VOLUME_IN_USE carrying podman's message; with force, podman stops
+// dependent containers first (its own semantics) and removes the volume.
+// Unknown names surface as the same clean 404 as inspect.
+func (s *VolumeService) Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error {
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get connection to machine: %w", err)
 	}
-	return inspect(report.IDOrName)
+	defer s.connManager.Release(machineID)
+
+	volumeEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	reports, err := volumeEngine.VolumeRm(ctx, []string{volumeName}, entities.VolumeRmOptions{Force: force})
+	if err != nil {
+		return fmt.Errorf("failed to remove volume: %w", err)
+	}
+	for _, report := range reports {
+		if report == nil || report.Err == nil {
+			continue
+		}
+		if isVolumeNotFound(report.Err) {
+			return appErrors.ErrVolumeNotFound
+		}
+		if appErr := mapInUseError(report.Err); appErr != nil {
+			return appErr
+		}
+		return fmt.Errorf("failed to remove volume: %w", report.Err)
+	}
+	return nil
+}
+
+// mapInUseError converts podman's in-use refusal into 409 VOLUME_IN_USE
+// carrying podman's message, so the UI can explain what depends on the
+// volume. Podman's compat layer reports the refusal as a 409 ErrorModel
+// or a plain "in use" error depending on version; both map here.
+func mapInUseError(err error) *appErrors.AppError {
+	msg := err.Error()
+	var errModel *errorhandling.ErrorModel
+	if errors.As(err, &errModel) {
+		msg = errModel.Message
+		if errModel.ResponseCode == http.StatusConflict {
+			return appErrors.ErrVolumeInUse.WithMessage(msg)
+		}
+	}
+	if strings.Contains(strings.ToLower(msg), "in use") {
+		return appErrors.ErrVolumeInUse.WithMessage(msg)
+	}
+	return nil
 }
 
 // mapCreateError converts podman's client-side rejections into 4xx app

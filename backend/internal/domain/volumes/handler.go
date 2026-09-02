@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
@@ -145,4 +146,54 @@ func (h *VolumeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(result)
+}
+
+// Delete handles removing a volume by exact name. Route-level
+// RequireMachinePermission(write) (app.go) gates it at write. The force
+// query flag (default false) lets podman stop dependent containers and
+// remove the volume anyway; without it an in-use volume surfaces as 409
+// VOLUME_IN_USE. Returns 204 with an empty body.
+func (h *VolumeHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	slog.InfoContext(r.Context(), "Delete")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	volumeName := chi.URLParam(r, "volumeName")
+	if volumeName == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_VOLUME_NAME", "Volume name is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	force := false
+	if raw := r.URL.Query().Get("force"); raw != "" {
+		var err error
+		force, err = strconv.ParseBool(raw)
+		if err != nil {
+			errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "force must be a boolean", contextutils.GetRequestID(r.Context()))
+			return
+		}
+	}
+
+	if err := h.service.Delete(r.Context(), userID, machineID, volumeName, force); err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "delete", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("volumeName", volumeName))
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }

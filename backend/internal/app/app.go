@@ -304,7 +304,10 @@ func New(cfg *config.Config) (*App, error) {
 					r.Route("/volumes", func(r chi.Router) {
 						r.Get("/", volumeHandler.List)
 						r.With(requireWrite).Post("/", volumeHandler.Create)
-						r.Get("/{volumeName}", volumeHandler.Get)
+						r.Route("/{volumeName}", func(r chi.Router) {
+							r.Get("/", volumeHandler.Get)
+							r.With(requireWrite).Delete("/", volumeHandler.Delete)
+						})
 					})
 				})
 			})

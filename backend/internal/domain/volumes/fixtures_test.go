@@ -69,3 +69,8 @@ func (m *MockVolumeService) Create(ctx context.Context, userID, machineID string
 	}
 	return nil, args.Error(1)
 }
+
+func (m *MockVolumeService) Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error {
+	args := m.Called(ctx, userID, machineID, volumeName, force)
+	return args.Error(0)
+}
