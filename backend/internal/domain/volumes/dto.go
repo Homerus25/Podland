@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
 // VolumeResponse represents a volume in the list API response
@@ -124,6 +125,37 @@ func ToVolumeListResponse(reports []*entities.VolumeListReport) []VolumeResponse
 	out := make([]VolumeResponse, 0, len(reports))
 	for _, report := range reports {
 		out = append(out, FromPodmanVolume(report))
+	}
+	return out
+}
+
+// VolumePruneResponse is one entry in the prune API response: the
+// removed volume's name and the reclaimed size (bytes), plus any
+// per-volume error podman reported while removing it.
+type VolumePruneResponse struct {
+	// Name of the removed volume
+	Name string `json:"name"`
+	// Reclaimed size in bytes, when podman reports it
+	Size uint64 `json:"size"`
+	// Per-volume error podman reported, if the removal failed
+	Error string `json:"error,omitempty"`
+}
+
+// FromPodmanPruneReports converts podman's prune reports to the API array.
+func FromPodmanPruneReports(reports []*reports.PruneReport) []VolumePruneResponse {
+	out := make([]VolumePruneResponse, 0, len(reports))
+	for _, report := range reports {
+		if report == nil {
+			continue
+		}
+		entry := VolumePruneResponse{
+			Name: report.Id,
+			Size: report.Size,
+		}
+		if report.Err != nil {
+			entry.Error = report.Err.Error()
+		}
+		out = append(out, entry)
 	}
 	return out
 }

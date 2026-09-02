@@ -512,3 +512,94 @@ func Test_Integration_Volumes_Delete_AccessControl(t *testing.T) {
 			"", http.StatusNotFound, "MACHINE_NOT_FOUND")
 	})
 }
+
+// Test_Integration_Volumes_Prune is the volume prune vertical slice
+// (200-05) against POST /api/machines/{id}/volumes/prune. It seeds two
+// unused volumes plus one in-use volume (mounted by a running container),
+// prunes, and verifies the reports and survival via the list endpoint:
+//
+//	POST /api/machines/{id}/volumes/prune → 200, entry per removed volume
+func Test_Integration_Volumes_Prune(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+	registerVolumesSweep()
+	registerContainersSweep()
+
+	machineID := suite.MachineID
+
+	unusedA := "it-" + suite.RunID + "-prune-a"
+	unusedB := "it-" + suite.RunID + "-prune-b"
+	inUse := "it-" + suite.RunID + "-prune-inuse"
+	containerName := "it-" + suite.RunID + "-prune-c"
+
+	for _, name := range []string{unusedA, unusedB, inUse} {
+		out, err := podmanConnRun("volume", "create", name)
+		require.NoError(t, err, "fixture volume create %q must succeed: %s", name, strings.TrimSpace(out))
+	}
+	t.Cleanup(func() {
+		_, _ = podmanConnRun("rm", "-f", containerName)
+		for _, name := range []string{unusedA, unusedB, inUse} {
+			_, _ = podmanConnRun("volume", "rm", "-f", name)
+		}
+	})
+
+	// Fixture: a running container mounting the in-use volume.
+	ensureBusyboxImage(t)
+	out, err := podmanConnRun("run", "-d", "--name", containerName,
+		"-v", inUse+":/data", "busybox:latest", "sh", "-c", "sleep 600")
+	require.NoError(t, err, "fixture container create must succeed: %s", strings.TrimSpace(out))
+
+	// --- AC: prune returns 200 with a report entry per removed volume --
+	resp, err := suite.AuthenticatedClient().Post(
+		suite.ServerURL+"/api/machines/"+machineID+"/volumes/prune", "application/json", nil)
+	require.NoError(t, err, "POST prune must connect to the in-process server")
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err, "read prune response body")
+	require.Equalf(t, http.StatusOK, resp.StatusCode,
+		"prune volumes: expected 200, got %d. body: %s", resp.StatusCode, string(raw))
+
+	var report []volumePruneDTO
+	require.NoErrorf(t, json.Unmarshal(raw, &report),
+		"prune response must decode as a report array. body: %s", string(raw))
+
+	reported := map[string]bool{}
+	for _, entry := range report {
+		reported[entry.Name] = true
+		assert.Empty(t, entry.Error, "removal of seeded unused volume %q must not error", entry.Name)
+	}
+	assert.True(t, reported[unusedA], "unused volume %q must be reported as removed", unusedA)
+	assert.True(t, reported[unusedB], "unused volume %q must be reported as removed", unusedB)
+	assert.False(t, reported[inUse], "in-use volume must not be reported as removed")
+
+	// --- AC: unused volumes are gone; the in-use volume survives -------
+	names := listVolumeNames(t, machineID)
+	assert.NotContains(t, names, unusedA, "pruned unused volume must be gone")
+	assert.NotContains(t, names, unusedB, "pruned unused volume must be gone")
+	assert.Contains(t, names, inUse, "in-use volume must survive the prune")
+}
+
+// volumePruneDTO mirrors one prune report entry.
+type volumePruneDTO struct {
+	Name  string `json:"name"`
+	Size  uint64 `json:"size"`
+	Error string `json:"error"`
+}
+
+// Test_Integration_Volumes_Prune_AccessControl pins the write gate on the
+// prune route: read-level grantees and no-access users get 403.
+func Test_Integration_Volumes_Prune_AccessControl(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+
+	t.Run("ReadLevelUserGets403", func(t *testing.T) {
+		client := levelUserClient(t, models.PermissionRead)
+		expectAPIError(t, client, http.MethodPost,
+			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes/prune",
+			"", http.StatusForbidden, "ACCESS_DENIED")
+	})
+
+	t.Run("NoAccessUserGets403", func(t *testing.T) {
+		expectAPIError(t, noAccessUserClient(t), http.MethodPost,
+			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes/prune",
+			"", http.StatusForbidden, "ACCESS_DENIED")
+	})
+}

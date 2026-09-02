@@ -106,3 +106,8 @@ func decodeVolumes(t *testing.T, body string) []VolumeResponse {
 	require.NoError(t, json.Unmarshal([]byte(body), &out), "response must decode as a JSON array of volumes")
 	return out
 }
+
+// jsonUnmarshalSlice decodes a JSON array response body.
+func jsonUnmarshalSlice(data []byte, out any) error {
+	return json.Unmarshal(data, out)
+}

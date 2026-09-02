@@ -304,6 +304,10 @@ func New(cfg *config.Config) (*App, error) {
 					r.Route("/volumes", func(r chi.Router) {
 						r.Get("/", volumeHandler.List)
 						r.With(requireWrite).Post("/", volumeHandler.Create)
+						// The literal /prune route must beat the
+						// /{volumeName} subtree or prune calls get
+						// swallowed as a volume named "prune".
+						r.With(requireWrite).Post("/prune", volumeHandler.Prune)
 						r.Route("/{volumeName}", func(r chi.Router) {
 							r.Get("/", volumeHandler.Get)
 							r.With(requireWrite).Delete("/", volumeHandler.Delete)

@@ -10,6 +10,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
@@ -21,6 +22,7 @@ type VolumeServiceInterface interface {
 	Get(ctx context.Context, userID, machineID, volumeName string) (*entities.VolumeInspectReport, error)
 	Create(ctx context.Context, userID, machineID string, req VolumeCreateRequest) (*entities.VolumeInspectReport, error)
 	Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error
+	Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error)
 }
 
 // VolumeService provides business logic for volumes
@@ -207,4 +209,26 @@ func isVolumeNotFound(err error) bool {
 	}
 	var errModel *errorhandling.ErrorModel
 	return errors.As(err, &errModel) && errModel.ResponseCode == http.StatusNotFound
+}
+
+// Prune removes every unused volume on the machine in one call and
+// returns podman's per-volume reports. Volumes in use by containers are
+// untouched — podman's own semantics, which is the blast-radius
+// mitigation for this endpoint.
+func (s *VolumeService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	volumeEngine := &tunnel.ContainerEngine{
+		ClientCtx: connCtx,
+	}
+
+	prunes, err := volumeEngine.VolumePrune(ctx, entities.VolumePruneOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to prune volumes: %w", err)
+	}
+	return prunes, nil
 }

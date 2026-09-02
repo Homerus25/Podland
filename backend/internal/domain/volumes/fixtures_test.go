@@ -8,6 +8,7 @@ import (
 
 	"go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
 func mustParseCreatedAt(value string) time.Time {
@@ -73,4 +74,12 @@ func (m *MockVolumeService) Create(ctx context.Context, userID, machineID string
 func (m *MockVolumeService) Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error {
 	args := m.Called(ctx, userID, machineID, volumeName, force)
 	return args.Error(0)
+}
+
+func (m *MockVolumeService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
+	args := m.Called(ctx, userID, machineID)
+	if prunes, ok := args.Get(0).([]*reports.PruneReport); ok {
+		return prunes, args.Error(1)
+	}
+	return nil, args.Error(1)
 }
