@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Crush project configuration. See .crush/hooks/ for hook scripts.
+
+# Format frontend files with Biome before every edit-type tool runs, so
+# agents always read and edit already-formatted content and never need to
+# run `biome check --write` manually.
+hook add PreToolUse \
+	--matcher '^(edit|multiedit|lsp_replace_symbol)$' \
+	--command "$CRUSH_PROJECT_DIR/.crush/hooks/biome-format.sh" \
+	--name biome-format
