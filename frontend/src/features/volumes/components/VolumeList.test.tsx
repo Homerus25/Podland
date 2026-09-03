@@ -2,6 +2,7 @@ import { VolumeList } from "@features/volumes/components/VolumeList";
 import type { VolumeSummary } from "@features/volumes/services/volumesApi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { server } from "@/test/server";
@@ -108,5 +109,56 @@ describe("VolumeList", () => {
 
 		expect(await screen.findByTestId("volumes-empty")).toBeInTheDocument();
 		expect(screen.queryByTestId("volumes-loading")).not.toBeInTheDocument();
+	});
+
+	it("opens the inspect drawer when a row is clicked", async () => {
+		mockVolumes([volumeFixture()]);
+		server.use(
+			http.get("*/api/machines/m-1/volumes/app-data", () =>
+				HttpResponse.json(volumeFixture({ labels: { team: "platform" } })),
+			),
+		);
+		renderVolumeList();
+
+		const user = userEvent.setup();
+		await user.click(await screen.findByTestId("volume-row"));
+
+		const content = await screen.findByTestId("volume-drawer-content");
+		expect(content).toHaveTextContent("app-data");
+		expect(screen.getByTestId("volume-drawer-labels")).toHaveTextContent(
+			"platform",
+		);
+	});
+
+	it("removes a deleted row from the list after a stale 404 inspect", async () => {
+		mockVolumes([volumeFixture()]);
+		let listCount = 0;
+		server.use(
+			http.get("*/api/machines/m-1/volumes", () => {
+				listCount += 1;
+				return HttpResponse.json(listCount > 1 ? [] : [volumeFixture()]);
+			}),
+			http.get("*/api/machines/m-1/volumes/app-data", () =>
+				HttpResponse.json(
+					{
+						requestId: "r-1",
+						error: { code: "VOLUME_NOT_FOUND", message: "Volume not found" },
+					},
+					{ status: 404 },
+				),
+			),
+		);
+		renderVolumeList();
+
+		const user = userEvent.setup();
+		await user.click(await screen.findByTestId("volume-row"));
+
+		expect(
+			await screen.findByTestId("volume-drawer-not-found"),
+		).toHaveTextContent(/no longer exists/i);
+		await waitFor(() =>
+			expect(screen.queryByTestId("volume-row")).not.toBeInTheDocument(),
+		);
+		expect(screen.getByTestId("volumes-empty")).toBeInTheDocument();
 	});
 });

@@ -14,10 +14,22 @@ import type { VolumeSummary } from "@features/volumes/services/volumesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { getApiError } from "@shared/utils/api";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
+import { useState } from "react";
+import { VolumeInspectDrawer } from "./VolumeInspectDrawer";
 
-function VolumeRow({ volume }: { volume: VolumeSummary }) {
+function VolumeRow({
+	volume,
+	onSelect,
+}: {
+	volume: VolumeSummary;
+	onSelect: (name: string) => void;
+}) {
 	return (
-		<Tr data-testid="volume-row">
+		<Tr
+			data-testid="volume-row"
+			cursor="pointer"
+			onClick={() => onSelect(volume.name)}
+		>
 			<Td fontFamily="mono">{volume.name}</Td>
 			<Td>
 				<Badge
@@ -37,6 +49,7 @@ function VolumeRow({ volume }: { volume: VolumeSummary }) {
 }
 
 export function VolumeList({ machineId }: { machineId: string }) {
+	const [selectedVolume, setSelectedVolume] = useState<string | null>(null);
 	const { data: volumes, isPending, error } = useVolumes(machineId);
 
 	if (isPending) {
@@ -65,12 +78,22 @@ export function VolumeList({ machineId }: { machineId: string }) {
 						</Thead>
 						<Tbody>
 							{volumes.map((volume) => (
-								<VolumeRow key={volume.name} volume={volume} />
+								<VolumeRow
+									key={volume.name}
+									volume={volume}
+									onSelect={setSelectedVolume}
+								/>
 							))}
 						</Tbody>
 					</Table>
 				</TableContainer>
 			)}
+			<VolumeInspectDrawer
+				machineId={machineId}
+				volumeName={selectedVolume}
+				isOpen={selectedVolume !== null}
+				onClose={() => setSelectedVolume(null)}
+			/>
 		</>
 	);
 }

@@ -15,6 +15,22 @@ export interface VolumeSummary {
 	size?: number;
 }
 
+// Volume as returned by GET /api/machines/{id}/volumes/{name}
+// (backend volumes dto.go VolumeInspectResponse): the volume's full
+// configuration. size is only present when podman reports usage.
+// labels/options are always present ({} when empty).
+export type VolumeDetail = VolumeSummary;
+
+export async function inspectVolume(
+	machineId: string,
+	volumeName: string,
+): Promise<VolumeDetail> {
+	const response = await api.get<VolumeDetail>(
+		`/machines/${encodeURIComponent(machineId)}/volumes/${encodeURIComponent(volumeName)}`,
+	);
+	return response.data;
+}
+
 export async function listVolumes(machineId: string): Promise<VolumeSummary[]> {
 	const response = await api.get<VolumeSummary[]>(
 		`/machines/${encodeURIComponent(machineId)}/volumes`,
