@@ -5,20 +5,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { volumeFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-function volumeFixture(overrides: Partial<VolumeSummary> = {}): VolumeSummary {
-	return {
-		name: "app-data",
-		driver: "local",
-		createdAt: "2026-08-20T10:00:00Z",
-		anonymous: false,
-		labels: {},
-		options: {},
-		mountpoint: "/var/lib/containers/storage/volumes/app-data/_data",
-		...overrides,
-	};
-}
 
 function mockVolumes(volumes: VolumeSummary[]) {
 	server.use(

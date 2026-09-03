@@ -1,24 +1,10 @@
 import { VolumeInspectDrawer } from "@features/volumes/components/VolumeInspectDrawer";
-import type { VolumeDetail } from "@features/volumes/services/volumesApi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
+import { volumeFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-function volumeFixture(overrides: Partial<VolumeDetail> = {}): VolumeDetail {
-	return {
-		name: "app-data",
-		driver: "local",
-		createdAt: "2026-08-20T10:00:00Z",
-		anonymous: false,
-		labels: { team: "platform", env: "prod" },
-		options: { type: "tmpfs", device: "tmpfs" },
-		mountpoint: "/var/lib/containers/storage/volumes/app-data/_data",
-		size: 1500000,
-		...overrides,
-	};
-}
 
 function mockInspect(
 	name: string,
@@ -46,7 +32,15 @@ function renderDrawer(
 
 describe("VolumeInspectDrawer", () => {
 	it("renders the volume's full configuration from the inspect endpoint", async () => {
-		mockInspect("app-data", () => HttpResponse.json(volumeFixture()));
+		mockInspect("app-data", () =>
+			HttpResponse.json(
+				volumeFixture({
+					labels: { team: "platform", env: "prod" },
+					options: { type: "tmpfs", device: "tmpfs" },
+					size: 1500000,
+				}),
+			),
+		);
 		renderDrawer();
 
 		const content = await screen.findByTestId("volume-drawer-content");

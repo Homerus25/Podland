@@ -1,27 +1,11 @@
 import { useVolume } from "@features/volumes/hooks/useVolume";
-import {
-	inspectVolume,
-	type VolumeDetail,
-} from "@features/volumes/services/volumesApi";
+import { inspectVolume } from "@features/volumes/services/volumesApi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { volumeFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-function volumeFixture(overrides: Partial<VolumeDetail> = {}): VolumeDetail {
-	return {
-		name: "app-data",
-		driver: "local",
-		createdAt: "2026-08-20T10:00:00Z",
-		anonymous: false,
-		labels: { team: "platform" },
-		options: { type: "tmpfs" },
-		mountpoint: "/var/lib/containers/storage/volumes/app-data/_data",
-		size: 1500000,
-		...overrides,
-	};
-}
 
 function makeWrapper() {
 	const queryClient = new QueryClient({
