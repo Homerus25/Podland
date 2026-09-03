@@ -32,6 +32,7 @@ import type {
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
 import { getApiError } from "@shared/utils/api";
+import { downloadFile } from "@shared/utils/download";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
 import { mutationToPromise } from "@shared/utils/mutationPromise";
 import { useState } from "react";
@@ -42,11 +43,15 @@ function VolumeRow({
 	onSelect,
 	canManage,
 	onDelete,
+	isExporting,
+	onExport,
 }: {
 	volume: VolumeSummary;
 	onSelect: (name: string) => void;
 	canManage: boolean;
 	onDelete: (volume: VolumeSummary) => void;
+	isExporting: boolean;
+	onExport: (volume: VolumeSummary) => void;
 }) {
 	return (
 		<Tr
@@ -68,8 +73,20 @@ function VolumeRow({
 			<Td isNumeric>
 				{volume.size !== undefined ? formatBytes(volume.size) : "—"}
 			</Td>
-			{canManage ? (
-				<Td>
+			<Td>
+				<Button
+					size="xs"
+					variant="outline"
+					aria-label={`Export ${volume.name}`}
+					isLoading={isExporting}
+					onClick={(event) => {
+						event.stopPropagation();
+						onExport(volume);
+					}}
+				>
+					Export
+				</Button>
+				{canManage ? (
 					<Button
 						size="xs"
 						colorScheme="red"
@@ -82,8 +99,8 @@ function VolumeRow({
 					>
 						Delete
 					</Button>
-				</Td>
-			) : null}
+				) : null}
+			</Td>
 		</Tr>
 	);
 }
@@ -289,7 +306,27 @@ export function VolumeList({
 	const [pendingDelete, setPendingDelete] = useState<VolumeSummary | null>(
 		null,
 	);
+	const [exportingName, setExportingName] = useState<string | null>(null);
 	const toast = useToast();
+
+	const handleExport = async (volume: VolumeSummary) => {
+		setExportingName(volume.name);
+		try {
+			await downloadFile(
+				`/api/machines/${encodeURIComponent(machineId)}/volumes/${encodeURIComponent(volume.name)}/export`,
+				`${volume.name}.tar`,
+			);
+		} catch (error) {
+			toast({
+				title: `Failed to export volume: ${volume.name}`,
+				description: getApiError(error).message,
+				status: "error",
+				isClosable: true,
+			});
+		} finally {
+			setExportingName(null);
+		}
+	};
 
 	const canManage = canManageVolumes(permission);
 
@@ -352,7 +389,7 @@ export function VolumeList({
 								<Th>Driver</Th>
 								<Th>Created</Th>
 								<Th isNumeric>Size</Th>
-								{canManage ? <Th /> : null}
+								<Th />
 							</Tr>
 						</Thead>
 						<Tbody>
@@ -363,6 +400,8 @@ export function VolumeList({
 									onSelect={setSelectedVolume}
 									canManage={canManage}
 									onDelete={setPendingDelete}
+									isExporting={exportingName === volume.name}
+									onExport={handleExport}
 								/>
 							))}
 						</Tbody>
