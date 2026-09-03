@@ -34,6 +34,12 @@ export function canManageSecrets(permission: EffectivePermission): boolean {
 	return permission === "admin" || permission === "write";
 }
 
+// Volume create/delete/prune/populate change the machine's remote state,
+// exactly like secrets (write+).
+export function canManageVolumes(permission: EffectivePermission): boolean {
+	return permission === "admin" || permission === "write";
+}
+
 // Revealing a secret's value is the admin-only capability (the backend's
 // reveal gate answers 403 below admin).
 export function canRevealSecrets(permission: EffectivePermission): boolean {

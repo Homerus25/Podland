@@ -190,7 +190,10 @@ export function MachineDetailPage() {
 						<ContainerList machineId={machine.id} />
 					</TabPanel>
 					<TabPanel>
-						<VolumeList machineId={machine.id} />
+						<VolumeList
+							machineId={machine.id}
+							permission={effectivePermission(machine)}
+						/>
 					</TabPanel>
 					<TabPanel>
 						<ImageList machineId={machine.id} />

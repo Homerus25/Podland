@@ -14,13 +14,15 @@ function mockVolumes(volumes: VolumeSummary[]) {
 	);
 }
 
-function renderVolumeList() {
+function renderVolumeList(
+	permission: "read" | "write" | "admin" = "admin" as const,
+) {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
 	return render(
 		<QueryClientProvider client={queryClient}>
-			<VolumeList machineId="m-1" />
+			<VolumeList machineId="m-1" permission={permission} />
 		</QueryClientProvider>,
 	);
 }

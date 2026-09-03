@@ -31,6 +31,33 @@ export async function inspectVolume(
 	return response.data;
 }
 
+// Body of POST /api/machines/{id}/volumes (backend VolumeCreateRequest).
+// name is optional: an empty name creates an anonymous volume whose
+// generated name podman reports back. Name-format validation is podman's
+// job; its rejections surface as 400 INVALID_REQUEST.
+export interface VolumeCreateInput {
+	name: string;
+	labels?: Record<string, string>;
+	driver?: string;
+	options?: Record<string, string>;
+}
+
+// Response of POST /api/machines/{id}/volumes -> 201: the created volume's
+// inspect response. For anonymous volumes this carries the podman-generated
+// name and anonymous: true.
+export type VolumeCreated = VolumeDetail;
+
+export async function createVolume(
+	machineId: string,
+	input: VolumeCreateInput,
+): Promise<VolumeCreated> {
+	const response = await api.post<VolumeCreated>(
+		`/machines/${encodeURIComponent(machineId)}/volumes`,
+		input,
+	);
+	return response.data;
+}
+
 export async function listVolumes(machineId: string): Promise<VolumeSummary[]> {
 	const response = await api.get<VolumeSummary[]>(
 		`/machines/${encodeURIComponent(machineId)}/volumes`,
