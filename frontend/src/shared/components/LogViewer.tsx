@@ -54,6 +54,8 @@ export function LogViewer({ source }: { source: LogSource }) {
 	const [error, setError] = useState<ApiError | null>(null);
 	const abortRef = useRef<AbortController | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
+	const isFollowingRef = useRef(false);
+	const mountedRef = useRef(false);
 
 	const loadTail = async (requestedTail: number) => {
 		setError(null);
@@ -68,6 +70,7 @@ export function LogViewer({ source }: { source: LogSource }) {
 	const stopFollowing = () => {
 		abortRef.current?.abort();
 		abortRef.current = null;
+		isFollowingRef.current = false;
 		setIsFollowing(false);
 	};
 
@@ -77,6 +80,7 @@ export function LogViewer({ source }: { source: LogSource }) {
 		abortRef.current = controller;
 		setError(null);
 		setIsFollowing(true);
+		isFollowingRef.current = true;
 		// The backend's follow mode replays the tail before streaming new lines,
 		// so the initial fetch's lines are dropped to avoid showing them twice.
 		setLines([]);
@@ -100,9 +104,10 @@ export function LogViewer({ source }: { source: LogSource }) {
 			// preserving the envelope when the source rejected with one.
 			if (!controller.signal.aborted) setError(toApiError(streamError));
 		} finally {
+			// The stream ended on its own; follow stays on until the user
+			// toggles it off (the next toggle aborts a dead controller, a no-op).
 			if (abortRef.current === controller) {
 				abortRef.current = null;
-				setIsFollowing(false);
 			}
 		}
 	};
@@ -115,16 +120,27 @@ export function LogViewer({ source }: { source: LogSource }) {
 		}
 	};
 
+	// Initial load: fetch the tail once on mount.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: mount-only fetch; tail changes are handled by the effect below
 	useEffect(() => {
-		if (isFollowing) {
-			// Tail changed mid-follow: restart the stream so the new tail applies
-			// (the replay repopulates the lines).
+		void loadTail(DEFAULT_TAIL);
+		mountedRef.current = true;
+	}, []);
+
+	// Tail changes reroute whichever mode is active: a live stream restarts
+	// with the new tail, a static view refetches. startFollowing/loadTail are
+	// re-created every render, so they must stay out of the dependency array:
+	// including them made this effect re-run on every render in an infinite
+	// async loop that starved the event loop and hung the test worker.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: only tail drives this effect; callbacks are unstable identities
+	useEffect(() => {
+		if (!mountedRef.current) return;
+		if (isFollowingRef.current) {
 			void startFollowing(tail);
 		} else {
 			void loadTail(tail);
 		}
-		// biome-ignore lint/correctness/useExhaustiveDependencies: callbacks are stable enough for follow semantics; restarting on identity change would kill active streams
-	}, [tail, isFollowing, startFollowing, loadTail]);
+	}, [tail]);
 
 	useEffect(
 		() => () => {
