@@ -2,6 +2,7 @@ import {
 	createVolume,
 	deleteVolume,
 	listVolumes,
+	pruneVolumes,
 	type VolumeCreateInput,
 } from "@features/volumes/services/volumesApi";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -41,6 +42,18 @@ export function useDeleteVolume(machineId: string) {
 			volumeName: string;
 			force: boolean;
 		}) => deleteVolume(machineId, volumeName, force),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: volumesQueryKey(machineId) });
+		},
+	});
+}
+
+// A prune changes the machine's volume set, so the list refetches on
+// success and the report shows the server's post-prune state.
+export function usePruneVolumes(machineId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: () => pruneVolumes(machineId),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: volumesQueryKey(machineId) });
 		},

@@ -78,3 +78,23 @@ export async function deleteVolume(
 		{ params: force ? { force: "true" } : undefined },
 	);
 }
+
+// One entry of POST /api/machines/{id}/volumes/prune -> 200 (backend
+// volumes dto.go VolumePruneResponse): a removed volume's name and
+// reclaimed size, plus podman's per-volume error when removal failed.
+export interface VolumePruneReport {
+	name: string;
+	size: number;
+	error?: string;
+}
+
+// Prunes every unused volume on the machine. In-use volumes are never
+// touched.
+export async function pruneVolumes(
+	machineId: string,
+): Promise<VolumePruneReport[]> {
+	const response = await api.post<VolumePruneReport[]>(
+		`/machines/${encodeURIComponent(machineId)}/volumes/prune`,
+	);
+	return response.data;
+}

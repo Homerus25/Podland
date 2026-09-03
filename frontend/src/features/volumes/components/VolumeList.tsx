@@ -22,9 +22,13 @@ import { VolumeForm } from "@features/volumes/components/VolumeForm";
 import {
 	useCreateVolume,
 	useDeleteVolume,
+	usePruneVolumes,
 	useVolumes,
 } from "@features/volumes/hooks/useVolumes";
-import type { VolumeSummary } from "@features/volumes/services/volumesApi";
+import type {
+	VolumePruneReport,
+	VolumeSummary,
+} from "@features/volumes/services/volumesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
 import { getApiError } from "@shared/utils/api";
@@ -175,6 +179,99 @@ function DeleteVolumeModal({
 	);
 }
 
+function PruneReportList({ report }: { report: VolumePruneReport[] }) {
+	if (report.length === 0) {
+		return (
+			<Text data-testid="prune-report-empty">
+				Nothing to prune: no unused volumes on this machine.
+			</Text>
+		);
+	}
+	return (
+		<TableContainer>
+			<Table data-testid="prune-report" size="sm">
+				<Thead>
+					<Tr>
+						<Th>Removed volume</Th>
+						<Th isNumeric>Reclaimed</Th>
+					</Tr>
+				</Thead>
+				<Tbody>
+					{report.map((entry) => (
+						<Tr key={entry.name} data-testid="prune-report-row">
+							<Td fontFamily="mono">{entry.name}</Td>
+							{entry.error ? (
+								<Td color="red.500">{entry.error}</Td>
+							) : (
+								<Td isNumeric>{formatBytes(entry.size)}</Td>
+							)}
+						</Tr>
+					))}
+				</Tbody>
+			</Table>
+		</TableContainer>
+	);
+}
+
+function PruneVolumesModal({
+	onClose,
+	pruneVolumes,
+}: {
+	onClose: () => void;
+	pruneVolumes: ReturnType<typeof usePruneVolumes>;
+}) {
+	const report = pruneVolumes.data;
+
+	return (
+		<Modal
+			isOpen
+			onClose={onClose}
+			title={report ? "Prune report" : "Prune unused volumes"}
+			footer={
+				report ? (
+					<Button onClick={onClose} data-testid="close-prune-report-button">
+						Close
+					</Button>
+				) : (
+					<>
+						<Button variant="ghost" onClick={onClose}>
+							Cancel
+						</Button>
+						<Button
+							colorScheme="red"
+							onClick={() => pruneVolumes.mutate()}
+							isLoading={pruneVolumes.isPending}
+							data-testid="confirm-prune-button"
+						>
+							Prune volumes
+						</Button>
+					</>
+				)
+			}
+		>
+			{report ? (
+				<PruneReportList report={report} />
+			) : (
+				<>
+					<Text>
+						All unused volumes on this machine will be removed. This cannot be
+						undone.
+					</Text>
+					<Text mt={2} color="gray.500">
+						Volumes that are in use by containers are safe and will not be
+						touched.
+					</Text>
+					{pruneVolumes.error ? (
+						<Box mt={2}>
+							<ErrorDisplay error={getApiError(pruneVolumes.error)} />
+						</Box>
+					) : null}
+				</>
+			)}
+		</Modal>
+	);
+}
+
 export function VolumeList({
 	machineId,
 	permission,
@@ -187,6 +284,8 @@ export function VolumeList({
 	const { data: volumes, isPending, error } = useVolumes(machineId);
 	const createVolume = useCreateVolume(machineId);
 	const deleteVolume = useDeleteVolume(machineId);
+	const pruneVolumes = usePruneVolumes(machineId);
+	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [pendingDelete, setPendingDelete] = useState<VolumeSummary | null>(
 		null,
 	);
@@ -212,6 +311,18 @@ export function VolumeList({
 						data-testid="create-volume-button"
 					>
 						Create volume
+					</Button>
+					<Button
+						size="sm"
+						colorScheme="red"
+						variant="outline"
+						onClick={() => {
+							pruneVolumes.reset();
+							setIsPruneOpen(true);
+						}}
+						data-testid="prune-volumes-button"
+					>
+						Prune
 					</Button>
 				</HStack>
 			) : (
@@ -264,6 +375,15 @@ export function VolumeList({
 				isOpen={selectedVolume !== null}
 				onClose={() => setSelectedVolume(null)}
 			/>
+			{isPruneOpen ? (
+				<PruneVolumesModal
+					onClose={() => {
+						pruneVolumes.reset();
+						setIsPruneOpen(false);
+					}}
+					pruneVolumes={pruneVolumes}
+				/>
+			) : null}
 			{pendingDelete ? (
 				<DeleteVolumeModal
 					volume={pendingDelete}
