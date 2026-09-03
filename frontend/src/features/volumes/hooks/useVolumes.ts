@@ -1,5 +1,6 @@
 import {
 	createVolume,
+	deleteVolume,
 	listVolumes,
 	type VolumeCreateInput,
 } from "@features/volumes/services/volumesApi";
@@ -22,6 +23,24 @@ export function useCreateVolume(machineId: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: (input: VolumeCreateInput) => createVolume(machineId, input),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: volumesQueryKey(machineId) });
+		},
+	});
+}
+
+// A delete removes one volume from the machine's list, so the list
+// refetches on success; no optimistic updates.
+export function useDeleteVolume(machineId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({
+			volumeName,
+			force,
+		}: {
+			volumeName: string;
+			force: boolean;
+		}) => deleteVolume(machineId, volumeName, force),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: volumesQueryKey(machineId) });
 		},

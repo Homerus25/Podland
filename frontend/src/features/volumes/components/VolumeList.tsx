@@ -1,6 +1,8 @@
 import {
 	Badge,
+	Box,
 	Button,
+	Checkbox,
 	HStack,
 	Table,
 	TableContainer,
@@ -19,6 +21,7 @@ import {
 import { VolumeForm } from "@features/volumes/components/VolumeForm";
 import {
 	useCreateVolume,
+	useDeleteVolume,
 	useVolumes,
 } from "@features/volumes/hooks/useVolumes";
 import type { VolumeSummary } from "@features/volumes/services/volumesApi";
@@ -33,9 +36,13 @@ import { VolumeInspectDrawer } from "./VolumeInspectDrawer";
 function VolumeRow({
 	volume,
 	onSelect,
+	canManage,
+	onDelete,
 }: {
 	volume: VolumeSummary;
 	onSelect: (name: string) => void;
+	canManage: boolean;
+	onDelete: (volume: VolumeSummary) => void;
 }) {
 	return (
 		<Tr
@@ -57,7 +64,114 @@ function VolumeRow({
 			<Td isNumeric>
 				{volume.size !== undefined ? formatBytes(volume.size) : "—"}
 			</Td>
+			{canManage ? (
+				<Td>
+					<Button
+						size="xs"
+						colorScheme="red"
+						variant="outline"
+						aria-label={`Delete ${volume.name}`}
+						onClick={(event) => {
+							event.stopPropagation();
+							onDelete(volume);
+						}}
+					>
+						Delete
+					</Button>
+				</Td>
+			) : null}
 		</Tr>
+	);
+}
+
+const VOLUME_IN_USE_CODE = "VOLUME_IN_USE";
+
+function isInUse(error: unknown): boolean {
+	return getApiError(error).code === VOLUME_IN_USE_CODE;
+}
+
+function DeleteVolumeModal({
+	volume,
+	onClose,
+	deleteVolume,
+}: {
+	volume: VolumeSummary;
+	onClose: () => void;
+	deleteVolume: ReturnType<typeof useDeleteVolume>;
+}) {
+	const [force, setForce] = useState(false);
+	const toast = useToast();
+	const inUse = isInUse(deleteVolume.error);
+
+	return (
+		<Modal
+			isOpen
+			onClose={onClose}
+			title="Delete volume"
+			footer={
+				<>
+					<Button variant="ghost" onClick={onClose}>
+						Cancel
+					</Button>
+					<Button
+						colorScheme="red"
+						onClick={() =>
+							deleteVolume.mutate(
+								{ volumeName: volume.name, force },
+								{
+									onSuccess: () => {
+										toast({
+											title: `Volume deleted: ${volume.name}`,
+											status: "success",
+											isClosable: true,
+										});
+										onClose();
+									},
+									onError: () => {
+										toast({
+											title: `Failed to delete volume: ${volume.name}`,
+											status: "error",
+											isClosable: true,
+										});
+									},
+								},
+							)
+						}
+						isLoading={deleteVolume.isPending}
+						data-testid="confirm-delete-button"
+					>
+						Delete volume
+					</Button>
+				</>
+			}
+		>
+			<Text>
+				Delete volume {volume.name} from this machine? This cannot be undone.
+			</Text>
+			<Checkbox
+				mt={3}
+				isChecked={force}
+				onChange={(event) => setForce(event.target.checked)}
+				data-testid="force-delete-checkbox"
+			>
+				Force delete (stops containers using this volume before removal)
+			</Checkbox>
+			{inUse ? (
+				<>
+					<Box mt={2}>
+						<ErrorDisplay error={getApiError(deleteVolume.error)} />
+					</Box>
+					<Text mt={2} color="orange.500" data-testid="volume-in-use-warning">
+						Force is required to delete a volume that containers are using. Tick
+						force delete and confirm to stop them and remove the volume.
+					</Text>
+				</>
+			) : deleteVolume.error ? (
+				<Box mt={2}>
+					<ErrorDisplay error={getApiError(deleteVolume.error)} />
+				</Box>
+			) : null}
+		</Modal>
 	);
 }
 
@@ -72,6 +186,10 @@ export function VolumeList({
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const { data: volumes, isPending, error } = useVolumes(machineId);
 	const createVolume = useCreateVolume(machineId);
+	const deleteVolume = useDeleteVolume(machineId);
+	const [pendingDelete, setPendingDelete] = useState<VolumeSummary | null>(
+		null,
+	);
 	const toast = useToast();
 
 	const canManage = canManageVolumes(permission);
@@ -123,6 +241,7 @@ export function VolumeList({
 								<Th>Driver</Th>
 								<Th>Created</Th>
 								<Th isNumeric>Size</Th>
+								{canManage ? <Th /> : null}
 							</Tr>
 						</Thead>
 						<Tbody>
@@ -131,6 +250,8 @@ export function VolumeList({
 									key={volume.name}
 									volume={volume}
 									onSelect={setSelectedVolume}
+									canManage={canManage}
+									onDelete={setPendingDelete}
 								/>
 							))}
 						</Tbody>
@@ -143,6 +264,16 @@ export function VolumeList({
 				isOpen={selectedVolume !== null}
 				onClose={() => setSelectedVolume(null)}
 			/>
+			{pendingDelete ? (
+				<DeleteVolumeModal
+					volume={pendingDelete}
+					onClose={() => {
+						deleteVolume.reset();
+						setPendingDelete(null);
+					}}
+					deleteVolume={deleteVolume}
+				/>
+			) : null}
 			{isCreateOpen ? (
 				<Modal
 					isOpen

@@ -60,7 +60,7 @@ describe("VolumeList", () => {
 		renderVolumeList();
 
 		const row = await screen.findByTestId("volume-row");
-		expect(within(row).getAllByRole("cell")).toHaveLength(5);
+		expect(within(row).getAllByRole("cell")).toHaveLength(6);
 		expect(within(row).getByText("—")).toBeInTheDocument();
 	});
 

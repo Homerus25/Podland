@@ -64,3 +64,17 @@ export async function listVolumes(machineId: string): Promise<VolumeSummary[]> {
 	);
 	return response.data;
 }
+
+// DELETE /api/machines/{id}/volumes/{name}?force=... -> 204. The force flag
+// (default false) lets podman stop containers using the volume before
+// removal; without it an in-use volume surfaces as 409 VOLUME_IN_USE.
+export async function deleteVolume(
+	machineId: string,
+	volumeName: string,
+	force: boolean,
+): Promise<void> {
+	await api.delete(
+		`/machines/${encodeURIComponent(machineId)}/volumes/${encodeURIComponent(volumeName)}`,
+		{ params: force ? { force: "true" } : undefined },
+	);
+}
