@@ -98,3 +98,50 @@ export async function pruneVolumes(
 	);
 	return response.data;
 }
+
+// Builds the populate request body in exactly one of the backend's two
+// shapes: the given plain files as "files" parts (filenames are the
+// relative paths inside the volume), or the single tar as the "archive"
+// part. Passing both is a caller bug — the modal prevents it client-side.
+export function buildPopulateForm(files: File[], archive?: File): FormData {
+	const form = new FormData();
+	// Browsers only populate webkitRelativePath for directory uploads;
+	// plain multi-file picks fall back to the bare name.
+	const relativePath = (file: File) => file.webkitRelativePath || file.name;
+	if (archive) {
+		form.append("archive", archive, archive.name);
+		return form;
+	}
+	for (const file of files) {
+		form.append("files", file, relativePath(file));
+	}
+	return form;
+}
+
+// POST /api/machines/{id}/volumes/{name}/populate -> 204. The FormData must
+// carry exactly one of the backend's two shapes: one or more "files" parts
+// whose filenames are the relative paths inside the volume, or exactly one
+// "archive" part holding a ready-made tar. Populate merges: uploaded paths
+// overwrite same-named files, everything else is kept. Oversized uploads
+// surface as 413 VOLUME_UPLOAD_TOO_LARGE.
+export async function populateVolume(
+	machineId: string,
+	volumeName: string,
+	form: FormData,
+	onProgress?: (fraction: number) => void,
+): Promise<void> {
+	const path = `/machines/${encodeURIComponent(machineId)}/volumes/${encodeURIComponent(volumeName)}/populate`;
+	// The fetch adapter needs an absolute URL. Resolve against the axios
+	// baseURL (e.g. "/api") the same way every other request does, so the
+	// populate call lands on the same origin/prefix as the rest of the API.
+	const base = new URL(api.defaults.baseURL ?? "/", window.location.origin);
+	const url = new URL(path, base).toString();
+	await api.post(url, form, {
+		adapter: "fetch",
+		onUploadProgress: onProgress
+			? (event) => {
+					if (event.total) onProgress(event.loaded / event.total);
+				}
+			: undefined,
+	});
+}

@@ -3,6 +3,8 @@ import {
 	Box,
 	Button,
 	Checkbox,
+	FormControl,
+	FormLabel,
 	HStack,
 	Table,
 	TableContainer,
@@ -22,12 +24,14 @@ import { VolumeForm } from "@features/volumes/components/VolumeForm";
 import {
 	useCreateVolume,
 	useDeleteVolume,
+	usePopulateVolume,
 	usePruneVolumes,
 	useVolumes,
 } from "@features/volumes/hooks/useVolumes";
-import type {
-	VolumePruneReport,
-	VolumeSummary,
+import {
+	buildPopulateForm,
+	type VolumePruneReport,
+	type VolumeSummary,
 } from "@features/volumes/services/volumesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
@@ -45,6 +49,7 @@ function VolumeRow({
 	onDelete,
 	isExporting,
 	onExport,
+	onPopulate,
 }: {
 	volume: VolumeSummary;
 	onSelect: (name: string) => void;
@@ -52,6 +57,7 @@ function VolumeRow({
 	onDelete: (volume: VolumeSummary) => void;
 	isExporting: boolean;
 	onExport: (volume: VolumeSummary) => void;
+	onPopulate: (volume: VolumeSummary) => void;
 }) {
 	return (
 		<Tr
@@ -87,18 +93,31 @@ function VolumeRow({
 					Export
 				</Button>
 				{canManage ? (
-					<Button
-						size="xs"
-						colorScheme="red"
-						variant="outline"
-						aria-label={`Delete ${volume.name}`}
-						onClick={(event) => {
-							event.stopPropagation();
-							onDelete(volume);
-						}}
-					>
-						Delete
-					</Button>
+					<>
+						<Button
+							size="xs"
+							variant="outline"
+							aria-label={`Populate ${volume.name}`}
+							onClick={(event) => {
+								event.stopPropagation();
+								onPopulate(volume);
+							}}
+						>
+							Populate
+						</Button>
+						<Button
+							size="xs"
+							colorScheme="red"
+							variant="outline"
+							aria-label={`Delete ${volume.name}`}
+							onClick={(event) => {
+								event.stopPropagation();
+								onDelete(volume);
+							}}
+						>
+							Delete
+						</Button>
+					</>
 				) : null}
 			</Td>
 		</Tr>
@@ -106,6 +125,7 @@ function VolumeRow({
 }
 
 const VOLUME_IN_USE_CODE = "VOLUME_IN_USE";
+const UPLOAD_TOO_LARGE_CODE = "VOLUME_UPLOAD_TOO_LARGE";
 
 function isInUse(error: unknown): boolean {
 	return getApiError(error).code === VOLUME_IN_USE_CODE;
@@ -289,6 +309,129 @@ function PruneVolumesModal({
 	);
 }
 
+function isUploadTooLarge(error: unknown): boolean {
+	return getApiError(error).code === UPLOAD_TOO_LARGE_CODE;
+}
+
+function PopulateVolumeModal({
+	volume,
+	onClose,
+	populateVolume,
+}: {
+	volume: VolumeSummary;
+	onClose: () => void;
+	populateVolume: ReturnType<typeof usePopulateVolume>;
+}) {
+	const [files, setFiles] = useState<FileList | null>(null);
+	const [archive, setArchive] = useState<File | null>(null);
+	const [progress, setProgress] = useState(0);
+	const toast = useToast();
+
+	const hasFiles = files !== null && files.length > 0;
+	const hasArchive = archive !== null;
+	const shapeConflict = hasFiles && hasArchive;
+	const canSubmit = (hasFiles || hasArchive) && !shapeConflict;
+	const tooLarge = isUploadTooLarge(populateVolume.error);
+
+	const submit = () => {
+		if (!canSubmit) return;
+		setProgress(0);
+		const form = buildPopulateForm(
+			hasFiles ? Array.from(files!) : [],
+			hasArchive ? archive : undefined,
+		);
+		populateVolume.mutate(
+			{
+				volumeName: volume.name,
+				form,
+				onProgress: setProgress,
+			},
+			{
+				onSuccess: () => {
+					toast({
+						title: `Volume populated: ${volume.name}`,
+						status: "success",
+						isClosable: true,
+					});
+					onClose();
+				},
+			},
+		);
+	};
+
+	return (
+		<Modal
+			isOpen
+			onClose={onClose}
+			title={`Populate ${volume.name}`}
+			footer={
+				<>
+					<Button variant="ghost" onClick={onClose}>
+						Cancel
+					</Button>
+					<Button
+						colorScheme="blue"
+						onClick={submit}
+						isDisabled={!canSubmit}
+						isLoading={populateVolume.isPending}
+						loadingText={`Populating ${Math.round(progress * 100)}%`}
+						data-testid="confirm-populate-button"
+					>
+						Upload and populate
+					</Button>
+				</>
+			}
+		>
+			<Text>
+				Populate merges into the volume: uploaded paths overwrite same-named
+				files, everything already in the volume is kept.
+			</Text>
+			<FormControl mt={3}>
+				<FormLabel htmlFor="populate-files">Files</FormLabel>
+				<Box data-testid="populate-files-input">
+					<input
+						id="populate-files"
+						type="file"
+						multiple
+						onChange={(event) => setFiles(event.target.files)}
+					/>
+				</Box>
+			</FormControl>
+			<FormControl mt={3}>
+				<FormLabel htmlFor="populate-archive">Or a tar archive</FormLabel>
+				<Box data-testid="populate-archive-input">
+					<input
+						id="populate-archive"
+						type="file"
+						accept=".tar"
+						onChange={(event) => setArchive(event.target.files?.[0] ?? null)}
+					/>
+				</Box>
+			</FormControl>
+			{shapeConflict ? (
+				<Text color="orange.500" mt={2} data-testid="populate-shape-conflict">
+					Choose either files or a single tar archive, not both.
+				</Text>
+			) : null}
+			{tooLarge ? (
+				<>
+					<Box mt={2}>
+						<ErrorDisplay error={getApiError(populateVolume.error)} />
+					</Box>
+					<Text mt={2} color="orange.500" data-testid="populate-too-large-hint">
+						The upload exceeds the configured size limit. Split or shrink it and
+						try again.
+					</Text>
+				</>
+			) : populateVolume.error ? (
+				<Box mt={2}>
+					<ErrorDisplay error={getApiError(populateVolume.error)} />
+				</Box>
+			) : null}
+		</Modal>
+	);
+}
+
 export function VolumeList({
 	machineId,
 	permission,
@@ -302,7 +445,11 @@ export function VolumeList({
 	const createVolume = useCreateVolume(machineId);
 	const deleteVolume = useDeleteVolume(machineId);
 	const pruneVolumes = usePruneVolumes(machineId);
+	const populateVolume = usePopulateVolume(machineId);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
+	const [populateTarget, setPopulateTarget] = useState<VolumeSummary | null>(
+		null,
+	);
 	const [pendingDelete, setPendingDelete] = useState<VolumeSummary | null>(
 		null,
 	);
@@ -402,6 +549,7 @@ export function VolumeList({
 									onDelete={setPendingDelete}
 									isExporting={exportingName === volume.name}
 									onExport={handleExport}
+									onPopulate={setPopulateTarget}
 								/>
 							))}
 						</Tbody>
@@ -414,6 +562,16 @@ export function VolumeList({
 				isOpen={selectedVolume !== null}
 				onClose={() => setSelectedVolume(null)}
 			/>
+			{populateTarget ? (
+				<PopulateVolumeModal
+					volume={populateTarget}
+					onClose={() => {
+						populateVolume.reset();
+						setPopulateTarget(null);
+					}}
+					populateVolume={populateVolume}
+				/>
+			) : null}
 			{isPruneOpen ? (
 				<PruneVolumesModal
 					onClose={() => {

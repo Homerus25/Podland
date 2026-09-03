@@ -2,6 +2,7 @@ import {
 	createVolume,
 	deleteVolume,
 	listVolumes,
+	populateVolume,
 	pruneVolumes,
 	type VolumeCreateInput,
 } from "@features/volumes/services/volumesApi";
@@ -54,6 +55,23 @@ export function usePruneVolumes(machineId: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: () => pruneVolumes(machineId),
+		onSuccess: () => {
+			queryClient.invalidateQueries({ queryKey: volumesQueryKey(machineId) });
+		},
+	});
+}
+
+// Populate changes a volume's contents (and reported size), so the list
+// refetches on success; no optimistic updates.
+export function usePopulateVolume(machineId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (input: {
+			volumeName: string;
+			form: FormData;
+			onProgress?: (fraction: number) => void;
+		}) =>
+			populateVolume(machineId, input.volumeName, input.form, input.onProgress),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: volumesQueryKey(machineId) });
 		},
