@@ -10,10 +10,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -27,11 +27,11 @@ type JWTConfig struct {
 
 // AuthService handles authentication
 type AuthService struct {
-	privateKey *rsa.PrivateKey
-	publicKey  *rsa.PublicKey
-	expiration time.Duration
-	issuer     string
-	userRepo   models.UserRepositoryInterface
+	privateKey  *rsa.PrivateKey
+	publicKey   *rsa.PublicKey
+	expiration  time.Duration
+	issuer      string
+	userRepo    models.UserRepositoryInterface
 	sessionRepo models.SessionRepositoryInterface
 	sessionTTL  time.Duration
 }
@@ -52,11 +52,11 @@ func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, s
 	}
 
 	return &AuthService{
-		privateKey: privateKey,
-		publicKey:  publicKey,
-		expiration: config.Expiration,
-		issuer:     config.Issuer,
-		userRepo:   userRepo,
+		privateKey:  privateKey,
+		publicKey:   publicKey,
+		expiration:  config.Expiration,
+		issuer:      config.Issuer,
+		userRepo:    userRepo,
 		sessionRepo: sessionRepo,
 		sessionTTL:  sessionTTL,
 	}, nil

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/google/uuid"
 )
 
 // GenerateTestUser creates a test user with random ID

@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/Homerus25/podland/backend/internal/encryption"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/stretchr/testify/assert"
 )
 
 // TestConnectionManager_Stop_TerminatesProcessQueueGoroutine verifies that

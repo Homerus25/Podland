@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/stretchr/testify/assert"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
 )
 
 // TestQuadletHandler_GetLogs_Success tests successful log retrieval

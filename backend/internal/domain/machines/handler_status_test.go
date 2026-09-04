@@ -125,4 +125,3 @@ func TestMachineHandler_Status(t *testing.T) {
 		assert.Equal(t, "online", body.Status)
 	})
 }
-

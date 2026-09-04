@@ -2,16 +2,16 @@ package machines
 
 import (
 	"context"
-	"log/slog"
 	stderrors "errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/google/uuid"
 )
 
 // MachineService provides business logic for machines

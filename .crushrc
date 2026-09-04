@@ -8,3 +8,10 @@ hook add PreToolUse \
 	--matcher '^(edit|multiedit|lsp_replace_symbol)$' \
 	--command "$CRUSH_PROJECT_DIR/.crush/hooks/biome-format.sh" \
 	--name biome-format
+
+# Same for Go files with gofmt: keeps backend files canonical and catches
+# indentation slips that build/vet/tests would silently pass.
+hook add PreToolUse \
+	--matcher '^(edit|multiedit|lsp_replace_symbol)$' \
+	--command "$CRUSH_PROJECT_DIR/.crush/hooks/gofmt.sh" \
+	--name gofmt-format

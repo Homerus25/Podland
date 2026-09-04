@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
+	"github.com/stretchr/testify/assert"
 )
 
 // TestContainerService_GetLogs_Success tests successful log retrieval

@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/Homerus25/podland/backend/internal/models"
 )
 
 // adminLoginForUsers seeds an admin user — the same role cmd/initdb

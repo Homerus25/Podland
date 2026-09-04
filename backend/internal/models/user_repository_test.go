@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Homerus25/podland/backend/migrations"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/Homerus25/podland/backend/migrations"
 )
 
 // newTestDB opens a temp SQLite database and runs the real migrations,

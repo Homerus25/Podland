@@ -10,10 +10,10 @@ import (
 	"os"
 	"testing"
 
+	"github.com/Homerus25/podland/backend/internal/app"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/Homerus25/podland/backend/internal/app"
 )
 
 // bootAuthLimitedApp boots a second in-process backend whose per-IP auth

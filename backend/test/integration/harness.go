@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/Homerus25/podland/backend/internal/app"
+	"github.com/google/uuid"
 )
 
 // Suite is the shared fixture constructed by TestMain and exposed to

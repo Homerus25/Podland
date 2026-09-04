@@ -3,10 +3,10 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/go-chi/chi/v5"
 )
 
 // machineRepoGetter is the slice of the machine repository

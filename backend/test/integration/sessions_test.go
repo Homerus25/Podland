@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 // openSuiteDB opens a second connection to the suite's SQLite database

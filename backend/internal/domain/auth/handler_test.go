@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
 func TestAuthHandler_Login_Success(t *testing.T) {
@@ -257,4 +257,3 @@ func TestAuthHandler_Login_DatabaseError(t *testing.T) {
 	require.NoError(t, err, "Should decode error response")
 	assert.Equal(t, "INTERNAL_ERROR", errorResp.Error.Code, "Should return INTERNAL_ERROR error code")
 }
-
