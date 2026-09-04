@@ -1,20 +1,30 @@
 package volumes
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
+
+// deleteRequest serves DELETE
+// /api/machines/{id}/volumes/{volumeName}{query} through the handler
+// with an authenticated test identity.
+func deleteRequest(handler http.HandlerFunc, volumeName, query string) *httptest.ResponseRecorder {
+	return testutils.Perform(handler, testutils.Request{
+		Method:    http.MethodDelete,
+		Path:      "/api/machines/test-machine/volumes/" + volumeName + query,
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine", "volumeName": volumeName},
+	})
+}
 
 // TestVolumeHandler_Delete_Success pins the delete contract: 204 with an
 // empty body, and the force flag forwarded as parsed (default false).
@@ -33,7 +43,7 @@ func TestVolumeHandler_Delete_Success(t *testing.T) {
 			mockService.On("Delete", mock.Anything, "test-user", "test-machine", "my-volume", tc.wantForce).Return(nil)
 			handler := NewVolumeHandler(mockService)
 
-			w := recordDeleteRequest(handler.Delete, "test-machine", "my-volume", tc.query)
+			w := deleteRequest(handler.Delete, "my-volume", tc.query)
 
 			assert.Equal(t, 204, w.Code, "delete of an unused volume should return 204")
 			assert.Empty(t, w.Body.String(), "204 response must have an empty body")
@@ -47,7 +57,7 @@ func TestVolumeHandler_Delete_Success(t *testing.T) {
 func TestVolumeHandler_Delete_InvalidForceFlag(t *testing.T) {
 	handler := NewVolumeHandler(new(MockVolumeService))
 
-	w := recordDeleteRequest(handler.Delete, "test-machine", "my-volume", "?force=yes")
+	w := deleteRequest(handler.Delete, "my-volume", "?force=yes")
 
 	assert.Equal(t, 400, w.Code)
 	assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
@@ -61,7 +71,7 @@ func TestVolumeHandler_Delete_NotFound(t *testing.T) {
 		Return(errors.ErrVolumeNotFound)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordDeleteRequest(handler.Delete, "test-machine", "no-such-volume", "")
+	w := deleteRequest(handler.Delete, "no-such-volume", "")
 
 	assert.Equal(t, 404, w.Code)
 	assert.Contains(t, w.Body.String(), "VOLUME_NOT_FOUND")
@@ -76,7 +86,7 @@ func TestVolumeHandler_Delete_InUse(t *testing.T) {
 	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "my-volume", false).Return(inUseErr)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordDeleteRequest(handler.Delete, "test-machine", "my-volume", "")
+	w := deleteRequest(handler.Delete, "my-volume", "")
 
 	assert.Equal(t, 409, w.Code)
 	assert.Contains(t, w.Body.String(), "VOLUME_IN_USE")
@@ -89,14 +99,14 @@ func TestVolumeHandler_Delete_ServiceError(t *testing.T) {
 		Return(fmt.Errorf("boom"))
 	handler := NewVolumeHandler(mockService)
 
-	w := recordDeleteRequest(handler.Delete, "test-machine", "my-volume", "")
+	w := deleteRequest(handler.Delete, "my-volume", "")
 
 	assert.Equal(t, 500, w.Code)
 }
 
 func TestVolumeHandler_Delete_MissingVolumeName(t *testing.T) {
 	handler := NewVolumeHandler(new(MockVolumeService))
-	w := recordDeleteRequest(handler.Delete, "test-machine", "", "")
+	w := deleteRequest(handler.Delete, "", "")
 	assert.Equal(t, 400, w.Code, "missing volume name must be rejected")
 }
 
@@ -116,21 +126,4 @@ func TestMapInUseError(t *testing.T) {
 
 	assert.Nil(t, mapInUseError(&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound}), "404 must not map to in-use")
 	assert.Nil(t, mapInUseError(assert.AnError), "unrelated errors must not map to in-use")
-}
-
-// recordDeleteRequest serves DELETE
-// /api/machines/{id}/volumes/{volumeName}{query} through the given
-// handler with an authenticated test identity.
-func recordDeleteRequest(handler http.HandlerFunc, machineID, volumeName, query string) *httptest.ResponseRecorder {
-	ctx := contextutils.SetUserID(contextutils.SetRequestID(context.Background(), "test-request-id"), "test-user")
-	req := httptest.NewRequest(http.MethodDelete, "/api/machines/"+machineID+"/volumes/"+volumeName+query, nil).WithContext(ctx)
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
-	rctx.URLParams.Add("volumeName", volumeName)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	w := httptest.NewRecorder()
-	handler(w, req)
-	return w
 }

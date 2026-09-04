@@ -63,6 +63,7 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **Abortable operations** with progress tracking via HTTP streaming
 
 ### 7. Error Handling
+- **Endpoint envelope**: the uniform response contract every machine-scoped endpoint speaks — failures as `{requestId, error{code, message}}`, successes as a DTO with an explicit status. _Avoid_: error wrapper, response helper
 - **Frontend**:
   - Detailed error messages for client errors (4xx)
   - Generic error messages for server errors (5xx)

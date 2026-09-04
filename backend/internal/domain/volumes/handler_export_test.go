@@ -1,18 +1,28 @@
 package volumes
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
+
+// exportRequest serves GET
+// /api/machines/{id}/volumes/{volumeName}/export through the handler
+// with an authenticated test identity.
+func exportRequest(export http.HandlerFunc, machineID, volumeName string) *httptest.ResponseRecorder {
+	return testutils.Perform(export, testutils.Request{
+		Method:    http.MethodGet,
+		Path:      "/api/machines/" + machineID + "/volumes/" + volumeName + "/export",
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": machineID, "volumeName": volumeName},
+	})
+}
 
 // TestVolumeHandler_Export_Success pins the export contract: 200 with
 // tar headers carrying the volume's filename, and the streamed bytes
@@ -26,7 +36,7 @@ func TestVolumeHandler_Export_Success(t *testing.T) {
 	})
 	handler := NewVolumeHandler(mockService)
 
-	w := recordExportRequest(handler.Export, "test-machine", "my-volume")
+	w := exportRequest(handler.Export, "test-machine", "my-volume")
 
 	assert.Equal(t, 200, w.Code)
 	assert.Equal(t, "application/x-tar", w.Header().Get("Content-Type"))
@@ -42,7 +52,7 @@ func TestVolumeHandler_Export_NotFound(t *testing.T) {
 		Return(apperrors.ErrVolumeNotFound)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordExportRequest(handler.Export, "test-machine", "no-such-volume")
+	w := exportRequest(handler.Export, "test-machine", "no-such-volume")
 
 	assert.Equal(t, 404, w.Code)
 	assert.Contains(t, w.Body.String(), "VOLUME_NOT_FOUND")
@@ -57,36 +67,19 @@ func TestVolumeHandler_Export_ServiceError(t *testing.T) {
 		Return(assert.AnError)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordExportRequest(handler.Export, "test-machine", "my-volume")
+	w := exportRequest(handler.Export, "test-machine", "my-volume")
 
 	assert.Equal(t, 500, w.Code)
 }
 
 func TestVolumeHandler_Export_MissingVolumeName(t *testing.T) {
 	handler := NewVolumeHandler(new(MockVolumeService))
-	w := recordExportRequest(handler.Export, "test-machine", "")
+	w := exportRequest(handler.Export, "test-machine", "")
 	assert.Equal(t, 400, w.Code)
-}
-
-// recordExportRequest serves GET
-// /api/machines/{id}/volumes/{volumeName}/export through the given
-// handler with an authenticated test identity.
-func recordExportRequest(export http.HandlerFunc, machineID, volumeName string) *httptest.ResponseRecorder {
-	ctx := contextutils.SetUserID(contextutils.SetRequestID(context.Background(), "test-request-id"), "test-user")
-	req := httptest.NewRequest(http.MethodGet, "/api/machines/"+machineID+"/volumes/"+volumeName+"/export", nil).WithContext(ctx)
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
-	rctx.URLParams.Add("volumeName", volumeName)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	w := httptest.NewRecorder()
-	export(w, req)
-	return w
 }
 
 func TestVolumeHandler_Export_MissingMachineID(t *testing.T) {
 	handler := NewVolumeHandler(new(MockVolumeService))
-	w := recordExportRequest(handler.Export, "", "my-volume")
+	w := exportRequest(handler.Export, "", "my-volume")
 	assert.Equal(t, 400, w.Code)
 }

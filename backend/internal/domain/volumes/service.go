@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -46,7 +47,12 @@ func NewVolumeService(connManager machines.ConnectionManagerInterface) *VolumeSe
 func (s *VolumeService) List(ctx context.Context, userID, machineID string, opts entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go): the backend acts as a gateway to the remote podman.
+		// The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
@@ -66,7 +72,12 @@ func (s *VolumeService) List(ctx context.Context, userID, machineID string, opts
 func (s *VolumeService) Get(ctx context.Context, userID, machineID, volumeName string) (*entities.VolumeInspectReport, error) {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go): the backend acts as a gateway to the remote podman.
+		// The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
@@ -106,7 +117,12 @@ func (s *VolumeService) inspectVolume(ctx context.Context, volumeEngine *tunnel.
 func (s *VolumeService) Create(ctx context.Context, userID, machineID string, req VolumeCreateRequest) (*entities.VolumeInspectReport, error) {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go): the backend acts as a gateway to the remote podman.
+		// The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
@@ -135,7 +151,11 @@ func (s *VolumeService) Create(ctx context.Context, userID, machineID string, re
 func (s *VolumeService) Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get connection to machine: %w", err)
+		// Same runtime-connection contract as List: 502
+		// CONNECTION_FAILED, cause logged here.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
@@ -223,7 +243,12 @@ func isVolumeNotFound(err error) bool {
 func (s *VolumeService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go): the backend acts as a gateway to the remote podman.
+		// The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
@@ -246,7 +271,11 @@ func (s *VolumeService) Prune(ctx context.Context, userID, machineID string) ([]
 func (s *VolumeService) Export(ctx context.Context, userID, machineID, volumeName string, w io.Writer) error {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get connection to machine: %w", err)
+		// Same runtime-connection contract as List: 502
+		// CONNECTION_FAILED, cause logged here.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
@@ -270,7 +299,11 @@ func (s *VolumeService) Export(ctx context.Context, userID, machineID, volumeNam
 func (s *VolumeService) Import(ctx context.Context, userID, machineID, volumeName string, r io.Reader) error {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get connection to machine: %w", err)
+		// Same runtime-connection contract as List: 502
+		// CONNECTION_FAILED, cause logged here.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 

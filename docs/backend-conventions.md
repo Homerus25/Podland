@@ -8,6 +8,21 @@ reference implementations agents should mirror.
 New domain endpoints should be written by reading and mirroring the
 closest sibling that already exists. Rulings so far:
 
+- **JSON endpoints (the endpoint envelope)** — `internal/web.Handle` is
+  the seam every machine-scoped JSON endpoint crosses: it owns identity
+  extraction, the AppError→envelope mapping, the 500 fallback, and JSON
+  encode. The volumes handler (`internal/domain/volumes/handler.go`) is
+  the reference: a handler is decode + URL params + service call inside
+  one `web.Handle` closure; identity/machine guards and error envelopes
+  belong to the envelope and the subtree middleware, never to handlers.
+  Domains not yet migrated (containers, images, quadlets, secrets,
+  machines subtree) still carry the old ritual; migrate them domain-by-
+  domain, machines last.
+- **Handler contract tests** — `testutils.Perform` builds the
+  request (identity, chi URL params, body) the way the router would;
+  per-domain `recordXRequest` chi scaffolding is retired. The envelope's
+  own behaviour (5xx rewrite, missing-identity invariant, status+encode)
+  is pinned once in `internal/web/web_test.go`, not per domain.
 - **Prune endpoints** — volumes prune is the reference pattern:
   `internal/domain/volumes/service.go` (`Prune`), `handler.go`
   (`Prune`), `dto.go` (`FromPodmanPruneReports`), and
@@ -20,13 +35,21 @@ closest sibling that already exists. Rulings so far:
   mutates remote state at write level via `r.With(requireWrite)` in
   `internal/app/app.go`. Bulk operations (prune) are write-level even
   if single-item deletes might be argued otherwise.
+- **Runtime connection failures** — a persisted machine's podman socket
+  unreachable during an operation is 502 `CONNECTION_FAILED`
+  (`appErrors.ErrConnectionFailed`), cause logged at the service site.
+  Never a wrapped 500; `errors.go` documents the registration-vs-runtime
+  distinction.
 
 ## Duplication across domains
 
 A new endpoint that copies an established sibling pattern (error
 envelope, `userID`/`machineID` extraction, JSON encode, test helper
 like `recordPruneRequest`) is **correct**, not a smell. Extract shared
-helpers only when a **third** domain copies the same shape.
+helpers only when a **third** domain copies the same shape. That
+threshold has been crossed twice so far and both extractions are now
+the reference: the endpoint ritual became `internal/web.Handle`, and
+the handler-test scaffolding became `testutils.Perform`.
 
 ## API documentation sync
 

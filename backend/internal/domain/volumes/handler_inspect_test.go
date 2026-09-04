@@ -1,20 +1,29 @@
 package volumes
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
+
+// getRequest serves a GET /api/machines/{id}/volumes/{volumeName}
+// through the handler with an authenticated test identity.
+func getRequest(get http.HandlerFunc, volumeName string) *httptest.ResponseRecorder {
+	return testutils.Perform(get, testutils.Request{
+		Method:    http.MethodGet,
+		Path:      "/api/machines/test-machine/volumes/" + volumeName,
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine", "volumeName": volumeName},
+	})
+}
 
 // TestVolumeHandler_Get_Success pins the inspect contract: 200 with the
 // volume's full configuration resolved by exact name.
@@ -26,7 +35,7 @@ func TestVolumeHandler_Get_Success(t *testing.T) {
 	mockService.On("Get", mock.Anything, "test-user", "test-machine", "my-volume").Return(report, nil)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordGetRequest(handler.Get, "test-machine", "my-volume")
+	w := getRequest(handler.Get, "my-volume")
 
 	assert.Equal(t, 200, w.Code, "inspect should return 200")
 
@@ -49,7 +58,7 @@ func TestVolumeHandler_Get_NotFound(t *testing.T) {
 		Return((*entities.VolumeInspectReport)(nil), errors.ErrVolumeNotFound)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordGetRequest(handler.Get, "test-machine", "no-such-volume")
+	w := getRequest(handler.Get, "no-such-volume")
 
 	assert.Equal(t, 404, w.Code)
 	assert.Contains(t, w.Body.String(), "VOLUME_NOT_FOUND")
@@ -64,7 +73,7 @@ func TestVolumeHandler_Get_ConnectionError(t *testing.T) {
 		Return((*entities.VolumeInspectReport)(nil), assert.AnError)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordGetRequest(handler.Get, "test-machine", "my-volume")
+	w := getRequest(handler.Get, "my-volume")
 
 	assert.Equal(t, 500, w.Code)
 	assert.Contains(t, w.Body.String(), "requestId")
@@ -72,22 +81,6 @@ func TestVolumeHandler_Get_ConnectionError(t *testing.T) {
 
 func TestVolumeHandler_Get_MissingVolumeName(t *testing.T) {
 	handler := NewVolumeHandler(new(MockVolumeService))
-	w := recordGetRequest(handler.Get, "test-machine", "")
+	w := getRequest(handler.Get, "")
 	assert.Equal(t, 400, w.Code, "missing volume name must be rejected")
-}
-
-// recordGetRequest serves a GET /api/machines/{id}/volumes/{volumeName}
-// through the given handler with an authenticated test identity.
-func recordGetRequest(get http.HandlerFunc, machineID, volumeName string) *httptest.ResponseRecorder {
-	ctx := contextutils.SetUserID(contextutils.SetRequestID(context.Background(), "test-request-id"), "test-user")
-	req := httptest.NewRequest(http.MethodGet, "/api/machines/"+machineID+"/volumes/"+volumeName, nil).WithContext(ctx)
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
-	rctx.URLParams.Add("volumeName", volumeName)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	w := httptest.NewRecorder()
-	get(w, req)
-	return w
 }

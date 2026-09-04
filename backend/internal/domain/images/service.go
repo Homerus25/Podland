@@ -3,6 +3,7 @@ package images
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -43,7 +44,12 @@ func NewImageService(connManager machines.ConnectionManagerInterface) *ImageServ
 func (s *ImageService) List(ctx context.Context, userID, machineID string, opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go) — this doc already promises it; the code had drifted
+		// to a wrapped 500. The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 
 	defer s.connManager.Release(machineID)
@@ -65,7 +71,11 @@ func (s *ImageService) List(ctx context.Context, userID, machineID string, opts 
 func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID string, force bool) error {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get connection to machine: %w", err)
+		// Same runtime-connection contract as List: 502
+		// CONNECTION_FAILED, cause logged here.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
@@ -103,7 +113,12 @@ func (s *ImageService) Pull(ctx context.Context, userID, machineID, rawImage str
 func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(event PullProgressEvent)) (*entities.ImagePullReport, error) {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go) — this doc already promises it; the code had drifted
+		// to a wrapped 500. The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
@@ -138,7 +153,12 @@ func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, 
 func (s *ImageService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go) — this doc already promises it; the code had drifted
+		// to a wrapped 500. The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 

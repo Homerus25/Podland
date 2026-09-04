@@ -2,6 +2,7 @@ package volumes
 
 import (
 	"archive/tar"
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/web"
 	"github.com/go-chi/chi/v5"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -50,82 +52,33 @@ func (h *VolumeHandler) WithMaxUploadBytes(max int64) *VolumeHandler {
 	return h
 }
 
-// List handles listing volumes on a machine
+// List handles listing volumes on a machine. Route-level
+// RequireMachineAccess (app.go) gates the subtree; the endpoint
+// envelope owns extraction, error mapping, and encoding.
 func (h *VolumeHandler) List(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "List")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	opts := entities.VolumeListOptions{}
-
-	volumes, err := h.service.List(r.Context(), userID, machineID, opts)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]VolumeResponse, error) {
+		volumes, err := h.service.List(ctx, userID, machineID, entities.VolumeListOptions{})
+		if err != nil {
+			return nil, err
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "list", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
-		return
-	}
-
-	result := ToVolumeListResponse(volumes)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+		return ToVolumeListResponse(volumes), nil
+	})
 }
 
 // Get handles inspecting a single volume on a machine
 func (h *VolumeHandler) Get(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Get")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	volumeName := chi.URLParam(r, "volumeName")
-	if volumeName == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_VOLUME_NAME", "Volume name is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	report, err := h.service.Get(r.Context(), userID, machineID, volumeName)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (VolumeInspectResponse, error) {
+		volumeName := chi.URLParam(r, "volumeName")
+		if volumeName == "" {
+			return VolumeInspectResponse{}, errors.NewAppError("MISSING_VOLUME_NAME", "Volume name is required", http.StatusBadRequest)
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "get", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("volumeName", volumeName))
-		return
-	}
 
-	result := FromPodmanVolumeInspect(report)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+		report, err := h.service.Get(ctx, userID, machineID, volumeName)
+		if err != nil {
+			return VolumeInspectResponse{}, err
+		}
+		return FromPodmanVolumeInspect(report), nil
+	})
 }
 
 // Create handles creating a volume on a machine. Route-level
@@ -134,44 +87,18 @@ func (h *VolumeHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Name-format validation is podman's job; its rejections surface as 400
 // INVALID_REQUEST from the service.
 func (h *VolumeHandler) Create(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Create")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	var request VolumeCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "Invalid volume create request body")
-		return
-	}
-
-	report, err := h.service.Create(r.Context(), userID, machineID, request)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (VolumeInspectResponse, error) {
+		var request VolumeCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			return VolumeInspectResponse{}, errors.ErrInvalidRequest.WithMessage("Invalid request body")
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "create", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
-		return
-	}
 
-	result := FromPodmanVolumeInspect(report)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(result)
+		report, err := h.service.Create(ctx, userID, machineID, request)
+		if err != nil {
+			return VolumeInspectResponse{}, err
+		}
+		return FromPodmanVolumeInspect(report), nil
+	})
 }
 
 // Delete handles removing a volume by exact name. Route-level
@@ -180,48 +107,23 @@ func (h *VolumeHandler) Create(w http.ResponseWriter, r *http.Request) {
 // remove the volume anyway; without it an in-use volume surfaces as 409
 // VOLUME_IN_USE. Returns 204 with an empty body.
 func (h *VolumeHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Delete")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	volumeName := chi.URLParam(r, "volumeName")
-	if volumeName == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_VOLUME_NAME", "Volume name is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	force := false
-	if raw := r.URL.Query().Get("force"); raw != "" {
-		var err error
-		force, err = strconv.ParseBool(raw)
-		if err != nil {
-			errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "force must be a boolean", contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+		volumeName := chi.URLParam(r, "volumeName")
+		if volumeName == "" {
+			return struct{}{}, errors.NewAppError("MISSING_VOLUME_NAME", "Volume name is required", http.StatusBadRequest)
 		}
-	}
 
-	if err := h.service.Delete(r.Context(), userID, machineID, volumeName, force); err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+		force := false
+		if raw := r.URL.Query().Get("force"); raw != "" {
+			var err error
+			force, err = strconv.ParseBool(raw)
+			if err != nil {
+				return struct{}{}, errors.ErrInvalidRequest.WithMessage("force must be a boolean")
+			}
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "delete", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("volumeName", volumeName))
-		return
-	}
 
-	w.WriteHeader(http.StatusNoContent)
+		return struct{}{}, h.service.Delete(ctx, userID, machineID, volumeName, force)
+	})
 }
 
 // Prune handles removing all unused volumes on a machine. Route-level
@@ -229,37 +131,13 @@ func (h *VolumeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // leaves in-use volumes alone. Returns 200 with one report entry per
 // removed volume (name, reclaimed size, any per-volume error).
 func (h *VolumeHandler) Prune(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Prune")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	prunes, err := h.service.Prune(r.Context(), userID, machineID)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]VolumePruneResponse, error) {
+		prunes, err := h.service.Prune(ctx, userID, machineID)
+		if err != nil {
+			return nil, err
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "prune", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
-		return
-	}
-
-	result := FromPodmanPruneReports(prunes)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+		return FromPodmanPruneReports(prunes), nil
+	})
 }
 
 // Export handles streaming a volume's contents as a tar download.

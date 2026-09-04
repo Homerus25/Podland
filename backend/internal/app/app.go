@@ -185,6 +185,11 @@ func New(cfg *config.Config) (*App, error) {
 	router.Use(chimid.Recoverer)
 	router.Use(appmiddleware.RequestIDMiddleware)
 	router.Use(appmiddleware.CORS(cfg.AllowedOrigins))
+	// Request logging lives here, not per handler: one line per request
+	// (method, path, status, duration, requestID) covering every
+	// endpoint, streaming included (long-lived streams log at stream
+	// end). Runs inside RequestIDMiddleware so the ID is in context.
+	router.Use(appmiddleware.RequestLogging)
 
 	// Routes
 	router.Route("/api", func(r chi.Router) {

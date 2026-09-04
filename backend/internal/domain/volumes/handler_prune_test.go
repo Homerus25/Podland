@@ -1,19 +1,28 @@
 package volumes
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
+
+// pruneRequest serves POST /api/machines/{id}/volumes/prune through
+// the handler with an authenticated test identity.
+func pruneRequest(prune http.HandlerFunc) *httptest.ResponseRecorder {
+	return testutils.Perform(prune, testutils.Request{
+		Method:    http.MethodPost,
+		Path:      "/api/machines/test-machine/volumes/prune",
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine"},
+	})
+}
 
 // TestVolumeHandler_Prune_Success pins the prune contract: 200 with one
 // report entry per removed volume, name and reclaimed size mapped, and
@@ -28,7 +37,7 @@ func TestVolumeHandler_Prune_Success(t *testing.T) {
 	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return(prunes, nil)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordPruneRequest(handler.Prune, "test-machine")
+	w := pruneRequest(handler.Prune)
 
 	assert.Equal(t, 200, w.Code, "prune should return 200")
 	var got []VolumePruneResponse
@@ -48,7 +57,7 @@ func TestVolumeHandler_Prune_EmptyReport(t *testing.T) {
 	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return([]*reports.PruneReport{}, nil)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordPruneRequest(handler.Prune, "test-machine")
+	w := pruneRequest(handler.Prune)
 
 	assert.Equal(t, 200, w.Code)
 	var got []VolumePruneResponse
@@ -62,7 +71,7 @@ func TestVolumeHandler_Prune_ServiceError(t *testing.T) {
 	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return(nil, fmt.Errorf("boom"))
 	handler := NewVolumeHandler(mockService)
 
-	w := recordPruneRequest(handler.Prune, "test-machine")
+	w := pruneRequest(handler.Prune)
 
 	assert.Equal(t, 500, w.Code)
 	assert.Contains(t, w.Body.String(), "requestId")
@@ -74,19 +83,4 @@ func TestFromPodmanPruneReports_NilEntries(t *testing.T) {
 	got := FromPodmanPruneReports([]*reports.PruneReport{nil, {Id: "x", Size: 1}})
 	require.Len(t, got, 1)
 	assert.Equal(t, "x", got[0].Name)
-}
-
-// recordPruneRequest serves POST /api/machines/{id}/volumes/prune
-// through the given handler with an authenticated test identity.
-func recordPruneRequest(prune http.HandlerFunc, machineID string) *httptest.ResponseRecorder {
-	ctx := contextutils.SetUserID(contextutils.SetRequestID(context.Background(), "test-request-id"), "test-user")
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/"+machineID+"/volumes/prune", nil).WithContext(ctx)
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	w := httptest.NewRecorder()
-	prune(w, req)
-	return w
 }

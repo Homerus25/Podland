@@ -3,16 +3,14 @@ package volumes
 import (
 	"archive/tar"
 	"bytes"
-	"context"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -40,18 +38,14 @@ func buildMultipartBody(t *testing.T, parts map[string]map[string][]byte) (*byte
 // /api/machines/{id}/volumes/{volumeName}/populate through the handler
 // with an authenticated identity and the given body.
 func recordPopulateRequest(handler http.HandlerFunc, machineID, volumeName string, body *bytes.Buffer, contentType string) *httptest.ResponseRecorder {
-	ctx := contextutils.SetUserID(contextutils.SetRequestID(context.Background(), "test-request-id"), "test-user")
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/"+machineID+"/volumes/"+volumeName+"/populate", body).WithContext(ctx)
-	req.Header.Set("Content-Type", contentType)
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
-	rctx.URLParams.Add("volumeName", volumeName)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	w := httptest.NewRecorder()
-	handler(w, req)
-	return w
+	return testutils.Perform(handler, testutils.Request{
+		Method:    http.MethodPost,
+		Path:      "/api/machines/" + machineID + "/volumes/" + volumeName + "/populate",
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": machineID, "volumeName": volumeName},
+		Body:      body,
+		Header:    http.Header{"Content-Type": []string{contentType}},
+	})
 }
 
 // readTarEntries untars the reader handed to the service mock.

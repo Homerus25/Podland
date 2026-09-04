@@ -1,19 +1,28 @@
 package volumes
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
+
+// listRequest performs a GET /api/machines/{id}/volumes through the
+// handler with an authenticated test identity.
+func listRequest(list http.HandlerFunc) *httptest.ResponseRecorder {
+	return testutils.Perform(list, testutils.Request{
+		Method:    http.MethodGet,
+		Path:      "/api/machines/test-machine/volumes",
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine"},
+	})
+}
 
 // TestVolumeHandler_List_Success pins the list contract: 200, JSON array,
 // and the DTO fields the API promises (name, driver, createdAt, anonymous,
@@ -29,7 +38,7 @@ func TestVolumeHandler_List_Success(t *testing.T) {
 	mockService.On("List", mock.Anything, "test-user", "test-machine", mock.Anything).Return(reports, nil)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordListRequest(handler.List, "test-machine")
+	w := listRequest(handler.List)
 
 	assert.Equal(t, 200, w.Code, "list should return 200")
 
@@ -58,46 +67,10 @@ func TestVolumeHandler_List_ConnectionError(t *testing.T) {
 		Return([]*entities.VolumeListReport(nil), assert.AnError)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordListRequest(handler.List, "test-machine")
+	w := listRequest(handler.List)
 
-	assert.Equal(t, 500, w.Code, "connection failures surface as 5xx")
+	assert.Equal(t, 500, w.Code, "unexpected service failures surface as the 500 fallback")
 	assert.Contains(t, w.Body.String(), "requestId", "error envelope must carry requestId")
-}
-
-func TestVolumeHandler_List_MissingUserID(t *testing.T) {
-	handler := NewVolumeHandler(new(MockVolumeService))
-	w := recordListRequestAnonymous(handler.List, "test-machine")
-	assert.Equal(t, 401, w.Code, "missing user identity must be rejected")
-}
-
-// recordListRequest serves a GET /api/machines/{id}/volumes through the
-// given handler with an authenticated test identity in the context.
-func recordListRequest(list http.HandlerFunc, machineID string) *httptest.ResponseRecorder {
-	ctx := contextutils.SetUserID(contextutils.SetRequestID(context.Background(), "test-request-id"), "test-user")
-	req := httptest.NewRequest(http.MethodGet, "/api/machines/"+machineID+"/volumes", nil).WithContext(ctx)
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	w := httptest.NewRecorder()
-	list(w, req)
-	return w
-}
-
-// recordListRequestAnonymous serves the same request without a user ID
-// in the context.
-func recordListRequestAnonymous(list http.HandlerFunc, machineID string) *httptest.ResponseRecorder {
-	ctx := contextutils.SetRequestID(context.Background(), "test-request-id")
-	req := httptest.NewRequest(http.MethodGet, "/api/machines/"+machineID+"/volumes", nil).WithContext(ctx)
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	w := httptest.NewRecorder()
-	list(w, req)
-	return w
 }
 
 func decodeVolumes(t *testing.T, body string) []VolumeResponse {

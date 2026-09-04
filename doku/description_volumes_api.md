@@ -39,7 +39,8 @@ Notes:
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
 - 404: `MACHINE_NOT_FOUND`
-- 500: `INTERNAL_ERROR` (including SSH connection failures to the machine)
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
 
 ### GET /api/machines/{id}/volumes/{volumeName}
 
@@ -73,7 +74,8 @@ Notes:
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
 - 404: `MACHINE_NOT_FOUND` (unknown machine ID), `VOLUME_NOT_FOUND` (unknown volume name)
-- 500: `INTERNAL_ERROR` (including SSH connection failures to the machine)
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
 
 ### POST /api/machines/{id}/volumes
 
@@ -104,7 +106,8 @@ shape as inspect, including the generated name for anonymous volumes).
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
 - 404: `MACHINE_NOT_FOUND`, `VOLUME_NOT_FOUND` (existence re-check)
-- 500: `INTERNAL_ERROR` (including SSH connection failures)
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
 
 ### POST /api/machines/{id}/volumes/prune
 
@@ -129,7 +132,8 @@ Notes:
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
 - 404: `MACHINE_NOT_FOUND`
-- 500: `INTERNAL_ERROR` (including SSH connection failures)
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
 
 ### GET /api/machines/{id}/volumes/{volumeName}/export
 
@@ -153,6 +157,7 @@ users who can read a machine's state can read its data.
 - 403: `ACCESS_DENIED` (no access row)
 - 404: `MACHINE_NOT_FOUND`, `VOLUME_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
 
 ### POST /api/machines/{id}/volumes/{volumeName}/populate
 
@@ -189,6 +194,7 @@ enforced while streaming. Temp files are removed on every path.
 - 404: `MACHINE_NOT_FOUND`, `VOLUME_NOT_FOUND`
 - 413: `VOLUME_UPLOAD_TOO_LARGE` (upload exceeded `VOLUME_UPLOAD_MAX_BYTES`)
 - 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
 
 ### DELETE /api/machines/{id}/volumes/{volumeName}
 
@@ -213,3 +219,4 @@ volume anyway.
 - 409: `VOLUME_IN_USE` (volume is in use by a container and `force` was
   not set; carries podman's message)
 - 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`

@@ -1,21 +1,31 @@
 package volumes
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
+
+// createRequest serves POST /api/machines/{id}/volumes with the given
+// JSON body through the handler with an authenticated test identity.
+func createRequest(create http.HandlerFunc, body string) *httptest.ResponseRecorder {
+	return testutils.Perform(create, testutils.Request{
+		Method:    http.MethodPost,
+		Path:      "/api/machines/test-machine/volumes",
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine"},
+		Body:      strings.NewReader(body),
+	})
+}
 
 func TestVolumeHandler_Create_Success(t *testing.T) {
 	cfg := namedVolumeFixture("2026-08-30T12:00:00Z")
@@ -26,7 +36,7 @@ func TestVolumeHandler_Create_Success(t *testing.T) {
 	mockService.On("Create", mock.Anything, "test-user", "test-machine", req).Return(report, nil)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordCreateRequest(handler.Create, "test-machine", `{"name":"my-volume","labels":{"app":"test"},"options":{"type":"tmpfs"}}`)
+	w := createRequest(handler.Create, `{"name":"my-volume","labels":{"app":"test"},"options":{"type":"tmpfs"}}`)
 
 	assert.Equal(t, 201, w.Code, "create should return 201")
 	var got VolumeInspectResponse
@@ -46,7 +56,7 @@ func TestVolumeHandler_Create_Anonymous(t *testing.T) {
 	mockService.On("Create", mock.Anything, "test-user", "test-machine", req).Return(report, nil)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordCreateRequest(handler.Create, "test-machine", `{}`)
+	w := createRequest(handler.Create, `{}`)
 
 	assert.Equal(t, 201, w.Code)
 	var got VolumeInspectResponse
@@ -58,7 +68,7 @@ func TestVolumeHandler_Create_Anonymous(t *testing.T) {
 func TestVolumeHandler_Create_MalformedBody(t *testing.T) {
 	handler := NewVolumeHandler(new(MockVolumeService))
 
-	w := recordCreateRequest(handler.Create, "test-machine", `{"labels": 42}`)
+	w := createRequest(handler.Create, `{"labels": 42}`)
 
 	assert.Equal(t, 400, w.Code, "wrong-typed body must be rejected as a validation error")
 	assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
@@ -72,7 +82,7 @@ func TestVolumeHandler_Create_PodmanRejectedName(t *testing.T) {
 		Return((*entities.VolumeInspectReport)(nil), errors.ErrInvalidRequest.WithMessage("invalid volume name"))
 	handler := NewVolumeHandler(mockService)
 
-	w := recordCreateRequest(handler.Create, "test-machine", `{"name":"bad name"}`)
+	w := createRequest(handler.Create, `{"name":"bad name"}`)
 
 	assert.Equal(t, 400, w.Code)
 	assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
@@ -85,31 +95,16 @@ func TestVolumeHandler_Create_ServiceError(t *testing.T) {
 		Return((*entities.VolumeInspectReport)(nil), assert.AnError)
 	handler := NewVolumeHandler(mockService)
 
-	w := recordCreateRequest(handler.Create, "test-machine", `{}`)
+	w := createRequest(handler.Create, `{}`)
 
 	assert.Equal(t, 500, w.Code)
 	assert.Contains(t, w.Body.String(), "requestId")
 }
 
-// recordCreateRequest serves POST /api/machines/{id}/volumes through the
-// given handler with an authenticated test identity.
-func recordCreateRequest(create http.HandlerFunc, machineID, body string) *httptest.ResponseRecorder {
-	ctx := contextutils.SetUserID(contextutils.SetRequestID(context.Background(), "test-request-id"), "test-user")
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/"+machineID+"/volumes", strings.NewReader(body)).WithContext(ctx)
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	w := httptest.NewRecorder()
-	create(w, req)
-	return w
-}
-
 func TestVolumeHandler_Create_MalformedJSON(t *testing.T) {
 	handler := NewVolumeHandler(new(MockVolumeService))
 
-	w := recordCreateRequest(handler.Create, "test-machine", `{bad`)
+	w := createRequest(handler.Create, `{bad`)
 
 	assert.Equal(t, 400, w.Code, "syntactically malformed body must be rejected as a validation error")
 	assert.Contains(t, w.Body.String(), "INVALID_REQUEST")

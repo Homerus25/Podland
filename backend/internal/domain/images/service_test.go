@@ -60,7 +60,7 @@ func TestImageService_List_ConnectionFailure(t *testing.T) {
 	result, err := service.List(ctx, "test-user", "test-machine", entities.ImageListOptions{})
 
 	assert.Error(t, err, "Should return error when connection fails")
-	assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 	assert.Nil(t, result, "Should return nil result when connection fails")
 }
 
@@ -79,7 +79,7 @@ func TestImageService_List_InvocationShape(t *testing.T) {
 	// no real podman backend behind the mock connection context.
 	assert.Error(t, err, "Should return error from engine call with mock connection")
 	assert.Nil(t, result, "Should return nil result when engine call fails")
-	assert.NotContains(t, err.Error(), "failed to get connection to machine",
+	assert.NotErrorIs(t, err, appErrors.ErrConnectionFailed,
 		"Error should not be a connection error — connection should have succeeded")
 }
 
@@ -97,7 +97,7 @@ func TestImageService_Delete_ConnectionError(t *testing.T) {
 	err := serviceWithError.Delete(ctx, userID, machineID, imageID, false)
 
 	assert.Error(t, err, "Should return error when connection fails")
-	assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 }
 
 // TestImageService_Delete_MissingParameters tests that Delete validates input parameters
@@ -209,7 +209,7 @@ func TestImageService_Pull_ConnectionFailure(t *testing.T) {
 	result, err := service.Pull(ctx, "test-user", "test-machine", "nginx:latest", entities.ImagePullOptions{})
 
 	assert.Error(t, err, "Should return error when connection fails")
-	assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 	assert.Nil(t, result, "Should return nil result when connection fails")
 }
 
@@ -271,6 +271,6 @@ func TestImageService_Prune_ConnectionFailure(t *testing.T) {
 	result, err := service.Prune(ctx, "test-user", "test-machine")
 
 	assert.Error(t, err, "Should return error when connection fails")
-	assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 	assert.Nil(t, result, "Should return nil result when connection fails")
 }
