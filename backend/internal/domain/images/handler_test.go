@@ -92,7 +92,7 @@ func TestImageHandler_List_Success(t *testing.T) {
 	opts := entities.ImageListOptions{}
 	mockService.On("List", mock.Anything, "test-user", "test-machine", opts).Return(testImages, nil)
 
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	req := httptest.NewRequest("GET", "/api/machines/test-machine/images", nil)
 	req = req.WithContext(ctx)
@@ -127,51 +127,10 @@ func TestImageHandler_List_Success(t *testing.T) {
 	mockService.AssertExpectations(t)
 }
 
-// TestImageHandler_List_MissingUserID tests that List returns 401 when user ID is missing.
-func TestImageHandler_List_MissingUserID(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
-
-	ctx := context.Background()
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/images", nil)
-	req = req.WithContext(ctx)
-
-	rr := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/images", handler.List)
-	r.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusUnauthorized, rr.Code, "Should return 401 when user ID is missing")
-}
-
-// TestImageHandler_List_MissingMachineID tests that List returns 400 when machine ID is missing.
-func TestImageHandler_List_MissingMachineID(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines//images", nil)
-	req = req.WithContext(ctx)
-
-	rr := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/images", handler.List)
-	r.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusBadRequest, rr.Code, "Should return 400 when machine ID is missing")
-}
-
 // TestImageHandler_List_ServiceError tests that List returns 500 when the service returns an error.
 func TestImageHandler_List_ServiceError(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -198,7 +157,7 @@ func TestImageHandler_List_ServiceError(t *testing.T) {
 // when the service returns a known AppError.
 func TestImageHandler_List_AppError(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -225,7 +184,7 @@ func TestImageHandler_List_AppError(t *testing.T) {
 // and passed to the service.
 func TestImageHandler_List_AllQueryParam(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -297,7 +256,7 @@ func TestImageHandler_List_FiltersQueryParam(t *testing.T) {
 				}).
 				Return([]*entities.ImageSummary{}, nil)
 
-			handler := NewImageHandler(mockService, nil)
+			handler := NewImageHandler(mockService)
 
 			ctx := context.Background()
 			ctx = contextutils.SetUserID(ctx, "test-user")
@@ -326,7 +285,7 @@ func TestImageHandler_List_FiltersQueryParam(t *testing.T) {
 // TestImageHandler_Delete_Success tests successful image deletion
 func TestImageHandler_Delete_Success(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -351,7 +310,7 @@ func TestImageHandler_Delete_Success(t *testing.T) {
 // TestImageHandler_Delete_Force tests deletion with force query parameter
 func TestImageHandler_Delete_Force(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -376,7 +335,7 @@ func TestImageHandler_Delete_Force(t *testing.T) {
 // TestImageHandler_Delete_ConnectionError tests that Delete handles connection errors
 func TestImageHandler_Delete_ConnectionError(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -398,53 +357,10 @@ func TestImageHandler_Delete_ConnectionError(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code, "Should return 500 on connection error")
 }
 
-// TestImageHandler_Delete_MissingUserID tests that Delete validates user ID
-func TestImageHandler_Delete_MissingUserID(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
-
-	ctx := context.Background()
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 when user ID is missing")
-}
-
-// TestImageHandler_Delete_MissingMachineID tests that Delete validates machine ID
-func TestImageHandler_Delete_MissingMachineID(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("DELETE", "/api/machines//images/sha256:abc123", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when machine ID is missing")
-}
-
 // TestImageHandler_Delete_MissingImageID tests that Delete validates image ID
 func TestImageHandler_Delete_MissingImageID(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -468,7 +384,7 @@ func TestImageHandler_Delete_MissingImageID(t *testing.T) {
 // TestImageHandler_Delete_ImageNotFound tests that Delete handles image not found errors
 func TestImageHandler_Delete_ImageNotFound(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -492,7 +408,7 @@ func TestImageHandler_Delete_ImageNotFound(t *testing.T) {
 // TestImageHandler_Delete_ImageUsedByContainers tests that Delete handles image in use errors
 func TestImageHandler_Delete_ImageUsedByContainers(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -516,7 +432,7 @@ func TestImageHandler_Delete_ImageUsedByContainers(t *testing.T) {
 // TestImageHandler_Delete_ServiceError tests that Delete handles general service errors
 func TestImageHandler_Delete_ServiceError(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -540,7 +456,7 @@ func TestImageHandler_Delete_ServiceError(t *testing.T) {
 // TestImageHandler_Pull_MissingUserID tests that Pull handles missing user ID
 func TestImageHandler_Pull_MissingUserID(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetRequestID(ctx, "test-request-id")
@@ -562,7 +478,7 @@ func TestImageHandler_Pull_MissingUserID(t *testing.T) {
 // TestImageHandler_Pull_MissingMachineID tests that Pull handles missing machine ID
 func TestImageHandler_Pull_MissingMachineID(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -585,7 +501,7 @@ func TestImageHandler_Pull_MissingMachineID(t *testing.T) {
 // TestImageHandler_Pull_InvalidRequestBody tests that Pull handles invalid request body
 func TestImageHandler_Pull_InvalidRequestBody(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -608,7 +524,7 @@ func TestImageHandler_Pull_InvalidRequestBody(t *testing.T) {
 // TestImageHandler_Pull_ValidationFailure tests that Pull handles validation failures
 func TestImageHandler_Pull_ValidationFailure(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -647,7 +563,7 @@ func splitLines(s string) []string {
 // TestImageHandler_Pull_ServiceError tests that Pull handles service errors
 func TestImageHandler_Pull_ServiceError(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -697,7 +613,7 @@ func TestImageHandler_Pull_ServiceError(t *testing.T) {
 // TestImageHandler_Pull_Success_Streaming tests successful pull with streaming events
 func TestImageHandler_Pull_Success_Streaming(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -762,7 +678,7 @@ func TestImageHandler_Pull_Success_Streaming(t *testing.T) {
 // TestImageHandler_Pull_ClientCancellation tests that client cancellation is handled
 func TestImageHandler_Pull_ClientCancellation(t *testing.T) {
 	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = contextutils.SetUserID(ctx, "test-user")

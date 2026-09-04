@@ -10,6 +10,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
+	"github.com/Homerus25/podland/backend/internal/web"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
@@ -17,78 +18,50 @@ import (
 )
 
 // ImageHandler handles image requests
+//
+// JSON endpoints cross the endpoint envelope (internal/web). Pull
+// keeps its own shape — it streams NDJSON progress via streaming.Run.
 type ImageHandler struct {
-	service        ImageServiceInterface
-	machineService any
+	service ImageServiceInterface
 }
 
 // NewImageHandler creates a new ImageHandler
-func NewImageHandler(service ImageServiceInterface, machineService any) *ImageHandler {
+func NewImageHandler(service ImageServiceInterface) *ImageHandler {
 	return &ImageHandler{
-		service:        service,
-		machineService: machineService,
+		service: service,
 	}
 }
 
 // List handles listing images
 func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "List")
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]ImageListResponse, error) {
+		opts := entities.ImageListOptions{}
 
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	opts := entities.ImageListOptions{}
-
-	if allParam := r.URL.Query().Get("all"); allParam != "" {
-		all, err := strconv.ParseBool(allParam)
-		if err == nil {
-			opts.All = all
+		if allParam := r.URL.Query().Get("all"); allParam != "" {
+			if all, err := strconv.ParseBool(allParam); err == nil {
+				opts.All = all
+			}
 		}
-	}
 
-	if filtersParam := r.URL.Query().Get("filters"); filtersParam != "" {
-		var filters map[string][]string
-		if err := json.Unmarshal([]byte(filtersParam), &filters); err != nil {
-			slog.WarnContext(r.Context(), "invalid filters query param, ignoring", slog.String("filters", filtersParam), slog.Any("error", err))
-		} else {
-			for key, values := range filters {
-				for _, value := range values {
-					opts.Filter = append(opts.Filter, key+"="+value)
+		if filtersParam := r.URL.Query().Get("filters"); filtersParam != "" {
+			var filters map[string][]string
+			if err := json.Unmarshal([]byte(filtersParam), &filters); err != nil {
+				slog.WarnContext(ctx, "invalid filters query param, ignoring", slog.String("filters", filtersParam), slog.Any("error", err))
+			} else {
+				for key, values := range filters {
+					for _, value := range values {
+						opts.Filter = append(opts.Filter, key+"="+value)
+					}
 				}
 			}
 		}
-	}
 
-	slog.InfoContext(r.Context(), "list", slog.Any("opts", opts))
-
-	images, err := h.service.List(r.Context(), userID, machineID, opts)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+		images, err := h.service.List(ctx, userID, machineID, opts)
+		if err != nil {
+			return nil, err
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "list", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
-		return
-	}
-
-	result := ToImageListResponse(images)
-
-	slog.InfoContext(r.Context(), "list", slog.Any("result", result))
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+		return ToImageListResponse(images), nil
+	})
 }
 
 // Pull handles pulling an image with streaming progress
@@ -182,81 +155,31 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 // leaves in-use images alone. Returns 200 with one report entry per
 // removed image (id, reclaimed size, any per-image error).
 func (h *ImageHandler) Prune(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Prune")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	prunes, err := h.service.Prune(r.Context(), userID, machineID)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]ImagePruneResponse, error) {
+		prunes, err := h.service.Prune(ctx, userID, machineID)
+		if err != nil {
+			return nil, err
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "prune", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
-		return
-	}
-
-	result := FromImagePruneReports(prunes)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+		return FromImagePruneReports(prunes), nil
+	})
 }
 
-// Delete handles deleting an image
+// Delete handles deleting an image. A malformed force flag is ignored
+// (deletes as unforced), matching the documented behavior.
 func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Delete")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	imageID := chi.URLParam(r, "imageId")
-	if imageID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_IMAGE_ID", "Image ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	force := false
-	if forceParam := r.URL.Query().Get("force"); forceParam != "" {
-		if parsed, err := strconv.ParseBool(forceParam); err == nil {
-			force = parsed
+	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+		imageID := chi.URLParam(r, "imageId")
+		if imageID == "" {
+			return struct{}{}, errors.NewAppError("MISSING_IMAGE_ID", "Image ID is required", http.StatusBadRequest)
 		}
-	}
 
-	slog.InfoContext(r.Context(), "delete", slog.String("imageID", imageID), slog.Bool("force", force))
-
-	err := h.service.Delete(r.Context(), userID, machineID, imageID, force)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+		force := false
+		if forceParam := r.URL.Query().Get("force"); forceParam != "" {
+			if parsed, err := strconv.ParseBool(forceParam); err == nil {
+				force = parsed
+			}
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "delete", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("imageID", imageID))
-		return
-	}
 
-	w.WriteHeader(http.StatusNoContent)
+		return struct{}{}, h.service.Delete(ctx, userID, machineID, imageID, force)
+	})
 }

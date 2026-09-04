@@ -27,7 +27,7 @@ func TestImageHandler_Prune_Success(t *testing.T) {
 
 	mockService := new(MockImageService)
 	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return(prunes, nil)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	w := recordPruneRequest(handler.Prune, "test-machine")
 
@@ -47,7 +47,7 @@ func TestImageHandler_Prune_Success(t *testing.T) {
 func TestImageHandler_Prune_EmptyReport(t *testing.T) {
 	mockService := new(MockImageService)
 	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return([]*reports.PruneReport{}, nil)
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	w := recordPruneRequest(handler.Prune, "test-machine")
 
@@ -61,7 +61,7 @@ func TestImageHandler_Prune_EmptyReport(t *testing.T) {
 func TestImageHandler_Prune_ServiceError(t *testing.T) {
 	mockService := new(MockImageService)
 	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return(nil, fmt.Errorf("boom"))
-	handler := NewImageHandler(mockService, nil)
+	handler := NewImageHandler(mockService)
 
 	w := recordPruneRequest(handler.Prune, "test-machine")
 

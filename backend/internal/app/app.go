@@ -158,7 +158,7 @@ func New(cfg *config.Config) (*App, error) {
 	userHandler := users.NewUserHandler(userService)
 	machineHandler := machines.NewMachineHandler(machineService)
 	containerHandler := containers.NewContainerHandler(containerService)
-	imageHandler := images.NewImageHandler(imageService, machineService)
+	imageHandler := images.NewImageHandler(imageService)
 	quadletHandler := quadlets.NewQuadletHandler(quadletService)
 	secretHandler := secrets.NewSecretHandler(secretService)
 	eventHandler := events.NewEventHandler(eventService, machineService, errors.NewErrorHandler())
