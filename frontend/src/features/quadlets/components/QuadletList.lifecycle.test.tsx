@@ -1,7 +1,7 @@
 import { QuadletList } from "@features/quadlets/components/QuadletList";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -79,6 +79,35 @@ async function openOptionsModal(action: "stop" | "restart", name = "web") {
 
 describe("QuadletList lifecycle", () => {
 	beforeEach(resetRequests);
+
+	it("shows Start only for non-running quadlets and Stop only for running ones", async () => {
+		server.use(
+			quadletsHandler(() => [
+				web,
+				quadletFixture({ id: "db", name: "db", unit: "db.service" }),
+			]),
+		);
+		renderQuadletList();
+
+		const rows = await screen.findAllByTestId("quadlet-row");
+		const stoppedRow = rows.find((row) => row.textContent?.includes("web"));
+		const runningRow = rows.find((row) => row.textContent?.includes("db"));
+
+		expect(stoppedRow).not.toBeNull();
+		expect(runningRow).not.toBeNull();
+		expect(
+			within(stoppedRow!).getByTestId("start-quadlet-button"),
+		).toBeInTheDocument();
+		expect(
+			within(stoppedRow!).queryByTestId("stop-quadlet-button"),
+		).not.toBeInTheDocument();
+		expect(
+			within(runningRow!).getByTestId("stop-quadlet-button"),
+		).toBeInTheDocument();
+		expect(
+			within(runningRow!).queryByTestId("start-quadlet-button"),
+		).not.toBeInTheDocument();
+	});
 
 	it("posts to the start endpoint with no options on Start click", async () => {
 		server.use(
