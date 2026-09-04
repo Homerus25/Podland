@@ -192,7 +192,7 @@ describe("QuadletList lifecycle", () => {
 		renderQuadletList();
 
 		const startButtons = await screen.findAllByTestId("start-quadlet-button");
-		expect(startButtons).toHaveLength(2);
+		expect(startButtons).toHaveLength(1);
 		await user.click(startButtons[0]);
 		await user.click(startButtons[0]);
 
@@ -200,10 +200,7 @@ describe("QuadletList lifecycle", () => {
 			expect(startButtons[0]).toBeDisabled();
 			expect(startButtons[0]).toHaveAttribute("data-loading");
 		});
-		expect(screen.getAllByTestId("stop-quadlet-button")[0]).toBeDisabled();
-		expect(screen.getAllByTestId("restart-quadlet-button")[0]).toBeDisabled();
-		expect(startButtons[1]).toBeEnabled();
-		expect(screen.getAllByTestId("stop-quadlet-button")[1]).toBeEnabled();
+		expect(screen.getByTestId("stop-quadlet-button")).toBeEnabled();
 
 		await waitFor(() => expect(lifecycleRequests).toHaveLength(1));
 	});
@@ -255,7 +252,7 @@ describe("QuadletList lifecycle", () => {
 
 	it("shows the error envelope under the row when starting fails", async () => {
 		server.use(
-			quadletsHandler(() => [quadletFixture()]),
+			quadletsHandler(() => [quadletFixture({ state: "stopped" })]),
 			http.post("*/api/machines/m-1/quadlets/:quadletId/start", () =>
 				HttpResponse.json(
 					{

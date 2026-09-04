@@ -177,6 +177,7 @@ function QuadletRow({
 		setPendingAction(null);
 	};
 
+	const isRunning = quadlet.state === "running";
 	return (
 		<>
 			<Tr data-testid="quadlet-row">
@@ -187,28 +188,32 @@ function QuadletRow({
 				</Td>
 				<Td>
 					<HStack spacing={2}>
-						<Button
-							size="xs"
-							variant="outline"
-							colorScheme="green"
-							aria-label={`Start ${quadlet.name}`}
-							onClick={() => startQuadlet.mutate(quadlet.id)}
-							isLoading={startQuadlet.isPending}
-							isDisabled={lifecyclePending}
-							data-testid="start-quadlet-button"
-						>
-							Start
-						</Button>
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Stop ${quadlet.name}`}
-							onClick={() => openLifecycleOptions("stop")}
-							isDisabled={lifecyclePending}
-							data-testid="stop-quadlet-button"
-						>
-							Stop
-						</Button>
+						{!isRunning ? (
+							<Button
+								size="xs"
+								variant="outline"
+								colorScheme="green"
+								aria-label={`Start ${quadlet.name}`}
+								onClick={() => startQuadlet.mutate(quadlet.id)}
+								isLoading={startQuadlet.isPending}
+								isDisabled={lifecyclePending}
+								data-testid="start-quadlet-button"
+							>
+								Start
+							</Button>
+						) : null}
+						{isRunning ? (
+							<Button
+								size="xs"
+								variant="outline"
+								aria-label={`Stop ${quadlet.name}`}
+								onClick={() => openLifecycleOptions("stop")}
+								isDisabled={lifecyclePending}
+								data-testid="stop-quadlet-button"
+							>
+								Stop
+							</Button>
+						) : null}
 						<Button
 							size="xs"
 							variant="outline"
