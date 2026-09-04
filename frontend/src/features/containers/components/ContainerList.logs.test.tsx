@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { LogsPage } from "@/pages/LogsPage";
 import { server } from "@/test/server";
 import { chunkedStream, streamResponse } from "@/test/stream";
 
@@ -84,7 +86,18 @@ function renderContainerList() {
 	});
 	render(
 		<QueryClientProvider client={queryClient}>
-			<ContainerList machineId="m-1" />
+			<MemoryRouter initialEntries={["/machines/m-1"]}>
+				<Routes>
+					<Route
+						path="/machines/:machineId"
+						element={<ContainerList machineId="m-1" />}
+					/>
+					<Route
+						path="/machines/:machineId/logs/:kind/:targetId"
+						element={<LogsPage />}
+					/>
+				</Routes>
+			</MemoryRouter>
 		</QueryClientProvider>,
 	);
 }
@@ -151,7 +164,7 @@ describe("ContainerList logs", () => {
 		await user.click(screen.getByTestId("log-follow-toggle"));
 		await waitFor(() => expect(streamSignal).not.toBeNull());
 
-		await user.click(screen.getByRole("button", { name: /close dialog/i }));
+		await user.click(screen.getByTestId("logs-back-button"));
 
 		await waitFor(() => expect(streamSignal?.aborted).toBe(true));
 		await waitFor(() =>

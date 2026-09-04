@@ -32,17 +32,13 @@ import {
 	useUpdateQuadlet,
 } from "@features/quadlets/hooks/useQuadlets";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
-import {
-	fetchQuadletLogs,
-	followQuadletLogs,
-} from "@features/quadlets/services/quadletsApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { type LogSource, LogViewer } from "@shared/components/LogViewer";
 import { Modal } from "@shared/components/Modal";
 import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
 import { mutationToPromise } from "@shared/utils/mutationPromise";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 // Stop and restart share the backend's option set (force, timeout), so one
 // modal serves both: the caller names the action and owns the mutation.
@@ -325,35 +321,15 @@ function EditQuadletModal({
 	);
 }
 
-// Bridges the generic LogViewer onto this quadlet's journalctl endpoint;
-// the tail fetch goes through axios, so its errors are converted to the
-// ApiError shape the viewer displays.
-function QuadletLogsModal({
-	machineId,
-	quadlet,
-	onClose,
-}: {
-	machineId: string;
-	quadlet: QuadletSummary;
-	onClose: () => void;
-}) {
-	const source: LogSource = {
-		fetchTail: async (tail) => {
-			try {
-				return await fetchQuadletLogs(machineId, quadlet.id, tail);
-			} catch (error) {
-				throw getApiError(error);
-			}
-		},
-		follow: (tail, onEvent, signal) =>
-			followQuadletLogs(machineId, quadlet.id, tail, onEvent, signal),
+// Opens the full-page logs view; the page itself bridges the LogViewer onto
+// this quadlet's journalctl endpoint.
+function useOpenQuadletLogs(machineId: string) {
+	const navigate = useNavigate();
+	return (quadlet: QuadletSummary) => {
+		navigate(`/machines/${machineId}/logs/quadlet/${quadlet.id}`, {
+			state: { name: quadlet.name },
+		});
 	};
-
-	return (
-		<Modal isOpen onClose={onClose} title={`Logs — ${quadlet.name}`}>
-			<LogViewer source={source} />
-		</Modal>
-	);
 }
 
 // No delete request leaves the browser until the user explicitly confirms.
@@ -444,7 +420,7 @@ export function QuadletList({
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<QuadletSummary | null>(null);
-	const [logsTarget, setLogsTarget] = useState<QuadletSummary | null>(null);
+	const openLogs = useOpenQuadletLogs(machineId);
 
 	if (isPending) {
 		return <Text data-testid="quadlets-loading">Loading quadlets…</Text>;
@@ -520,7 +496,7 @@ export function QuadletList({
 										deleteQuadlet.reset();
 										setDeleteTarget(target);
 									}}
-									onShowLogs={setLogsTarget}
+									onShowLogs={openLogs}
 								/>
 							))}
 						</Tbody>
@@ -546,13 +522,6 @@ export function QuadletList({
 						deleteQuadlet.reset();
 						setDeleteTarget(null);
 					}}
-				/>
-			) : null}
-			{logsTarget ? (
-				<QuadletLogsModal
-					machineId={machineId}
-					quadlet={logsTarget}
-					onClose={() => setLogsTarget(null)}
 				/>
 			) : null}
 			{isConfirmUpdateOpen ? (

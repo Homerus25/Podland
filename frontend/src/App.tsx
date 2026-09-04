@@ -3,6 +3,7 @@ import { ProtectedRoute } from "@shared/components/ProtectedRoute";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { LogsPage } from "@/pages/LogsPage";
 import { MachineDetailPage } from "@/pages/MachineDetailPage";
 import { MachinesPage } from "@/pages/MachinesPage";
 
@@ -21,6 +22,10 @@ export function App() {
 				<Route index element={<DashboardPage />} />
 				<Route path="machines" element={<MachinesPage />} />
 				<Route path="machines/:machineId" element={<MachineDetailPage />} />
+				<Route
+					path="machines/:machineId/logs/:kind/:targetId"
+					element={<LogsPage />}
+				/>
 			</Route>
 			<Route path="*" element={<Navigate to="/" replace />} />
 		</Routes>

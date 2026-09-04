@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { server } from "@/test/server";
 
@@ -34,7 +35,9 @@ function renderQuadletList(permission: Permission = "admin") {
 	);
 	render(
 		<QueryClientProvider client={queryClient}>
-			<QuadletList machineId="m-1" permission={permission} />
+			<MemoryRouter>
+				<QuadletList machineId="m-1" permission={permission} />
+			</MemoryRouter>
 		</QueryClientProvider>,
 	);
 }

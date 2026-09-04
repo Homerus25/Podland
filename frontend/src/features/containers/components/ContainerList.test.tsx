@@ -3,6 +3,7 @@ import type { ContainerSummary } from "@features/containers/services/containersA
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { server } from "@/test/server";
 
@@ -44,7 +45,9 @@ function renderContainerList() {
 	});
 	const view = render(
 		<QueryClientProvider client={queryClient}>
-			<ContainerList machineId="m-1" />
+			<MemoryRouter>
+				<ContainerList machineId="m-1" />
+			</MemoryRouter>
 		</QueryClientProvider>,
 	);
 	return { queryClient, ...view };

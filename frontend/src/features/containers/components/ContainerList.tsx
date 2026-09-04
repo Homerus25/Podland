@@ -20,18 +20,14 @@ import {
 	useStopContainer,
 } from "@features/containers/hooks/useContainers";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
-import {
-	fetchContainerLogs,
-	followContainerLogs,
-} from "@features/containers/services/containersApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { type LogSource, LogViewer } from "@shared/components/LogViewer";
 import { Modal } from "@shared/components/Modal";
 import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
 import { shortImageId } from "@shared/utils/format";
 import { mutationToPromise } from "@shared/utils/mutationPromise";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 // Podman reports container names with a leading slash; display them bare and
 // fall back to the short id when a container has no name at all.
@@ -88,36 +84,15 @@ function DeleteContainerModal({
 	);
 }
 
-// Bridges the generic LogViewer onto this container's log endpoint; the
-// viewer itself stays source-agnostic so quadlets logs can reuse it. The
-// tail fetch goes through axios, so its errors are converted to the ApiError
-// shape the viewer displays.
-function ContainerLogsModal({
-	machineId,
-	container,
-	onClose,
-}: {
-	machineId: string;
-	container: ContainerSummary;
-	onClose: () => void;
-}) {
-	const source: LogSource = {
-		fetchTail: async (tail) => {
-			try {
-				return await fetchContainerLogs(machineId, container.id, tail);
-			} catch (error) {
-				throw getApiError(error);
-			}
-		},
-		follow: (tail, onEvent, signal) =>
-			followContainerLogs(machineId, container.id, tail, onEvent, signal),
+// Opens the full-page logs view; the page itself bridges the LogViewer onto
+// this container's log endpoint.
+function useOpenContainerLogs(machineId: string) {
+	const navigate = useNavigate();
+	return (container: ContainerSummary) => {
+		navigate(`/machines/${machineId}/logs/container/${container.id}`, {
+			state: { name: displayName(container) },
+		});
 	};
-
-	return (
-		<Modal isOpen onClose={onClose} title={`Logs — ${displayName(container)}`}>
-			<LogViewer source={source} />
-		</Modal>
-	);
 }
 
 // Each row owns its lifecycle mutation instances, so pending state and
@@ -211,7 +186,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
 	const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(
 		null,
 	);
-	const [logsTarget, setLogsTarget] = useState<ContainerSummary | null>(null);
+	const openLogs = useOpenContainerLogs(machineId);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 
 	if (isPending) {
@@ -263,7 +238,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
 										deleteContainer.reset();
 										setPendingDelete(target);
 									}}
-									onShowLogs={setLogsTarget}
+									onShowLogs={openLogs}
 								/>
 							))}
 						</Tbody>
@@ -278,13 +253,6 @@ export function ContainerList({ machineId }: { machineId: string }) {
 						deleteContainer.reset();
 						setPendingDelete(null);
 					}}
-				/>
-			) : null}
-			{logsTarget ? (
-				<ContainerLogsModal
-					machineId={machineId}
-					container={logsTarget}
-					onClose={() => setLogsTarget(null)}
 				/>
 			) : null}
 			{isCreateOpen ? (

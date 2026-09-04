@@ -47,7 +47,13 @@ function toApiError(error: unknown): ApiError {
 // live NDJSON stream, auto-scroll while following, and error surfacing. Owns
 // one AbortController per follow session; aborting on unmount guarantees no
 // background connections leak.
-export function LogViewer({ source }: { source: LogSource }) {
+export function LogViewer({
+	source,
+	maxHeight = "400px",
+}: {
+	source: LogSource;
+	maxHeight?: string;
+}) {
 	const [tail, setTail] = useState(DEFAULT_TAIL);
 	const [lines, setLines] = useState<string[]>([]);
 	const [isFollowing, setIsFollowing] = useState(false);
@@ -187,7 +193,7 @@ export function LogViewer({ source }: { source: LogSource }) {
 				fontFamily="mono"
 				fontSize="sm"
 				p={2}
-				maxHeight="400px"
+				maxHeight={maxHeight}
 				overflowY="auto"
 				whiteSpace="pre-wrap"
 				data-testid="log-viewer-scroll"

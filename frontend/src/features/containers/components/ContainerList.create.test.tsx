@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { server } from "@/test/server";
 
@@ -65,7 +66,9 @@ function renderContainerList() {
 	});
 	render(
 		<QueryClientProvider client={queryClient}>
-			<ContainerList machineId="m-1" />
+			<MemoryRouter>
+				<ContainerList machineId="m-1" />
+			</MemoryRouter>
 		</QueryClientProvider>,
 	);
 }

@@ -3,6 +3,7 @@ import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { server } from "@/test/server";
 
@@ -32,7 +33,9 @@ function renderQuadletList() {
 	});
 	const view = render(
 		<QueryClientProvider client={queryClient}>
-			<QuadletList machineId="m-1" />
+			<MemoryRouter>
+				<QuadletList machineId="m-1" />
+			</MemoryRouter>
 		</QueryClientProvider>,
 	);
 	return { queryClient, ...view };
