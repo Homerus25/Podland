@@ -17,7 +17,7 @@ import (
 // TestQuadletHandler_GetLogs_Success tests successful log retrieval
 func TestQuadletHandler_GetLogs_Success(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -49,7 +49,7 @@ func TestQuadletHandler_GetLogs_Success(t *testing.T) {
 // TestQuadletHandler_GetLogs_WithSinceParameter tests log retrieval with since parameter
 func TestQuadletHandler_GetLogs_WithSinceParameter(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -81,7 +81,7 @@ func TestQuadletHandler_GetLogs_WithSinceParameter(t *testing.T) {
 // TestQuadletHandler_GetLogs_WithTailParameter tests log retrieval with tail parameter
 func TestQuadletHandler_GetLogs_WithTailParameter(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -111,7 +111,7 @@ func TestQuadletHandler_GetLogs_WithTailParameter(t *testing.T) {
 // TestQuadletHandler_GetLogs_WithFollowParameter tests log retrieval with follow parameter
 func TestQuadletHandler_GetLogs_WithFollowParameter(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -153,7 +153,7 @@ func TestQuadletHandler_GetLogs_WithFollowParameter(t *testing.T) {
 // TestQuadletHandler_GetLogs_InvalidSinceParameter tests log retrieval with invalid since parameter
 func TestQuadletHandler_GetLogs_InvalidSinceParameter(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -176,7 +176,7 @@ func TestQuadletHandler_GetLogs_InvalidSinceParameter(t *testing.T) {
 // TestQuadletHandler_GetLogs_QuadletNotFound tests that GetLogs handles quadlet not found error
 func TestQuadletHandler_GetLogs_QuadletNotFound(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -203,7 +203,7 @@ func TestQuadletHandler_GetLogs_QuadletNotFound(t *testing.T) {
 // TestQuadletHandler_GetLogs_ConnectionError tests that GetLogs handles connection errors
 func TestQuadletHandler_GetLogs_ConnectionError(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -230,7 +230,7 @@ func TestQuadletHandler_GetLogs_ConnectionError(t *testing.T) {
 // TestQuadletHandler_GetLogs_MissingUserID tests that GetLogs validates user ID
 func TestQuadletHandler_GetLogs_MissingUserID(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 
@@ -250,7 +250,7 @@ func TestQuadletHandler_GetLogs_MissingUserID(t *testing.T) {
 // TestQuadletHandler_GetLogs_MissingMachineID tests that GetLogs validates machine ID
 func TestQuadletHandler_GetLogs_MissingMachineID(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -273,7 +273,7 @@ func TestQuadletHandler_GetLogs_MissingMachineID(t *testing.T) {
 // TestQuadletHandler_GetLogs_MissingQuadletID tests that GetLogs validates quadlet ID
 func TestQuadletHandler_GetLogs_MissingQuadletID(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -296,7 +296,7 @@ func TestQuadletHandler_GetLogs_MissingQuadletID(t *testing.T) {
 // TestQuadletHandler_GetLogs_StreamingHappyPath tests successful streaming logs with follow=true
 func TestQuadletHandler_GetLogs_StreamingHappyPath(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -337,7 +337,7 @@ func TestQuadletHandler_GetLogs_StreamingHappyPath(t *testing.T) {
 // TestQuadletHandler_GetLogs_NonStreamingUnchanged tests that follow=false returns non-streaming response unchanged
 func TestQuadletHandler_GetLogs_NonStreamingUnchanged(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -369,7 +369,7 @@ func TestQuadletHandler_GetLogs_NonStreamingUnchanged(t *testing.T) {
 // TestQuadletHandler_GetLogs_StreamingQuadletNotFound tests streaming with quadlet not found
 func TestQuadletHandler_GetLogs_StreamingQuadletNotFound(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -399,7 +399,7 @@ func TestQuadletHandler_GetLogs_StreamingQuadletNotFound(t *testing.T) {
 // TestQuadletHandler_GetLogs_StreamingClientDisconnect tests client disconnect during streaming
 func TestQuadletHandler_GetLogs_StreamingClientDisconnect(t *testing.T) {
 	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = contextutils.SetUserID(ctx, "test-user")

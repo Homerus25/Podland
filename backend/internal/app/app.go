@@ -159,7 +159,7 @@ func New(cfg *config.Config) (*App, error) {
 	machineHandler := machines.NewMachineHandler(machineService)
 	containerHandler := containers.NewContainerHandler(containerService)
 	imageHandler := images.NewImageHandler(imageService, machineService)
-	quadletHandler := quadlets.NewQuadletHandler(quadletService, machineService)
+	quadletHandler := quadlets.NewQuadletHandler(quadletService)
 	secretHandler := secrets.NewSecretHandler(secretService)
 	eventHandler := events.NewEventHandler(eventService, machineService, errors.NewErrorHandler())
 	volumeHandler := volumes.NewVolumeHandler(volumeService).

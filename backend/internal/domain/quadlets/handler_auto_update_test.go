@@ -58,7 +58,7 @@ func (d *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 
 func newAutoUpdateTestServer(t *testing.T, svc *MockQuadletService) (*chi.Mux, *deadlineRecorder) {
 	t.Helper()
-	handler := NewQuadletHandler(svc, nil)
+	handler := NewQuadletHandler(svc)
 	r := chi.NewRouter()
 	r.Post("/api/machines/{id}/quadlets/auto-update", handler.AutoUpdate)
 	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
@@ -195,7 +195,7 @@ func TestQuadletHandler_AutoUpdate_DryRunForwarded(t *testing.T) {
 
 func TestQuadletHandler_AutoUpdate_MissingUserID(t *testing.T) {
 	svc := &MockQuadletService{}
-	handler := NewQuadletHandler(svc, nil)
+	handler := NewQuadletHandler(svc)
 	r := chi.NewRouter()
 	r.Post("/api/machines/{id}/quadlets/auto-update", handler.AutoUpdate)
 
@@ -233,7 +233,7 @@ func autoUpdateAccessRouter(machineRepo *testutils.MockMachineRepository, access
 		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
 			requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
 			r.Route("/quadlets", func(r chi.Router) {
-				r.With(requireWrite).Post("/auto-update", NewQuadletHandler(service, nil).AutoUpdate)
+				r.With(requireWrite).Post("/auto-update", NewQuadletHandler(service).AutoUpdate)
 			})
 		})
 	})

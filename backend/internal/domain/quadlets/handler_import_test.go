@@ -31,7 +31,7 @@ func TestHandlerImport_Success(t *testing.T) {
 			return importResult, nil
 		},
 	}
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	reqBody := QuadletImportRequest{
 		Quadlets: []QuadletImportEntry{
@@ -69,71 +69,11 @@ func TestHandlerImport_Success(t *testing.T) {
 	assert.Equal(t, "db", response.Imported[1].Name)
 }
 
-func TestHandlerImport_InvalidCredentials(t *testing.T) {
-	t.Parallel()
-
-	mockService := &MockQuadletService{}
-	handler := NewQuadletHandler(mockService, nil)
-
-	reqBody := QuadletImportRequest{
-		Quadlets: []QuadletImportEntry{
-			{Name: "web", Resource: "container", Content: "[Container]\nImage=nginx\n"},
-		},
-	}
-
-	body, err := json.Marshal(reqBody)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader(body))
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine-1")
-	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	handler.Import(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
-}
-
-func TestHandlerImport_MissingMachineID(t *testing.T) {
-	t.Parallel()
-
-	mockService := &MockQuadletService{}
-	handler := NewQuadletHandler(mockService, nil)
-
-	reqBody := QuadletImportRequest{
-		Quadlets: []QuadletImportEntry{
-			{Name: "web", Resource: "container", Content: "[Container]\nImage=nginx\n"},
-		},
-	}
-
-	body, err := json.Marshal(reqBody)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/machines//quadlets/import", bytes.NewReader(body))
-
-	rctx := chi.NewRouteContext()
-	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
-	ctx = contextutils.SetUserID(ctx, "user-1")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	handler.Import(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
 func TestHandlerImport_InvalidRequestBody(t *testing.T) {
 	t.Parallel()
 
 	mockService := &MockQuadletService{}
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader([]byte("invalid json")))
 
@@ -159,7 +99,7 @@ func TestHandlerImport_ServiceError(t *testing.T) {
 			return nil, errors.ErrConnectionFailed
 		},
 	}
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	reqBody := QuadletImportRequest{
 		Quadlets: []QuadletImportEntry{
@@ -190,7 +130,7 @@ func TestHandlerImport_EmptyQuadletsList(t *testing.T) {
 	t.Parallel()
 
 	mockService := &MockQuadletService{}
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	reqBody := QuadletImportRequest{
 		Quadlets: []QuadletImportEntry{},
@@ -232,7 +172,7 @@ func TestHandlerImport_PartialFailure(t *testing.T) {
 			return importResult, nil
 		},
 	}
-	handler := NewQuadletHandler(mockService, nil)
+	handler := NewQuadletHandler(mockService)
 
 	reqBody := QuadletImportRequest{
 		Quadlets: []QuadletImportEntry{

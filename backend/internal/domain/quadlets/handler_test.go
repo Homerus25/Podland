@@ -61,22 +61,6 @@ func TestQuadletHandler_List(t *testing.T) {
 			expectedBody:   `[]` + "\n",
 		},
 		{
-			name:           "missing user ID",
-			userID:         "",
-			machineID:      "machine123",
-			queryParams:    "",
-			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   "",
-		},
-		{
-			name:           "missing machine ID",
-			userID:         "user123",
-			machineID:      "",
-			queryParams:    "",
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "",
-		},
-		{
 			name:           "connection failed",
 			userID:         "user123",
 			machineID:      "machine123",
@@ -134,7 +118,7 @@ func TestQuadletHandler_List(t *testing.T) {
 				},
 			}
 
-			handler := NewQuadletHandler(mockService, nil)
+			handler := NewQuadletHandler(mockService)
 
 			req := httptest.NewRequest("GET", "/api/machines/"+tt.machineID+"/quadlets"+tt.queryParams, nil)
 
@@ -207,7 +191,7 @@ func TestQuadletHandler_List_ForwardsQueryFiltersToService(t *testing.T) {
 				},
 			}
 
-			handler := NewQuadletHandler(mockService, nil)
+			handler := NewQuadletHandler(mockService)
 
 			req := httptest.NewRequest("GET", "/api/machines/machine123/quadlets"+tt.queryParams, nil)
 
@@ -375,26 +359,6 @@ func TestQuadletHandler_Get(t *testing.T) {
 			expectedBody:   "",
 		},
 		{
-			name:           "missing user ID",
-			userID:         "",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			mockQuadlet:    nil,
-			mockError:      nil,
-			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   "",
-		},
-		{
-			name:           "missing machine ID",
-			userID:         "user123",
-			machineID:      "",
-			quadletID:      "my-container.container",
-			mockQuadlet:    nil,
-			mockError:      nil,
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "",
-		},
-		{
 			name:           "missing quadlet ID",
 			userID:         "user123",
 			machineID:      "machine123",
@@ -444,7 +408,7 @@ func TestQuadletHandler_Get(t *testing.T) {
 				},
 			}
 
-			handler := NewQuadletHandler(mockService, nil)
+			handler := NewQuadletHandler(mockService)
 
 			req := httptest.NewRequest("GET", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID, nil)
 
@@ -500,20 +464,6 @@ func TestQuadletHandler_Create(t *testing.T) {
 			},
 			expectedStatus: http.StatusCreated,
 			expectedBody:   `{"id":"my-container","name":"my-container","path":"/etc/containers/systemd/my-container.container","resource":"container","state":"unknown","content":"[Container]\nImage=nginx:latest\n"}` + "\n",
-		},
-		{
-			name:           "missing user ID",
-			userID:         "",
-			machineID:      "machine123",
-			requestBody:    `{"name":"x","resource":"container","content":"y"}`,
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name:           "missing machine ID",
-			userID:         "user123",
-			machineID:      "",
-			requestBody:    `{"name":"x","resource":"container","content":"y"}`,
-			expectedStatus: http.StatusBadRequest,
 		},
 		{
 			name:           "malformed JSON body",
@@ -572,7 +522,7 @@ func TestQuadletHandler_Create(t *testing.T) {
 				},
 			}
 
-			handler := NewQuadletHandler(mockService, nil)
+			handler := NewQuadletHandler(mockService)
 
 			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets", bytes.NewBufferString(tt.requestBody))
 
@@ -665,22 +615,6 @@ func TestQuadletHandler_Update(t *testing.T) {
 			expectedStatus: http.StatusBadRequest,
 		},
 		{
-			name:           "missing user ID",
-			userID:         "",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			requestBody:    `{"content":"x"}`,
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name:           "missing machine ID",
-			userID:         "user123",
-			machineID:      "",
-			quadletID:      "my-container.container",
-			requestBody:    `{"content":"x"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
 			name:           "missing quadlet ID",
 			userID:         "user123",
 			machineID:      "machine123",
@@ -723,7 +657,7 @@ func TestQuadletHandler_Update(t *testing.T) {
 				},
 			}
 
-			handler := NewQuadletHandler(mockService, nil)
+			handler := NewQuadletHandler(mockService)
 
 			req := httptest.NewRequest("PUT", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID, bytes.NewBufferString(tt.requestBody))
 
@@ -844,20 +778,6 @@ func TestQuadletHandler_Delete(t *testing.T) {
 			expectedStatus: http.StatusBadGateway,
 		},
 		{
-			name:           "missing user ID",
-			userID:         "",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name:           "missing machine ID",
-			userID:         "user123",
-			machineID:      "",
-			quadletID:      "my-container.container",
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
 			name:           "missing quadlet ID",
 			userID:         "user123",
 			machineID:      "machine123",
@@ -899,7 +819,7 @@ func TestQuadletHandler_Delete(t *testing.T) {
 				},
 			}
 
-			handler := NewQuadletHandler(mockService, nil)
+			handler := NewQuadletHandler(mockService)
 
 			req := httptest.NewRequest("DELETE", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+tt.queryParams, nil)
 
@@ -992,20 +912,6 @@ func TestQuadletHandler_Start(t *testing.T) {
 			expectedStatus: http.StatusInternalServerError,
 		},
 		{
-			name:           "missing user ID",
-			userID:         "",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name:           "missing machine ID",
-			userID:         "user123",
-			machineID:      "",
-			quadletID:      "my-container.container",
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
 			name:           "missing quadlet ID",
 			userID:         "user123",
 			machineID:      "machine123",
@@ -1027,7 +933,7 @@ func TestQuadletHandler_Start(t *testing.T) {
 				},
 			}
 
-			handler := NewQuadletHandler(mockService, nil)
+			handler := NewQuadletHandler(mockService)
 
 			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+"/start", nil)
 
@@ -1176,13 +1082,6 @@ func TestQuadletHandler_Stop(t *testing.T) {
 			expectedStatus: http.StatusInternalServerError,
 		},
 		{
-			name:           "missing user ID",
-			userID:         "",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
 			name:           "missing quadlet ID",
 			userID:         "user123",
 			machineID:      "machine123",
@@ -1206,7 +1105,7 @@ func TestQuadletHandler_Stop(t *testing.T) {
 				},
 			}
 
-			handler := NewQuadletHandler(mockService, nil)
+			handler := NewQuadletHandler(mockService)
 
 			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+"/stop"+tt.queryParams, nil)
 
@@ -1311,13 +1210,6 @@ func TestQuadletHandler_Restart(t *testing.T) {
 			expectedStatus: http.StatusInternalServerError,
 		},
 		{
-			name:           "missing user ID",
-			userID:         "",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
 			name:           "missing quadlet ID",
 			userID:         "user123",
 			machineID:      "machine123",
@@ -1341,7 +1233,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 				},
 			}
 
-			handler := NewQuadletHandler(mockService, nil)
+			handler := NewQuadletHandler(mockService)
 
 			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+"/restart"+tt.queryParams, nil)
 
@@ -1501,22 +1393,6 @@ func TestQuadletHandler_Generate(t *testing.T) {
 			mockError:      errGeneric,
 			expectedStatus: http.StatusInternalServerError,
 		},
-		{
-			name:           "missing user ID",
-			userID:         "",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"my-container","resourceType":"container"}`,
-			expectedStatus: http.StatusUnauthorized,
-		},
-		{
-			name:           "missing machine ID",
-			userID:         "user123",
-			machineID:      "",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"my-container","resourceType":"container"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
 
 		{
 			name:           "malformed JSON body",
@@ -1541,7 +1417,7 @@ func TestQuadletHandler_Generate(t *testing.T) {
 				},
 			}
 
-			handler := NewQuadletHandler(mockService, nil)
+			handler := NewQuadletHandler(mockService)
 
 			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID, bytes.NewBufferString(tt.requestBody))
 
