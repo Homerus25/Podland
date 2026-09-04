@@ -27,11 +27,12 @@ export function MachineCard({ machine }: { machine: Machine }) {
 
 	return (
 		<Card
+			as="button"
+			type="button"
 			data-testid="machine-card"
 			onClick={() => navigate(`/machines/${machine.id}`)}
 			cursor="pointer"
-			role="button"
-			aria-label={`View ${machine.name}`}
+			textAlign="left"
 			_hover={{ shadow: "md" }}
 		>
 			<CardHeader>
