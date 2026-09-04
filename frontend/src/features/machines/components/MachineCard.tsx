@@ -1,5 +1,4 @@
 import {
-	Button,
 	Card,
 	CardBody,
 	CardHeader,
@@ -27,7 +26,14 @@ export function MachineCard({ machine }: { machine: Machine }) {
 			: (statusQuery.data?.status ?? "checking");
 
 	return (
-		<Card data-testid="machine-card">
+		<Card
+			data-testid="machine-card"
+			onClick={() => navigate(`/machines/${machine.id}`)}
+			cursor="pointer"
+			role="button"
+			aria-label={`View ${machine.name}`}
+			_hover={{ shadow: "md" }}
+		>
 			<CardHeader>
 				<HStack justify="space-between">
 					<Heading size="md">{machine.name}</Heading>
@@ -45,15 +51,6 @@ export function MachineCard({ machine }: { machine: Machine }) {
 				<Text fontFamily="mono">
 					{machine.hostname}:{machine.port}
 				</Text>
-				<Button
-					size="sm"
-					colorScheme="blue"
-					variant="outline"
-					onClick={() => navigate(`/machines/${machine.id}`)}
-					data-testid="view-machine-button"
-				>
-					View
-				</Button>
 			</CardBody>
 		</Card>
 	);

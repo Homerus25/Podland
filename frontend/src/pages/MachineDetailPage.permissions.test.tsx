@@ -128,14 +128,13 @@ describe("permission gating on the machine detail page", () => {
 				resolveInitialState: async () => ({ username: "alice" }),
 			});
 
-			const viewButton = await screen.findByTestId("view-machine-button");
-			expect(viewButton).toBeInTheDocument();
+			const card = await screen.findByTestId("machine-card");
+			expect(card).toBeInTheDocument();
 
 			// The list has no machine-scoped write actions, so there is nothing
 			// for a read user to be baited with — assert no stray actions appear.
-			const card = screen.getByTestId("machine-card");
 			const cardButtons = card.querySelectorAll("button");
-			expect(cardButtons).toHaveLength(1);
+			expect(cardButtons).toHaveLength(0);
 		},
 	);
 });

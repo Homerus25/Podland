@@ -50,7 +50,7 @@ function renderMachineDetailPage(id = "m-1") {
 }
 
 describe("MachineDetailPage", () => {
-	it("navigates from the machines list into the detail page via the View action", async () => {
+	it("navigates from the machines list into the detail page via the card click", async () => {
 		server.use(
 			http.get("*/api/machines", () => HttpResponse.json([machineFixture])),
 		);
@@ -63,7 +63,7 @@ describe("MachineDetailPage", () => {
 			resolveInitialState: async () => ({ username: "alice" }),
 		});
 
-		await userEvent.click(await screen.findByRole("button", { name: /view/i }));
+		await userEvent.click(await screen.findByTestId("machine-card"));
 
 		expect(await screen.findByText("prod-web-01")).toBeInTheDocument();
 		expect(screen.getByText("web01.example.com:22")).toBeInTheDocument();
