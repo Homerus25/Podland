@@ -40,6 +40,11 @@ export function canManageVolumes(permission: EffectivePermission): boolean {
 	return permission === "admin" || permission === "write";
 }
 
+// Image delete/prune change the machine's remote state (write+).
+export function canManageImages(permission: EffectivePermission): boolean {
+	return permission === "admin" || permission === "write";
+}
+
 // Revealing a secret's value is the admin-only capability (the backend's
 // reveal gate answers 403 below admin).
 export function canRevealSecrets(permission: EffectivePermission): boolean {

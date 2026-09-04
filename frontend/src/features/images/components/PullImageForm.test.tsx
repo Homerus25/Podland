@@ -50,7 +50,7 @@ function renderTab() {
 	render(
 		<QueryClientProvider client={queryClient}>
 			<PullImageForm machineId="m-1" />
-			<ImageList machineId="m-1" />
+			<ImageList machineId="m-1" permission="admin" />
 		</QueryClientProvider>,
 	);
 }

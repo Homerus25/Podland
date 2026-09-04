@@ -21,6 +21,26 @@ export async function listImages(machineId: string): Promise<ImageSummary[]> {
 	return response.data;
 }
 
+// One entry of POST /api/machines/{id}/images/prune -> 200 (backend
+// images dto.go ImagePruneResponse): a removed image's ID and reclaimed
+// size, plus podman's per-image error when removal failed.
+export interface ImagePruneReport {
+	id: string;
+	size: number;
+	error?: string;
+}
+
+// Prunes every unused image on the machine. Images in use by containers
+// are never touched.
+export async function pruneImages(
+	machineId: string,
+): Promise<ImagePruneReport[]> {
+	const response = await api.post<ImagePruneReport[]>(
+		`/machines/${encodeURIComponent(machineId)}/images/prune`,
+	);
+	return response.data;
+}
+
 export async function deleteImage(
 	machineId: string,
 	imageId: string,

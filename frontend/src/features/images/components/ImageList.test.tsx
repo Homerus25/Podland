@@ -21,7 +21,7 @@ function renderImageList() {
 	});
 	return render(
 		<QueryClientProvider client={queryClient}>
-			<ImageList machineId="m-1" />
+			<ImageList machineId="m-1" permission="admin" />
 		</QueryClientProvider>,
 	);
 }

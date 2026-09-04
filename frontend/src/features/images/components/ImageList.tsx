@@ -1,5 +1,7 @@
 import {
+	Box,
 	Button,
+	Flex,
 	Table,
 	TableContainer,
 	Tbody,
@@ -10,8 +12,19 @@ import {
 	Tr,
 } from "@chakra-ui/react";
 import { PullImageForm } from "@features/images/components/PullImageForm";
-import { useDeleteImage, useImages } from "@features/images/hooks/useImages";
-import type { ImageSummary } from "@features/images/services/imagesApi";
+import {
+	useDeleteImage,
+	useImages,
+	usePruneImages,
+} from "@features/images/hooks/useImages";
+import type {
+	ImagePruneReport,
+	ImageSummary,
+} from "@features/images/services/imagesApi";
+import {
+	canManageImages,
+	type EffectivePermission,
+} from "@features/machines/permissions";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
 import { getApiError } from "@shared/utils/api";
@@ -105,10 +118,111 @@ function DeleteImageModal({
 	);
 }
 
-export function ImageList({ machineId }: { machineId: string }) {
+function PruneReportList({ report }: { report: ImagePruneReport[] }) {
+	if (report.length === 0) {
+		return (
+			<Text data-testid="prune-report-empty">
+				Nothing to prune: no unused images on this machine.
+			</Text>
+		);
+	}
+	return (
+		<TableContainer>
+			<Table data-testid="prune-report" size="sm">
+				<Thead>
+					<Tr>
+						<Th>Removed image</Th>
+						<Th isNumeric>Reclaimed</Th>
+					</Tr>
+				</Thead>
+				<Tbody>
+					{report.map((entry) => (
+						<Tr key={entry.id} data-testid="prune-report-row">
+							<Td fontFamily="mono">{shortImageId(entry.id)}</Td>
+							{entry.error ? (
+								<Td color="red.500">{entry.error}</Td>
+							) : (
+								<Td isNumeric>{formatBytes(entry.size)}</Td>
+							)}
+						</Tr>
+					))}
+				</Tbody>
+			</Table>
+		</TableContainer>
+	);
+}
+
+function PruneImagesModal({
+	onClose,
+	pruneImages,
+}: {
+	onClose: () => void;
+	pruneImages: ReturnType<typeof usePruneImages>;
+}) {
+	const report = pruneImages.data;
+	return (
+		<Modal
+			isOpen
+			onClose={onClose}
+			title={report ? "Prune report" : "Prune unused images"}
+			footer={
+				report ? (
+					<Button onClick={onClose} data-testid="close-prune-report-button">
+						Close
+					</Button>
+				) : (
+					<>
+						<Button variant="ghost" onClick={onClose}>
+							Cancel
+						</Button>
+						<Button
+							colorScheme="red"
+							onClick={() => pruneImages.mutate()}
+							isLoading={pruneImages.isPending}
+							data-testid="confirm-prune-button"
+						>
+							Prune images
+						</Button>
+					</>
+				)
+			}
+		>
+			{report ? (
+				<PruneReportList report={report} />
+			) : (
+				<>
+					<Text>
+						All unused images on this machine will be removed. This cannot be
+						undone.
+					</Text>
+					<Text mt={2} color="gray.500">
+						Images that are in use by containers are safe and will not be
+						touched.
+					</Text>
+					{pruneImages.error ? (
+						<Box mt={2}>
+							<ErrorDisplay error={getApiError(pruneImages.error)} />
+						</Box>
+					) : null}
+				</>
+			)}
+		</Modal>
+	);
+}
+
+export function ImageList({
+	machineId,
+	permission,
+}: {
+	machineId: string;
+	permission: EffectivePermission;
+}) {
 	const { data: images, isPending, error } = useImages(machineId);
 	const deleteImage = useDeleteImage(machineId);
+	const pruneImages = usePruneImages(machineId);
 	const [pendingDelete, setPendingDelete] = useState<ImageSummary | null>(null);
+	const [isPruneOpen, setIsPruneOpen] = useState(false);
+	const canManage = canManageImages(permission);
 
 	if (isPending) {
 		return <Text data-testid="images-loading">Loading images…</Text>;
@@ -126,7 +240,34 @@ export function ImageList({ machineId }: { machineId: string }) {
 
 	return (
 		<>
-			<PullImageForm machineId={machineId} />
+			<Flex gap={2} align="flex-start">
+				<Box flex={1}>
+					<PullImageForm machineId={machineId} />
+				</Box>
+				{canManage ? (
+					<Button
+						size="sm"
+						colorScheme="red"
+						variant="outline"
+						onClick={() => {
+							pruneImages.reset();
+							setIsPruneOpen(true);
+						}}
+						data-testid="prune-images-button"
+					>
+						Delete unused images
+					</Button>
+				) : (
+					<Text
+						color="gray.500"
+						alignSelf="center"
+						data-testid="images-permission-hint"
+					>
+						You have read-only access to this machine. Ask an owner or admin for
+						write access to delete its unused images.
+					</Text>
+				)}
+			</Flex>
 			<TableContainer>
 				<Table data-testid="images-table" variant="simple">
 					<Thead>
@@ -166,6 +307,15 @@ export function ImageList({ machineId }: { machineId: string }) {
 					</Tbody>
 				</Table>
 			</TableContainer>
+			{isPruneOpen ? (
+				<PruneImagesModal
+					onClose={() => {
+						pruneImages.reset();
+						setIsPruneOpen(false);
+					}}
+					pruneImages={pruneImages}
+				/>
+			) : null}
 			{pendingDelete ? (
 				<DeleteImageModal
 					image={pendingDelete}

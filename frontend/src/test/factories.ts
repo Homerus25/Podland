@@ -1,3 +1,4 @@
+import type { ImageSummary } from "@features/images/services/imagesApi";
 import type { VolumeSummary } from "@features/volumes/services/volumesApi";
 
 // Shared test fixture factories: one authoritative shape per DTO, imported
@@ -14,6 +15,19 @@ export function volumeFixture(
 		labels: {},
 		options: {},
 		mountpoint: "/var/lib/containers/storage/volumes/app-data/_data",
+		...overrides,
+	};
+}
+
+export function imageFixture(
+	overrides: Partial<ImageSummary> = {},
+): ImageSummary {
+	return {
+		id: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		repoTags: ["docker.io/library/nginx:1.27"],
+		repoDigests: [],
+		createdAt: "2026-08-18T10:00:00Z",
+		size: 157286400,
 		...overrides,
 	};
 }

@@ -44,7 +44,7 @@ async function renderImageList() {
 	});
 	render(
 		<QueryClientProvider client={queryClient}>
-			<ImageList machineId="m-1" />
+			<ImageList machineId="m-1" permission="admin" />
 		</QueryClientProvider>,
 	);
 	await screen.findByText("docker.io/library/nginx:1.27");
@@ -57,7 +57,7 @@ describe("ImageList delete", () => {
 		await renderImageList();
 
 		await userEvent.click(
-			screen.getAllByRole("button", { name: /delete/i })[0],
+			screen.getAllByRole("button", { name: /delete docker\.io/i })[0],
 		);
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 		await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
@@ -86,7 +86,7 @@ describe("ImageList delete", () => {
 		await renderImageList();
 
 		await userEvent.click(
-			screen.getAllByRole("button", { name: /delete/i })[0],
+			screen.getAllByRole("button", { name: /delete docker\.io/i })[0],
 		);
 		await userEvent.click(screen.getByTestId("confirm-delete-button"));
 
@@ -125,7 +125,7 @@ describe("ImageList delete", () => {
 		await renderImageList();
 
 		await userEvent.click(
-			screen.getAllByRole("button", { name: /delete/i })[0],
+			screen.getAllByRole("button", { name: /delete docker\.io/i })[0],
 		);
 		await userEvent.click(screen.getByTestId("confirm-delete-button"));
 
@@ -166,7 +166,7 @@ describe("ImageList delete", () => {
 		await renderImageList();
 
 		await userEvent.click(
-			screen.getAllByRole("button", { name: /delete/i })[0],
+			screen.getAllByRole("button", { name: /delete docker\.io/i })[0],
 		);
 		await userEvent.click(screen.getByTestId("confirm-delete-button"));
 
