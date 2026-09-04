@@ -68,20 +68,6 @@ func TestSecretHandler_List(t *testing.T) {
 			expectedBody:   `[]` + "\n",
 		},
 		{
-			name:           "missing user ID",
-			userID:         "",
-			machineID:      "machine123",
-			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   "",
-		},
-		{
-			name:           "missing machine ID",
-			userID:         "user123",
-			machineID:      "",
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "",
-		},
-		{
 			name:           "connection failed",
 			userID:         "user123",
 			machineID:      "machine123",
@@ -417,12 +403,6 @@ func TestSecretHandler_Get_MissingContextAndParams(t *testing.T) {
 		return req.WithContext(ctx)
 	}
 
-	t.Run("missing user ID", func(t *testing.T) {
-		rr := httptest.NewRecorder()
-		NewSecretHandler(&MockSecretService{}).Get(rr, newReq("", "db-password"))
-		assert.Equal(t, http.StatusUnauthorized, rr.Code)
-	})
-
 	t.Run("missing secret ID", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 		NewSecretHandler(&MockSecretService{}).Get(rr, newReq("user123", ""))
@@ -568,24 +548,6 @@ func TestSecretHandler_Create_RejectsValueWithoutEchoingIt(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 	assert.NotContains(t, rr.Body.String(), "top-secret-payload",
 		"a validation failure must never echo the submitted value")
-}
-
-// TestSecretHandler_Create_MissingContextAndParams pins the request-shape
-// guards: no authenticated user → 401, no {id} URL param → 400.
-func TestSecretHandler_Create_MissingContextAndParams(t *testing.T) {
-	t.Run("missing user ID", func(t *testing.T) {
-		rr := httptest.NewRecorder()
-		NewSecretHandler(&MockSecretService{}).Create(rr,
-			newCreateRequest("", "machine123", `{"name":"db-password","value":"hunter2"}`))
-		assert.Equal(t, http.StatusUnauthorized, rr.Code)
-	})
-
-	t.Run("missing machine ID", func(t *testing.T) {
-		rr := httptest.NewRecorder()
-		NewSecretHandler(&MockSecretService{}).Create(rr,
-			newCreateRequest("user123", "", `{"name":"db-password","value":"hunter2"}`))
-		assert.Equal(t, http.StatusBadRequest, rr.Code)
-	})
 }
 
 // TestSecretHandler_Create_ErrorMapping pins the error pass-throughs: the
@@ -869,7 +831,6 @@ func TestSecretHandler_Delete_MissingContextAndParams(t *testing.T) {
 		secretID       string
 		expectedStatus int
 	}{
-		{name: "missing user ID", userID: "", secretID: "db-password", expectedStatus: http.StatusUnauthorized},
 		{name: "missing secret ID", userID: "user123", secretID: "", expectedStatus: http.StatusBadRequest},
 	}
 
