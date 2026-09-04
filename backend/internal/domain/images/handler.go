@@ -177,6 +177,44 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Prune handles removing all unused images on a machine. Route-level
+// RequireMachinePermission(write) (app.go) gates it at write; podman
+// leaves in-use images alone. Returns 200 with one report entry per
+// removed image (id, reclaimed size, any per-image error).
+func (h *ImageHandler) Prune(w http.ResponseWriter, r *http.Request) {
+	slog.InfoContext(r.Context(), "Prune")
+
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	prunes, err := h.service.Prune(r.Context(), userID, machineID)
+	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
+		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), "prune", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
+		return
+	}
+
+	result := FromImagePruneReports(prunes)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(result)
+}
+
 // Delete handles deleting an image
 func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "Delete")

@@ -258,6 +258,10 @@ func New(cfg *config.Config) (*App, error) {
 					r.Route("/images", func(r chi.Router) {
 						r.Get("/", imageHandler.List)
 						r.With(requireWrite).Post("/pull", imageHandler.Pull)
+						// Bulk deletion, so write-level like the volume
+						// prune. No shadowing hazard: the only parametric
+						// images route is a DELETE.
+						r.With(requireWrite).Post("/prune", imageHandler.Prune)
 						r.With(requireWrite).Delete("/{imageId}", imageHandler.Delete)
 					})
 

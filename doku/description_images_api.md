@@ -115,6 +115,35 @@ For type: `complete`:
 - 400: `VALIDATION_FAILED`, `INVALID_REQUEST`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
+### POST /api/machines/{id}/images/prune
+
+Remove all unused images on a machine in one call — tagged or not, the equivalent of `podman image prune -a`. Images in use by containers are untouched.
+
+**Authentication:** Required
+
+**Permissions:** Write level required (bulk deletion, wide blast radius)
+
+**Response (Success - 200):**
+```json
+[
+  {
+    "id": "sha256:abc123...",
+    "size": 4096,
+    "error": "string, only present when podman reported a per-image removal error"
+  }
+]
+```
+
+One entry per removed image with its ID and reclaimed size (bytes). An empty array means nothing was pruned.
+
+**Response (Error):**
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`, `PERMISSION_DENIED` (read-level users)
 - 404: `MACHINE_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`

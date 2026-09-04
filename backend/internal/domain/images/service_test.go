@@ -5,11 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
+	"github.com/stretchr/testify/assert"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -258,4 +258,19 @@ func TestImageService_Pull_EngineFailure(t *testing.T) {
 	assert.Error(t, err, "Should return error when engine pull fails")
 	assert.Equal(t, appErrors.ErrImagePullFailed, err, "Should return ErrImagePullFailed")
 	assert.Nil(t, result, "Should return nil result when engine pull fails")
+}
+
+// TestImageService_Prune_ConnectionFailure tests that Prune wraps
+// connection errors from the ConnectionManager.
+func TestImageService_Prune_ConnectionFailure(t *testing.T) {
+	ctx := context.Background()
+	connErr := errors.New("SSH connection failed")
+	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
+	service := NewImageService(mockConnManager)
+
+	result, err := service.Prune(ctx, "test-user", "test-machine")
+
+	assert.Error(t, err, "Should return error when connection fails")
+	assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+	assert.Nil(t, result, "Should return nil result when connection fails")
 }

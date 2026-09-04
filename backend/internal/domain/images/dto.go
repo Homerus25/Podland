@@ -5,7 +5,40 @@ import (
 	"time"
 
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
+
+// ImagePruneResponse is one entry in the image prune API response: the
+// removed image's ID and the reclaimed size (bytes), plus any
+// per-image error podman reported while removing it.
+type ImagePruneResponse struct {
+	// ID of the removed image
+	ID string `json:"id"`
+	// Reclaimed size in bytes, when podman reports it
+	Size uint64 `json:"size"`
+	// Per-image error podman reported, if the removal failed
+	Error string `json:"error,omitempty"`
+}
+
+// FromImagePruneReports converts podman's image prune reports to the
+// API array.
+func FromImagePruneReports(reports []*reports.PruneReport) []ImagePruneResponse {
+	out := make([]ImagePruneResponse, 0, len(reports))
+	for _, report := range reports {
+		if report == nil {
+			continue
+		}
+		entry := ImagePruneResponse{
+			ID:   report.Id,
+			Size: report.Size,
+		}
+		if report.Err != nil {
+			entry.Error = report.Err.Error()
+		}
+		out = append(out, entry)
+	}
+	return out
+}
 
 // ImagePullRequest represents a request to pull an image from a registry
 type ImagePullRequest struct {

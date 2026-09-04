@@ -16,6 +16,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
 // MockImageService is a mock implementation of ImageServiceInterface for testing.
@@ -34,6 +35,14 @@ func (m *MockImageService) List(ctx context.Context, userID, machineID string, o
 func (m *MockImageService) Delete(ctx context.Context, userID, machineID, imageID string, force bool) error {
 	args := m.Called(ctx, userID, machineID, imageID, force)
 	return args.Error(0)
+}
+
+func (m *MockImageService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
+	args := m.Called(ctx, userID, machineID)
+	if prunes, ok := args.Get(0).([]*reports.PruneReport); ok {
+		return prunes, args.Error(1)
+	}
+	return nil, args.Error(1)
 }
 
 func (m *MockImageService) Pull(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {

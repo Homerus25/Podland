@@ -9,6 +9,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
@@ -23,6 +24,7 @@ type ImageServiceInterface interface {
 	Delete(ctx context.Context, userID, machineID, imageID string, force bool) error
 	Pull(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error)
 	PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(event PullProgressEvent)) (*entities.ImagePullReport, error)
+	Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error)
 }
 
 // ImageService provides business logic for images.
@@ -127,6 +129,31 @@ func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, 
 	}
 
 	return report, nil
+}
+
+// Prune removes every unused image on the machine in one call,
+// tagged or not (the equivalent of `podman image prune -a`). Images
+// in use by containers are untouched by podman. Returns one prune
+// report per removed image with its reclaimed size.
+func (s *ImageService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
+	connCtx, err := s.connManager.GetConnection(machineID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+	}
+	defer s.connManager.Release(machineID)
+
+	imageEngine := &tunnel.ImageEngine{
+		ClientCtx: connCtx,
+	}
+
+	prunes, err := imageEngine.Prune(ctx, entities.ImagePruneOptions{
+		All: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to prune images: %w", err)
+	}
+
+	return prunes, nil
 }
 
 // progressAdapter adapts podman progress output to our progress event format
