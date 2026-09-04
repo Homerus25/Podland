@@ -18,5 +18,7 @@ hook add PreToolUse \
 
 # Build the integration-tagged tests (backend/test/integration) so gopls
 # stops warning "No packages found for open file" on those files.
+lsp add go --command gopls \
+	--options '{"buildFlags": ["-tags=integration"]}'
 lsp add gopls --command gopls \
 	--options '{"buildFlags": ["-tags=integration"]}'

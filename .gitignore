@@ -4,5 +4,4 @@ podland.db-shm
 jwt-private.pem
 jwt-public.pem
 node_modules
-docs/
 resonance/
