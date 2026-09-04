@@ -15,3 +15,8 @@ hook add PreToolUse \
 	--matcher '^(edit|multiedit|lsp_replace_symbol)$' \
 	--command "$CRUSH_PROJECT_DIR/.crush/hooks/gofmt.sh" \
 	--name gofmt-format
+
+# Build the integration-tagged tests (backend/test/integration) so gopls
+# stops warning "No packages found for open file" on those files.
+lsp add gopls --command gopls \
+	--options '{"buildFlags": ["-tags=integration"]}'
