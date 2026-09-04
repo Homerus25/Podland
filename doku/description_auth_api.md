@@ -26,21 +26,44 @@ Content-Type: application/json
 ```
 
 **Response (Success - 200):**
-- Returns JWT token in response body
-- Returns user information
+- Returns the JWT access token and the authenticated user's username in the response body
+- Additionally sets the httpOnly refresh cookie (see POST /api/auth/refresh)
 ```json
 {
   "token": "string (jwt)",
-  "user": {
-    "id": "string (uuid)",
-    "username": "string"
-  }
+  "username": "string"
 }
 ```
 
 **Response (Error):**
 - 401 Unauthorized: Invalid credentials (`INVALID_CREDENTIALS`)
 - 400 Bad Request: Invalid request format
+
+---
+
+#### POST /api/auth/refresh
+
+Renews an access JWT from the httpOnly refresh cookie set by login (or a
+previous refresh). No Authorization header; the cookie is the credential.
+Rotation is the only refresh path: every successful call replaces the
+session row behind the cookie with a fresh token (and renewed, sliding
+expiry) and sets the rotated cookie.
+
+**Request:**
+- No body; sends the `refresh_token` httpOnly cookie (Path=/api/auth)
+
+**Response (Success - 200):**
+- Same body as login; sets a rotated refresh cookie
+```json
+{
+  "token": "string (jwt)",
+  "username": "string"
+}
+```
+
+**Response (Error):**
+- 401 Unauthorized: Missing/unknown/replayed token (`AUTH_REFRESH_INVALID`) or expired session (`AUTH_SESSION_EXPIRED`)
+- Rate-limited like login
 
 ---
 

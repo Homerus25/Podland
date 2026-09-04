@@ -64,6 +64,54 @@ describe("app routing guard", () => {
 		expect(screen.queryByRole("status")).not.toBeInTheDocument();
 	});
 
+	describe("session restore on reload", () => {
+		it("restores the session from the refresh cookie on reload and stays on the deep link", async () => {
+			const authHeaders: (string | null)[] = [];
+			server.use(
+				http.get("*/api/machines", ({ request }) => {
+					authHeaders.push(request.headers.get("Authorization"));
+					return HttpResponse.json([]);
+				}),
+				http.post("*/api/auth/refresh", () => {
+					return HttpResponse.json({
+						token: "refreshed-access-token",
+						username: "alice",
+					});
+				}),
+			);
+			renderApp("/machines");
+
+			expect(
+				await screen.findByRole("heading", { name: "Machines" }),
+			).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/machines");
+			expect(screen.getByTestId("auth-user")).toHaveTextContent("alice");
+			expect(authHeaders[0]).toBe("Bearer refreshed-access-token");
+		});
+
+		it("redirects to /login when the refresh cookie is rejected", async () => {
+			server.use(
+				http.post("*/api/auth/refresh", () => {
+					return HttpResponse.json(
+						{
+							requestId: "req-1",
+							error: {
+								code: "AUTH_REFRESH_INVALID",
+								message: "Refresh token invalid",
+							},
+						},
+						{ status: 401 },
+					);
+				}),
+			);
+			renderApp("/machines");
+
+			expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/login");
+			expect(screen.getByTestId("auth-user")).toHaveTextContent("anonymous");
+		});
+	});
+
 	it("logs out: calls POST /api/auth/logout, clears auth state, and lands on /login", async () => {
 		let logoutCalls = 0;
 		server.use(

@@ -38,8 +38,9 @@ func findRefreshCookie(resp *http.Response) *http.Cookie {
 }
 
 // TestAuthHandler_Refresh_SetsRotatedCookieAndAccessToken asserts the
-// happy path: 200, a body carrying exactly the new access JWT, and a new
-// refresh cookie with all four security attributes and a rotated value.
+// happy path: 200, a body carrying the new access JWT and the username
+// it belongs to, and a new refresh cookie with all four security
+// attributes and a rotated value.
 func TestAuthHandler_Refresh_SetsRotatedCookieAndAccessToken(t *testing.T) {
 	mockRepo := seedLoginUser(t, "testuser", "test-password-123")
 	sessionRepo := testutils.NewMockSessionRepository()
@@ -65,8 +66,9 @@ func TestAuthHandler_Refresh_SetsRotatedCookieAndAccessToken(t *testing.T) {
 
 	var body map[string]any
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body), "Should decode refresh body")
-	assert.Equal(t, []string{"token"}, mapKeys(body), "Refresh body should contain only the access token field")
+	assert.ElementsMatch(t, []string{"token", "username"}, mapKeys(body), "Refresh body should carry the access token and the username")
 	assert.NotEmpty(t, body["token"], "Refresh body should carry the new access JWT")
+	assert.Equal(t, "testuser", body["username"], "Refresh body should carry the session user's username")
 }
 
 // decodeErrorEnvelope reads a structured error response into its code,

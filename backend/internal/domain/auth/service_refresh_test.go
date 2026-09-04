@@ -20,18 +20,20 @@ func TestAuthService_Refresh_UnknownTokenIsInvalid(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	accessToken, refreshToken, err := service.Refresh("no-such-token")
+	accessToken, refreshToken, user, err := service.Refresh("no-such-token")
 
 	assert.ErrorIs(t, err, apperrors.ErrRefreshInvalid, "Unknown token must be rejected as invalid")
 	assert.Empty(t, accessToken, "No access token should be issued for an unknown refresh token")
 	assert.Empty(t, refreshToken, "No refresh token should be issued for an unknown refresh token")
+	assert.Nil(t, user, "No user should be returned for an unknown refresh token")
 }
 
 // TestAuthService_Refresh_ValidTokenRotatesSession asserts the happy
 // path end-to-end at the service seam: refresh returns a new access JWT
-// for the session's user plus a distinct refresh token, and the session
-// store reflects a rotation — old hash gone, new hash present, expiry
-// slid forward by the full TTL.
+// for the session's user, the user themselves (so callers can restore
+// display state without a second lookup), plus a distinct refresh
+// token; and the session store reflects a rotation — old hash gone, new
+// hash present, expiry slid forward by the full TTL.
 func TestAuthService_Refresh_ValidTokenRotatesSession(t *testing.T) {
 	repo := seedLoginUser(t, "testuser", "test-password-123")
 	sessionRepo := testutils.NewMockSessionRepository()
@@ -43,11 +45,13 @@ func TestAuthService_Refresh_ValidTokenRotatesSession(t *testing.T) {
 	require.NoError(t, err, "Should log in to mint a refresh token")
 
 	before := time.Now()
-	accessToken, rotatedToken, err := service.Refresh(loginToken)
+	accessToken, rotatedToken, user, err := service.Refresh(loginToken)
 	require.NoError(t, err, "Valid refresh token should rotate")
 	after := time.Now()
 
 	assert.NotEmpty(t, accessToken, "Refresh should issue an access token")
+	require.NotNil(t, user, "Refresh should return the session's user")
+	assert.Equal(t, "testuser", user.Username, "Refresh should return the user the session belongs to")
 	claims, err := service.ValidateToken(accessToken)
 	require.NoError(t, err, "Issued access token should validate")
 	assert.Equal(t, "user-testuser", claims.UserID, "Access token must belong to the session's user")
@@ -82,16 +86,18 @@ func TestAuthService_Refresh_ReplayedTokenIsRejected(t *testing.T) {
 	_, loginToken, _, err := service.Login("testuser", "test-password-123")
 	require.NoError(t, err, "Should log in to mint a refresh token")
 
-	_, firstRotation, err := service.Refresh(loginToken)
+	_, firstRotation, user, err := service.Refresh(loginToken)
 	require.NoError(t, err, "First refresh should succeed")
 	require.NotEmpty(t, firstRotation, "First refresh should rotate the token")
+	require.NotNil(t, user, "First refresh should return the session's user")
 
-	accessToken, replayToken, err := service.Refresh(loginToken)
+	accessToken, replayToken, user, err := service.Refresh(loginToken)
 
 	assert.ErrorIs(t, err, apperrors.ErrRefreshInvalid, "Replaying the consumed token must be rejected as invalid")
 	assert.NotErrorIs(t, err, apperrors.ErrSessionExpired, "A replay is a missing row, not an expired one")
 	assert.Empty(t, accessToken, "No access token should be issued for a replay")
 	assert.Empty(t, replayToken, "No refresh token should be issued for a replay")
+	assert.Nil(t, user, "No user should be returned for a replay")
 }
 
 // TestAuthService_Refresh_ExpiredSessionFailsAndIsDeleted asserts a
@@ -112,11 +118,12 @@ func TestAuthService_Refresh_ExpiredSessionFailsAndIsDeleted(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	accessToken, refreshToken, err := service.Refresh("expired-refresh-token")
+	accessToken, refreshToken, user, err := service.Refresh("expired-refresh-token")
 
 	assert.ErrorIs(t, err, apperrors.ErrSessionExpired, "Expired session must report the session-expired error")
 	assert.Empty(t, accessToken, "No access token should be issued for an expired session")
 	assert.Empty(t, refreshToken, "No refresh token should be issued for an expired session")
+	assert.Nil(t, user, "No user should be returned for an expired session")
 
 	gone, err := sessionRepo.GetByTokenHash(expiredHash)
 	require.NoError(t, err, "Lookup of the expired row should not error")
@@ -154,10 +161,37 @@ func TestAuthService_Refresh_LostRotationRaceIsCleanInvalid(t *testing.T) {
 	raceService, err := NewTestAuthServiceWithSessionRepo(repo, raceRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create racing auth service without error")
 
-	accessToken, refreshToken, err := raceService.Refresh(loginToken)
+	accessToken, refreshToken, user, err := raceService.Refresh(loginToken)
 
 	assert.ErrorIs(t, err, apperrors.ErrRefreshInvalid, "Losing the rotation race must surface as invalid")
 	assert.Empty(t, accessToken, "No access token should be issued when the race is lost")
 	assert.Empty(t, refreshToken, "No refresh token should be issued when the race is lost")
+	assert.Nil(t, user, "No user should be returned when the race is lost")
 	assert.Empty(t, sessionRepo.SessionsForUser("user-testuser"), "A lost race must not leave a rotated row behind")
+}
+
+// TestAuthService_Refresh_OrphanedSessionIsInvalid asserts a session row
+// whose user no longer exists is rejected as invalid — a deleted user
+// leaves the cookie meaningless, indistinguishable from any other
+// unknown token, and the caller is sent to re-login rather than held in
+// a half-authenticated state.
+func TestAuthService_Refresh_OrphanedSessionIsInvalid(t *testing.T) {
+	repo := seedLoginUser(t, "testuser", "test-password-123")
+	sessionRepo := testutils.NewMockSessionRepository()
+	sessionRepo.AddSession(&models.Session{
+		ID:        "orphaned-session",
+		UserID:    "user-deleted",
+		TokenHash: sha256Hex("orphaned-cookie-token"),
+		CreatedAt: time.Now().Add(-1 * time.Hour),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	})
+	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
+	require.NoError(t, err, "Should create auth service without error")
+
+	accessToken, refreshToken, user, err := service.Refresh("orphaned-cookie-token")
+
+	assert.ErrorIs(t, err, apperrors.ErrRefreshInvalid, "An orphaned session must be rejected as invalid")
+	assert.Empty(t, accessToken, "No access token should be issued for an orphaned session")
+	assert.Empty(t, refreshToken, "No refresh token should be issued for an orphaned session")
+	assert.Nil(t, user, "No user should be returned for an orphaned session")
 }

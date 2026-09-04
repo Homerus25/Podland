@@ -28,6 +28,14 @@ envelope, `userID`/`machineID` extraction, JSON encode, test helper
 like `recordPruneRequest`) is **correct**, not a smell. Extract shared
 helpers only when a **third** domain copies the same shape.
 
+## API documentation sync
+
+A change that alters what an endpoint accepts or returns — body fields,
+status codes, error codes, cookie behavior — updates the matching
+`doku/description_*_api.md` section in the same change. The doku file is
+the contract; a handler change whose diff carries no matching doku hunk
+is incomplete.
+
 ## Testing expectations
 
 - Unit tests per domain package: handler contract tests against a

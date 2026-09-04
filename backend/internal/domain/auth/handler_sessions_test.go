@@ -49,8 +49,8 @@ func TestAuthHandler_Login_SetsRefreshCookieAttributes(t *testing.T) {
 }
 
 // TestAuthHandler_Login_BodyUnchanged asserts the login response body is
-// still exactly the access JWT — the refresh token lives only in the
-// cookie, not in the JSON payload.
+// still exactly the access JWT and the username it belongs to — the
+// refresh token lives only in the cookie, not in the JSON payload.
 func TestAuthHandler_Login_BodyUnchanged(t *testing.T) {
 	mockRepo := seedLoginUser(t, "testuser", "test-password-123")
 	service, err := NewTestAuthServiceWithUserRepo(mockRepo)
@@ -73,7 +73,7 @@ func TestAuthHandler_Login_BodyUnchanged(t *testing.T) {
 	var body map[string]any
 	err = json.NewDecoder(resp.Body).Decode(&body)
 	require.NoError(t, err, "Should decode response body")
-	assert.Equal(t, []string{"token"}, mapKeys(body), "Response body should contain only the access token field")
+	assert.ElementsMatch(t, []string{"token", "username"}, mapKeys(body), "Response body should carry the access token and the username")
 }
 
 // mapKeys returns the keys of a decoded JSON object.

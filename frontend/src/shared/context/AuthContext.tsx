@@ -20,16 +20,28 @@ interface AuthContextType {
 
 export const AuthContext = createContext<AuthContextType>(null!);
 
-// Auth state is memory-only in this slice, so initial resolution always
-// lands on logged-out; the silent-refresh slice will replace this default
-// with a refresh call. The seam exists so the routing guard can cover the
-// resolving state (full-page spinner) instead of flashing protected
-// content or the login form.
-const resolveToLoggedOut = () => Promise.resolve<User | null>(null);
+// Auth state is memory-only, so a reload starts with nothing and must
+// be rebuilt from the httpOnly refresh cookie: this silent-refresh
+// resolver exchanges that cookie for a fresh access JWT and the user it
+// belongs to. Any failure (no cookie, expired/revoked session, network)
+// simply resolves to logged-out — an expired session behaves exactly
+// like a logged-out one, no error screen. The seam exists so the
+// routing guard can cover the resolving state (full-page spinner)
+// instead of flashing protected content or the login form, and so tests
+// can pin the initial state deterministically.
+const resolveFromRefreshSession = async (): Promise<User | null> => {
+	try {
+		const { token, username } = await authApi.refresh();
+		setBearerToken(token);
+		return { username };
+	} catch {
+		return null;
+	}
+};
 
 export function AuthProvider({
 	children,
-	resolveInitialState = resolveToLoggedOut,
+	resolveInitialState = resolveFromRefreshSession,
 }: {
 	children: ReactNode;
 	resolveInitialState?: () => Promise<User | null>;
@@ -50,9 +62,9 @@ export function AuthProvider({
 	}, [resolveInitialState]);
 
 	const login = useCallback(async (credentials: LoginCredentials) => {
-		const { token } = await authApi.login(credentials);
+		const { token, username } = await authApi.login(credentials);
 		setBearerToken(token);
-		setUser({ username: credentials.username });
+		setUser({ username });
 	}, []);
 
 	// Logout revokes the server-side refresh session, then drops the

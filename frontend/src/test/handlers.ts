@@ -2,8 +2,30 @@ import { HttpResponse, http } from "msw";
 
 // Handlers mirror the real API shapes from the backend
 // (see backend/internal/app/app.go and backend/internal/domain/auth/handler.go).
-export const loginSuccessHandler = http.post("*/api/auth/login", () => {
-	return HttpResponse.json({ token: "test-access-token" });
+// The login body carries the username alongside the token (login echoes
+// the credential; refresh would return the session's user).
+export const loginSuccessHandler = http.post(
+	"*/api/auth/login",
+	async ({ request }) => {
+		const { username } = (await request.json()) as { username: string };
+		return HttpResponse.json({ token: "test-access-token", username });
+	},
+);
+
+// Default refresh rejection so full-app renders start logged-out, the
+// pre-session browser state; session-restore tests override with
+// server.use().
+export const refreshRejectedHandler = http.post("*/api/auth/refresh", () => {
+	return HttpResponse.json(
+		{
+			requestId: "req-1",
+			error: {
+				code: "AUTH_REFRESH_INVALID",
+				message: "Refresh token invalid",
+			},
+		},
+		{ status: 401 },
+	);
 });
 
 export const handlers = [
@@ -11,6 +33,7 @@ export const handlers = [
 		return new HttpResponse("OK", { status: 200 });
 	}),
 	loginSuccessHandler,
+	refreshRejectedHandler,
 	http.post("*/api/auth/logout", () => {
 		return HttpResponse.json({ message: "Logged out successfully" });
 	}),

@@ -7,8 +7,12 @@ export interface LoginCredentials {
 	password: string;
 }
 
+// Body of POST /api/auth/login and POST /api/auth/refresh (the refresh
+// response matches the login body; the refresh token itself lives only
+// in the rotated httpOnly cookie).
 export interface LoginResponse {
 	token: string;
+	username: string;
 }
 
 export type MachinePermission = "read" | "write" | "admin";

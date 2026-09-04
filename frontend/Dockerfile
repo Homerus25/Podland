@@ -14,7 +14,7 @@ RUN npm run build
 
 FROM caddy:latest
 
-expose 3000
+expose 3200
 WORKDIR /app
 
 COPY --from=builder /app/dist /app

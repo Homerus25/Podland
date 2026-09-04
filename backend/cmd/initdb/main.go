@@ -24,6 +24,15 @@ func main() {
 		log.Fatalf("Failed to change working directory: %v", err)
 	}
 
+	// The chdir above only lands on the backend root when this tool is
+	// started from cmd/initdb (as `make initDB` does). A binary started
+	// anywhere else — e.g. from backend/ — climbs past the root and would
+	// otherwise open its default database in the wrong place, so refuse
+	// before any file is touched.
+	if _, err := os.Stat("migrations"); err != nil {
+		log.Fatalf("No migrations/ directory here — start initdb from cmd/initdb (or run `make initDB`): %v", err)
+	}
+
 	// Validate required arguments
 	if *password == "" {
 		fmt.Println("Error: password is required")

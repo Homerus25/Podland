@@ -34,7 +34,8 @@ type LoginRequest struct {
 
 // LoginResponse represents a login response
 type LoginResponse struct {
-	Token string `json:"token"`
+	Token    string `json:"token"`
+	Username string `json:"username"`
 }
 
 // refreshTokenCookieName is the httpOnly cookie login sets to carry the
@@ -83,7 +84,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, refreshToken, _, err := h.service.Login(req.Username, req.Password)
+	token, refreshToken, user, err := h.service.Login(req.Username, req.Password)
 	if err != nil {
 		errors.RespondWithError(w, h.errorHandler.HandleError(err), requestID)
 		return
@@ -97,12 +98,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(LoginResponse{Token: token})
+	json.NewEncoder(w).Encode(LoginResponse{Token: token, Username: user.Username})
 }
 
 // RefreshResponse represents a refresh response. It intentionally
-// matches the login body: exactly the new access JWT — the refresh
-// token lives only in the rotated cookie.
+// matches the login body: the new access JWT and the username it
+// belongs to — the refresh token lives only in the rotated cookie.
 type RefreshResponse = LoginResponse
 
 // Refresh handles the unauthenticated renewal path: it exchanges the
@@ -120,7 +121,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, refreshToken, err := h.service.Refresh(cookie.Value)
+	token, refreshToken, user, err := h.service.Refresh(cookie.Value)
 	if err != nil {
 		errors.RespondWithError(w, h.errorHandler.HandleError(err), requestID)
 		return
@@ -130,7 +131,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(RefreshResponse{Token: token})
+	json.NewEncoder(w).Encode(RefreshResponse{Token: token, Username: user.Username})
 }
 
 // clearRefreshCookie expires the refresh cookie: the same name, path,

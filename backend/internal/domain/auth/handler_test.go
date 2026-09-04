@@ -41,6 +41,7 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 	err = json.NewDecoder(resp.Body).Decode(&loginResp)
 	require.NoError(t, err, "Should decode response without error")
 	assert.NotEmpty(t, loginResp.Token, "Response should contain a token")
+	assert.Equal(t, "testuser", loginResp.Username, "Response should contain the authenticated user's username")
 }
 
 func TestAuthHandler_Login_WrongPassword(t *testing.T) {

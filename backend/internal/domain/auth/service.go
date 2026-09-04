@@ -119,46 +119,55 @@ func (s *AuthService) Login(username, password string) (accessToken string, refr
 	return accessToken, refreshToken, user, nil
 }
 
-// Refresh exchanges a presented refresh token for a fresh access JWT and
-// a rotated refresh token. The presented token's hash must address a live
-// session row; rotation atomically replaces that row with one holding a
+// Refresh exchanges a presented refresh token for a fresh access JWT, a
+// rotated refresh token, and the user the session belongs to. The
+// presented token's hash must address a live session row whose user
+// still exists; rotation atomically replaces that row with one holding a
 // fresh token and a renewed (sliding) expiry, so a token can be redeemed
 // exactly once — there is deliberately no non-rotating refresh path.
 //
-// Failure mapping: an unknown hash — never issued, revoked, or already
-// rotated (replayed) — yields ErrRefreshInvalid (401); a found-but-
-// expired row is deleted on encounter as lazy cleanup and yields
-// ErrSessionExpired (401). A rotation that loses to a concurrent refresh
-// presenting the same token also yields ErrRefreshInvalid: the winner
-// already consumed the row. Storage failures propagate unchanged (mapped
-// to 500 by the handler).
-func (s *AuthService) Refresh(refreshToken string) (accessToken, newRefreshToken string, err error) {
+// Failure mapping: an unknown hash — never issued, revoked, already
+// rotated (replayed), or belonging to a since-deleted user — yields
+// ErrRefreshInvalid (401); a found-but-expired row is deleted on
+// encounter as lazy cleanup and yields ErrSessionExpired (401). A
+// rotation that loses to a concurrent refresh presenting the same token
+// also yields ErrRefreshInvalid: the winner already consumed the row.
+// Storage failures propagate unchanged (mapped to 500 by the handler).
+func (s *AuthService) Refresh(refreshToken string) (accessToken, newRefreshToken string, user *models.User, err error) {
 	tokenHash := HashRefreshToken(refreshToken)
 
 	session, err := s.sessionRepo.GetByTokenHash(tokenHash)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	if session == nil {
-		return "", "", apperrors.ErrRefreshInvalid
+		return "", "", nil, apperrors.ErrRefreshInvalid
 	}
 
 	now := time.Now().UTC()
 	if !now.Before(session.ExpiresAt) {
 		if err := s.sessionRepo.DeleteByTokenHash(tokenHash); err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
-		return "", "", apperrors.ErrSessionExpired
+		return "", "", nil, apperrors.ErrSessionExpired
+	}
+
+	user, err = s.userRepo.GetByID(session.UserID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if user == nil {
+		return "", "", nil, apperrors.ErrRefreshInvalid
 	}
 
 	newRefreshToken, newTokenHash, err := generateRefreshToken()
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 
 	accessToken, err = s.GenerateToken(session.UserID)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 
 	replacement := &models.Session{
@@ -170,13 +179,13 @@ func (s *AuthService) Refresh(refreshToken string) (accessToken, newRefreshToken
 	}
 	rotated, err := s.sessionRepo.Rotate(tokenHash, replacement)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 	if !rotated {
-		return "", "", apperrors.ErrRefreshInvalid
+		return "", "", nil, apperrors.ErrRefreshInvalid
 	}
 
-	return accessToken, newRefreshToken, nil
+	return accessToken, newRefreshToken, user, nil
 }
 
 // Logout revokes the refresh session addressed by the presented token:
