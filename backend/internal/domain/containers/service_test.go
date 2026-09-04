@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -65,7 +66,7 @@ func TestContainerService_List_Success(t *testing.T) {
 		result, err := serviceWithError.List(ctx, userID, machineID, opts)
 
 		assert.Error(t, err, "Should return error when connection fails")
-		assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+		assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 		assert.Nil(t, result, "Should return nil result when connection fails")
 	})
 
@@ -126,7 +127,7 @@ func TestContainerService_List_ErrorHandling(t *testing.T) {
 		result, err := service.List(ctx, userID, machineID, opts)
 
 		assert.Error(t, err, "Should return connection error")
-		assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should wrap connection error")
+		assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 		assert.Nil(t, result, "Should return nil result on connection error")
 	})
 
@@ -178,7 +179,7 @@ func TestContainerService_Create_Success(t *testing.T) {
 		result, err := serviceWithError.Create(ctx, userID, machineID, request)
 
 		assert.Error(t, err, "Should return error when connection fails")
-		assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+		assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 		assert.Nil(t, result, "Should return nil result when connection fails")
 	})
 

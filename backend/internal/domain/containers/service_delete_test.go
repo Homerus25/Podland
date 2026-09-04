@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 )
@@ -24,7 +25,7 @@ func TestContainerService_Delete_ConnectionError(t *testing.T) {
 	err := serviceWithError.Delete(ctx, userID, machineID, containerID, false)
 
 	assert.Error(t, err, "Should return error when connection fails")
-	assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 }
 
 // TestContainerService_Delete_MissingParameters tests that Delete validates input parameters

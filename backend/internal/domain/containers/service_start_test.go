@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 )
@@ -24,7 +25,7 @@ func TestContainerService_Start_ConnectionError(t *testing.T) {
 	result, err := serviceWithError.Start(ctx, userID, machineID, containerID)
 
 	assert.Error(t, err, "Should return error when connection fails")
-	assert.Contains(t, err.Error(), "failed to get connection to machine", "Error should mention connection failure")
+	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 	assert.Nil(t, result, "Should return nil result when connection fails")
 }
 

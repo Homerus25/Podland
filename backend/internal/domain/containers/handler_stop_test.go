@@ -15,7 +15,7 @@ import (
 // TestContainerHandler_Stop_ConnectionError tests that Stop handles connection errors
 func TestContainerHandler_Stop_ConnectionError(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -40,7 +40,7 @@ func TestContainerHandler_Stop_ConnectionError(t *testing.T) {
 // TestContainerHandler_Stop_Success tests successful container stop
 func TestContainerHandler_Stop_Success(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")

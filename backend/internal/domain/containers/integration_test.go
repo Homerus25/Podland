@@ -111,7 +111,7 @@ func TestContainerHandler_List_Success(t *testing.T) {
 	mockService.On("List", mock.Anything, "test-user", "test-machine", opts).Return(testContainers, nil)
 
 	// Create handler
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	// Create test request
 	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers?all=true", nil)
@@ -195,7 +195,7 @@ func TestContainerHandler_Create_Success(t *testing.T) {
 	mockService.On("Create", mock.Anything, "test-user", "test-machine", expectedRequest).Return(expectedResponse, nil)
 
 	// Create handler
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	// Create test request
 	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers", strings.NewReader(requestBody))
@@ -284,7 +284,7 @@ func TestContainerHandler_List_QueryParameters(t *testing.T) {
 			mockService.On("List", mock.Anything, "test-user", "test-machine", tc.expectedOpts).
 				Return([]containerTypes.ListContainer{}, nil)
 
-			handler := NewContainerHandler(mockService, nil)
+			handler := NewContainerHandler(mockService)
 			req := httptest.NewRequest("GET", tc.url, nil)
 			req = req.WithContext(ctx)
 
@@ -309,17 +309,6 @@ func TestContainerHandler_List_ErrorScenarios(t *testing.T) {
 		expectedError  string
 		description    string
 	}{
-		{
-			name: "missing user ID",
-			setupRequest: func() *http.Request {
-				ctx := context.Background() // No user ID set
-				req := httptest.NewRequest("GET", "/api/machines/test-machine/containers", nil)
-				return req.WithContext(ctx)
-			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedError:  "INVALID_CREDENTIALS",
-			description:    "Should return 401 when user ID is missing",
-		},
 		{
 			name: "service error",
 			setupRequest: func() *http.Request {
@@ -361,7 +350,7 @@ func TestContainerHandler_List_ErrorScenarios(t *testing.T) {
 					Return([]containerTypes.ListContainer{}, expectedErr)
 			}
 
-			handler := NewContainerHandler(mockService, nil)
+			handler := NewContainerHandler(mockService)
 			r := chi.NewRouter()
 			r.Get("/api/machines/{id}/containers", handler.List)
 
@@ -397,7 +386,7 @@ func TestContainerHandler_List_EmptyResponse(t *testing.T) {
 	opts := entities.ContainerListOptions{}
 	mockService.On("List", mock.Anything, "test-user", "test-machine", opts).Return([]containerTypes.ListContainer{}, nil)
 
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers", nil)
 	req = req.WithContext(ctx)
 
@@ -464,7 +453,7 @@ func TestContainerHandler_List_ContainerWithOptionalFields(t *testing.T) {
 	opts := entities.ContainerListOptions{}
 	mockService.On("List", mock.Anything, "test-user", "test-machine", opts).Return([]containerTypes.ListContainer{testContainer}, nil)
 
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers", nil)
 	req = req.WithContext(ctx)
 
@@ -511,7 +500,7 @@ func TestContainerHandler_Get_Success(t *testing.T) {
 	mockService.On("Get", mock.Anything, "test-user", "test-machine", "container-123").Return((*entities.ContainerInspectReport)(nil), fmt.Errorf("container not found"))
 
 	// Create handler
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	// Create test request
 	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123", nil)
@@ -555,30 +544,6 @@ func TestContainerHandler_Get_ErrorScenarios(t *testing.T) {
 		description    string
 	}{
 		{
-			name: "missing user ID",
-			setupRequest: func() *http.Request {
-				ctx := context.Background() // No user ID set
-				req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123", nil)
-				return req.WithContext(ctx)
-			},
-			expectedStatus: http.StatusUnauthorized,
-			expectedError:  "INVALID_CREDENTIALS",
-			description:    "Should return 401 when user ID is missing",
-		},
-		{
-			name: "missing machine ID",
-			setupRequest: func() *http.Request {
-				ctx := context.Background()
-				ctx = contextutils.SetUserID(ctx, "test-user")
-				ctx = contextutils.SetRequestID(ctx, "test-request-id")
-				req := httptest.NewRequest("GET", "/api/machines//containers/container-123", nil)
-				return req.WithContext(ctx)
-			},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "MISSING_MACHINE_ID",
-			description:    "Should return 400 when machine ID is missing",
-		},
-		{
 			name: "missing container ID",
 			setupRequest: func() *http.Request {
 				ctx := context.Background()
@@ -619,7 +584,7 @@ func TestContainerHandler_Get_ErrorScenarios(t *testing.T) {
 					Return((*entities.ContainerInspectReport)(nil), expectedErr)
 			}
 
-			handler := NewContainerHandler(mockService, nil)
+			handler := NewContainerHandler(mockService)
 			r := chi.NewRouter()
 			r.Get("/api/machines/{id}/containers/{containerId}", handler.Get)
 
@@ -659,32 +624,6 @@ func TestContainerHandler_Delete_ErrorScenarios(t *testing.T) {
 		expectedError  string
 		description    string
 	}{
-		{
-			name: "missing user ID",
-			setupRequest: func() *http.Request {
-				ctx := context.Background()
-				req := httptest.NewRequest("DELETE", "/api/machines/test-machine/containers/container-123", nil)
-				return req.WithContext(ctx)
-			},
-			setupMock:      func(m *MockContainerService) {},
-			expectedStatus: http.StatusUnauthorized,
-			expectedError:  "INVALID_CREDENTIALS",
-			description:    "Should return 401 when user ID is missing",
-		},
-		{
-			name: "missing machine ID",
-			setupRequest: func() *http.Request {
-				ctx := context.Background()
-				ctx = contextutils.SetUserID(ctx, "test-user")
-				ctx = contextutils.SetRequestID(ctx, "test-request-id")
-				req := httptest.NewRequest("DELETE", "/api/machines//containers/container-123", nil)
-				return req.WithContext(ctx)
-			},
-			setupMock:      func(m *MockContainerService) {},
-			expectedStatus: http.StatusBadRequest,
-			expectedError:  "MISSING_MACHINE_ID",
-			description:    "Should return 400 when machine ID is missing",
-		},
 		{
 			name: "service error",
 			setupRequest: func() *http.Request {
@@ -729,7 +668,7 @@ func TestContainerHandler_Delete_ErrorScenarios(t *testing.T) {
 			mockService := new(MockContainerService)
 			tc.setupMock(mockService)
 
-			handler := NewContainerHandler(mockService, nil)
+			handler := NewContainerHandler(mockService)
 			r := chi.NewRouter()
 			r.Delete("/api/machines/{id}/containers/{containerId}", handler.Delete)
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"maps"
 	"strings"
 	"time"
@@ -45,7 +46,12 @@ func (s *ContainerService) List(ctx context.Context, userID, machineID string, o
 	// Get connection context to the machine
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go): the backend acts as a gateway to the remote podman.
+		// The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 
 	defer s.connManager.Release(machineID)
@@ -68,7 +74,12 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 	// Get connection context to the machine
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go): the backend acts as a gateway to the remote podman.
+		// The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 	// Create container engine with the connection context
@@ -138,7 +149,12 @@ func (s *ContainerService) Get(ctx context.Context, userID, machineID, container
 	// Get connection context to the machine
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go): the backend acts as a gateway to the remote podman.
+		// The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 	// Create container engine with the connection context
@@ -181,7 +197,12 @@ func (s *ContainerService) Start(ctx context.Context, userID, machineID, contain
 
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go): the backend acts as a gateway to the remote podman.
+		// The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 	containerEngine := &tunnel.ContainerEngine{
@@ -221,7 +242,12 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go): the backend acts as a gateway to the remote podman.
+		// The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 	containerEngine := &tunnel.ContainerEngine{
@@ -262,7 +288,11 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get connection to machine: %w", err)
+		// Same runtime-connection contract as List: 502
+		// CONNECTION_FAILED, cause logged here.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 
@@ -302,7 +332,12 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get connection to machine: %w", err)
+		// ErrConnectionFailed is the documented runtime contract (502,
+		// errors.go): the backend acts as a gateway to the remote podman.
+		// The cause stays in the log, not the response.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return nil, appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 	containerEngine := &tunnel.ContainerEngine{
@@ -359,7 +394,11 @@ func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machin
 
 	connCtx, err := s.connManager.GetConnection(machineID, userID)
 	if err != nil {
-		return fmt.Errorf("failed to get connection to machine: %w", err)
+		// Same runtime-connection contract as List: 502
+		// CONNECTION_FAILED, cause logged here.
+		slog.WarnContext(ctx, "connection to machine failed",
+			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
+		return appErrors.ErrConnectionFailed
 	}
 	defer s.connManager.Release(machineID)
 

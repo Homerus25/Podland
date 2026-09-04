@@ -15,7 +15,7 @@ import (
 // TestContainerHandler_Start_ConnectionError tests that Start handles connection errors
 func TestContainerHandler_Start_ConnectionError(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -40,7 +40,7 @@ func TestContainerHandler_Start_ConnectionError(t *testing.T) {
 // TestContainerHandler_Start_Success tests successful container start
 func TestContainerHandler_Start_Success(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")

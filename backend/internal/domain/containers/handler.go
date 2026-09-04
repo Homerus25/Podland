@@ -11,385 +11,179 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
+	"github.com/Homerus25/podland/backend/internal/web"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // ContainerHandler handles container requests
+//
+// JSON endpoints cross the endpoint envelope (internal/web): extraction,
+// error envelope, and encoding live there. Logs keeps its own shape —
+// its follow branch streams NDJSON rather than encoding one DTO.
 type ContainerHandler struct {
-	service        ContainerServiceInterface
-	machineService *any
+	service ContainerServiceInterface
 }
 
 // NewContainerHandler creates a new ContainerHandler
-func NewContainerHandler(service ContainerServiceInterface, machineService any) *ContainerHandler {
+func NewContainerHandler(service ContainerServiceInterface) *ContainerHandler {
 	return &ContainerHandler{
-		service:        service,
-		machineService: &machineService,
+		service: service,
 	}
 }
 
 // List handles listing containers
 func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "List")
-	// Get user ID from context
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerListResult, error) {
+		opts := parseContainerListOptions(r)
 
-	// Get machine ID from URL parameter
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
+		containers, err := h.service.List(ctx, userID, machineID, opts)
+		if err != nil {
+			return ContainerListResult{}, err
+		}
 
-	// Parse query parameters for container list options
+		containersAny := make([]any, len(containers))
+		for i, c := range containers {
+			containersAny[i] = c
+		}
+		return ToContainerListResult(containersAny), nil
+	})
+}
+
+// parseContainerListOptions reads the list query parameters podman
+// understands (all, filters, size, namespace, sync, external, last,
+// latest). Malformed values are ignored, matching the endpoints'
+// documented behavior.
+func parseContainerListOptions(r *http.Request) entities.ContainerListOptions {
 	opts := entities.ContainerListOptions{}
 
-	// Parse 'all' parameter
 	if allParam := r.URL.Query().Get("all"); allParam != "" {
-		all, err := strconv.ParseBool(allParam)
-		if err == nil {
+		if all, err := strconv.ParseBool(allParam); err == nil {
 			opts.All = all
 		}
 	}
 
-	// Parse 'filters' parameter (comma-separated key=value pairs)
 	if filtersParam := r.URL.Query().Get("filters"); filtersParam != "" {
 		opts.Filters = make(map[string][]string)
-		// Simple parsing - split by comma and then by equals
-		// This is a basic implementation; could be enhanced
-		// Expected format: key=value,key2=value2
-		// For now, we'll just store as-is
 		opts.Filters["custom"] = []string{filtersParam}
 	}
 
-	// Parse 'size' parameter
 	if sizeParam := r.URL.Query().Get("size"); sizeParam != "" {
-		size, err := strconv.ParseBool(sizeParam)
-		if err == nil {
+		if size, err := strconv.ParseBool(sizeParam); err == nil {
 			opts.Size = size
 		}
 	}
 
-	// Parse 'namespace' parameter
 	if namespaceParam := r.URL.Query().Get("namespace"); namespaceParam != "" {
-		namespace, err := strconv.ParseBool(namespaceParam)
-		if err == nil {
+		if namespace, err := strconv.ParseBool(namespaceParam); err == nil {
 			opts.Namespace = namespace
 		}
 	}
 
-	// Parse 'sync' parameter
 	if syncParam := r.URL.Query().Get("sync"); syncParam != "" {
-		sync, err := strconv.ParseBool(syncParam)
-		if err == nil {
+		if sync, err := strconv.ParseBool(syncParam); err == nil {
 			opts.Sync = sync
 		}
 	}
 
-	// Parse 'external' parameter
 	if externalParam := r.URL.Query().Get("external"); externalParam != "" {
-		external, err := strconv.ParseBool(externalParam)
-		if err == nil {
+		if external, err := strconv.ParseBool(externalParam); err == nil {
 			opts.External = external
 		}
 	}
 
-	// Parse 'last' parameter
 	if lastParam := r.URL.Query().Get("last"); lastParam != "" {
-		last, err := strconv.Atoi(lastParam)
-		if err == nil {
+		if last, err := strconv.Atoi(lastParam); err == nil {
 			opts.Last = last
 		}
 	}
 
-	// Parse 'latest' parameter
 	if latestParam := r.URL.Query().Get("latest"); latestParam != "" {
-		latest, err := strconv.ParseBool(latestParam)
-		if err == nil {
+		if latest, err := strconv.ParseBool(latestParam); err == nil {
 			opts.Latest = latest
 		}
 	}
 
-	slog.InfoContext(r.Context(), "list", slog.Any("opts", opts))
-
-	// Call ContainerService.List with context, userID, machineID, and options
-	containers, err := h.service.List(r.Context(), userID, machineID, opts)
-	if err != nil {
-		// Handle specific error types
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
-		}
-		// Handle generic errors
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "list", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
-		return
-	}
-
-	// Convert podman entities to API DTO response
-	containersAny := make([]any, len(containers))
-	for i, c := range containers {
-		containersAny[i] = c
-	}
-	result := ToContainerListResult(containersAny)
-
-	slog.InfoContext(r.Context(), "list", slog.Any("result", result))
-
-	// Return success response with container list DTO
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+	return opts
 }
 
 // Create handles creating a container
 func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Create")
-
-	// Get user ID from context
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	// Get machine ID from URL parameter
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	// Parse request body
-	var request ContainerCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "Invalid request body", slog.Any("error", err))
-		return
-	}
-
-	// Validate request
-	validate := validator.New()
-	if err := validate.Struct(request); err != nil {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error(), contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "Validation failed", slog.Any("error", err))
-		return
-	}
-
-	slog.InfoContext(r.Context(), "create", slog.Any("request", request))
-
-	// Call ContainerService.Create
-	response, err := h.service.Create(r.Context(), userID, machineID, request)
-	if err != nil {
-		// Handle specific error types
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*ContainerCreateResponse, error) {
+		var request ContainerCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			return nil, errors.ErrInvalidRequest.WithMessage("Invalid request body")
 		}
-		// Handle generic errors
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "create", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID))
-		return
-	}
 
-	slog.InfoContext(r.Context(), "create", slog.Any("response", response))
+		validate := validator.New()
+		if err := validate.Struct(request); err != nil {
+			return nil, errors.NewAppError("VALIDATION_FAILED", err.Error(), http.StatusBadRequest)
+		}
 
-	// Return success response
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(response)
+		return h.service.Create(ctx, userID, machineID, request)
+	})
 }
 
 // Get handles getting a container by ID
 func (h *ContainerHandler) Get(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Get")
-
-	// Get user ID from context
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	// Get machine ID from URL parameter
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	// Get container ID from URL parameter
-	containerID := chi.URLParam(r, "containerId")
-	if containerID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_CONTAINER_ID", "Container ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	slog.InfoContext(r.Context(), "get", slog.String("containerID", containerID))
-
-	// Call ContainerService.Get with context, userID, machineID, and containerID
-	containerData, err := h.service.Get(r.Context(), userID, machineID, containerID)
-	if err != nil {
-		// Handle specific error types
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerGetResponse, error) {
+		containerID := chi.URLParam(r, "containerId")
+		if containerID == "" {
+			return ContainerGetResponse{}, errors.NewAppError("MISSING_CONTAINER_ID", "Container ID is required", http.StatusBadRequest)
 		}
-		// Handle generic errors
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "get", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("containerID", containerID))
-		return
-	}
 
-	// Convert podman entities to API DTO response
-	result := FromPodmanInspectContainer(containerData)
-
-	slog.InfoContext(r.Context(), "get", slog.Any("result", result))
-
-	// Return success response with container details DTO
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(result)
+		containerData, err := h.service.Get(ctx, userID, machineID, containerID)
+		if err != nil {
+			return ContainerGetResponse{}, err
+		}
+		return FromPodmanInspectContainer(containerData), nil
+	})
 }
 
 // Start handles starting a container
 func (h *ContainerHandler) Start(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Start")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	containerID := chi.URLParam(r, "containerId")
-	if containerID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_CONTAINER_ID", "Container ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	slog.InfoContext(r.Context(), "start", slog.String("containerID", containerID))
-
-	response, err := h.service.Start(r.Context(), userID, machineID, containerID)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerStartResponse, error) {
+		containerID := chi.URLParam(r, "containerId")
+		if containerID == "" {
+			return nil, errors.NewAppError("MISSING_CONTAINER_ID", "Container ID is required", http.StatusBadRequest)
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "start", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("containerID", containerID))
-		return
-	}
 
-	slog.InfoContext(r.Context(), "start", slog.Any("response", response))
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+		return h.service.Start(ctx, userID, machineID, containerID)
+	})
 }
 
 // Stop handles stopping a container
 func (h *ContainerHandler) Stop(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Stop")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	containerID := chi.URLParam(r, "containerId")
-	if containerID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_CONTAINER_ID", "Container ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	slog.InfoContext(r.Context(), "stop", slog.String("containerID", containerID))
-
-	response, err := h.service.Stop(r.Context(), userID, machineID, containerID)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerStopResponse, error) {
+		containerID := chi.URLParam(r, "containerId")
+		if containerID == "" {
+			return nil, errors.NewAppError("MISSING_CONTAINER_ID", "Container ID is required", http.StatusBadRequest)
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "stop", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("containerID", containerID))
-		return
-	}
 
-	slog.InfoContext(r.Context(), "stop", slog.Any("response", response))
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+		return h.service.Stop(ctx, userID, machineID, containerID)
+	})
 }
 
 // Delete handles deleting a container
 func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Delete")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	containerID := chi.URLParam(r, "containerId")
-	if containerID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_CONTAINER_ID", "Container ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	force := false
-	if forceParam := r.URL.Query().Get("force"); forceParam != "" {
-		if parsed, err := strconv.ParseBool(forceParam); err == nil {
-			force = parsed
+	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+		containerID := chi.URLParam(r, "containerId")
+		if containerID == "" {
+			return struct{}{}, errors.NewAppError("MISSING_CONTAINER_ID", "Container ID is required", http.StatusBadRequest)
 		}
-	}
 
-	slog.InfoContext(r.Context(), "delete", slog.String("containerID", containerID), slog.Bool("force", force))
-
-	err := h.service.Delete(r.Context(), userID, machineID, containerID, force)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+		// A malformed force flag is ignored (deletes as unforced),
+		// matching the documented behavior of this endpoint.
+		force := false
+		if forceParam := r.URL.Query().Get("force"); forceParam != "" {
+			if parsed, err := strconv.ParseBool(forceParam); err == nil {
+				force = parsed
+			}
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "delete", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("containerID", containerID))
-		return
-	}
 
-	w.WriteHeader(http.StatusNoContent)
+		return struct{}{}, h.service.Delete(ctx, userID, machineID, containerID, force)
+	})
 }
 
 // Logs handles retrieving logs for a container

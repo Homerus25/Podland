@@ -157,7 +157,7 @@ func New(cfg *config.Config) (*App, error) {
 	authHandler := auth.NewAuthHandler(authService, userRepo)
 	userHandler := users.NewUserHandler(userService)
 	machineHandler := machines.NewMachineHandler(machineService)
-	containerHandler := containers.NewContainerHandler(containerService, machineService)
+	containerHandler := containers.NewContainerHandler(containerService)
 	imageHandler := images.NewImageHandler(imageService, machineService)
 	quadletHandler := quadlets.NewQuadletHandler(quadletService, machineService)
 	secretHandler := secrets.NewSecretHandler(secretService)

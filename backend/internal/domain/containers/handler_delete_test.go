@@ -16,7 +16,7 @@ import (
 // TestContainerHandler_Delete_Success tests successful container deletion
 func TestContainerHandler_Delete_Success(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -41,7 +41,7 @@ func TestContainerHandler_Delete_Success(t *testing.T) {
 // TestContainerHandler_Delete_Force tests deletion with force query parameter
 func TestContainerHandler_Delete_Force(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -66,7 +66,7 @@ func TestContainerHandler_Delete_Force(t *testing.T) {
 // TestContainerHandler_Delete_ConnectionError tests that Delete handles connection errors
 func TestContainerHandler_Delete_ConnectionError(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -86,46 +86,4 @@ func TestContainerHandler_Delete_ConnectionError(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code, "Should return 500 on connection error")
-}
-
-// TestContainerHandler_Delete_MissingUserID tests that Delete validates user ID
-func TestContainerHandler_Delete_MissingUserID(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
-
-	ctx := context.Background()
-
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/containers/container-123", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/containers/{containerId}", handler.Delete)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 when user ID is missing")
-}
-
-// TestContainerHandler_Delete_MissingMachineID tests that Delete validates machine ID
-func TestContainerHandler_Delete_MissingMachineID(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("DELETE", "/api/machines//containers/container-123", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/containers/{containerId}", handler.Delete)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when machine ID is missing")
 }

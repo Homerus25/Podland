@@ -18,7 +18,7 @@ import (
 // TestContainerHandler_Logs_Success tests successful log retrieval
 func TestContainerHandler_Logs_Success(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -49,7 +49,7 @@ func TestContainerHandler_Logs_Success(t *testing.T) {
 // TestContainerHandler_Logs_WithSinceParameter tests log retrieval with since parameter
 func TestContainerHandler_Logs_WithSinceParameter(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -81,7 +81,7 @@ func TestContainerHandler_Logs_WithSinceParameter(t *testing.T) {
 // TestContainerHandler_Logs_WithTailParameter tests log retrieval with tail parameter
 func TestContainerHandler_Logs_WithTailParameter(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -110,7 +110,7 @@ func TestContainerHandler_Logs_WithTailParameter(t *testing.T) {
 // TestContainerHandler_Logs_WithFollowParameter tests log retrieval with follow parameter
 func TestContainerHandler_Logs_WithFollowParameter(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -144,7 +144,7 @@ func TestContainerHandler_Logs_WithFollowParameter(t *testing.T) {
 // TestContainerHandler_Logs_InvalidSinceParameter tests log retrieval with invalid since parameter
 func TestContainerHandler_Logs_InvalidSinceParameter(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -167,7 +167,7 @@ func TestContainerHandler_Logs_InvalidSinceParameter(t *testing.T) {
 // TestContainerHandler_Logs_InvalidTailParameter tests log retrieval with invalid tail parameter
 func TestContainerHandler_Logs_InvalidTailParameter(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -190,7 +190,7 @@ func TestContainerHandler_Logs_InvalidTailParameter(t *testing.T) {
 // TestContainerHandler_Logs_ContainerNotFound tests that Logs handles container not found error
 func TestContainerHandler_Logs_ContainerNotFound(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -215,7 +215,7 @@ func TestContainerHandler_Logs_ContainerNotFound(t *testing.T) {
 // TestContainerHandler_Logs_ConnectionError tests that Logs handles connection errors
 func TestContainerHandler_Logs_ConnectionError(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -240,7 +240,7 @@ func TestContainerHandler_Logs_ConnectionError(t *testing.T) {
 // TestContainerHandler_Logs_MissingUserID tests that Logs validates user ID
 func TestContainerHandler_Logs_MissingUserID(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 
@@ -260,7 +260,7 @@ func TestContainerHandler_Logs_MissingUserID(t *testing.T) {
 // TestContainerHandler_Logs_MissingMachineID tests that Logs validates machine ID
 func TestContainerHandler_Logs_MissingMachineID(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -283,7 +283,7 @@ func TestContainerHandler_Logs_MissingMachineID(t *testing.T) {
 // TestContainerHandler_Logs_MissingContainerID tests that Logs validates container ID
 func TestContainerHandler_Logs_MissingContainerID(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -306,7 +306,7 @@ func TestContainerHandler_Logs_MissingContainerID(t *testing.T) {
 // TestContainerHandler_Logs_StreamingHappyPath tests successful streaming logs with follow=true
 func TestContainerHandler_Logs_StreamingHappyPath(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	// Create context with timeout to avoid hanging
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -348,7 +348,7 @@ func TestContainerHandler_Logs_StreamingHappyPath(t *testing.T) {
 // TestContainerHandler_Logs_NonStreamingUnchanged tests that follow=false returns non-streaming response unchanged
 func TestContainerHandler_Logs_NonStreamingUnchanged(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -379,7 +379,7 @@ func TestContainerHandler_Logs_NonStreamingUnchanged(t *testing.T) {
 // TestContainerHandler_Logs_StreamingContainerNotFound tests streaming with container not found
 func TestContainerHandler_Logs_StreamingContainerNotFound(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
@@ -409,7 +409,7 @@ func TestContainerHandler_Logs_StreamingContainerNotFound(t *testing.T) {
 // TestContainerHandler_Logs_StreamingClientDisconnect tests client disconnect during streaming
 func TestContainerHandler_Logs_StreamingClientDisconnect(t *testing.T) {
 	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService, nil)
+	handler := NewContainerHandler(mockService)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = contextutils.SetUserID(ctx, "test-user")
