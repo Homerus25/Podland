@@ -15,8 +15,10 @@ closest sibling that already exists. Rulings so far:
   the reference: a handler is decode + URL params + service call inside
   one `web.Handle` closure; identity/machine guards and error envelopes
   belong to the envelope and the subtree middleware, never to handlers.
-  The machines subtree handlers still carry the old ritual (they hold
-  extra service-level access checks) and migrate last.
+  Every domain has migrated (volumes, containers, quadlets, secrets,
+  images, machines subtree). Exceptions that keep their own shape:
+  machines Create/List (outside the subtree, no machine ID) and the
+  streaming endpoints (logs, pull, auto-update, populate, export).
 - **Handler contract tests** — `testutils.Perform` builds the
   request (identity, chi URL params, body) the way the router would;
   per-domain `recordXRequest` chi scaffolding is retired. The envelope's
