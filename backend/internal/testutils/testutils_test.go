@@ -587,6 +587,41 @@ func TestMockPodmanConnection(t *testing.T) {
 	})
 }
 
+// TestMockConnectionManager_WithConnection pins the mock's
+// WithConnection behavior: fn runs once with a connection context and its
+// error crosses untouched; an injected acquisition error short-circuits
+// fn and crosses as-is (the 502 mapping itself is the production
+// manager's job, pinned once in the connections package tests).
+func TestMockConnectionManager_WithConnection(t *testing.T) {
+	t.Run("runs fn with a connection context and propagates its error", func(t *testing.T) {
+		mock := NewMockConnectionManager()
+
+		var sawCtx context.Context
+		fnErr := errors.New("engine exploded")
+		err := mock.WithConnection(context.Background(), "user-1", "machine-1", "volumes.List", func(connCtx context.Context) error {
+			sawCtx = connCtx
+			return fnErr
+		})
+
+		assert.ErrorIs(t, err, fnErr, "fn's error must cross untouched")
+		assert.NotNil(t, sawCtx, "fn must receive a connection context")
+	})
+
+	t.Run("injected acquisition error short-circuits fn", func(t *testing.T) {
+		acquireErr := errors.New("dial failed")
+		mock := NewMockConnectionManagerWithAcquireError(acquireErr)
+
+		fnRan := false
+		err := mock.WithConnection(context.Background(), "user-1", "machine-1", "volumes.List", func(context.Context) error {
+			fnRan = true
+			return nil
+		})
+
+		assert.Equal(t, acquireErr, err, "the injected acquisition error crosses as-is")
+		assert.False(t, fnRan, "fn must not run without a connection")
+	})
+}
+
 // TestMockSSHExec tests the MockSSHExec functionality across its three
 // construction modes (default, fixed-result, fixed-error, custom-func) plus
 // the call-recording helpers. Mirrors the MockEncryptionService test shape.

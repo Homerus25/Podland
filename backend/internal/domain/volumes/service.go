@@ -4,15 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
+	"io"
 	"net/http"
 	"strings"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	bindingsVolumes "go.podman.io/podman/v6/pkg/bindings/volumes"
-	"io"
-
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
@@ -33,59 +31,50 @@ type VolumeServiceInterface interface {
 
 // VolumeService provides business logic for volumes
 type VolumeService struct {
-	connManager machines.ConnectionManagerInterface
+	conn connections.Manager
 }
 
 // NewVolumeService creates a new VolumeService
-func NewVolumeService(connManager machines.ConnectionManagerInterface) *VolumeService {
+func NewVolumeService(conn connections.Manager) *VolumeService {
 	return &VolumeService{
-		connManager: connManager,
+		conn: conn,
 	}
 }
 
 // List returns every volume on the specified machine, named and anonymous
 func (s *VolumeService) List(ctx context.Context, userID, machineID string, opts entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go): the backend acts as a gateway to the remote podman.
-		// The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	var volumes []*entities.VolumeListReport
+	err := s.conn.WithConnection(ctx, userID, machineID, "volumes.List", func(connCtx context.Context) error {
+		volumeEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	volumeEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	volumes, err := volumeEngine.VolumeList(ctx, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list volumes: %w", err)
-	}
-
-	return volumes, nil
+		v, err := volumeEngine.VolumeList(ctx, opts)
+		if err != nil {
+			return fmt.Errorf("failed to list volumes: %w", err)
+		}
+		volumes = v
+		return nil
+	})
+	return volumes, err
 }
 
 // Get returns the full configuration of a single volume by exact name
 func (s *VolumeService) Get(ctx context.Context, userID, machineID, volumeName string) (*entities.VolumeInspectReport, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go): the backend acts as a gateway to the remote podman.
-		// The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	var report *entities.VolumeInspectReport
+	err := s.conn.WithConnection(ctx, userID, machineID, "volumes.Get", func(connCtx context.Context) error {
+		volumeEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	volumeEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	return s.inspectVolume(ctx, volumeEngine, volumeName)
+		r, err := s.inspectVolume(ctx, volumeEngine, volumeName)
+		if err != nil {
+			return err
+		}
+		report = r
+		return nil
+	})
+	return report, err
 }
 
 // inspectVolume resolves a single volume by exact name through the
@@ -115,32 +104,30 @@ func (s *VolumeService) inspectVolume(ctx context.Context, volumeEngine *tunnel.
 // format, driver errors, already-existing name) surface as 400
 // INVALID_REQUEST carrying podman's message, not 5xx.
 func (s *VolumeService) Create(ctx context.Context, userID, machineID string, req VolumeCreateRequest) (*entities.VolumeInspectReport, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go): the backend acts as a gateway to the remote podman.
-		// The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
-
-	volumeEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	report, err := volumeEngine.VolumeCreate(ctx, ToPodmanVolumeCreateOptions(req))
-	if err != nil {
-		if appErr := mapCreateError(err); appErr != nil {
-			return nil, appErr
+	var report *entities.VolumeInspectReport
+	err := s.conn.WithConnection(ctx, userID, machineID, "volumes.Create", func(connCtx context.Context) error {
+		volumeEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
 		}
-		return nil, fmt.Errorf("failed to create volume: %w", err)
-	}
 
-	// Create only reports the name; the contract is the full config, so
-	// inspect the freshly created volume by its (possibly generated) name.
-	return s.inspectVolume(ctx, volumeEngine, report.IDOrName)
+		created, err := volumeEngine.VolumeCreate(ctx, ToPodmanVolumeCreateOptions(req))
+		if err != nil {
+			if appErr := mapCreateError(err); appErr != nil {
+				return appErr
+			}
+			return fmt.Errorf("failed to create volume: %w", err)
+		}
+
+		// Create only reports the name; the contract is the full config, so
+		// inspect the freshly created volume by its (possibly generated) name.
+		inspect, err := s.inspectVolume(ctx, volumeEngine, created.IDOrName)
+		if err != nil {
+			return err
+		}
+		report = inspect
+		return nil
+	})
+	return report, err
 }
 
 // Delete removes a volume by exact name. Without force, podman refuses
@@ -149,37 +136,29 @@ func (s *VolumeService) Create(ctx context.Context, userID, machineID string, re
 // dependent containers first (its own semantics) and removes the volume.
 // Unknown names surface as the same clean 404 as inspect.
 func (s *VolumeService) Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// Same runtime-connection contract as List: 502
-		// CONNECTION_FAILED, cause logged here.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	return s.conn.WithConnection(ctx, userID, machineID, "volumes.Delete", func(connCtx context.Context) error {
+		volumeEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	volumeEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	reports, err := volumeEngine.VolumeRm(ctx, []string{volumeName}, entities.VolumeRmOptions{Force: force})
-	if err != nil {
-		return fmt.Errorf("failed to remove volume: %w", err)
-	}
-	for _, report := range reports {
-		if report == nil || report.Err == nil {
-			continue
+		reports, err := volumeEngine.VolumeRm(ctx, []string{volumeName}, entities.VolumeRmOptions{Force: force})
+		if err != nil {
+			return fmt.Errorf("failed to remove volume: %w", err)
 		}
-		if isVolumeNotFound(report.Err) {
-			return appErrors.ErrVolumeNotFound
+		for _, report := range reports {
+			if report == nil || report.Err == nil {
+				continue
+			}
+			if isVolumeNotFound(report.Err) {
+				return appErrors.ErrVolumeNotFound
+			}
+			if appErr := mapInUseError(report.Err); appErr != nil {
+				return appErr
+			}
+			return fmt.Errorf("failed to remove volume: %w", report.Err)
 		}
-		if appErr := mapInUseError(report.Err); appErr != nil {
-			return appErr
-		}
-		return fmt.Errorf("failed to remove volume: %w", report.Err)
-	}
-	return nil
+		return nil
+	})
 }
 
 // mapInUseError converts podman's in-use refusal into 409 VOLUME_IN_USE
@@ -241,26 +220,20 @@ func isVolumeNotFound(err error) bool {
 // untouched — podman's own semantics, which is the blast-radius
 // mitigation for this endpoint.
 func (s *VolumeService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go): the backend acts as a gateway to the remote podman.
-		// The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	var prunes []*reports.PruneReport
+	err := s.conn.WithConnection(ctx, userID, machineID, "volumes.Prune", func(connCtx context.Context) error {
+		volumeEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	volumeEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	prunes, err := volumeEngine.VolumePrune(ctx, entities.VolumePruneOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to prune volumes: %w", err)
-	}
-	return prunes, nil
+		p, err := volumeEngine.VolumePrune(ctx, entities.VolumePruneOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to prune volumes: %w", err)
+		}
+		prunes = p
+		return nil
+	})
+	return prunes, err
 }
 
 // Export streams the volume's contents as a tar archive into w. The
@@ -269,26 +242,18 @@ func (s *VolumeService) Prune(ctx context.Context, userID, machineID string) ([]
 // responses when this returns an AppError. Bytes flow straight from the
 // remote podman into w with no server-side buffering.
 func (s *VolumeService) Export(ctx context.Context, userID, machineID, volumeName string, w io.Writer) error {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// Same runtime-connection contract as List: 502
-		// CONNECTION_FAILED, cause logged here.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	return s.conn.WithConnection(ctx, userID, machineID, "volumes.Export", func(connCtx context.Context) error {
+		volumeEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	volumeEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
+		// Existence gate: fail before writing anything to w.
+		if _, err := s.inspectVolume(ctx, volumeEngine, volumeName); err != nil {
+			return err
+		}
 
-	// Existence gate: fail before writing anything to w.
-	if _, err := s.inspectVolume(ctx, volumeEngine, volumeName); err != nil {
-		return err
-	}
-
-	return bindingsVolumes.Export(connCtx, volumeName, w)
+		return bindingsVolumes.Export(connCtx, volumeName, w)
+	})
 }
 
 // Import streams a tar archive into the volume. Semantics are
@@ -297,24 +262,16 @@ func (s *VolumeService) Export(ctx context.Context, userID, machineID, volumeNam
 // volume's existence is resolved first, so a missing name fails with
 // the clean 404 before the archive is consumed.
 func (s *VolumeService) Import(ctx context.Context, userID, machineID, volumeName string, r io.Reader) error {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// Same runtime-connection contract as List: 502
-		// CONNECTION_FAILED, cause logged here.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	return s.conn.WithConnection(ctx, userID, machineID, "volumes.Import", func(connCtx context.Context) error {
+		volumeEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	volumeEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
+		// Existence gate: fail before consuming the archive.
+		if _, err := s.inspectVolume(ctx, volumeEngine, volumeName); err != nil {
+			return err
+		}
 
-	// Existence gate: fail before consuming the archive.
-	if _, err := s.inspectVolume(ctx, volumeEngine, volumeName); err != nil {
-		return err
-	}
-
-	return bindingsVolumes.Import(connCtx, volumeName, r)
+		return bindingsVolumes.Import(connCtx, volumeName, r)
+	})
 }

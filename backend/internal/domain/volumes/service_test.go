@@ -1,15 +1,12 @@
 package volumes
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
-	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,23 +14,13 @@ import (
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// TestVolumeService_List_ConnectionError pins the connection-failure path:
-// a GetConnection failure surfaces as the 502 CONNECTION_FAILED sentinel.
-func TestVolumeService_List_ConnectionError(t *testing.T) {
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewVolumeService(mockConnManager)
-
-	result, err := service.List(context.Background(), "test-user", "test-machine", entities.VolumeListOptions{})
-
-	assert.Error(t, err, "should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-	assert.Nil(t, result, "should return nil result on connection error")
-}
+// Connection-failure mapping (502 CONNECTION_FAILED) is owned by the
+// connections.Manager seam and pinned once in the connections package
+// tests — not re-pinned per service method here.
 
 // TestVolumeService_List_ContextCancelled pins the cancelled-context path.
 func TestVolumeService_List_ContextCancelled(t *testing.T) {
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewVolumeService(mockConnManager)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -50,7 +37,7 @@ func TestVolumeService_List_ContextCancelled(t *testing.T) {
 // podman client, so the tunnel call errors; the happy path is covered by
 // the integration suite.
 func TestVolumeService_List_EngineError(t *testing.T) {
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewVolumeService(mockConnManager)
 
 	result, err := service.List(context.Background(), "test-user", "test-machine", entities.VolumeListOptions{})
@@ -60,26 +47,12 @@ func TestVolumeService_List_EngineError(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-// TestVolumeService_Get_ConnectionError pins the connection-failure path
-// for inspect: a GetConnection failure surfaces as ErrConnectionFailed.
-func TestVolumeService_Get_ConnectionError(t *testing.T) {
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewVolumeService(mockConnManager)
-
-	result, err := service.Get(context.Background(), "test-user", "test-machine", "my-volume")
-
-	assert.Error(t, err, "should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-	assert.Nil(t, result, "should return nil result on connection error")
-}
-
 // TestVolumeService_Get_EngineError pins that an engine failure surfaces
 // wrapped as "failed to inspect volume". The mock connection carries no real
 // podman client, so the tunnel call errors; happy path and not-found mapping
 // are covered by the integration suite.
 func TestVolumeService_Get_EngineError(t *testing.T) {
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewVolumeService(mockConnManager)
 
 	result, err := service.Get(context.Background(), "test-user", "test-machine", "my-volume")
@@ -99,26 +72,12 @@ func TestIsVolumeNotFound(t *testing.T) {
 	assert.False(t, isVolumeNotFound(assert.AnError), "unrelated errors must not map to not-found")
 }
 
-// TestVolumeService_Create_ConnectionError pins the connection-failure path
-// for create: a GetConnection failure surfaces as ErrConnectionFailed.
-func TestVolumeService_Create_ConnectionError(t *testing.T) {
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewVolumeService(mockConnManager)
-
-	result, err := service.Create(context.Background(), "test-user", "test-machine", VolumeCreateRequest{Name: "my-volume"})
-
-	assert.Error(t, err, "should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-	assert.Nil(t, result)
-}
-
 // TestVolumeService_Create_EngineError pins that an engine failure surfaces
 // wrapped as "failed to create volume". The mock connection carries no real
 // podman client, so the tunnel call errors; happy paths are covered by the
 // integration suite.
 func TestVolumeService_Create_EngineError(t *testing.T) {
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewVolumeService(mockConnManager)
 
 	result, err := service.Create(context.Background(), "test-user", "test-machine", VolumeCreateRequest{})
@@ -140,31 +99,4 @@ func TestMapCreateError(t *testing.T) {
 
 	assert.Nil(t, mapCreateError(&errorhandling.ErrorModel{ResponseCode: http.StatusInternalServerError}), "podman 5xx must not map to a client error")
 	assert.Nil(t, mapCreateError(assert.AnError), "unrelated errors must not map to a client error")
-}
-
-// TestVolumeService_Delete_ConnectionError pins the connection-failure
-// path for delete: a GetConnection failure surfaces as ErrConnectionFailed.
-func TestVolumeService_Delete_ConnectionError(t *testing.T) {
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewVolumeService(mockConnManager)
-
-	err := service.Delete(context.Background(), "test-user", "test-machine", "my-volume", false)
-
-	assert.Error(t, err, "should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-}
-
-// TestVolumeService_Export_ConnectionError pins the connection-failure
-// path for export: a GetConnection failure surfaces as ErrConnectionFailed.
-func TestVolumeService_Export_ConnectionError(t *testing.T) {
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewVolumeService(mockConnManager)
-
-	var sink bytes.Buffer
-	err := service.Export(context.Background(), "test-user", "test-machine", "my-volume", &sink)
-
-	assert.Error(t, err, "should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 }

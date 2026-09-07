@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"go.podman.io/podman/v6/pkg/bindings"
 )
@@ -159,13 +160,20 @@ type MockTestConnectionCall struct {
 }
 
 // MockConnectionManager implements a mock connection manager for testing
+// (both the legacy GetConnection/Release surface and the connections.Manager
+// seam services migrate to).
 type MockConnectionManager struct {
 	getConnectionErr    error
+	acquireErr          error
 	testConnectionErr   error
 	testConnectionCalls []MockTestConnectionCall
 	probeErr            error
 	probeCalls          []MockProbeCall
 }
+
+// The mock satisfies the full connections.Manager seam so services can
+// depend on the interface in production wiring and tests.
+var _ connections.Manager = (*MockConnectionManager)(nil)
 
 // MockProbeCall records a single ProbeMachine invocation.
 type MockProbeCall struct {
@@ -193,6 +201,23 @@ func NewMockConnectionManagerWithError(getConnectionErr error) *MockConnectionMa
 	}
 }
 
+// NewMockConnectionManagerWithAcquireError returns a MockConnectionManager
+// whose WithConnection fails with the given error before running fn. The
+// error crosses as-is: mapping it to the 502 sentinel is the production
+// manager's job, pinned once in the connections package tests.
+func NewMockConnectionManagerWithAcquireError(acquireErr error) *MockConnectionManager {
+	return &MockConnectionManager{
+		acquireErr: acquireErr,
+	}
+}
+
+// mockConnectionContext is the stand-in connection context both mock
+// surfaces hand out. It carries no real podman client, so tunnel engine
+// calls through it fail — the shape unit tests rely on.
+func mockConnectionContext() context.Context {
+	return context.WithValue(context.Background(), "mock-connection", &bindings.Connection{})
+}
+
 // NewMockConnectionManagerWithTestError returns a MockConnectionManager
 // whose TestConnection always fails with the given error. Use this to
 // exercise the registration connection-test failure branch in
@@ -208,13 +233,30 @@ func (m *MockConnectionManager) GetConnection(machineID, userID string) (context
 	if m.getConnectionErr != nil {
 		return nil, m.getConnectionErr
 	}
-	// Return a mock context with a mock connection
-	mockConn := &bindings.Connection{}
-	mockCtx := context.WithValue(context.Background(), "mock-connection", mockConn)
-	return mockCtx, nil
+	return mockConnectionContext(), nil
 }
 
 func (m *MockConnectionManager) Release(machineID string) {
+}
+
+// WithConnection runs fn with a mock connection context, mirroring the
+// production contract: an injected acquisition error short-circuits fn and
+// crosses as-is, otherwise fn's error propagates untouched.
+func (m *MockConnectionManager) WithConnection(ctx context.Context, userID, machineID, op string, fn func(connCtx context.Context) error) error {
+	if m.acquireErr != nil {
+		return m.acquireErr
+	}
+	return fn(mockConnectionContext())
+}
+
+// RemoveMachine mirrors the production seam: invalidating a machine's
+// cached connection is meaningless for a stateless mock, so it is a no-op.
+func (m *MockConnectionManager) RemoveMachine(machineID string) {
+}
+
+// Stop mirrors the production seam: the mock owns no background workers,
+// so shutdown is a no-op.
+func (m *MockConnectionManager) Stop() {
 }
 
 // ProbeMachine records the call and returns the injected error. The
