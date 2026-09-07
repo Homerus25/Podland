@@ -10,6 +10,7 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 	"go.podman.io/podman/v6/pkg/specgen"
@@ -259,7 +260,7 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 			Force: force,
 		})
 		if err != nil {
-			if strings.Contains(err.Error(), "no such container") {
+			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrContainerNotFound
 			}
 			return fmt.Errorf("failed to remove container: %w", err)
@@ -270,7 +271,7 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 		}
 
 		if rmReports[0].Err != nil {
-			if strings.Contains(rmReports[0].Err.Error(), "no such container") {
+			if podmanerr.IsNotFound(rmReports[0].Err) {
 				return appErrors.ErrContainerNotFound
 			}
 			return fmt.Errorf("failed to remove container: %w", rmReports[0].Err)
@@ -310,7 +311,7 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 		// Fetch logs from container
 		err := containerEngine.ContainerLogs(ctx, []string{containerID}, logsOpts)
 		if err != nil {
-			if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
+			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrContainerNotFound
 			}
 			return fmt.Errorf("failed to get container logs: %w", err)
@@ -375,7 +376,7 @@ func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machin
 		// Fetch logs from container (this will block until follow ends or context is cancelled)
 		err := containerEngine.ContainerLogs(ctx, []string{containerID}, logsOpts)
 		if err != nil {
-			if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
+			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrContainerNotFound
 			}
 			if ctx.Err() == context.Canceled {

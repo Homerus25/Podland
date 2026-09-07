@@ -3,11 +3,11 @@ package images
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
@@ -70,10 +70,13 @@ func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID st
 		})
 
 		if len(errs) > 0 && errs[0] != nil {
-			if strings.Contains(errs[0].Error(), "no such image") || strings.Contains(errs[0].Error(), "image not found") {
+			// The adapter's conflict predicate is a superset of the pair of
+			// phrases this slice used to match: podman also refuses via the
+			// "in use" family and typed 409 ErrorModels.
+			if podmanerr.IsNotFound(errs[0]) {
 				return appErrors.ErrImageNotFound
 			}
-			if strings.Contains(errs[0].Error(), "image is used by") || strings.Contains(errs[0].Error(), "unable to delete") {
+			if podmanerr.IsConflict(errs[0]) {
 				return appErrors.ErrImageUsedByContainers
 			}
 			return fmt.Errorf("failed to remove image: %w", errs[0])
