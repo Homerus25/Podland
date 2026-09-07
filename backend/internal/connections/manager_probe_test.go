@@ -2,37 +2,67 @@ package connections
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/encryption"
-	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/bindings"
+	"golang.org/x/crypto/ssh"
 )
 
-// newProbeCache returns a cache with the given connection contexts
+// realDialMu serializes the tests' real SSH dials. The fork's sshClient
+// writes ssh_config.DefaultUserSettings.IgnoreErrors without
+// synchronization on every dial, so two dials without a happens-before
+// edge between them trip the race detector. That is a pre-existing
+// upstream race concurrent production dials can also hit; fixing it
+// belongs in the fork, not in this package.
+var realDialMu sync.Mutex
+
+// newProbeManager returns a manager with live podman connection contexts
 // pre-seeded per machine, standing in for SSH-established tunnels so the
-// probe exercises the "cached connection" path without a real host.
-func newProbeCache(t *testing.T, connCtxByMachine map[string]context.Context) *ConnectionCache {
+// probe exercises the "cached connection" path without a real host. The
+// dial seam is rigged to fail the test if a probe ever tries to dial.
+func newProbeManager(t *testing.T, connCtxByMachine map[string]context.Context, testTimeout time.Duration) *ConnectionManager {
 	t.Helper()
-	connections := make(map[string]*ConnectionEntry, len(connCtxByMachine))
+	mgr := newManager(managerOptions{
+		maxSize:         10,
+		testTimeout:     testTimeout,
+		idleTimeout:     15 * time.Minute,
+		cleanupInterval: 0, // no cleanup goroutine: entries must survive the test
+		dial: func(context.Context, string) (context.Context, bindings.CloseFunc, error) {
+			return nil, nil, errors.New("probe tests must not dial: connections are pre-seeded")
+		},
+	})
 	for machineID, connCtx := range connCtxByMachine {
-		conn, err := bindings.GetClient(connCtx)
-		require.NoError(t, err)
-		connections[machineID] = &ConnectionEntry{
-			connCtx:   connCtx,
-			conn:      conn,
+		if _, err := bindings.GetClient(connCtx); err != nil {
+			t.Fatalf("pre-seeded context for %s: %v", machineID, err)
+		}
+		mgr.entries[machineID] = &connectionEntry{
 			machineID: machineID,
-			refCount:  1,
-			isActive:  true,
+			connCtx:   connCtx,
+			close:     func() {},
+			lastUsed:  time.Now(),
+			ready:     true,
+			done:      closedChan(),
 		}
 	}
-	return &ConnectionCache{connections: connections}
+	return mgr
+}
+
+func closedChan() chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
 }
 
 // pingServer starts an httptest server that answers /_ping with the given
@@ -48,19 +78,17 @@ func pingServer(t *testing.T, status int) string {
 
 func tunnelCtx(t *testing.T, uri string) context.Context {
 	t.Helper()
+	realDialMu.Lock()
+	defer realDialMu.Unlock()
 	connCtx, err := bindings.NewConnectionWithOptions(context.Background(), bindings.Options{URI: uri})
 	require.NoError(t, err)
 	return connCtx
 }
 
-func newProbeManager(cache *ConnectionCache, testTimeout time.Duration) *ConnectionManager {
-	return NewConnectionManager(cache, &models.MachineRepository{}, &encryption.EncryptionService{}, 1, 1*time.Second, testTimeout)
-}
-
 func TestConnectionManager_ProbeMachine(t *testing.T) {
 	t.Run("ping succeeds over cached connection", func(t *testing.T) {
 		connCtx := tunnelCtx(t, pingServer(t, http.StatusOK))
-		mgr := newProbeManager(newProbeCache(t, map[string]context.Context{"machine-1": connCtx}), 10*time.Second)
+		mgr := newProbeManager(t, map[string]context.Context{"machine-1": connCtx}, 10*time.Second)
 
 		err := mgr.ProbeMachine("machine-1", "user-1")
 
@@ -80,7 +108,7 @@ func TestConnectionManager_ProbeMachine(t *testing.T) {
 		t.Cleanup(server.Close)
 		connCtx := tunnelCtx(t, "tcp://"+server.Listener.Addr().String())
 		status.Store(http.StatusInternalServerError)
-		mgr := newProbeManager(newProbeCache(t, map[string]context.Context{"machine-1": connCtx}), 10*time.Second)
+		mgr := newProbeManager(t, map[string]context.Context{"machine-1": connCtx}, 10*time.Second)
 
 		err := mgr.ProbeMachine("machine-1", "user-1")
 
@@ -94,11 +122,89 @@ func TestConnectionManager_ProbeMachine(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 		connCtx := tunnelCtx(t, "tcp://"+server.Listener.Addr().String())
-		mgr := newProbeManager(newProbeCache(t, map[string]context.Context{"machine-1": connCtx}), 20*time.Millisecond)
+		mgr := newProbeManager(t, map[string]context.Context{"machine-1": connCtx}, 20*time.Millisecond)
 
 		err := mgr.ProbeMachine("machine-1", "user-1")
 
 		assert.ErrorIs(t, err, context.DeadlineExceeded,
 			"probe exceeding testTimeout must return the standard deadline error (→ offline)")
 	})
+}
+
+// --- registration TestConnection: timeout semantics ---
+
+// writeTestIdentity returns a valid ed25519 private key as PEM content —
+// the raw-credential shape TestConnection takes (the SSH dial parses the
+// identity BEFORE opening the TCP connection, so an invalid key would fail
+// fast and never reach the handshake the timeout tests need to block on).
+func writeTestIdentity(t *testing.T) string {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+	block, err := ssh.MarshalPrivateKey(key, "")
+	require.NoError(t, err)
+	return string(pem.EncodeToMemory(block))
+}
+
+// silentSSHServer starts a TCP listener that accepts connections but never
+// sends the SSH version banner, so the client handshake blocks and only
+// the manager's deadline race can decide the outcome.
+func silentSSHServer(t *testing.T) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	var mu sync.Mutex
+	var conns []net.Conn
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			_ = c.Close()
+		}
+	})
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port
+}
+
+func TestConnectionManager_TestConnection_BoundedByTestTimeout(t *testing.T) {
+	port := silentSSHServer(t)
+	identity := writeTestIdentity(t)
+	mgr := newProbeManager(t, nil, 50*time.Millisecond)
+
+	realDialMu.Lock()
+	err := mgr.TestConnection(context.Background(), "127.0.0.1", port, "root", identity, "/run/podman/podman.sock")
+	realDialMu.Unlock()
+
+	assert.ErrorIs(t, err, context.DeadlineExceeded,
+		"a silent host must surface the manager's deadline (→ registration 400 timeout), not hang")
+}
+
+func TestConnectionManager_TestConnection_FastDialFailureIsNotATimeout(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	require.NoError(t, ln.Close())
+
+	identity := writeTestIdentity(t)
+	mgr := newProbeManager(t, nil, 10*time.Second)
+
+	realDialMu.Lock()
+	err = mgr.TestConnection(context.Background(), "127.0.0.1", port, "root", identity, "/run/podman/podman.sock")
+	realDialMu.Unlock()
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, context.DeadlineExceeded,
+		"connection refused is a real probe failure (→ registration 400), not the deadline")
 }

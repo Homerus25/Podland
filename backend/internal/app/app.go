@@ -116,23 +116,12 @@ func New(cfg *config.Config) (*App, error) {
 	userService := users.NewUserService(userRepo)
 
 	// Initialize connection manager
-	connectionFactory := connections.NewConnectionFactory(connections.ConnectionFactoryOptions{
-		MachineRepo: machineRepo,
-		Encryption:  encryptionService,
-	})
-	connectionCache := connections.NewConnectionCache(connections.ConnectionCacheOptions{
-		MaxSize: cfg.Connections.MaxConcurrent,
-		Factory: connectionFactory,
-	})
 	connectionManager := connections.NewConnectionManager(
-		connectionCache,
 		machineRepo,
 		encryptionService,
 		cfg.Connections.MaxConcurrent,
-		time.Duration(cfg.Connections.QueueTimeoutSeconds)*time.Second,
 		time.Duration(cfg.Connections.TestTimeoutSeconds)*time.Second,
 	)
-	go connectionManager.Run()
 
 	// sshExecService is the SSH-exec capability (sshexec.SSHExecInterface).
 	// It is constructed here so its dialer cache + cleanup goroutine start
@@ -358,19 +347,13 @@ func (a *App) Handler() http.Handler {
 	return a.router
 }
 
-// Close stops the background goroutines (connection-manager processQueue
+// Close stops the background goroutines (connection-manager idle cleanup
 // and sshexec dialer-cleanup) and closes the DB. Safe to call any number
 // of times — subsequent calls are no-ops that return the first call's
 // result.
-//
-// Note: the connection cache's cleanup goroutine (internal/connections)
-// has no stop mechanism today and is intentionally left running — it
-// matches existing main() behaviour and is not on the PRD's stop list.
-// Stopping it is a separate prefactoring concern.
 func (a *App) Close() error {
 	a.closeOnce.Do(func() {
-		// Stop the connection-manager processQueue goroutine first so no
-		// new connection requests are processed while we're tearing down.
+		// Stop the connection manager (its idle-cleanup goroutine) first.
 		if a.connectionManager != nil {
 			a.connectionManager.Stop()
 		}

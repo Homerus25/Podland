@@ -222,7 +222,7 @@ func (d *sshDialer) evictLRU() {
 
 // cleanupLoop periodically drops idle clients older than IdleTimeout. It
 // closes stoppedCh on exit so Close can block until the goroutine has
-// truly terminated (mirroring connections.ConnectionManager.processQueue).
+// truly terminated (mirroring connections.ConnectionManager.Stop).
 func (d *sshDialer) cleanupLoop() {
 	defer close(d.stoppedCh)
 	ticker := time.NewTicker(d.cleanupInterval)

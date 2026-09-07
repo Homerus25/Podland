@@ -96,7 +96,6 @@ backend/
 | `JWT_ISSUER` | `podland` | No | JWT issuer claim |
 | `SSH_IDLE_TIMEOUT_SECONDS` | `900` | No | SSH connection idle timeout (15 minutes) |
 | `MAX_CONCURRENT_MACHINES` | `100` | No | Maximum concurrent machine connections |
-| `CONNECTION_QUEUE_TIMEOUT_SECONDS` | `30` | No | Max wait time for queued connection requests |
 | `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | No | Timeout for machine connection test during registration |
 | `RATE_LIMIT_REQUESTS_PER_USER_PER_MINUTE` | `60` | No | Rate limit: requests per minute per user |
 | `ALLOWED_ORIGINS` | (empty) | No | CORS allowed origins (comma-separated) |

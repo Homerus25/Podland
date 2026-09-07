@@ -54,7 +54,6 @@ type SessionConfig struct {
 type ConnectionConfig struct {
 	SSHIdleTimeoutSeconds int
 	MaxConcurrent         int
-	QueueTimeoutSeconds   int
 	TestTimeoutSeconds    int
 }
 
@@ -108,7 +107,6 @@ func Load() (*Config, error) {
 	// Connections
 	cfg.Connections.SSHIdleTimeoutSeconds = getEnvInt("SSH_IDLE_TIMEOUT_SECONDS", 900)
 	cfg.Connections.MaxConcurrent = getEnvInt("MAX_CONCURRENT_MACHINES", 100)
-	cfg.Connections.QueueTimeoutSeconds = getEnvInt("CONNECTION_QUEUE_TIMEOUT_SECONDS", 30)
 	cfg.Connections.TestTimeoutSeconds = getEnvInt("MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS", 10)
 
 	// Rate Limiting

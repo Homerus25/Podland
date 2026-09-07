@@ -59,7 +59,6 @@ func newTestConfig(t *testing.T) *config.Config {
 		Connections: config.ConnectionConfig{
 			SSHIdleTimeoutSeconds: 900,
 			MaxConcurrent:         10,
-			QueueTimeoutSeconds:   30,
 			TestTimeoutSeconds:    10,
 		},
 		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 60},

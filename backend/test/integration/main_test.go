@@ -622,7 +622,6 @@ func buildTestConfig() (*config.Config, []string, error) {
 		Connections: config.ConnectionConfig{
 			SSHIdleTimeoutSeconds: 900,
 			MaxConcurrent:         10,
-			QueueTimeoutSeconds:   30,
 			TestTimeoutSeconds:    10,
 		},
 		// The rate limiters are production abuse guards, not the system
