@@ -3,11 +3,10 @@ package images
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
@@ -30,78 +29,62 @@ type ImageServiceInterface interface {
 
 // ImageService provides business logic for images.
 type ImageService struct {
-	connManager machines.ConnectionManagerInterface
+	conn connections.Manager
 }
 
-// NewImageService creates a new ImageService with the given connection manager interface.
-func NewImageService(connManager machines.ConnectionManagerInterface) *ImageService {
+// NewImageService creates a new ImageService with the given connection manager.
+func NewImageService(conn connections.Manager) *ImageService {
 	return &ImageService{
-		connManager: connManager,
+		conn: conn,
 	}
 }
 
 // List returns a list of images on the specified machine.
 func (s *ImageService) List(ctx context.Context, userID, machineID string, opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go) — this doc already promises it; the code had drifted
-		// to a wrapped 500. The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
+	var summaries []*entities.ImageSummary
+	err := s.conn.WithConnection(ctx, userID, machineID, "images.List", func(connCtx context.Context) error {
+		imageEngine := &tunnel.ImageEngine{
+			ClientCtx: connCtx,
+		}
 
-	defer s.connManager.Release(machineID)
-
-	imageEngine := &tunnel.ImageEngine{
-		ClientCtx: connCtx,
-	}
-
-	images, err := imageEngine.List(ctx, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list images: %w", err)
-	}
-
-	return images, nil
+		list, err := imageEngine.List(ctx, opts)
+		if err != nil {
+			return fmt.Errorf("failed to list images: %w", err)
+		}
+		summaries = list
+		return nil
+	})
+	return summaries, err
 }
 
 // Delete removes an image by ID on the specified machine.
 // Stub — implemented in slice 060-02-image-delete.
 func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID string, force bool) error {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// Same runtime-connection contract as List: 502
-		// CONNECTION_FAILED, cause logged here.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	return s.conn.WithConnection(ctx, userID, machineID, "images.Delete", func(connCtx context.Context) error {
+		imageEngine := &tunnel.ImageEngine{
+			ClientCtx: connCtx,
+		}
 
-	imageEngine := &tunnel.ImageEngine{
-		ClientCtx: connCtx,
-	}
+		report, errs := imageEngine.Remove(ctx, []string{imageID}, entities.ImageRemoveOptions{
+			Force: force,
+		})
 
-	report, errs := imageEngine.Remove(ctx, []string{imageID}, entities.ImageRemoveOptions{
-		Force: force,
+		if len(errs) > 0 && errs[0] != nil {
+			if strings.Contains(errs[0].Error(), "no such image") || strings.Contains(errs[0].Error(), "image not found") {
+				return appErrors.ErrImageNotFound
+			}
+			if strings.Contains(errs[0].Error(), "image is used by") || strings.Contains(errs[0].Error(), "unable to delete") {
+				return appErrors.ErrImageUsedByContainers
+			}
+			return fmt.Errorf("failed to remove image: %w", errs[0])
+		}
+
+		if report == nil {
+			return fmt.Errorf("no remove report returned for image: %s", imageID)
+		}
+
+		return nil
 	})
-
-	if len(errs) > 0 && errs[0] != nil {
-		if strings.Contains(errs[0].Error(), "no such image") || strings.Contains(errs[0].Error(), "image not found") {
-			return appErrors.ErrImageNotFound
-		}
-		if strings.Contains(errs[0].Error(), "image is used by") || strings.Contains(errs[0].Error(), "unable to delete") {
-			return appErrors.ErrImageUsedByContainers
-		}
-		return fmt.Errorf("failed to remove image: %w", errs[0])
-	}
-
-	if report == nil {
-		return fmt.Errorf("no remove report returned for image: %s", imageID)
-	}
-
-	return nil
 }
 
 // Pull pulls an image on the specified machine.
@@ -111,39 +94,33 @@ func (s *ImageService) Pull(ctx context.Context, userID, machineID, rawImage str
 
 // PullWithProgress pulls an image on the specified machine and reports progress via the provided callback.
 func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(event PullProgressEvent)) (*entities.ImagePullReport, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go) — this doc already promises it; the code had drifted
-		// to a wrapped 500. The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
-
-	imageEngine := &tunnel.ImageEngine{
-		ClientCtx: connCtx,
-	}
-
-	// Set up progress writer if callback is provided
-	if progressWriter != nil {
-		opts.Writer = &progressAdapter{
-			writer:      progressWriter,
-			machineID:   machineID,
-			operationID: generateOperationID(),
+	var report *entities.ImagePullReport
+	err := s.conn.WithConnection(ctx, userID, machineID, "images.Pull", func(connCtx context.Context) error {
+		imageEngine := &tunnel.ImageEngine{
+			ClientCtx: connCtx,
 		}
-	}
 
-	report, err := imageEngine.Pull(ctx, rawImage, opts)
-	if err != nil {
-		if ctx.Err() == context.Canceled {
-			return nil, appErrors.ErrOperationCancelled
+		// Set up progress writer if callback is provided
+		if progressWriter != nil {
+			opts.Writer = &progressAdapter{
+				writer:      progressWriter,
+				machineID:   machineID,
+				operationID: generateOperationID(),
+			}
 		}
-		return nil, appErrors.ErrImagePullFailed
-	}
 
-	return report, nil
+		pullReport, err := imageEngine.Pull(ctx, rawImage, opts)
+		if err != nil {
+			if ctx.Err() == context.Canceled {
+				return appErrors.ErrOperationCancelled
+			}
+			return appErrors.ErrImagePullFailed
+		}
+
+		report = pullReport
+		return nil
+	})
+	return report, err
 }
 
 // Prune removes every unused image on the machine in one call,
@@ -151,29 +128,22 @@ func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, 
 // in use by containers are untouched by podman. Returns one prune
 // report per removed image with its reclaimed size.
 func (s *ImageService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go) — this doc already promises it; the code had drifted
-		// to a wrapped 500. The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	var pruned []*reports.PruneReport
+	err := s.conn.WithConnection(ctx, userID, machineID, "images.Prune", func(connCtx context.Context) error {
+		imageEngine := &tunnel.ImageEngine{
+			ClientCtx: connCtx,
+		}
 
-	imageEngine := &tunnel.ImageEngine{
-		ClientCtx: connCtx,
-	}
-
-	prunes, err := imageEngine.Prune(ctx, entities.ImagePruneOptions{
-		All: true,
+		pruneReports, err := imageEngine.Prune(ctx, entities.ImagePruneOptions{
+			All: true,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to prune images: %w", err)
+		}
+		pruned = pruneReports
+		return nil
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to prune images: %w", err)
-	}
-
-	return prunes, nil
+	return pruned, err
 }
 
 // progressAdapter adapts podman progress output to our progress event format

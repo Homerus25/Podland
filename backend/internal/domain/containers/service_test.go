@@ -2,16 +2,18 @@ package containers
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
-	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
+
+// Connection-failure mapping (502 CONNECTION_FAILED) is owned by the
+// connections.Manager seam and pinned once in the connections package
+// tests — not re-pinned per service method here.
 
 // MockContainerEngine is a mock implementation of the ContainerEngine interface
 type MockContainerEngine struct {
@@ -30,7 +32,7 @@ func TestContainerService_List_Success(t *testing.T) {
 	machineID := "test-machine"
 
 	// Setup mock dependencies
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewContainerService(mockConnManager)
 
 	// Create test container list options
@@ -56,19 +58,6 @@ func TestContainerService_List_Success(t *testing.T) {
 	// Since we can't easily mock the ContainerEngine creation in the service,
 	// we'll test the error handling and connection management
 	// The actual ContainerList call would be tested in integration tests
-
-	// Test that the service properly handles connection errors
-	t.Run("connection error", func(t *testing.T) {
-		connErr := errors.New("connection failed")
-		var mockConnManagerWithError machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-		serviceWithError := NewContainerService(mockConnManagerWithError)
-
-		result, err := serviceWithError.List(ctx, userID, machineID, opts)
-
-		assert.Error(t, err, "Should return error when connection fails")
-		assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-		assert.Nil(t, result, "Should return nil result when connection fails")
-	})
 
 	// Test that the service properly handles container list errors
 	t.Run("container list error", func(t *testing.T) {
@@ -114,29 +103,15 @@ func TestContainerService_List_Options(t *testing.T) {
 
 // TestContainerService_List_ErrorHandling tests error handling scenarios
 func TestContainerService_List_ErrorHandling(t *testing.T) {
-	ctx := context.Background()
 	userID := "test-user"
 	machineID := "test-machine"
-
-	t.Run("connection manager error", func(t *testing.T) {
-		connErr := errors.New("SSH connection failed")
-		var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-		service := NewContainerService(mockConnManager)
-
-		opts := entities.ContainerListOptions{}
-		result, err := service.List(ctx, userID, machineID, opts)
-
-		assert.Error(t, err, "Should return connection error")
-		assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-		assert.Nil(t, result, "Should return nil result on connection error")
-	})
 
 	t.Run("context cancellation", func(t *testing.T) {
 		// Create a context that's already cancelled
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
-		var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+		var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 		service := NewContainerService(mockConnManager)
 
 		opts := entities.ContainerListOptions{}
@@ -154,7 +129,7 @@ func TestContainerService_Create_Success(t *testing.T) {
 	machineID := "test-machine"
 
 	// Setup mock dependencies
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewContainerService(mockConnManager)
 
 	// Create test request
@@ -169,19 +144,6 @@ func TestContainerService_Create_Success(t *testing.T) {
 			"app": "test",
 		},
 	}
-
-	// Test that the service properly handles connection errors
-	t.Run("connection error", func(t *testing.T) {
-		connErr := errors.New("connection failed")
-		var mockConnManagerWithError machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-		serviceWithError := NewContainerService(mockConnManagerWithError)
-
-		result, err := serviceWithError.Create(ctx, userID, machineID, request)
-
-		assert.Error(t, err, "Should return error when connection fails")
-		assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-		assert.Nil(t, result, "Should return nil result when connection fails")
-	})
 
 	// Test that the service properly handles container creation
 	t.Run("container creation error", func(t *testing.T) {

@@ -6,12 +6,15 @@ import (
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
+
+// Connection-failure mapping (502 CONNECTION_FAILED) is owned by the
+// connections.Manager seam and pinned once in the connections package
+// tests — not re-pinned per service method here.
 
 // TestImageService_ImplementsInterface is a compile-time check that *ImageService
 // satisfies ImageServiceInterface.
@@ -20,20 +23,20 @@ func TestImageService_ImplementsInterface(t *testing.T) {
 }
 
 // TestNewImageService_WithMockConnManager verifies that ImageService can be
-// constructed with a mock ConnectionManagerInterface, enabling unit testing.
+// constructed with a mock connections.Manager, enabling unit testing.
 func TestNewImageService_WithMockConnManager(t *testing.T) {
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 
 	service := NewImageService(mockConnManager)
 
 	assert.NotNil(t, service)
-	assert.NotNil(t, service.connManager)
+	assert.NotNil(t, service.conn)
 }
 
 // TestNewImageService_WithErrorMockConnManager verifies the service can be
 // constructed with a mock that simulates connection errors.
 func TestNewImageService_WithErrorMockConnManager(t *testing.T) {
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManagerWithError(
 		errors.New("simulated connection failure"),
 	)
 
@@ -42,35 +45,13 @@ func TestNewImageService_WithErrorMockConnManager(t *testing.T) {
 	assert.NotNil(t, service)
 }
 
-// TestConnectionManager_ImplementsInterface is a compile-time check that
-// *connections.ConnectionManager satisfies ConnectionManagerInterface,
-// allowing it to be passed directly to NewImageService.
-func TestConnectionManager_ImplementsInterface(t *testing.T) {
-	var _ machines.ConnectionManagerInterface = (*connections.ConnectionManager)(nil)
-}
-
-// TestImageService_List_ConnectionFailure tests that List properly wraps
-// connection errors from the ConnectionManager.
-func TestImageService_List_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewImageService(mockConnManager)
-
-	result, err := service.List(ctx, "test-user", "test-machine", entities.ImageListOptions{})
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
-
 // TestImageService_List_InvocationShape tests that List follows the correct
 // invocation shape: gets a connection, creates an ImageEngine, and calls List.
 // With the mock connection manager (no real podman backend), the engine call
 // fails — but we can verify the error is from the list step, not the connection step.
 func TestImageService_List_InvocationShape(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewImageService(mockConnManager)
 
 	result, err := service.List(ctx, "test-user", "test-machine", entities.ImageListOptions{})
@@ -81,23 +62,6 @@ func TestImageService_List_InvocationShape(t *testing.T) {
 	assert.Nil(t, result, "Should return nil result when engine call fails")
 	assert.NotErrorIs(t, err, appErrors.ErrConnectionFailed,
 		"Error should not be a connection error — connection should have succeeded")
-}
-
-// TestImageService_Delete_ConnectionError tests that Delete returns error when connection fails
-func TestImageService_Delete_ConnectionError(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	imageID := "image-123"
-
-	connErr := errors.New("connection failed")
-	var mockConnManagerWithError machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	serviceWithError := NewImageService(mockConnManagerWithError)
-
-	err := serviceWithError.Delete(ctx, userID, machineID, imageID, false)
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
 }
 
 // TestImageService_Delete_MissingParameters tests that Delete validates input parameters
@@ -198,21 +162,6 @@ func TestImageService_ParsePlatform(t *testing.T) {
 	})
 }
 
-// TestImageService_Pull_ConnectionFailure tests that Pull properly handles
-// connection failures from the ConnectionManager.
-func TestImageService_Pull_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewImageService(mockConnManager)
-
-	result, err := service.Pull(ctx, "test-user", "test-machine", "nginx:latest", entities.ImagePullOptions{})
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
-
 // TestImageService_Pull_MissingRawImage tests that Pull validates input parameters
 func TestImageService_Pull_MissingRawImage(t *testing.T) {
 	ctx := context.Background()
@@ -248,7 +197,7 @@ func TestImageService_Pull_EngineFailure(t *testing.T) {
 	userID := "test-user"
 	machineID := "test-machine"
 
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewImageService(mockConnManager)
 
 	result, err := service.Pull(ctx, userID, machineID, "nginx:latest", entities.ImagePullOptions{})
@@ -258,19 +207,4 @@ func TestImageService_Pull_EngineFailure(t *testing.T) {
 	assert.Error(t, err, "Should return error when engine pull fails")
 	assert.Equal(t, appErrors.ErrImagePullFailed, err, "Should return ErrImagePullFailed")
 	assert.Nil(t, result, "Should return nil result when engine pull fails")
-}
-
-// TestImageService_Prune_ConnectionFailure tests that Prune wraps
-// connection errors from the ConnectionManager.
-func TestImageService_Prune_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewImageService(mockConnManager)
-
-	result, err := service.Prune(ctx, "test-user", "test-machine")
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-	assert.Nil(t, result, "Should return nil result when connection fails")
 }

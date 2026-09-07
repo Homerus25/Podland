@@ -37,9 +37,9 @@ type Manager interface {
 }
 
 // Manager interface satisfaction is pinned at compile time. During the
-// expand phase the concrete manager ALSO satisfies the old
-// machines.ConnectionManagerInterface (pinned in images/service_test.go):
-// unmigrated domains keep their GetConnection/Release pairing.
+// expand phase the concrete manager also satisfies the old
+// machines.ConnectionManagerInterface, which the not-yet-migrated domains
+// (machines, quadlets, secrets) still require until the contract ticket.
 var _ Manager = (*ConnectionManager)(nil)
 
 // DefaultConnectionTestTimeout is the registration-probe deadline when no

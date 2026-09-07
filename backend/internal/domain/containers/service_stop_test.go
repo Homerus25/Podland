@@ -2,32 +2,11 @@ package containers
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
-	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 )
-
-// TestContainerService_Stop_ConnectionError tests that Stop returns error when connection fails
-func TestContainerService_Stop_ConnectionError(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	containerID := "container-123"
-
-	connErr := errors.New("connection failed")
-	var mockConnManagerWithError machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	serviceWithError := NewContainerService(mockConnManagerWithError)
-
-	result, err := serviceWithError.Stop(ctx, userID, machineID, containerID)
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
 
 // TestContainerService_Stop_MissingParameters tests that Stop validates input parameters
 func TestContainerService_Stop_MissingParameters(t *testing.T) {

@@ -2,31 +2,11 @@ package containers
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
-	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 )
-
-// TestContainerService_Delete_ConnectionError tests that Delete returns error when connection fails
-func TestContainerService_Delete_ConnectionError(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	containerID := "container-123"
-
-	connErr := errors.New("connection failed")
-	var mockConnManagerWithError machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	serviceWithError := NewContainerService(mockConnManagerWithError)
-
-	err := serviceWithError.Delete(ctx, userID, machineID, containerID, false)
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-}
 
 // TestContainerService_Delete_MissingParameters tests that Delete validates input parameters
 func TestContainerService_Delete_MissingParameters(t *testing.T) {

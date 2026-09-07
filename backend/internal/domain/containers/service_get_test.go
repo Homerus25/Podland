@@ -2,11 +2,8 @@ package containers
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
-	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 )
@@ -19,21 +16,8 @@ func TestContainerService_Get_Success(t *testing.T) {
 	containerID := "container-123"
 
 	// Setup mock dependencies
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	mockConnManager := testutils.NewMockConnectionManager()
 	service := NewContainerService(mockConnManager)
-
-	// Test that the service properly handles connection errors
-	t.Run("connection error", func(t *testing.T) {
-		connErr := errors.New("connection failed")
-		var mockConnManagerWithError machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-		serviceWithError := NewContainerService(mockConnManagerWithError)
-
-		result, err := serviceWithError.Get(ctx, userID, machineID, containerID)
-
-		assert.Error(t, err, "Should return error when connection fails")
-		assert.ErrorIs(t, err, appErrors.ErrConnectionFailed, "runtime connection failures surface as the 502 sentinel")
-		assert.Nil(t, result, "Should return nil result when connection fails")
-	})
 
 	// Test that the service properly handles container inspection
 	t.Run("container inspection error", func(t *testing.T) {

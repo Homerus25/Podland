@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log/slog"
 	"maps"
 	"strings"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
@@ -31,148 +30,123 @@ type ContainerServiceInterface interface {
 
 // ContainerService provides business logic for containers
 type ContainerService struct {
-	connManager machines.ConnectionManagerInterface
+	conn connections.Manager
 }
 
 // NewContainerService creates a new ContainerService
-func NewContainerService(connManager machines.ConnectionManagerInterface) *ContainerService {
+func NewContainerService(conn connections.Manager) *ContainerService {
 	return &ContainerService{
-		connManager: connManager,
+		conn: conn,
 	}
 }
 
 // List returns a list of containers on the specified machine
 func (s *ContainerService) List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error) {
-	// Get connection context to the machine
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go): the backend acts as a gateway to the remote podman.
-		// The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
+	var containers []entities.ListContainer
+	err := s.conn.WithConnection(ctx, userID, machineID, "containers.List", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	defer s.connManager.Release(machineID)
-	// Create container engine with the connection context
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	// Call the official podman ContainerList method
-	containers, err := containerEngine.ContainerList(ctx, opts)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list containers: %w", err)
-	}
-
-	return containers, nil
+		list, err := containerEngine.ContainerList(ctx, opts)
+		if err != nil {
+			return fmt.Errorf("failed to list containers: %w", err)
+		}
+		containers = list
+		return nil
+	})
+	return containers, err
 }
 
 // Create creates a new container on the specified machine
 func (s *ContainerService) Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*ContainerCreateResponse, error) {
-	// Get connection context to the machine
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go): the backend acts as a gateway to the remote podman.
-		// The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
-	// Create container engine with the connection context
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	// Create a basic spec generator with the image
-	spec := specgen.NewSpecGenerator(request.Image, false)
-
-	// Set container name if provided
-	if request.Name != "" {
-		spec.Name = request.Name
-	}
-
-	// Set command if provided
-	if len(request.Command) > 0 {
-		spec.Command = request.Command
-	}
-
-	// Set working directory if provided
-	if request.WorkingDir != "" {
-		spec.WorkDir = request.WorkingDir
-	}
-
-	// Set environment variables if provided
-	if len(request.Environment) > 0 {
-		if spec.Env == nil {
-			spec.Env = make(map[string]string)
+	var response *ContainerCreateResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "containers.Create", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
 		}
-		maps.Copy(spec.Env, request.Environment)
-	}
 
-	// Set labels if provided
-	if len(request.Labels) > 0 {
-		if spec.Labels == nil {
-			spec.Labels = make(map[string]string)
+		// Create a basic spec generator with the image
+		spec := specgen.NewSpecGenerator(request.Image, false)
+
+		// Set container name if provided
+		if request.Name != "" {
+			spec.Name = request.Name
 		}
-		maps.Copy(spec.Labels, request.Labels)
-	}
 
-	// Note: For now, we're skipping port bindings, mounts, privileged mode,
-	// restart policy, and resource limits due to API complexity.
-	// These can be added in a future enhancement.
+		// Set command if provided
+		if len(request.Command) > 0 {
+			spec.Command = request.Command
+		}
 
-	// Create the container using Podman API
-	createResponse, err := containerEngine.ContainerCreate(ctx, spec)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create container: %w", err)
-	}
+		// Set working directory if provided
+		if request.WorkingDir != "" {
+			spec.WorkDir = request.WorkingDir
+		}
 
-	// Convert the response to our DTO format
-	response := &ContainerCreateResponse{
-		ID:        createResponse.Id,
-		Name:      request.Name,
-		State:     "created",
-		Image:     request.Image,
-		ImageID:   "", // ImageID is not available in ContainerCreateReport
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
-	}
+		// Set environment variables if provided
+		if len(request.Environment) > 0 {
+			if spec.Env == nil {
+				spec.Env = make(map[string]string)
+			}
+			maps.Copy(spec.Env, request.Environment)
+		}
 
-	return response, nil
+		// Set labels if provided
+		if len(request.Labels) > 0 {
+			if spec.Labels == nil {
+				spec.Labels = make(map[string]string)
+			}
+			maps.Copy(spec.Labels, request.Labels)
+		}
+
+		// Note: For now, we're skipping port bindings, mounts, privileged mode,
+		// restart policy, and resource limits due to API complexity.
+		// These can be added in a future enhancement.
+
+		// Create the container using Podman API
+		createResponse, err := containerEngine.ContainerCreate(ctx, spec)
+		if err != nil {
+			return fmt.Errorf("failed to create container: %w", err)
+		}
+
+		// Convert the response to our DTO format
+		response = &ContainerCreateResponse{
+			ID:        createResponse.Id,
+			Name:      request.Name,
+			State:     "created",
+			Image:     request.Image,
+			ImageID:   "", // ImageID is not available in ContainerCreateReport
+			CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+
+		return nil
+	})
+	return response, err
 }
 
 // Get returns detailed information about a specific container
 func (s *ContainerService) Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
-	// Get connection context to the machine
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go): the backend acts as a gateway to the remote podman.
-		// The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
-	// Create container engine with the connection context
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
+	var report *entities.ContainerInspectReport
+	err := s.conn.WithConnection(ctx, userID, machineID, "containers.Get", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	// Call the official podman ContainerInspect method
-	containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to inspect container: %w", err)
-	}
+		// Call the official podman ContainerInspect method
+		containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to inspect container: %w", err)
+		}
 
-	if len(containerReports) == 0 {
-		return nil, fmt.Errorf("no container found with ID: %s", containerID)
-	}
+		if len(containerReports) == 0 {
+			return fmt.Errorf("no container found with ID: %s", containerID)
+		}
 
-	return containerReports[0], nil
+		report = containerReports[0]
+		return nil
+	})
+	return report, err
 }
 
 // validateContainerOperationParams validates common parameters for container operations
@@ -195,43 +169,38 @@ func (s *ContainerService) Start(ctx context.Context, userID, machineID, contain
 		return nil, err
 	}
 
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go): the backend acts as a gateway to the remote podman.
-		// The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	startReports, err := containerEngine.ContainerStart(ctx, []string{containerID}, entities.ContainerStartOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to start container: %w", err)
-	}
-
-	if len(startReports) == 0 {
-		return nil, fmt.Errorf("no start report returned for container: %s", containerID)
-	}
-
-	containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
-	containerName := containerID
-	if err == nil && len(containerReports) > 0 {
-		if len(containerReports[0].Name) > 0 {
-			containerName = strings.TrimPrefix(containerReports[0].Name, "/")
+	var response *ContainerStartResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "containers.Start", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
 		}
-	}
 
-	return &ContainerStartResponse{
-		ID:        containerID,
-		Name:      containerName,
-		State:     "running",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}, nil
+		startReports, err := containerEngine.ContainerStart(ctx, []string{containerID}, entities.ContainerStartOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to start container: %w", err)
+		}
+
+		if len(startReports) == 0 {
+			return fmt.Errorf("no start report returned for container: %s", containerID)
+		}
+
+		containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
+		containerName := containerID
+		if err == nil && len(containerReports) > 0 {
+			if len(containerReports[0].Name) > 0 {
+				containerName = strings.TrimPrefix(containerReports[0].Name, "/")
+			}
+		}
+
+		response = &ContainerStartResponse{
+			ID:        containerID,
+			Name:      containerName,
+			State:     "running",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		return nil
+	})
+	return response, err
 }
 
 // Stop stops a container by ID on the specified machine
@@ -240,43 +209,38 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 		return nil, err
 	}
 
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go): the backend acts as a gateway to the remote podman.
-		// The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	stopReports, err := containerEngine.ContainerStop(ctx, []string{containerID}, entities.StopOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to stop container: %w", err)
-	}
-
-	if len(stopReports) == 0 {
-		return nil, fmt.Errorf("no stop report returned for container: %s", containerID)
-	}
-
-	containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
-	containerName := containerID
-	if err == nil && len(containerReports) > 0 {
-		if len(containerReports[0].Name) > 0 {
-			containerName = strings.TrimPrefix(containerReports[0].Name, "/")
+	var response *ContainerStopResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "containers.Stop", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
 		}
-	}
 
-	return &ContainerStopResponse{
-		ID:        containerID,
-		Name:      containerName,
-		State:     "stopped",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}, nil
+		stopReports, err := containerEngine.ContainerStop(ctx, []string{containerID}, entities.StopOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to stop container: %w", err)
+		}
+
+		if len(stopReports) == 0 {
+			return fmt.Errorf("no stop report returned for container: %s", containerID)
+		}
+
+		containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
+		containerName := containerID
+		if err == nil && len(containerReports) > 0 {
+			if len(containerReports[0].Name) > 0 {
+				containerName = strings.TrimPrefix(containerReports[0].Name, "/")
+			}
+		}
+
+		response = &ContainerStopResponse{
+			ID:        containerID,
+			Name:      containerName,
+			State:     "stopped",
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		return nil
+	})
+	return response, err
 }
 
 // Delete removes a container by ID on the specified machine.
@@ -286,42 +250,34 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 		return err
 	}
 
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// Same runtime-connection contract as List: 502
-		// CONNECTION_FAILED, cause logged here.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	return s.conn.WithConnection(ctx, userID, machineID, "containers.Delete", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
+		rmReports, err := containerEngine.ContainerRm(ctx, []string{containerID}, entities.RmOptions{
+			Force: force,
+		})
+		if err != nil {
+			if strings.Contains(err.Error(), "no such container") {
+				return appErrors.ErrContainerNotFound
+			}
+			return fmt.Errorf("failed to remove container: %w", err)
+		}
 
-	rmReports, err := containerEngine.ContainerRm(ctx, []string{containerID}, entities.RmOptions{
-		Force: force,
+		if len(rmReports) == 0 {
+			return fmt.Errorf("no remove report returned for container: %s", containerID)
+		}
+
+		if rmReports[0].Err != nil {
+			if strings.Contains(rmReports[0].Err.Error(), "no such container") {
+				return appErrors.ErrContainerNotFound
+			}
+			return fmt.Errorf("failed to remove container: %w", rmReports[0].Err)
+		}
+
+		return nil
 	})
-	if err != nil {
-		if strings.Contains(err.Error(), "no such container") {
-			return appErrors.ErrContainerNotFound
-		}
-		return fmt.Errorf("failed to remove container: %w", err)
-	}
-
-	if len(rmReports) == 0 {
-		return fmt.Errorf("no remove report returned for container: %s", containerID)
-	}
-
-	if rmReports[0].Err != nil {
-		if strings.Contains(rmReports[0].Err.Error(), "no such container") {
-			return appErrors.ErrContainerNotFound
-		}
-		return fmt.Errorf("failed to remove container: %w", rmReports[0].Err)
-	}
-
-	return nil
 }
 
 // GetLogs retrieves logs for a specific container on the specified machine
@@ -330,59 +286,54 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 		return nil, err
 	}
 
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// ErrConnectionFailed is the documented runtime contract (502,
-		// errors.go): the backend acts as a gateway to the remote podman.
-		// The cause stays in the log, not the response.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	// Prepare buffers for stdout and stderr
-	var stdoutBuffer, stderrBuffer bytes.Buffer
-
-	// Set up container logs options
-	logsOpts := entities.ContainerLogsOptions{
-		Follow:     false,
-		Since:      since,
-		Tail:       tail,
-		Timestamps: false,
-	}
-
-	// Set writers to capture output
-	logsOpts.StdoutWriter = &stdoutBuffer
-	logsOpts.StderrWriter = &stderrBuffer
-
-	// Fetch logs from container
-	err = containerEngine.ContainerLogs(ctx, []string{containerID}, logsOpts)
-	if err != nil {
-		if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
-			return nil, appErrors.ErrContainerNotFound
+	var response *ContainerLogsResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "containers.GetLogs", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
 		}
-		return nil, fmt.Errorf("failed to get container logs: %w", err)
-	}
 
-	// Combine stdout and stderr logs
-	combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
-	if stderrBuffer.Len() > 0 {
-		stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
-		if combinedLogs != "" {
-			combinedLogs += "\n" + stderrContent
-		} else {
-			combinedLogs = stderrContent
+		// Prepare buffers for stdout and stderr
+		var stdoutBuffer, stderrBuffer bytes.Buffer
+
+		// Set up container logs options
+		logsOpts := entities.ContainerLogsOptions{
+			Follow:     false,
+			Since:      since,
+			Tail:       tail,
+			Timestamps: false,
 		}
-	}
 
-	return &ContainerLogsResponse{
-		ID:   containerID,
-		Logs: combinedLogs,
-	}, nil
+		// Set writers to capture output
+		logsOpts.StdoutWriter = &stdoutBuffer
+		logsOpts.StderrWriter = &stderrBuffer
+
+		// Fetch logs from container
+		err := containerEngine.ContainerLogs(ctx, []string{containerID}, logsOpts)
+		if err != nil {
+			if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
+				return appErrors.ErrContainerNotFound
+			}
+			return fmt.Errorf("failed to get container logs: %w", err)
+		}
+
+		// Combine stdout and stderr logs
+		combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
+		if stderrBuffer.Len() > 0 {
+			stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
+			if combinedLogs != "" {
+				combinedLogs += "\n" + stderrContent
+			} else {
+				combinedLogs = stderrContent
+			}
+		}
+
+		response = &ContainerLogsResponse{
+			ID:   containerID,
+			Logs: combinedLogs,
+		}
+		return nil
+	})
+	return response, err
 }
 
 // GetLogsWithStream retrieves logs for a specific container with streaming callback
@@ -392,57 +343,49 @@ func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machin
 		return err
 	}
 
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		// Same runtime-connection contract as List: 502
-		// CONNECTION_FAILED, cause logged here.
-		slog.WarnContext(ctx, "connection to machine failed",
-			slog.Any("machineID", machineID), slog.Any("userID", userID), slog.Any("error", err))
-		return appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
-
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	// Set up container logs options for streaming
-	logsOpts := entities.ContainerLogsOptions{
-		Follow:     true,
-		Since:      since,
-		Tail:       tail,
-		Timestamps: true,
-	}
-
-	// Create callback writers that convert each log line to an event
-	stdoutWriter := &logEventWriter{
-		callback:   logCallback,
-		level:      "INFO",
-		timestamps: true,
-	}
-	stderrWriter := &logEventWriter{
-		callback:   logCallback,
-		level:      "ERROR",
-		timestamps: true,
-	}
-
-	// Set writers to capture streaming output
-	logsOpts.StdoutWriter = stdoutWriter
-	logsOpts.StderrWriter = stderrWriter
-
-	// Fetch logs from container (this will block until follow ends or context is cancelled)
-	err = containerEngine.ContainerLogs(ctx, []string{containerID}, logsOpts)
-	if err != nil {
-		if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
-			return appErrors.ErrContainerNotFound
+	return s.conn.WithConnection(ctx, userID, machineID, "containers.GetLogsWithStream", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
 		}
-		if ctx.Err() == context.Canceled {
-			return appErrors.ErrOperationCancelled
-		}
-		return fmt.Errorf("failed to get container logs: %w", err)
-	}
 
-	return nil
+		// Set up container logs options for streaming
+		logsOpts := entities.ContainerLogsOptions{
+			Follow:     true,
+			Since:      since,
+			Tail:       tail,
+			Timestamps: true,
+		}
+
+		// Create callback writers that convert each log line to an event
+		stdoutWriter := &logEventWriter{
+			callback:   logCallback,
+			level:      "INFO",
+			timestamps: true,
+		}
+		stderrWriter := &logEventWriter{
+			callback:   logCallback,
+			level:      "ERROR",
+			timestamps: true,
+		}
+
+		// Set writers to capture streaming output
+		logsOpts.StdoutWriter = stdoutWriter
+		logsOpts.StderrWriter = stderrWriter
+
+		// Fetch logs from container (this will block until follow ends or context is cancelled)
+		err := containerEngine.ContainerLogs(ctx, []string{containerID}, logsOpts)
+		if err != nil {
+			if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
+				return appErrors.ErrContainerNotFound
+			}
+			if ctx.Err() == context.Canceled {
+				return appErrors.ErrOperationCancelled
+			}
+			return fmt.Errorf("failed to get container logs: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // logEventWriter wraps podman's log writers and converts each line to a ContainerLogEvent
