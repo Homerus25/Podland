@@ -159,11 +159,9 @@ type MockTestConnectionCall struct {
 	PodmanSocketPath string
 }
 
-// MockConnectionManager implements a mock connection manager for testing
-// (both the legacy GetConnection/Release surface and the connections.Manager
-// seam services migrate to).
+// MockConnectionManager implements the connections.Manager seam for
+// testing.
 type MockConnectionManager struct {
-	getConnectionErr    error
 	acquireErr          error
 	testConnectionErr   error
 	testConnectionCalls []MockTestConnectionCall
@@ -195,16 +193,6 @@ func NewMockConnectionManagerWithProbeError(probeErr error) *MockConnectionManag
 	}
 }
 
-func NewMockConnectionManagerWithError(getConnectionErr error) *MockConnectionManager {
-	return &MockConnectionManager{
-		getConnectionErr: getConnectionErr,
-	}
-}
-
-// NewMockConnectionManagerWithAcquireError returns a MockConnectionManager
-// whose WithConnection fails with the given error before running fn. The
-// error crosses as-is: mapping it to the 502 sentinel is the production
-// manager's job, pinned once in the connections package tests.
 func NewMockConnectionManagerWithAcquireError(acquireErr error) *MockConnectionManager {
 	return &MockConnectionManager{
 		acquireErr: acquireErr,
@@ -229,19 +217,10 @@ func NewMockConnectionManagerWithTestError(testErr error) *MockConnectionManager
 	}
 }
 
-func (m *MockConnectionManager) GetConnection(machineID, userID string) (context.Context, error) {
-	if m.getConnectionErr != nil {
-		return nil, m.getConnectionErr
-	}
-	return mockConnectionContext(), nil
-}
-
-func (m *MockConnectionManager) Release(machineID string) {
-}
-
 // WithConnection runs fn with a mock connection context, mirroring the
 // production contract: an injected acquisition error short-circuits fn and
-// crosses as-is, otherwise fn's error propagates untouched.
+// crosses as-is (the 502 mapping is the production manager's job),
+// otherwise fn's error propagates untouched.
 func (m *MockConnectionManager) WithConnection(ctx context.Context, userID, machineID, op string, fn func(connCtx context.Context) error) error {
 	if m.acquireErr != nil {
 		return m.acquireErr

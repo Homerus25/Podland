@@ -139,19 +139,6 @@ func CleanupTestResources() {
 	// Currently a no-op, but can be extended for actual resource cleanup
 }
 
-// NewTestMachineService creates a test machine service with mock dependencies
-func NewTestMachineService() (*MockMachineService, error) {
-	mockRepo := NewMockMachineRepository()
-	mockEncryption := NewMockEncryptionService()
-	mockCache := NewMockConnectionCache()
-
-	return &MockMachineService{
-		mockMachineRepo:     mockRepo,
-		mockEncryption:      mockEncryption,
-		mockConnectionCache: mockCache,
-	}, nil
-}
-
 // NewTestAuthServiceWithMocks creates a test auth service with mock dependencies
 func NewTestAuthServiceWithMocks() (*MockAuthService, error) {
 	mockRepo := NewMockUserRepository()
@@ -161,46 +148,10 @@ func NewTestAuthServiceWithMocks() (*MockAuthService, error) {
 	}, nil
 }
 
-// MockMachineService is a mock machine service for testing
-type MockMachineService struct {
-	mockMachineRepo     *MockMachineRepository
-	mockEncryption      *MockEncryptionService
-	mockConnectionCache *MockConnectionCache
-	errors              map[string]error
-}
-
 // MockAuthService is a mock auth service for testing
 type MockAuthService struct {
 	mockUserRepo *MockUserRepository
 	errors       map[string]error
-}
-
-// WithRepositoryErrors sets errors for the mock machine repository
-func (s *MockMachineService) WithRepositoryErrors(errors map[string]error) *MockMachineService {
-	s.errors = errors
-	return s
-}
-
-// WithEncryptionErrors sets errors for the mock encryption service
-func (s *MockMachineService) WithEncryptionErrors(encryptErr, decryptErr error) *MockMachineService {
-	s.mockEncryption.encryptError = encryptErr
-	s.mockEncryption.decryptError = decryptErr
-	return s
-}
-
-// GetMachineRepository returns the mock machine repository
-func (s *MockMachineService) GetMachineRepository() *MockMachineRepository {
-	return s.mockMachineRepo
-}
-
-// GetEncryptionService returns the mock encryption service
-func (s *MockMachineService) GetEncryptionService() *MockEncryptionService {
-	return s.mockEncryption
-}
-
-// GetConnectionCache returns the mock connection cache
-func (s *MockMachineService) GetConnectionCache() *MockConnectionCache {
-	return s.mockConnectionCache
 }
 
 // GetUserRepository returns the mock user repository

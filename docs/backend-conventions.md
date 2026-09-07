@@ -38,9 +38,26 @@ closest sibling that already exists. Rulings so far:
   if single-item deletes might be argued otherwise.
 - **Runtime connection failures** — a persisted machine's podman socket
   unreachable during an operation is 502 `CONNECTION_FAILED`
-  (`appErrors.ErrConnectionFailed`), cause logged at the service site.
+  (`appErrors.ErrConnectionFailed`). The cause log (op, machineID,
+  userID, cause) lives at the connection seam:
+  `connections.Manager.WithConnection` warns and returns the sentinel;
+  service call sites never map or log the acquisition error themselves.
+  `ProbeMachine` has no `WithConnection` wrapper: the status endpoint logs
+  the probe failure itself (the reason never surfaces to clients —
+  machines can be shared with read-only users).
   Never a wrapped 500; `errors.go` documents the registration-vs-runtime
   distinction.
+- **Connection seam (the podman prologue)** — every machine-scoped
+  podman call crosses `connections.Manager`
+  (`internal/connections/manager.go`); the volumes service is the
+  reference for the shape (`internal/domain/volumes/service.go`, `List`):
+  hold the result in a closure variable, call
+  `s.conn.WithConnection(ctx, userID, machineID, "domain.Op", func(connCtx)
+  error)` with an op tag, build the tunnel engine from `connCtx` inside,
+  return its error untouched. Domains depend on `connections.Manager`
+  only — the interface does not live in the machines domain anymore.
+  Registration (`TestConnection`) and the status probe (`ProbeMachine`)
+  are the manager's other two entry points.
 
 ## Duplication across domains
 

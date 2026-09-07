@@ -36,7 +36,7 @@ func TestNewImageService_WithMockConnManager(t *testing.T) {
 // TestNewImageService_WithErrorMockConnManager verifies the service can be
 // constructed with a mock that simulates connection errors.
 func TestNewImageService_WithErrorMockConnManager(t *testing.T) {
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManagerWithError(
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManagerWithAcquireError(
 		errors.New("simulated connection failure"),
 	)
 

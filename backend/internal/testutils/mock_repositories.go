@@ -1,7 +1,6 @@
 package testutils
 
 import (
-	"context"
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/models"
@@ -308,63 +307,6 @@ func (m *MockSessionRepository) DeleteExpiredForUser(userID string) error {
 		}
 	}
 	return nil
-}
-
-// MockConnectionCache implements a mock connection cache for testing
-// It simulates the ConnectionCache from connections/cache.go but with simplified interface
-type MockConnectionCache struct {
-	connections     map[string]any
-	getOrCreateErr  error
-	getOrCreateFunc func(ctx context.Context, machineID, userID string) (any, error)
-}
-
-func NewMockConnectionCache() *MockConnectionCache {
-	return &MockConnectionCache{
-		connections: make(map[string]any),
-	}
-}
-
-func NewMockConnectionCacheWithError(getOrCreateErr error) *MockConnectionCache {
-	return &MockConnectionCache{
-		connections:    make(map[string]any),
-		getOrCreateErr: getOrCreateErr,
-	}
-}
-
-// SetCustomGetOrCreate sets a custom function for GetOrCreate
-func (m *MockConnectionCache) SetCustomGetOrCreate(getOrCreateFunc func(ctx context.Context, machineID, userID string) (any, error)) {
-	m.getOrCreateFunc = getOrCreateFunc
-}
-
-// GetOrCreate simulates the ConnectionCache.GetOrCreate method
-func (m *MockConnectionCache) GetOrCreate(ctx context.Context, machineID, userID string) (any, error) {
-	if m.getOrCreateErr != nil {
-		return nil, m.getOrCreateErr
-	}
-	if m.getOrCreateFunc != nil {
-		return m.getOrCreateFunc(ctx, machineID, userID)
-	}
-
-	// Default mock behavior - return a simple mock connection
-	mockConn := &MockPodmanConnection{MachineID: machineID}
-	m.connections[machineID] = mockConn
-	return mockConn, nil
-}
-
-// Release simulates releasing a connection
-func (m *MockConnectionCache) Release(machineID string) {
-	delete(m.connections, machineID)
-}
-
-// MarkActive marks a connection as active
-func (m *MockConnectionCache) MarkActive(machineID string) {}
-
-// MarkIdle marks a connection as idle
-func (m *MockConnectionCache) MarkIdle(machineID string) {}
-
-// Clear removes all connections
-func (m *MockConnectionCache) Clear() {
-	m.connections = make(map[string]any)
 }
 
 // MockMachineAccessRepository implements a mock machine access repository for testing

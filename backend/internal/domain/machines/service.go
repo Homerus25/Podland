@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
@@ -18,7 +19,7 @@ import (
 type MachineService struct {
 	machineRepo MachineRepositoryInterface
 	accessRepo  models.MachineAccessRepositoryInterface
-	connManager ConnectionManagerInterface
+	conn        connections.Manager
 	encryption  EncryptionServiceInterface
 }
 
@@ -26,13 +27,13 @@ type MachineService struct {
 func NewMachineService(
 	machineRepo MachineRepositoryInterface,
 	accessRepo models.MachineAccessRepositoryInterface,
-	connManager ConnectionManagerInterface,
+	conn connections.Manager,
 	encryption EncryptionServiceInterface,
 ) *MachineService {
 	return &MachineService{
 		machineRepo: machineRepo,
 		accessRepo:  accessRepo,
-		connManager: connManager,
+		conn:        conn,
 		encryption:  encryption,
 	}
 }
@@ -122,7 +123,7 @@ func (s *MachineService) Create(ctx context.Context, userID string, req *CreateM
 	// any DB write — so a failed probe leaves nothing behind. The probe
 	// is bounded by MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS inside the
 	// connection manager.
-	if err := s.connManager.TestConnection(ctx, req.Hostname, req.Port, req.SSHUsername, req.SSHPrivateKey, req.PodmanSocketPath); err != nil {
+	if err := s.conn.TestConnection(ctx, req.Hostname, req.Port, req.SSHUsername, req.SSHPrivateKey, req.PodmanSocketPath); err != nil {
 		// A deadline (the probe's own timeout, or the caller's context
 		// expiring) maps to CONNECTION_TEST_TIMEOUT; any other failure
 		// (bad host / credentials / socket) maps to CONNECTION_FAILED.
@@ -263,7 +264,7 @@ func (s *MachineService) GetMachineStatus(ctx context.Context, userID, machineID
 	}
 
 	checkedAt := time.Now().UTC()
-	if err := s.connManager.ProbeMachine(machineID, userID); err != nil {
+	if err := s.conn.ProbeMachine(machineID, userID); err != nil {
 		slog.ErrorContext(ctx, "machine status probe failed",
 			"error", err,
 			"machineID", machineID,

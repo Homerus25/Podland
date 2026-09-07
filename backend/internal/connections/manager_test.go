@@ -391,31 +391,6 @@ func TestStop_NoCleanupGoroutineReturnsImmediately(t *testing.T) {
 	assert.NotPanics(t, func() { mgr.Stop() })
 }
 
-// --- legacy GetConnection/Release shims (expand phase) ---
-
-// The shims keep TODAY's semantics: raw errors, caller-side mapping (the
-// compile-time satisfaction of machines.ConnectionManagerInterface is
-// pinned in images/service_test.go).
-func TestLegacyShims_GetConnectionReleaseKeepRawSemantics(t *testing.T) {
-	dialErr := errors.New("ssh: handshake failed")
-	dial := newCountingDial()
-	dial.failMachine("machine-1", dialErr)
-	mgr := newTestManager(10, dial.dialFunc(), time.Minute, 0)
-
-	_, err := mgr.GetConnection("machine-1", "user-1")
-	require.Error(t, err)
-	assert.Equal(t, dialErr, err,
-		"shims surface the raw dial error; 502 mapping stays at the service sites until their migration slice")
-	assert.NotErrorIs(t, err, appErrors.ErrConnectionFailed)
-
-	mgr.Release("machine-1") // no cached entry: must be a safe no-op
-
-	ctx, err := mgr.GetConnection("machine-2", "user-1")
-	require.NoError(t, err)
-	require.NotNil(t, ctx)
-	mgr.Release("machine-2")
-}
-
 // --- slog capture for the 502 cause-log ownership ---
 
 type captureHandler struct {

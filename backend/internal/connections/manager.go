@@ -36,10 +36,7 @@ type Manager interface {
 	Stop()
 }
 
-// Manager interface satisfaction is pinned at compile time. During the
-// expand phase the concrete manager also satisfies the old
-// machines.ConnectionManagerInterface, which the not-yet-migrated machines
-// domain still requires until the contract ticket.
+// Manager interface satisfaction is pinned at compile time.
 var _ Manager = (*ConnectionManager)(nil)
 
 // DefaultConnectionTestTimeout is the registration-probe deadline when no
@@ -92,11 +89,6 @@ type ConnectionManager struct {
 
 	mu      sync.Mutex
 	entries map[string]*connectionEntry
-	// dying holds graceful-removed entries that still serve in-flight
-	// legacy GetConnection/Release pairs (WithConnection callers hold a
-	// release func and need no lookup). The handle closes when the last
-	// of them releases.
-	dying []*connectionEntry
 
 	stopCh chan struct{}
 	// stoppedCh is closed by cleanupLoop on its way out so Stop can block
@@ -217,8 +209,7 @@ func (m *ConnectionManager) WithConnection(ctx context.Context, userID, machineI
 
 // acquire returns a live connection context for machineID plus a release
 // func the caller MUST call exactly once when done (WithConnection does it
-// via defer; the legacy GetConnection/Release shims hand the pairing to
-// the caller instead).
+// via defer).
 //
 // Cache hit: refCount is bumped and the cached context is served. Cache
 // miss: a pending entry is registered under the lock and the dial runs
@@ -332,33 +323,6 @@ func closeEntry(e *connectionEntry) {
 	e.close()
 }
 
-// GetConnection is the legacy expand-phase shim paired with Release: it
-// keeps today's semantics (raw errors, caller-side 502 mapping) until each
-// domain migrates to WithConnection.
-func (m *ConnectionManager) GetConnection(machineID, userID string) (context.Context, error) {
-	connCtx, _, err := m.acquire(context.Background(), machineID, userID)
-	return connCtx, err
-}
-
-// Release is the legacy shim's pairing half: it decrements the reference
-// count for machineID, including for entries already moved to the dying
-// list by RemoveMachine.
-func (m *ConnectionManager) Release(machineID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if e, ok := m.entries[machineID]; ok {
-		releaseEntry(e)
-		return
-	}
-	for _, e := range m.dying {
-		if e.machineID == machineID && e.refCount > 0 {
-			releaseEntry(e)
-			return
-		}
-	}
-}
-
 // RemoveMachine invalidates a machine's cached connection gracefully: the
 // entry leaves the map immediately (fresh acquisitions fail on the machine
 // lookup), a dial already in flight completes and closes its fresh handle
@@ -383,25 +347,8 @@ func (m *ConnectionManager) RemoveMachine(machineID string) {
 		closeEntry(e)
 		return
 	}
-	// In-flight users hold release funcs (WithConnection) or will call
-	// the shim Release (which consults the dying list): the handle closes
-	// when the last of them returns.
-	m.dying = append(m.dying, e)
-	m.pruneDying()
-}
-
-// pruneDying drops closed entries from the dying list so it cannot grow
-// with every RemoveMachine that had in-flight users. Callers must hold
-// m.mu.
-func (m *ConnectionManager) pruneDying() {
-	kept := m.dying[:0]
-	for _, e := range m.dying {
-		if e.closed {
-			continue
-		}
-		kept = append(kept, e)
-	}
-	m.dying = kept
+	// In-flight users hold release funcs (WithConnection): the handle
+	// closes when the last of them returns.
 }
 
 // evictLRUIdle closes and removes the least recently used idle entry.

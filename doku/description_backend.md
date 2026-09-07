@@ -201,103 +201,57 @@ const (
 
 ## Connection Management
 
-### SSH Connection Cache
+One deep module owns the podman connection seam: `internal/connections`
+(manager.go + dial.go). Every domain depends on the `Manager` interface —
+call sites never look up connections, pair acquire/release, or map
+connection errors themselves.
 
 ```go
-// connections/cache.go
-type ConnectionCache struct {
-    connections map[string]*ConnectionEntry  // key: machineID
-    maxSize    int
-    mu         sync.RWMutex
+// internal/connections/manager.go
+type Manager interface {
+    // WithConnection hands fn a live podman connection context and
+    // releases it when fn returns. Dial failures are warn-logged here
+    // (op, machineID, userID, cause) and returned as the 502 sentinel
+    // appErrors.ErrConnectionFailed — callers never map it.
+    WithConnection(ctx context.Context, userID, machineID, op string,
+        fn func(connCtx context.Context) error) error
+    // ProbeMachine: live status probe of a persisted machine, bounded by
+    // MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS; any error means offline.
+    ProbeMachine(machineID, userID string) error
+    // TestConnection: registration-time probe against raw credentials
+    // (the machine row does not exist yet), bounded by the same timeout.
+    TestConnection(ctx context.Context, hostname string, port int,
+        sshUsername, sshPrivateKey, podmanSocketPath string) error
+    // RemoveMachine invalidates a machine's cached connection; the SSH
+    // session closes once in-flight calls finish.
+    RemoveMachine(machineID string)
+    Stop()
 }
-
-type ConnectionEntry struct {
-    conn       *bindings.Connection  // From podman/pkg/bindings/connection.go
-    userID     string                 // Current user (for reference)
-    machineID  string                 // Machine ID
-    refCount   int                    // Active request count
-    lastUsed   time.Time              // Last activity timestamp
-    isActive   bool                   // Currently serving a request
-}
-
-func NewConnectionCache(opts ConnectionCacheOptions) *ConnectionCache {
-    cache := &ConnectionCache{
-        connections: make(map[string]*ConnectionEntry),
-        maxSize:    maxSize,
-    }
-    go cache.cleanupLoop()
-    return cache
-}
-
-func (c *ConnectionCache) GetOrCreate(ctx context.Context, machineID, userID string, config MachineConfig) (*bindings.Connection, error)
-func (c *ConnectionCache) Release(machineID string)
-func (c *ConnectionCache) MarkActive(machineID string)
-func (c *ConnectionCache) MarkIdle(machineID string)
-func (c *ConnectionCache) cleanupLoop()
 ```
 
-### Connection Manager
-
-```go
-// connections/manager.go
-type ConnectionManager struct {
-    cache           *ConnectionCache
-    machineRepo     *MachineRepository
-    encryption      *EncryptionService
-    maxConcurrent   int
-    queueTimeout    time.Duration
-    connectionQueue chan connectionRequest
-}
-
-type connectionRequest struct {
-    machineID string
-    userID    string
-    response  chan<- connectionResponse
-}
-
-type connectionResponse struct {
-    conn *bindings.Connection
-    err  error
-}
-
-func NewConnectionManager(
-    cache *ConnectionCache,
-    machineRepo *MachineRepository,
-    encryption *EncryptionService,
-    maxConcurrent int,
-    queueTimeout time.Duration,
-) *ConnectionManager
-
-func (m *ConnectionManager) GetConnection(ctx context.Context, machineID, userID string) (*bindings.Connection, error)
-func (m *ConnectionManager) QueueRequest(ctx context.Context, machineID, userID string) (*bindings.Connection, error)
-func (m *ConnectionManager) Run()
-```
+The manager owns everything the dial needs: the machine repository
+(lookup), the encryption service (key decrypt), the cache size limit
+(`MAX_CONCURRENT_MACHINES`), and the probe timeout
+(`MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS`).
 
 ### Connection Lifecycle
 
-1. **Request arrives** for machine `X`
-2. **Check cache** for existing connection to machine `X`
-3. **If exists and idle**:
-   - Mark as active
-   - Increment reference count
-   - Return connection
-4. **If exists and active**:
-   - Increment reference count
-   - Return connection (shared)
-5. **If not in cache**:
-   - Check if at max concurrent limit
-   - If at limit:
-     - Find LRU idle connection, close it
-     - Create new connection
-   - Else if all connections active:
-     - Queue request
-     - Wait for timeout or connection to become available
-   - Create new connection via forked Podman's `bindings.NewConnectionWithOptions`
-   - Store in cache
-   - Return connection
-6. **Request completes**:
-   - Decrement reference count
-   - If ref count reaches 0: Mark as idle
+1. **Request arrives** for machine `X` via `WithConnection`
+2. **Cache hit**: reference count is bumped, the cached connection is served
+3. **Cache miss**: a pending entry is registered and the dial runs outside
+   the manager lock (dials to different machines do not serialize);
+   concurrent cold acquisitions for the same machine wait on the pending
+   entry and share the one dial
+4. **Cache full**: the least recently used idle connection is evicted
+   (soft cap: when every entry is in flight, the dial proceeds)
+5. **Dial failure**: fail fast — warn-logged at the seam, returned as
+   502 `CONNECTION_FAILED`; no retry, no queue
+6. **Request completes**: the `WithConnection` closure returns and its
+   release func drops the reference count
+7. **Teardown is real**: LRU eviction, the idle-timeout cleanup
+   (15 minutes), and `RemoveMachine` close the SSH session through the
+   fork's close handle; removal is graceful (the entry leaves the map at
+   once, the handle closes when the last in-flight callback returns)
 
 ---
 
@@ -1041,15 +995,12 @@ func main() {
     accessRepo := repositories.NewMachineAccessRepository(db)
     
     // Initialize connection manager
-    connectionCache := connections.NewConnectionCache(config.Connections.MaxConcurrent)
     connectionManager := connections.NewConnectionManager(
-        connectionCache,
         machineRepo,
         encryption,
         config.Connections.MaxConcurrent,
-        config.Connections.QueueTimeout,
+        config.Connections.TestTimeoutSeconds,
     )
-    go connectionManager.Run()
     
     // Initialize services
     machineService := services.NewMachineService(machineRepo, accessRepo, connectionManager, encryption)

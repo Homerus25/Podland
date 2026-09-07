@@ -25,17 +25,16 @@ type ExecResult struct {
 // SSHExecInterface defines the ability to run a command on a remote machine
 // over SSH using that machine's stored credentials.
 //
-// This interface is intentionally SEPARATE from machines.ConnectionManagerInterface:
-// the existing images/containers/quadlets services depend only on
-// ConnectionManagerInterface and are completely unaffected by this
-// capability. The first consumer is the quadlet lifecycle service (070-06),
+// This interface is intentionally SEPARATE from the podman connection seam
+// (internal/connections): the domain services depend on connections.Manager
+// for podman calls and add sshexec.SSHExecInterface only where shell access
+// is needed. The first consumer is the quadlet lifecycle service (070-06),
 // which runs `systemctl` over SSH.
 //
-// (The issue suggested internal/domain/machines/service_interfaces.go as the
-// home — "e.g." — but co-locating it with ConnectionManagerInterface would
-// create an import cycle, because the existing machines tests already
-// import internal/testutils and MockSSHExec needs to reference these types.
-// See the long comment in internal/domain/machines/service_interfaces.go.)
+// (It lives here rather than in a domain package because the machines tests
+// already import internal/testutils and MockSSHExec needs to reference these
+// types; a domain home would create a testutils→domain→testutils import
+// cycle.)
 type SSHExecInterface interface {
 	Exec(ctx context.Context, machineID, userID, command string, opts ExecOptions) (ExecResult, error)
 	// ExecStream is the streaming variant of Exec: it invokes onLine for

@@ -34,13 +34,13 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **One connection per machine** (not per user) - cached and reused
 
 ### 4. Concurrency & Performance
-- **Goroutines with semaphore** for limiting concurrent SSH tunnels
-- **Connection per machine**: Each machine has at most one active SSH connection
-- **Global limit**: Maximum concurrent machine connections = 100 (configurable)
-- **LRU eviction**: When limit reached, close least recently used idle connection
-- **Request queuing**: If all connections active, queue new requests
+- **One connection per machine**: Each machine has at most one active SSH connection, cached and reused
+- **Per-machine in-flight dial dedup**: concurrent cold acquisitions for the same machine share a single dial; dials to different machines never serialize behind a lock
+- **Global limit**: Maximum cached machine connections = 100 (configurable, `MAX_CONCURRENT_MACHINES`)
+- **LRU eviction**: When the cache is full, the least recently used idle connection is closed
+- **Real teardown**: LRU eviction, the idle-timeout cleanup (15 minutes), and machine removal genuinely close the SSH session; removal is graceful (in-flight calls finish first)
+- **Fail fast** on connection failures/timeouts (no retry logic, no request queue)
 - **React Query** for frontend state management and caching
-- **Fail fast** on connection failures/timeouts (no retry logic)
 
 ### 5. Authentication & Security
 - **JWT tokens** (RS256 asymmetric keys)
@@ -169,7 +169,7 @@ A full-stack web application for managing Podman on remote machines. This docume
 ### Performance
 - Connection caching and reuse
 - LRU eviction for connection management
-- Request queuing when limits reached
+- Per-machine dial dedup; fail fast when a connection cannot be acquired (no queuing)
 - React Query for efficient data fetching and caching
 
 ### User Experience

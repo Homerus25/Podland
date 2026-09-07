@@ -133,9 +133,10 @@ func (s *Service) Close() error {
 // exit code), the cached *ssh.Client for this machine is invalidated so the
 // next call re-dials, and the error is returned unwrapped-by-retry.
 func (s *Service) Exec(ctx context.Context, machineID, userID, command string, opts ExecOptions) (ExecResult, error) {
-	_ = userID // accepted for interface symmetry with ConnectionManagerInterface;
-	// permission checks happen at the handler layer, matching the
-	// connection manager's posture (it also ignores userID beyond metadata).
+	_ = userID // accepted for interface symmetry with the podman connection
+	// seam (connections.Manager); permission checks happen at the handler
+	// layer, matching that seam's posture (it also ignores userID beyond
+	// metadata).
 
 	cmd := shellQuote(command, opts.Args)
 

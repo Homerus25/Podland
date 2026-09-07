@@ -315,62 +315,6 @@ func TestMockEncryptionService(t *testing.T) {
 	})
 }
 
-// TestMockConnectionCache tests the mock connection cache functionality
-func TestMockConnectionCache(t *testing.T) {
-	t.Run("basic operations", func(t *testing.T) {
-		cache := NewMockConnectionCache()
-		ctx := context.Background()
-
-		// Test GetOrCreate
-		conn, err := cache.GetOrCreate(ctx, "machine-1", "user-1")
-		assert.NoError(t, err)
-		assert.NotNil(t, conn)
-
-		// Verify the connection is of the expected type
-		mockConn, ok := conn.(*MockPodmanConnection)
-		assert.True(t, ok)
-		assert.Equal(t, "machine-1", mockConn.GetMachineID())
-
-		// Test Release
-		cache.Release("machine-1")
-
-		// Test MarkActive and MarkIdle (should not panic)
-		cache.MarkActive("machine-1")
-		cache.MarkIdle("machine-1")
-
-		// Test Clear
-		cache.Clear()
-	})
-
-	t.Run("error injection", func(t *testing.T) {
-		expectedErr := errors.New("connection cache error")
-		cache := NewMockConnectionCacheWithError(expectedErr)
-		ctx := context.Background()
-
-		_, err := cache.GetOrCreate(ctx, "machine-1", "user-1")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "connection cache error")
-	})
-
-	t.Run("custom GetOrCreate function", func(t *testing.T) {
-		customFunc := func(ctx context.Context, machineID, userID string) (any, error) {
-			return &MockPodmanConnection{MachineID: "custom-" + machineID}, nil
-		}
-
-		cache := NewMockConnectionCache()
-		cache.SetCustomGetOrCreate(customFunc)
-		ctx := context.Background()
-
-		conn, err := cache.GetOrCreate(ctx, "machine-1", "user-1")
-		assert.NoError(t, err)
-		assert.NotNil(t, conn)
-
-		mockConn, ok := conn.(*MockPodmanConnection)
-		assert.True(t, ok)
-		assert.Equal(t, "custom-machine-1", mockConn.GetMachineID())
-	})
-}
-
 // TestTestDataGenerators tests the test data generator functions
 func TestTestDataGenerators(t *testing.T) {
 	t.Run("GenerateTestUser", func(t *testing.T) {
@@ -531,17 +475,6 @@ func TestTestConfiguration(t *testing.T) {
 
 // TestMockServiceHelpers tests the service helper functions
 func TestMockServiceHelpers(t *testing.T) {
-	t.Run("NewTestMachineService", func(t *testing.T) {
-		service, err := NewTestMachineService()
-		require.NoError(t, err)
-		require.NotNil(t, service)
-
-		// Verify service has mock dependencies
-		assert.NotNil(t, service.GetMachineRepository())
-		assert.NotNil(t, service.GetEncryptionService())
-		assert.NotNil(t, service.GetConnectionCache())
-	})
-
 	t.Run("NewTestAuthServiceWithMocks", func(t *testing.T) {
 		service, err := NewTestAuthServiceWithMocks()
 		require.NoError(t, err)
@@ -549,26 +482,6 @@ func TestMockServiceHelpers(t *testing.T) {
 
 		// Verify service has mock user repository
 		assert.NotNil(t, service.GetUserRepository())
-	})
-
-	t.Run("MockMachineService with errors", func(t *testing.T) {
-		service, err := NewTestMachineService()
-		require.NoError(t, err)
-
-		// Set errors
-		encryptErr := errors.New("encryption error")
-		decryptErr := errors.New("decryption error")
-		service.WithEncryptionErrors(encryptErr, decryptErr)
-
-		// Verify errors are set
-		encService := service.GetEncryptionService()
-		_, err = encService.Encrypt("test")
-		assert.Error(t, err)
-		assert.Equal(t, encryptErr, err)
-
-		_, err = encService.Decrypt([]byte("test"))
-		assert.Error(t, err)
-		assert.Equal(t, decryptErr, err)
 	})
 }
 
