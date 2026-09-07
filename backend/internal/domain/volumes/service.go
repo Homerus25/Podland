@@ -2,19 +2,16 @@ package volumes
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
-	"strings"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	bindingsVolumes "go.podman.io/podman/v6/pkg/bindings/volumes"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
-	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
 // VolumeServiceInterface defines the interface for volume services
@@ -86,7 +83,7 @@ func (s *VolumeService) inspectVolume(ctx context.Context, volumeEngine *tunnel.
 	}
 	for _, itemErr := range errs {
 		if itemErr != nil {
-			if isVolumeNotFound(itemErr) {
+			if podmanerr.IsNotFound(itemErr) {
 				return nil, appErrors.ErrVolumeNotFound
 			}
 			return nil, fmt.Errorf("failed to inspect volume: %w", itemErr)
@@ -149,7 +146,7 @@ func (s *VolumeService) Delete(ctx context.Context, userID, machineID, volumeNam
 			if report == nil || report.Err == nil {
 				continue
 			}
-			if isVolumeNotFound(report.Err) {
+			if podmanerr.IsNotFound(report.Err) {
 				return appErrors.ErrVolumeNotFound
 			}
 			if appErr := mapInUseError(report.Err); appErr != nil {
@@ -164,56 +161,33 @@ func (s *VolumeService) Delete(ctx context.Context, userID, machineID, volumeNam
 // mapInUseError converts podman's in-use refusal into 409 VOLUME_IN_USE
 // carrying podman's message, so the UI can explain what depends on the
 // volume. Podman's compat layer reports the refusal as a 409 ErrorModel
-// or a plain "in use" error depending on version; both map here.
+// or a plain "in use" error depending on version; the adapter owns both
+// shapes (podmanerr.IsConflict).
 func mapInUseError(err error) *appErrors.AppError {
-	msg := err.Error()
-	var errModel *errorhandling.ErrorModel
-	if errors.As(err, &errModel) {
-		msg = errModel.Message
-		if errModel.ResponseCode == http.StatusConflict {
-			return appErrors.ErrVolumeInUse.WithMessage(msg)
-		}
-	}
-	if strings.Contains(strings.ToLower(msg), "in use") {
-		return appErrors.ErrVolumeInUse.WithMessage(msg)
+	if podmanerr.IsConflict(err) {
+		return appErrors.ErrVolumeInUse.WithMessage(podmanerr.Message(err))
 	}
 	return nil
 }
 
 // mapCreateError converts podman's client-side rejections into 4xx app
-// errors. A 4xx ErrorModel from the podman service means the request
-// itself was bad (unknown driver/option, name in use). Invalid NAME
-// format is special: podman's compat layer rejects it as a 500
-// ErrorModel (or a plain "invalid argument" error), so detection also
-// rides on podman's validation text; everything else stays a wrapped 5xx.
+// errors. Any podman-side 4xx ErrorModel means the request itself was bad
+// (unknown driver/option, name already in use) — the composition preserves
+// that contract across the adapter's predicates, since the adapter excludes
+// the 404/409 answers from IsClientError. Podman's invalid NAME format is
+// special: the compat layer rejects it as a 500 ErrorModel (or a plain
+// "invalid argument" error), so the adapter's validation phrases catch it
+// too; everything else stays a wrapped 5xx.
 func mapCreateError(err error) *appErrors.AppError {
-	msg := err.Error()
-	var errModel *errorhandling.ErrorModel
-	if errors.As(err, &errModel) {
-		msg = errModel.Message
-		if errModel.ResponseCode >= 400 && errModel.ResponseCode < 500 {
-			return appErrors.ErrInvalidRequest.WithMessage(msg)
-		}
-	}
-	if strings.Contains(msg, "invalid argument") || strings.Contains(msg, "names must match") {
-		return appErrors.ErrInvalidRequest.WithMessage(msg)
+	if podmanerr.IsClientError(err) || podmanerr.IsConflict(err) || podmanerr.IsNotFound(err) {
+		return appErrors.ErrInvalidRequest.WithMessage(podmanerr.Message(err))
 	}
 	return nil
 }
 
-// isVolumeNotFound reports whether an item error from tunnel
-// VolumeInspect means the volume does not exist. The tunnel layer
-// converts a 404 ErrorModel from the podman service into a plain
-// "no such volume %q" error (pkg/domain/infra/tunnel/volumes.go), so
-// detection rides on that text; podman ErrorModels that reach us
-// directly are still recognized via ResponseCode == 404.
-func isVolumeNotFound(err error) bool {
-	if strings.Contains(strings.ToLower(err.Error()), "no such volume") {
-		return true
-	}
-	var errModel *errorhandling.ErrorModel
-	return errors.As(err, &errModel) && errModel.ResponseCode == http.StatusNotFound
-}
+// (tunnel VolumeInspect converts a 404 ErrorModel into a plain error and
+// per-item reports stringify failures, so not-found classification is the
+// adapter's job: podmanerr.IsNotFound.)
 
 // Prune removes every unused volume on the machine in one call and
 // returns podman's per-volume reports. Volumes in use by containers are

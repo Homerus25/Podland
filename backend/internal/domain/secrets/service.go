@@ -2,17 +2,15 @@ package secrets
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	podmanSecrets "go.podman.io/podman/v6/pkg/bindings/secrets"
-	"go.podman.io/podman/v6/pkg/errorhandling"
 )
 
 // Compile-time check that *SecretService satisfies SecretServiceInterface.
@@ -107,7 +105,7 @@ func (s *SecretService) Get(ctx context.Context, userID, machineID, secretID str
 
 		report, err := podmanSecrets.Inspect(connCtx, secretID, opts)
 		if err != nil {
-			if isPodmanNotFound(err) {
+			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrSecretNotFound
 			}
 			return fmt.Errorf("failed to inspect secret: %w", err)
@@ -134,9 +132,10 @@ func (s *SecretService) Get(ctx context.Context, userID, machineID, secretID str
 // byte-identical, never trimmed — under the file driver with no labels
 // (v1 ruling: driver/labels deferred). The response carries only the
 // created ID. A duplicate name surfaces as ErrSecretAlreadyExists (podman
-// reports the conflict as a 500 ErrorModel whose cause is the common
-// package's "secret name in use" sentinel); any other creation failure
-// becomes ErrSecretCreationFailed. The value itself never appears in any
+// reports the conflict as a 500 ErrorModel whose cause carries the common
+// package's "secret name in use" sentinel, classified by the adapter's
+// cause check); any other creation failure becomes
+// ErrSecretCreationFailed. The value itself never appears in any
 // log statement on this path.
 func (s *SecretService) Create(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
 	var response *SecretCreateResponse
@@ -145,7 +144,7 @@ func (s *SecretService) Create(ctx context.Context, userID, machineID string, re
 
 		report, err := podmanSecrets.Create(connCtx, strings.NewReader(req.Value), opts)
 		if err != nil {
-			if isPodmanSecretNameInUse(err) {
+			if podmanerr.IsAlreadyExists(err) {
 				return appErrors.ErrSecretAlreadyExists
 			}
 			// The underlying error is logged here, not returned: the sentinel
@@ -173,71 +172,23 @@ func (s *SecretService) Create(ctx context.Context, userID, machineID string, re
 	return response, err
 }
 
-// isPodmanSecretNameInUse reports whether err is podman's duplicate-name
-// answer for a create. The service API surfaces the common package's
-// errSecretNameInUse sentinel as a 500 ErrorModel whose cause field
-// carries the unwrapped root cause ("secret name in use"), so detection
-// rides on that stable string — mirroring the quadlets slice's
-// isAlreadyExistsError heuristic, which has no typed sentinel either.
-func isPodmanSecretNameInUse(err error) bool {
-	var errModel *errorhandling.ErrorModel
-	if errors.As(err, &errModel) {
-		return errModel.Because == "secret name in use"
-	}
-	return false
-}
-
 // Delete removes a secret (by name or ID) from the specified machine.
 // Podman answers 204 with no body on success, and the API's response body
 // is empty too — the frontend series (170) invalidates the list on the 204.
 func (s *SecretService) Delete(ctx context.Context, userID, machineID, secretID string) error {
 	return s.conn.WithConnection(ctx, userID, machineID, "secrets.Delete", func(connCtx context.Context) error {
 		if err := podmanSecrets.Remove(connCtx, secretID); err != nil {
-			if isPodmanNotFound(err) {
+			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrSecretNotFound
 			}
-			if isPodmanSecretInUse(err) {
+			if podmanerr.IsConflict(err) {
 				// Surface podman's own refusal text (which container holds the
 				// secret) — a 4xx, so the message reaches the frontend.
-				return appErrors.ErrSecretInUse.WithMessage(podmanErrorMessage(err))
+				return appErrors.ErrSecretInUse.WithMessage(podmanerr.Message(err))
 			}
 			return fmt.Errorf("failed to delete secret: %w", err)
 		}
 
 		return nil
 	})
-}
-
-// isPodmanSecretInUse reports whether err is podman's refusal to remove a
-// secret still referenced by a container. Podman surfaces that refusal as a
-// 500 ErrorModel (the compat handler funnels every non-"no such secret"
-// removal failure through InternalServerError), so detection rides on the
-// message/cause text — podman carries no distinct status for the in-use
-// case.
-func isPodmanSecretInUse(err error) bool {
-	return strings.Contains(strings.ToLower(podmanErrorMessage(err)), "in use")
-}
-
-// podmanErrorMessage digs the human-readable text out of a podman
-// errorhandling.ErrorModel. The refusal text rides in Message; the Create
-// duplicate-name path instead shows up under Because, so both are checked.
-func podmanErrorMessage(err error) string {
-	var errModel *errorhandling.ErrorModel
-	if errors.As(err, &errModel) {
-		return errModel.Message + " " + errModel.Because
-	}
-	return ""
-}
-
-// isPodmanNotFound reports whether err is podman's typed not-found answer.
-// The bindings decode a non-2xx service API response body into an
-// *errorhandling.ErrorModel carrying the HTTP status, so detection rides
-// on ResponseCode == 404 — mirroring the tunnel layer (pkg/domain/infra/
-// tunnel/secrets.go) instead of matching on message strings.
-func isPodmanNotFound(err error) bool {
-	var errModel *errorhandling.ErrorModel
-	if errors.As(err, &errModel) {
-		return errModel.ResponseCode == http.StatusNotFound
-	}
-	return false
 }

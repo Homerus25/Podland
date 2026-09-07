@@ -2,7 +2,6 @@ package volumes
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"testing"
 
@@ -62,16 +61,6 @@ func TestVolumeService_Get_EngineError(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-// TestIsVolumeNotFound pins the not-found mapping for inspect: both the
-// tunnel's stringified per-item error ("no such volume") and a direct
-// podman 404 ErrorModel must map, while other failures must not.
-func TestIsVolumeNotFound(t *testing.T) {
-	assert.True(t, isVolumeNotFound(fmt.Errorf(`no such volume "gone"`)), "tunnel not-found text must map to not-found")
-	assert.True(t, isVolumeNotFound(&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound}), "podman 404 ErrorModel must map to not-found")
-	assert.False(t, isVolumeNotFound(&errorhandling.ErrorModel{ResponseCode: http.StatusInternalServerError}), "podman 500 ErrorModel must not map to not-found")
-	assert.False(t, isVolumeNotFound(assert.AnError), "unrelated errors must not map to not-found")
-}
-
 // TestVolumeService_Create_EngineError pins that an engine failure surfaces
 // wrapped as "failed to create volume". The mock connection carries no real
 // podman client, so the tunnel call errors; happy paths are covered by the
@@ -96,6 +85,14 @@ func TestMapCreateError(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, appErr.Status)
 	assert.Equal(t, "INVALID_REQUEST", appErr.Code)
 	assert.Equal(t, "volume name invalid", appErr.Message)
+
+	// The adapter excludes the 404/409 answers from its client-error
+	// predicate; volumes create folds them back in, so the duplicate-name
+	// 409 stays the 400 INVALID_REQUEST the create contract documents.
+	appErr = mapCreateError(&errorhandling.ErrorModel{ResponseCode: http.StatusConflict, Message: `volume with name "x" already exists`})
+	require.NotNil(t, appErr, "podman 409 duplicate name must still map to a client error")
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Equal(t, "INVALID_REQUEST", appErr.Code)
 
 	assert.Nil(t, mapCreateError(&errorhandling.ErrorModel{ResponseCode: http.StatusInternalServerError}), "podman 5xx must not map to a client error")
 	assert.Nil(t, mapCreateError(assert.AnError), "unrelated errors must not map to a client error")
