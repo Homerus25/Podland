@@ -28,8 +28,7 @@ import (
 // ErrorModel, or the "no such X" / "not found" texts podman's tunnel layer
 // and per-item reports use when the type is lost.
 func IsNotFound(err error) bool {
-	var errModel *errorhandling.ErrorModel
-	if errors.As(err, &errModel) && errModel.ResponseCode == http.StatusNotFound {
+	if code, ok := responseCode(err); ok && code == http.StatusNotFound {
 		return true
 	}
 	return containsAny(err, "no such", "not found")
@@ -52,8 +51,7 @@ func IsAlreadyExists(err error) bool {
 // referenced ("in use", "used by", "unable to delete") — which arrive as
 // plain errors or 500 ErrorModels on several paths.
 func IsConflict(err error) bool {
-	var errModel *errorhandling.ErrorModel
-	if errors.As(err, &errModel) && errModel.ResponseCode == http.StatusConflict {
+	if code, ok := responseCode(err); ok && code == http.StatusConflict {
 		return true
 	}
 	return containsAny(err, "in use", "used by", "unable to delete")
@@ -64,12 +62,11 @@ func IsConflict(err error) bool {
 // podman's validation texts ("invalid argument", "names must match") that
 // arrive untyped, sometimes under a 500 status.
 func IsClientError(err error) bool {
-	var errModel *errorhandling.ErrorModel
-	if errors.As(err, &errModel) &&
-		errModel.ResponseCode >= http.StatusBadRequest &&
-		errModel.ResponseCode < http.StatusInternalServerError &&
-		errModel.ResponseCode != http.StatusNotFound &&
-		errModel.ResponseCode != http.StatusConflict {
+	if code, ok := responseCode(err); ok &&
+		code >= http.StatusBadRequest &&
+		code < http.StatusInternalServerError &&
+		code != http.StatusNotFound &&
+		code != http.StatusConflict {
 		return true
 	}
 	return containsAny(err, "invalid argument", "names must match")
@@ -97,6 +94,16 @@ func Message(err error) string {
 		}
 	}
 	return err.Error()
+}
+
+// responseCode digs the ErrorModel's HTTP status out of a podman error,
+// reporting whether one is present anywhere in the wrap chain.
+func responseCode(err error) (int, bool) {
+	var errModel *errorhandling.ErrorModel
+	if !errors.As(err, &errModel) {
+		return 0, false
+	}
+	return errModel.ResponseCode, true
 }
 
 // containsAny reports whether any phrase appears in the error's combined
