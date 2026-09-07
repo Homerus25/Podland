@@ -11,6 +11,7 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"go.podman.io/podman/v6/pkg/bindings/quadlets"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -168,7 +169,7 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 
 		report, err := quadlets.Install(connCtx, options, body)
 		if err != nil {
-			if isAlreadyExistsError(err) {
+			if podmanerr.IsAlreadyExists(err) {
 				return appErrors.ErrQuadletAlreadyExists
 			}
 			return fmt.Errorf("failed to install quadlet: %w", err)
@@ -177,7 +178,7 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 		// A conflict surfaces as an entry in QuadletErrors keyed by source path.
 		if report != nil {
 			for _, qErr := range report.QuadletErrors {
-				if qErr != nil && isAlreadyExistsError(qErr) {
+				if qErr != nil && podmanerr.IsAlreadyExists(qErr) {
 					return appErrors.ErrQuadletAlreadyExists
 				}
 			}
@@ -250,7 +251,7 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 			Force:         true,
 			ReloadSystemd: true,
 		}); err != nil {
-			if isNotFoundError(err) {
+			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrQuadletNotFound
 			}
 			return fmt.Errorf("failed to remove existing quadlet: %w", err)
@@ -334,7 +335,7 @@ func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name str
 			ReloadSystemd: true,
 		})
 		if err != nil {
-			if isNotFoundError(err) {
+			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrQuadletNotFound
 			}
 			if !force && isResourceRunningError(err) {
@@ -348,7 +349,7 @@ func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name str
 		// report's Errors map keyed by quadlet name.
 		if report != nil {
 			if qErr, ok := report.Errors[name]; ok && qErr != nil {
-				if isNotFoundError(qErr) {
+				if podmanerr.IsNotFound(qErr) {
 					return appErrors.ErrQuadletNotFound
 				}
 				if !force && isResourceRunningError(qErr) {
@@ -418,17 +419,6 @@ func buildUpdateResponse(name, unit, resource, installedPath, content string) *Q
 	}
 }
 
-// isAlreadyExistsError heuristically detects a quadlet name-collision error.
-// Podman surfaces install conflicts via QuadletErrors rather than a typed
-// not-found/exists error, so we match on the "already exists" phrase from the
-// error message (per the issue spec).
-func isAlreadyExistsError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "already exists")
-}
-
 // findQuadletByName returns the first ListQuadlet in the slice whose Name
 // matches, or nil if none match. Nil entries in the slice are skipped.
 func findQuadletByName(quadlets []*entities.ListQuadlet, name string) *entities.ListQuadlet {
@@ -458,31 +448,22 @@ func checkDeletePreconditions(target *entities.ListQuadlet, force bool) error {
 	return nil
 }
 
-// isNotFoundError heuristically detects a "quadlet missing" error from a
-// QuadletRemove report entry or return value. Podman surfaces removal failures
-// of absent quadlets via the Errors map rather than a typed error, so we match
-// on common "no such" / "not found" phrases.
-func isNotFoundError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "not found") || strings.Contains(msg, "no such")
-}
-
-// isResourceRunningError heuristically detects a "resource in use / running"
-// error from a QuadletRemove call. Per the issue's technical note, podman may
-// return a typed "in use" error on Force=false (e.g. when a quadlet-managed
-// container started between our pre-check and the remove). Such an error maps
-// to ErrQuadletResourceRunning (400) rather than a generic 500.
+// isResourceRunningError reports whether err is podman's refusal to remove
+// a quadlet whose managed resource is still running. Podman phrases that
+// refusal ("quadlet %s is running and force is not set, refusing to
+// remove") outside its shared conflict vocabulary, so the running/active
+// phrases stay quadlet-local — the same ruling as lifecycle.go's
+// systemctl/stderr classifier. Everything the conflict vocabulary covers
+// delegates to the podmanerr adapter.
 func isResourceRunningError(err error) bool {
+	if podmanerr.IsConflict(err) {
+		return true
+	}
 	if err == nil {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "in use") ||
-		strings.Contains(msg, "running") ||
-		strings.Contains(msg, "active")
+	return strings.Contains(msg, "running") || strings.Contains(msg, "active")
 }
 
 // GetLogs retrieves logs for the managed container of a quadlet.
@@ -525,7 +506,7 @@ func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadlet
 
 		err = containerEngine.ContainerLogs(ctx, []string{containerName}, logsOpts)
 		if err != nil {
-			if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
+			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrQuadletNotFound
 			}
 			return fmt.Errorf("failed to get quadlet logs: %w", err)
@@ -594,7 +575,7 @@ func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineI
 
 		err = containerEngine.ContainerLogs(ctx, []string{containerName}, logsOpts)
 		if err != nil {
-			if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
+			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrQuadletNotFound
 			}
 			if ctx.Err() == context.Canceled {
@@ -908,7 +889,7 @@ func (s *QuadletService) importSingleQuadlet(connCtx context.Context, entry Quad
 
 	report, err := quadlets.Install(connCtx, options, body)
 	if err != nil {
-		if isAlreadyExistsError(err) {
+		if podmanerr.IsAlreadyExists(err) {
 			return QuadletImportResult{}, fmt.Errorf("quadlet already exists")
 		}
 		return QuadletImportResult{}, fmt.Errorf("failed to install quadlet: %w", err)
@@ -916,7 +897,7 @@ func (s *QuadletService) importSingleQuadlet(connCtx context.Context, entry Quad
 
 	if report != nil {
 		for _, qErr := range report.QuadletErrors {
-			if qErr != nil && isAlreadyExistsError(qErr) {
+			if qErr != nil && podmanerr.IsAlreadyExists(qErr) {
 				return QuadletImportResult{}, fmt.Errorf("quadlet already exists")
 			}
 		}

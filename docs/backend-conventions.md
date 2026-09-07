@@ -65,9 +65,20 @@ A new endpoint that copies an established sibling pattern (error
 envelope, `userID`/`machineID` extraction, JSON encode, test helper
 like `recordPruneRequest`) is **correct**, not a smell. Extract shared
 helpers only when a **third** domain copies the same shape. That
-threshold has been crossed twice so far and both extractions are now
-the reference: the endpoint ritual became `internal/web.Handle`, and
-the handler-test scaffolding became `testutils.Perform`.
+threshold has been crossed three times and all three extractions are
+now the reference: the endpoint ritual became `internal/web.Handle`,
+the handler-test scaffolding became `testutils.Perform`, and podman
+error classification became `internal/podmanerr` — one leaf adapter
+owning podman's error model (typed `ErrorModel` status first, phrase
+fallback over the lowercased text) for volumes, secrets, containers,
+images, and quadlets. Domains classify through its predicates, check
+most-specific first, and map the results to their own sentinels; the
+adapter never imports `internal/errors`, so sentinels stay
+domain-owned. Two vocabularies deliberately stay quadlet-local: the
+quadlet running-refusal phrases (podman phrases that refusal outside
+its shared conflict vocabulary) and lifecycle.go's systemctl/stderr
+classification (a different transport). A second consumer for either
+earns it a place in the adapter.
 
 ## API documentation sync
 

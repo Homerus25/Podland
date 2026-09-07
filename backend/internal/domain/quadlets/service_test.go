@@ -380,26 +380,6 @@ func TestCreateTarBody(t *testing.T) {
 	})
 }
 
-func TestIsAlreadyExistsError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"nil", nil, false},
-		{"plain error", errors.New("something broke"), false},
-		{"already exists phrase", errors.New("quadlet my-container already exists"), true},
-		{"bare exists phrase is not enough", errors.New("file exists"), false},
-		{"case-insensitive", errors.New("Quadlet ALREADY EXISTS"), true},
-		{"unrelated message", errors.New("network unreachable"), false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isAlreadyExistsError(tt.err))
-		})
-	}
-}
-
 // --- Pure helpers used by Create + Update ---
 
 func TestFirstInstalledPath(t *testing.T) {
@@ -555,27 +535,6 @@ func TestCheckDeletePreconditions(t *testing.T) {
 	})
 }
 
-func TestIsNotFoundError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"nil", nil, false},
-		{"plain error", errors.New("something broke"), false},
-		{"no such quadlet", errors.New("no such quadlet: foo.container"), true},
-		{"quadlet not found", errors.New("quadlet foo not found"), true},
-		{"no such file", errors.New("no such file or directory"), true},
-		{"case-insensitive not found", errors.New("Quadlet NOT FOUND"), true},
-		{"unrelated running error", errors.New("resource is running"), false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isNotFoundError(tt.err))
-		})
-	}
-}
-
 func TestIsResourceRunningError(t *testing.T) {
 	tests := []struct {
 		name string
@@ -584,10 +543,11 @@ func TestIsResourceRunningError(t *testing.T) {
 	}{
 		{"nil", nil, false},
 		{"plain error", errors.New("something broke"), false},
-		{"in use", errors.New("resource is in use"), true},
+		{"in use delegates to the adapter's conflict predicate", errors.New("resource is in use"), true},
 		{"is running", errors.New("container is running"), true},
 		{"still running", errors.New("unit still running"), true},
 		{"active", errors.New("resource is active"), true},
+		{"podman's real running refusal", errors.New("quadlet x.container is running and force is not set, refusing to remove: quadlet is running"), true},
 		{"case-insensitive running", errors.New("RESOURCE IS RUNNING"), true},
 		{"not found is not running", errors.New("no such quadlet"), false},
 	}
