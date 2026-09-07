@@ -200,15 +200,13 @@ func TestWithConnection_ConcurrentColdAcquisitionsShareOneDial(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
 	fnsRun := atomic.Int32{}
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 2 {
+		wg.Go(func() {
 			errs <- mgr.WithConnection(context.Background(), "user-1", "machine-1", "test.op", func(context.Context) error {
 				fnsRun.Add(1)
 				return nil
 			})
-		}()
+		})
 	}
 
 	<-started // the cold dial is in flight, its pending entry already in the map

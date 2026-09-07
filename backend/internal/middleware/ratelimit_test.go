@@ -36,7 +36,7 @@ func TestAuthRateLimitMiddleware_UnderLimitPassesThrough(t *testing.T) {
 	var calls int
 	handler := AuthRateLimitMiddleware(limiter)(countingHandler(&calls))
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		req := requestFromIP(http.MethodPost, "/api/auth/login", "203.0.113.10:5555")
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
@@ -58,7 +58,7 @@ func TestAuthRateLimitMiddleware_OverLimitReturns429(t *testing.T) {
 	var calls int
 	handler := AuthRateLimitMiddleware(limiter)(countingHandler(&calls))
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		req := requestFromIP(http.MethodPost, "/api/auth/login", "203.0.113.10:5555")
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)

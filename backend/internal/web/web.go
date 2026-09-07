@@ -59,8 +59,7 @@ func Handle[T any](w http.ResponseWriter, r *http.Request, successStatus int, ca
 
 	result, err := call(r.Context(), userID, machineID)
 	if err != nil {
-		var appErr *appErrors.AppError
-		if errors.As(err, &appErr) {
+		if appErr, ok := errors.AsType[*appErrors.AppError](err); ok {
 			appErrors.RespondWithError(w, appErr, requestID)
 			return
 		}

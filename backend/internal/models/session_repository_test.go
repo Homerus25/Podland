@@ -195,7 +195,7 @@ func TestSessionRepository_RotateConcurrentExactlyOneWins(t *testing.T) {
 	require.NoError(t, repo.Create(newSession("session-raced", user.ID, "raced-hash", time.Now().UTC().Add(24*time.Hour))))
 
 	winners := make(chan bool, 2)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		go func(i int) {
 			replacement := newSession(
 				fmt.Sprintf("session-winner-%d", i),
