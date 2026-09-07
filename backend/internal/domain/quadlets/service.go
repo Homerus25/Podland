@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"go.podman.io/podman/v6/pkg/bindings/quadlets"
@@ -46,9 +46,9 @@ type ListFilters struct {
 
 // QuadletService provides business logic for quadlets
 type QuadletService struct {
-	connManager machines.ConnectionManagerInterface
+	conn connections.Manager
 	// sshExec runs systemctl over SSH for the lifecycle (Start/Stop/Restart)
-	// operations. It is a SEPARATE dependency from connManager (which is a
+	// operations. It is a SEPARATE dependency from conn (which is a
 	// podman-socket tunnel only) per the 070-10 SSH-exec infra slice.
 	sshExec sshexec.SSHExecInterface
 }
@@ -59,31 +59,30 @@ type QuadletService struct {
 // the other operations (List/Get/Create/Update/Delete) use only the connection
 // manager and are unaffected by it. Tests that do not exercise lifecycle may
 // pass nil for sshExec.
-func NewQuadletService(connManager machines.ConnectionManagerInterface, sshExec sshexec.SSHExecInterface) *QuadletService {
+func NewQuadletService(conn connections.Manager, sshExec sshexec.SSHExecInterface) *QuadletService {
 	return &QuadletService{
-		connManager: connManager,
-		sshExec:     sshExec,
+		conn:    conn,
+		sshExec: sshExec,
 	}
 }
 
 // List returns a list of quadlets on the specified machine.
 func (s *QuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return nil, appErrors.ErrConnectionFailed
-	}
+	var quadlets []QuadletListResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.List", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	defer s.connManager.Release(machineID)
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
+		list, err := containerEngine.QuadletList(ctx, entities.QuadletListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to list quadlets: %w", err)
+		}
 
-	quadlets, err := containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list quadlets: %w", err)
-	}
-
-	return applyFilters(ToQuadletListResponse(quadlets), filters), nil
+		quadlets = applyFilters(ToQuadletListResponse(list), filters)
+		return nil
+	})
+	return quadlets, err
 }
 
 // applyFilters applies the resource and name filters to the quadlet list.
@@ -108,42 +107,41 @@ func applyFilters(quadlets []QuadletListResponse, filters ListFilters) []Quadlet
 
 // Get returns a specific quadlet by name on the specified machine.
 func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return nil, appErrors.ErrConnectionFailed
-	}
+	var response *QuadletGetResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Get", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	defer s.connManager.Release(machineID)
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
+		content, err := containerEngine.QuadletPrint(ctx, name)
+		if err != nil {
+			return fmt.Errorf("failed to get quadlet content: %w", err)
+		}
 
-	content, err := containerEngine.QuadletPrint(connCtx, name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get quadlet content: %w", err)
-	}
+		quadlets, err := containerEngine.QuadletList(ctx, entities.QuadletListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to list quadlets: %w", err)
+		}
 
-	quadlets, err := containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list quadlets: %w", err)
-	}
+		targetQuadlet := findQuadletByName(quadlets, name)
 
-	targetQuadlet := findQuadletByName(quadlets, name)
+		if targetQuadlet == nil {
+			return appErrors.ErrQuadletNotFound
+		}
 
-	if targetQuadlet == nil {
-		return nil, appErrors.ErrQuadletNotFound
-	}
-
-	listResponse := FromListQuadlet(targetQuadlet)
-	return &QuadletGetResponse{
-		ID:       listResponse.ID,
-		Name:     listResponse.Name,
-		Path:     listResponse.Path,
-		Unit:     listResponse.Unit,
-		Resource: listResponse.Resource,
-		State:    listResponse.State,
-		Content:  content,
-	}, nil
+		listResponse := FromListQuadlet(targetQuadlet)
+		response = &QuadletGetResponse{
+			ID:       listResponse.ID,
+			Name:     listResponse.Name,
+			Path:     listResponse.Path,
+			Unit:     listResponse.Unit,
+			Resource: listResponse.Resource,
+			State:    listResponse.State,
+			Content:  content,
+		}
+		return nil
+	})
+	return response, err
 }
 
 // Create installs a new quadlet on the specified machine.
@@ -152,57 +150,56 @@ func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string
 // primitive with ReloadSystemd enabled so systemd picks up the new unit.
 // A name collision in the install report is mapped to ErrQuadletAlreadyExists.
 func (s *QuadletService) Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return nil, appErrors.ErrConnectionFailed
-	}
-
-	defer s.connManager.Release(machineID)
-	// Build the in-memory tar: a single file named `<name>.<resource-extension>`.
-	// Podman's QuadletInstall primitive accepts a tar body, not raw content —
-	// see ~/repos/podman/pkg/domain/infra/tunnel/quadlet.go:161 (createTarFromReader).
-	fileName := req.Name + resourceToExtension(req.Resource)
-	body, err := createTarBody(fileName, []byte(req.Content))
-	if err != nil {
-		return nil, fmt.Errorf("failed to build quadlet tar body: %w", err)
-	}
-
-	// Call the podman bindings-level Install directly. The engine-level
-	// QuadletInstall only accepts on-disk paths / URLs; we already hold the
-	// content in memory, so we skip its path-resolution step.
-	options := new(quadlets.QuadletInstallOptions).WithReloadSystemd(true)
-
-	report, err := quadlets.Install(connCtx, options, body)
-	if err != nil {
-		if isAlreadyExistsError(err) {
-			return nil, appErrors.ErrQuadletAlreadyExists
+	var response *QuadletCreateResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Create", func(connCtx context.Context) error {
+		// Build the in-memory tar: a single file named `<name>.<resource-extension>`.
+		// Podman's QuadletInstall primitive accepts a tar body, not raw content —
+		// see ~/repos/podman/pkg/domain/infra/tunnel/quadlet.go:161 (createTarFromReader).
+		fileName := req.Name + resourceToExtension(req.Resource)
+		body, err := createTarBody(fileName, []byte(req.Content))
+		if err != nil {
+			return fmt.Errorf("failed to build quadlet tar body: %w", err)
 		}
-		return nil, fmt.Errorf("failed to install quadlet: %w", err)
-	}
 
-	// A conflict surfaces as an entry in QuadletErrors keyed by source path.
-	if report != nil {
-		for _, qErr := range report.QuadletErrors {
-			if qErr != nil && isAlreadyExistsError(qErr) {
-				return nil, appErrors.ErrQuadletAlreadyExists
+		// Call the podman bindings-level Install directly. The engine-level
+		// QuadletInstall only accepts on-disk paths / URLs; we already hold the
+		// content in memory, so we skip its path-resolution step.
+		options := new(quadlets.QuadletInstallOptions).WithReloadSystemd(true)
+
+		report, err := quadlets.Install(connCtx, options, body)
+		if err != nil {
+			if isAlreadyExistsError(err) {
+				return appErrors.ErrQuadletAlreadyExists
+			}
+			return fmt.Errorf("failed to install quadlet: %w", err)
+		}
+
+		// A conflict surfaces as an entry in QuadletErrors keyed by source path.
+		if report != nil {
+			for _, qErr := range report.QuadletErrors {
+				if qErr != nil && isAlreadyExistsError(qErr) {
+					return appErrors.ErrQuadletAlreadyExists
+				}
 			}
 		}
-	}
 
-	// Resolve the installed path if podman reported one back.
-	installedPath := ""
-	if report != nil {
-		installedPath = firstInstalledPath(report.InstalledQuadlets)
-	}
+		// Resolve the installed path if podman reported one back.
+		installedPath := ""
+		if report != nil {
+			installedPath = firstInstalledPath(report.InstalledQuadlets)
+		}
 
-	return &QuadletCreateResponse{
-		ID:       req.Name,
-		Name:     req.Name,
-		Path:     installedPath,
-		Resource: strings.ToLower(req.Resource),
-		State:    "unknown",
-		Content:  req.Content,
-	}, nil
+		response = &QuadletCreateResponse{
+			ID:       req.Name,
+			Name:     req.Name,
+			Path:     installedPath,
+			Resource: strings.ToLower(req.Resource),
+			State:    "unknown",
+			Content:  req.Content,
+		}
+		return nil
+	})
+	return response, err
 }
 
 // Update replaces an existing quadlet's content on the specified machine.
@@ -229,72 +226,71 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 // reported as "unknown" immediately after the reinstall because systemd has not
 // yet reloaded to report a fresh status — matching the Create slice's behaviour.
 func (s *QuadletService) Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return nil, appErrors.ErrConnectionFailed
-	}
-
-	defer s.connManager.Release(machineID)
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	// 1. Existence check + resource derivation. A missing quadlet is a 404.
-	list, err := containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list quadlets: %w", err)
-	}
-
-	target := findQuadletByName(list, name)
-	if target == nil {
-		return nil, appErrors.ErrQuadletNotFound
-	}
-
-	// 2. Remove the existing quadlet. Force: true so an active managed resource
-	//    does not block the replace (the PUT contract has no running-conflict
-	//    error). ReloadSystemd: true so systemd drops the old unit.
-	if _, err := containerEngine.QuadletRemove(connCtx, []string{name}, entities.QuadletRemoveOptions{
-		Force:         true,
-		ReloadSystemd: true,
-	}); err != nil {
-		if isNotFoundError(err) {
-			return nil, appErrors.ErrQuadletNotFound
+	var response *QuadletGetResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Update", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
 		}
-		return nil, fmt.Errorf("failed to remove existing quadlet: %w", err)
-	}
 
-	// 3. Install the new content. The filename preserves the original resource
-	//    extension so the rebuilt quadlet keeps its type. Replace: true overwrites
-	//    any leftover file from a partial state; ReloadSystemd: true picks up the
-	//    change.
-	//    The derive→extension round-trip re-normalizes the contract enum (so a
-	//    .kube/.build path rebuilds as .container/.image), matching Create's use
-	//    of resourceToExtension on the request resource.
-	//
-	//    NOTE: The `name` parameter includes the extension (e.g. "my-quadlet.container"),
-	//    but we need to strip it before adding the new extension to avoid doubling it.
-	resource := deriveResourceFromPath(target.Path)
-	// Strip the existing extension from the name to avoid doubling
-	ext := resourceToExtension(resource)
-	baseName := strings.TrimSuffix(name, ext)
-	fileName := baseName + ext
-	body, err := createTarBody(fileName, []byte(req.Content))
-	if err != nil {
-		return nil, fmt.Errorf("failed to build quadlet tar body: %w", err)
-	}
+		// 1. Existence check + resource derivation. A missing quadlet is a 404.
+		list, err := containerEngine.QuadletList(ctx, entities.QuadletListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to list quadlets: %w", err)
+		}
 
-	options := new(quadlets.QuadletInstallOptions).WithReplace(true).WithReloadSystemd(true)
-	report, err := quadlets.Install(connCtx, options, body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to install updated quadlet: %w", err)
-	}
+		target := findQuadletByName(list, name)
+		if target == nil {
+			return appErrors.ErrQuadletNotFound
+		}
 
-	installedPath := ""
-	if report != nil {
-		installedPath = firstInstalledPath(report.InstalledQuadlets)
-	}
+		// 2. Remove the existing quadlet. Force: true so an active managed resource
+		//    does not block the replace (the PUT contract has no running-conflict
+		//    error). ReloadSystemd: true so systemd drops the old unit.
+		if _, err := containerEngine.QuadletRemove(ctx, []string{name}, entities.QuadletRemoveOptions{
+			Force:         true,
+			ReloadSystemd: true,
+		}); err != nil {
+			if isNotFoundError(err) {
+				return appErrors.ErrQuadletNotFound
+			}
+			return fmt.Errorf("failed to remove existing quadlet: %w", err)
+		}
 
-	return buildUpdateResponse(name, target.UnitName, resource, installedPath, req.Content), nil
+		// 3. Install the new content. The filename preserves the original resource
+		//    extension so the rebuilt quadlet keeps its type. Replace: true overwrites
+		//    any leftover file from a partial state; ReloadSystemd: true picks up the
+		//    change.
+		//    The derive→extension round-trip re-normalizes the contract enum (so a
+		//    .kube/.build path rebuilds as .container/.image), matching Create's use
+		//    of resourceToExtension on the request resource.
+		//
+		//    NOTE: The `name` parameter includes the extension (e.g. "my-quadlet.container"),
+		//    but we need to strip it before adding the new extension to avoid doubling it.
+		resource := deriveResourceFromPath(target.Path)
+		// Strip the existing extension from the name to avoid doubling
+		ext := resourceToExtension(resource)
+		baseName := strings.TrimSuffix(name, ext)
+		fileName := baseName + ext
+		body, err := createTarBody(fileName, []byte(req.Content))
+		if err != nil {
+			return fmt.Errorf("failed to build quadlet tar body: %w", err)
+		}
+
+		options := new(quadlets.QuadletInstallOptions).WithReplace(true).WithReloadSystemd(true)
+		report, err := quadlets.Install(connCtx, options, body)
+		if err != nil {
+			return fmt.Errorf("failed to install updated quadlet: %w", err)
+		}
+
+		installedPath := ""
+		if report != nil {
+			installedPath = firstInstalledPath(report.InstalledQuadlets)
+		}
+
+		response = buildUpdateResponse(name, target.UnitName, resource, installedPath, req.Content)
+		return nil
+	})
+	return response, err
 }
 
 // Delete removes a quadlet by name on the specified machine.
@@ -317,58 +313,53 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error {
 	_ = stop // honoured once SSH-exec (070-10) is available; see doc comment.
 
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return appErrors.ErrConnectionFailed
-	}
-
-	defer s.connManager.Release(machineID)
-
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	// Pre-check: locate the quadlet and evaluate the running guard so we map
-	// not-found / running-conflict before attempting the destructive call.
-	list, err := containerEngine.QuadletList(connCtx, entities.QuadletListOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to list quadlets: %w", err)
-	}
-
-	if err := checkDeletePreconditions(findQuadletByName(list, name), force); err != nil {
-		return err
-	}
-
-	report, err := containerEngine.QuadletRemove(connCtx, []string{name}, entities.QuadletRemoveOptions{
-		Force:         force,
-		ReloadSystemd: true,
-	})
-	if err != nil {
-		if isNotFoundError(err) {
-			return appErrors.ErrQuadletNotFound
+	return s.conn.WithConnection(ctx, userID, machineID, "quadlets.Delete", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
 		}
-		if !force && isResourceRunningError(err) {
-			return appErrors.ErrQuadletResourceRunning
-		}
-		return fmt.Errorf("failed to remove quadlet: %w", err)
-	}
 
-	// A removal failure (e.g. a race where the quadlet vanished or its
-	// resource started between the pre-check and the remove) surfaces in the
-	// report's Errors map keyed by quadlet name.
-	if report != nil {
-		if qErr, ok := report.Errors[name]; ok && qErr != nil {
-			if isNotFoundError(qErr) {
+		// Pre-check: locate the quadlet and evaluate the running guard so we map
+		// not-found / running-conflict before attempting the destructive call.
+		list, err := containerEngine.QuadletList(ctx, entities.QuadletListOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to list quadlets: %w", err)
+		}
+
+		if err := checkDeletePreconditions(findQuadletByName(list, name), force); err != nil {
+			return err
+		}
+
+		report, err := containerEngine.QuadletRemove(ctx, []string{name}, entities.QuadletRemoveOptions{
+			Force:         force,
+			ReloadSystemd: true,
+		})
+		if err != nil {
+			if isNotFoundError(err) {
 				return appErrors.ErrQuadletNotFound
 			}
-			if !force && isResourceRunningError(qErr) {
+			if !force && isResourceRunningError(err) {
 				return appErrors.ErrQuadletResourceRunning
 			}
-			return fmt.Errorf("failed to remove quadlet: %w", qErr)
+			return fmt.Errorf("failed to remove quadlet: %w", err)
 		}
-	}
 
-	return nil
+		// A removal failure (e.g. a race where the quadlet vanished or its
+		// resource started between the pre-check and the remove) surfaces in the
+		// report's Errors map keyed by quadlet name.
+		if report != nil {
+			if qErr, ok := report.Errors[name]; ok && qErr != nil {
+				if isNotFoundError(qErr) {
+					return appErrors.ErrQuadletNotFound
+				}
+				if !force && isResourceRunningError(qErr) {
+					return appErrors.ErrQuadletResourceRunning
+				}
+				return fmt.Errorf("failed to remove quadlet: %w", qErr)
+			}
+		}
+
+		return nil
+	})
 }
 
 // createTarBody builds an in-memory tar containing a single file with the given
@@ -510,56 +501,53 @@ func isResourceRunningError(err error) bool {
 //  3. Map "no such container" → QUADLET_NOT_FOUND (404).
 //
 // Returns `{id, logs}` on success. Supports `since` and `tail` query params.
-func (s *QuadletService) GetLogs(_ context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
-
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	containerName, err := s.resolveForLogs(containerEngine, userID, machineID, quadletName)
-	println("containername: " + containerName)
-	if err != nil {
-		return nil, err
-	}
-	defer s.connManager.Release(machineID)
-
-	var stdoutBuffer, stderrBuffer bytes.Buffer
-	logsOpts := entities.ContainerLogsOptions{
-		Follow:       false,
-		Since:        since,
-		Tail:         tail,
-		Timestamps:   false,
-		StdoutWriter: &stdoutBuffer,
-		StderrWriter: &stderrBuffer,
-	}
-
-	err = containerEngine.ContainerLogs(connCtx, []string{containerName}, logsOpts)
-	if err != nil {
-		if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
-			return nil, appErrors.ErrQuadletNotFound
+func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error) {
+	var response *QuadletLogsResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.GetLogs", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
 		}
-		return nil, fmt.Errorf("failed to get quadlet logs: %w", err)
-	}
 
-	combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
-	if stderrBuffer.Len() > 0 {
-		stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
-		if combinedLogs != "" {
-			combinedLogs += "\n" + stderrContent
-		} else {
-			combinedLogs = stderrContent
+		containerName, err := s.resolveForLogs(containerEngine, userID, machineID, quadletName)
+		if err != nil {
+			return err
 		}
-	}
 
-	return &QuadletLogsResponse{
-		ID:   quadletName,
-		Logs: combinedLogs,
-	}, nil
+		var stdoutBuffer, stderrBuffer bytes.Buffer
+		logsOpts := entities.ContainerLogsOptions{
+			Follow:       false,
+			Since:        since,
+			Tail:         tail,
+			Timestamps:   false,
+			StdoutWriter: &stdoutBuffer,
+			StderrWriter: &stderrBuffer,
+		}
+
+		err = containerEngine.ContainerLogs(ctx, []string{containerName}, logsOpts)
+		if err != nil {
+			if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
+				return appErrors.ErrQuadletNotFound
+			}
+			return fmt.Errorf("failed to get quadlet logs: %w", err)
+		}
+
+		combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
+		if stderrBuffer.Len() > 0 {
+			stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
+			if combinedLogs != "" {
+				combinedLogs += "\n" + stderrContent
+			} else {
+				combinedLogs = stderrContent
+			}
+		}
+
+		response = &QuadletLogsResponse{
+			ID:   quadletName,
+			Logs: combinedLogs,
+		}
+		return nil
+	})
+	return response, err
 }
 
 // GetLogsWithStream retrieves logs for the managed container of a quadlet
@@ -572,55 +560,51 @@ func (s *QuadletService) GetLogs(_ context.Context, userID, machineID, quadletNa
 // via context cancellation and mapped to OPERATION_CANCELLED.
 //
 // Supports `since` and `tail` query params. Emits NDJSON events via callback.
-func (s *QuadletService) GetLogsWithStream(_ context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
-
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
-
-	containerName, err := s.resolveForLogs(containerEngine, userID, machineID, quadletName)
-	if err != nil {
-		return err
-	}
-
-	logsOpts := entities.ContainerLogsOptions{
-		Follow:     true,
-		Since:      since,
-		Tail:       tail,
-		Timestamps: true,
-	}
-
-	stdoutWriter := &quadletLogEventWriter{
-		callback:   logCallback,
-		level:      "INFO",
-		timestamps: true,
-	}
-	stderrWriter := &quadletLogEventWriter{
-		callback:   logCallback,
-		level:      "ERROR",
-		timestamps: true,
-	}
-
-	logsOpts.StdoutWriter = stdoutWriter
-	logsOpts.StderrWriter = stderrWriter
-
-	err = containerEngine.ContainerLogs(connCtx, []string{containerName}, logsOpts)
-	if err != nil {
-		if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
-			return appErrors.ErrQuadletNotFound
+func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
+	return s.conn.WithConnection(ctx, userID, machineID, "quadlets.GetLogsWithStream", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
 		}
-		if connCtx.Err() == context.Canceled {
-			return appErrors.ErrOperationCancelled
-		}
-		return fmt.Errorf("failed to get quadlet logs: %w", err)
-	}
 
-	return nil
+		containerName, err := s.resolveForLogs(containerEngine, userID, machineID, quadletName)
+		if err != nil {
+			return err
+		}
+
+		logsOpts := entities.ContainerLogsOptions{
+			Follow:     true,
+			Since:      since,
+			Tail:       tail,
+			Timestamps: true,
+		}
+
+		stdoutWriter := &quadletLogEventWriter{
+			callback:   logCallback,
+			level:      "INFO",
+			timestamps: true,
+		}
+		stderrWriter := &quadletLogEventWriter{
+			callback:   logCallback,
+			level:      "ERROR",
+			timestamps: true,
+		}
+
+		logsOpts.StdoutWriter = stdoutWriter
+		logsOpts.StderrWriter = stderrWriter
+
+		err = containerEngine.ContainerLogs(ctx, []string{containerName}, logsOpts)
+		if err != nil {
+			if strings.Contains(err.Error(), "no such container") || strings.Contains(err.Error(), "container not found") {
+				return appErrors.ErrQuadletNotFound
+			}
+			if ctx.Err() == context.Canceled {
+				return appErrors.ErrOperationCancelled
+			}
+			return fmt.Errorf("failed to get quadlet logs: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // resolveForLogs performs the shared pre-work for GetLogs and GetLogsWithStream:
@@ -751,29 +735,28 @@ func (rt resourceType) inspectAndConvert(ctx context.Context, engine *tunnel.Con
 // remote machine. It inspects the source resource via the podman API and
 // converts it to quadlet format using the pkg/systemd/quadlet converter.
 func (s *QuadletService) Generate(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return nil, appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	var response *QuadletGenerateResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Generate", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
+		rt := resourceType(req.ResourceType)
+		quadletName, content, err := rt.inspectAndConvert(ctx, containerEngine, req.ResourceID)
+		if err != nil {
+			return err
+		}
 
-	rt := resourceType(req.ResourceType)
-	quadletName, content, err := rt.inspectAndConvert(connCtx, containerEngine, req.ResourceID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &QuadletGenerateResponse{
-		ID:       quadletName,
-		Name:     quadletName,
-		Resource: req.ResourceType,
-		State:    "unknown",
-		Content:  content,
-	}, nil
+		response = &QuadletGenerateResponse{
+			ID:       quadletName,
+			Name:     quadletName,
+			Resource: req.ResourceType,
+			State:    "unknown",
+			Content:  content,
+		}
+		return nil
+	})
+	return response, err
 }
 
 // generateContainerQuadlet converts a container inspect report to quadlet format.
@@ -888,31 +871,28 @@ func generatePodQuadlet(inspect *entities.PodInspectReport) (string, error) {
 // QuadletInstall primitive. The method handles partial failures by collecting
 // successful and failed imports separately.
 func (s *QuadletService) Import(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return nil, appErrors.ErrConnectionFailed
-	}
-
-	defer s.connManager.Release(machineID)
-
-	response := &QuadletImportResponse{
-		Imported: make([]QuadletImportResult, 0),
-		Failed:   make([]QuadletImportError, 0),
-	}
-
-	for _, entry := range req.Quadlets {
-		importResult, err := s.importSingleQuadlet(connCtx, entry)
-		if err != nil {
-			response.Failed = append(response.Failed, QuadletImportError{
-				Name:  entry.Name,
-				Error: err.Error(),
-			})
-		} else {
-			response.Imported = append(response.Imported, importResult)
+	var response *QuadletImportResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Import", func(connCtx context.Context) error {
+		response = &QuadletImportResponse{
+			Imported: make([]QuadletImportResult, 0),
+			Failed:   make([]QuadletImportError, 0),
 		}
-	}
 
-	return response, nil
+		for _, entry := range req.Quadlets {
+			importResult, err := s.importSingleQuadlet(connCtx, entry)
+			if err != nil {
+				response.Failed = append(response.Failed, QuadletImportError{
+					Name:  entry.Name,
+					Error: err.Error(),
+				})
+			} else {
+				response.Imported = append(response.Imported, importResult)
+			}
+		}
+
+		return nil
+	})
+	return response, err
 }
 
 // importSingleQuadlet imports a single quadlet entry using QuadletInstall.

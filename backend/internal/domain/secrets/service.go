@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
 	podmanSecrets "go.podman.io/podman/v6/pkg/bindings/secrets"
@@ -42,7 +42,7 @@ type accessPermissionGetter interface {
 // persists nothing locally, matching ContainerService/ImageService/
 // QuadletService.
 type SecretService struct {
-	connManager machines.ConnectionManagerInterface
+	conn connections.Manager
 	// accessRepo resolves the caller's permission level for the
 	// admin-only value reveal (?reveal=true): the gate is a query param,
 	// not a separate route, so it cannot ride on route-level middleware.
@@ -52,28 +52,26 @@ type SecretService struct {
 // NewSecretService creates a new SecretService with the given connection
 // manager interface and machine-access repository (permission lookup for
 // the admin-only reveal).
-func NewSecretService(connManager machines.ConnectionManagerInterface, accessRepo accessPermissionGetter) *SecretService {
+func NewSecretService(conn connections.Manager, accessRepo accessPermissionGetter) *SecretService {
 	return &SecretService{
-		connManager: connManager,
-		accessRepo:  accessRepo,
+		conn:       conn,
+		accessRepo: accessRepo,
 	}
 }
 
 // List returns the metadata of the secrets on the specified machine.
 func (s *SecretService) List(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return nil, appErrors.ErrConnectionFailed
-	}
+	var response []SecretListResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "secrets.List", func(connCtx context.Context) error {
+		reports, err := podmanSecrets.List(connCtx, nil)
+		if err != nil {
+			return fmt.Errorf("failed to list secrets: %w", err)
+		}
 
-	defer s.connManager.Release(machineID)
-
-	reports, err := podmanSecrets.List(connCtx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list secrets: %w", err)
-	}
-
-	return ToSecretListResponse(reports), nil
+		response = ToSecretListResponse(reports)
+		return nil
+	})
+	return response, err
 }
 
 // Get returns a single secret on the specified machine. With reveal=false
@@ -100,36 +98,34 @@ func (s *SecretService) Get(ctx context.Context, userID, machineID, secretID str
 		}
 	}
 
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return nil, appErrors.ErrConnectionFailed
-	}
-
-	defer s.connManager.Release(machineID)
-
-	opts := new(podmanSecrets.InspectOptions)
-	if reveal {
-		opts = opts.WithShowSecret(true)
-	}
-
-	report, err := podmanSecrets.Inspect(connCtx, secretID, opts)
-	if err != nil {
-		if isPodmanNotFound(err) {
-			return nil, appErrors.ErrSecretNotFound
+	var response *SecretInspectResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "secrets.Get", func(connCtx context.Context) error {
+		opts := new(podmanSecrets.InspectOptions)
+		if reveal {
+			opts = opts.WithShowSecret(true)
 		}
-		return nil, fmt.Errorf("failed to inspect secret: %w", err)
-	}
 
-	if reveal {
-		// Audit event per the redaction discipline: who revealed what,
-		// never the value itself.
-		slog.InfoContext(ctx, "secret value revealed",
-			slog.String("userID", userID),
-			slog.String("machineID", machineID),
-			slog.String("secretID", secretID))
-	}
+		report, err := podmanSecrets.Inspect(connCtx, secretID, opts)
+		if err != nil {
+			if isPodmanNotFound(err) {
+				return appErrors.ErrSecretNotFound
+			}
+			return fmt.Errorf("failed to inspect secret: %w", err)
+		}
 
-	return ToSecretInspectResponse(report, reveal), nil
+		if reveal {
+			// Audit event per the redaction discipline: who revealed what,
+			// never the value itself.
+			slog.InfoContext(ctx, "secret value revealed",
+				slog.String("userID", userID),
+				slog.String("machineID", machineID),
+				slog.String("secretID", secretID))
+		}
+
+		response = ToSecretInspectResponse(report, reveal)
+		return nil
+	})
+	return response, err
 }
 
 // Create installs a new secret on the specified machine. Podman takes the
@@ -143,40 +139,38 @@ func (s *SecretService) Get(ctx context.Context, userID, machineID, secretID str
 // becomes ErrSecretCreationFailed. The value itself never appears in any
 // log statement on this path.
 func (s *SecretService) Create(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return nil, appErrors.ErrConnectionFailed
-	}
+	var response *SecretCreateResponse
+	err := s.conn.WithConnection(ctx, userID, machineID, "secrets.Create", func(connCtx context.Context) error {
+		opts := new(podmanSecrets.CreateOptions).WithName(req.Name)
 
-	defer s.connManager.Release(machineID)
-
-	opts := new(podmanSecrets.CreateOptions).WithName(req.Name)
-
-	report, err := podmanSecrets.Create(connCtx, strings.NewReader(req.Value), opts)
-	if err != nil {
-		if isPodmanSecretNameInUse(err) {
-			return nil, appErrors.ErrSecretAlreadyExists
+		report, err := podmanSecrets.Create(connCtx, strings.NewReader(req.Value), opts)
+		if err != nil {
+			if isPodmanSecretNameInUse(err) {
+				return appErrors.ErrSecretAlreadyExists
+			}
+			// The underlying error is logged here, not returned: the sentinel
+			// is what the handler answers with, and podman's create errors
+			// (name/size/driver) never contain the value — only the name,
+			// which is public metadata.
+			slog.ErrorContext(ctx, "secret creation failed",
+				slog.Any("error", err),
+				slog.String("userID", userID),
+				slog.String("machineID", machineID),
+				slog.String("secretName", req.Name))
+			return appErrors.ErrSecretCreationFailed
 		}
-		// The underlying error is logged here, not returned: the sentinel
-		// is what the handler answers with, and podman's create errors
-		// (name/size/driver) never contain the value — only the name,
-		// which is public metadata.
-		slog.ErrorContext(ctx, "secret creation failed",
-			slog.Any("error", err),
-			slog.String("userID", userID),
-			slog.String("machineID", machineID),
-			slog.String("secretName", req.Name))
-		return nil, appErrors.ErrSecretCreationFailed
-	}
-	if report == nil {
-		slog.ErrorContext(ctx, "secret creation returned no report",
-			slog.String("userID", userID),
-			slog.String("machineID", machineID),
-			slog.String("secretName", req.Name))
-		return nil, appErrors.ErrSecretCreationFailed
-	}
+		if report == nil {
+			slog.ErrorContext(ctx, "secret creation returned no report",
+				slog.String("userID", userID),
+				slog.String("machineID", machineID),
+				slog.String("secretName", req.Name))
+			return appErrors.ErrSecretCreationFailed
+		}
 
-	return &SecretCreateResponse{ID: report.ID}, nil
+		response = &SecretCreateResponse{ID: report.ID}
+		return nil
+	})
+	return response, err
 }
 
 // isPodmanSecretNameInUse reports whether err is podman's duplicate-name
@@ -197,26 +191,21 @@ func isPodmanSecretNameInUse(err error) bool {
 // Podman answers 204 with no body on success, and the API's response body
 // is empty too — the frontend series (170) invalidates the list on the 204.
 func (s *SecretService) Delete(ctx context.Context, userID, machineID, secretID string) error {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return appErrors.ErrConnectionFailed
-	}
-
-	defer s.connManager.Release(machineID)
-
-	if err := podmanSecrets.Remove(connCtx, secretID); err != nil {
-		if isPodmanNotFound(err) {
-			return appErrors.ErrSecretNotFound
+	return s.conn.WithConnection(ctx, userID, machineID, "secrets.Delete", func(connCtx context.Context) error {
+		if err := podmanSecrets.Remove(connCtx, secretID); err != nil {
+			if isPodmanNotFound(err) {
+				return appErrors.ErrSecretNotFound
+			}
+			if isPodmanSecretInUse(err) {
+				// Surface podman's own refusal text (which container holds the
+				// secret) — a 4xx, so the message reaches the frontend.
+				return appErrors.ErrSecretInUse.WithMessage(podmanErrorMessage(err))
+			}
+			return fmt.Errorf("failed to delete secret: %w", err)
 		}
-		if isPodmanSecretInUse(err) {
-			// Surface podman's own refusal text (which container holds the
-			// secret) — a 4xx, so the message reaches the frontend.
-			return appErrors.ErrSecretInUse.WithMessage(podmanErrorMessage(err))
-		}
-		return fmt.Errorf("failed to delete secret: %w", err)
-	}
 
-	return nil
+		return nil
+	})
 }
 
 // isPodmanSecretInUse reports whether err is podman's refusal to remove a

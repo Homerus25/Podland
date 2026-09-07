@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
@@ -22,28 +22,19 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
+// Connection-failure mapping (502 CONNECTION_FAILED) is owned by the
+// connections.Manager seam and pinned once in the connections package
+// tests — not re-pinned per service method here.
+
 // TestNewSecretService_WithMockConnManager verifies that SecretService can be
-// constructed with a mock ConnectionManagerInterface, enabling unit testing.
+// constructed with a mock connections.Manager, enabling unit testing.
 func TestNewSecretService_WithMockConnManager(t *testing.T) {
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 
 	service := NewSecretService(mockConnManager, testutils.NewMockMachineAccessRepository())
 
 	assert.NotNil(t, service)
-	assert.NotNil(t, service.connManager)
-}
-
-func TestSecretService_List_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewSecretService(mockConnManager, testutils.NewMockMachineAccessRepository())
-
-	result, err := service.List(ctx, "test-user", "test-machine")
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
-	assert.Nil(t, result, "Should return nil result when connection fails")
+	assert.NotNil(t, service.conn)
 }
 
 // --- Service seam: List through a fake podman service API ---
@@ -51,11 +42,11 @@ func TestSecretService_List_ConnectionFailure(t *testing.T) {
 // The bindings boundary (go.podman.io/podman/v6/pkg/bindings/secrets) is a
 // package-level function that talks HTTP to whatever *bindings.Connection
 // the tunnel context carries, so the deepest seam a unit test can reach is
-// a fake podman HTTP server: GetConnection hands back a context built by
-// bindings.NewConnection against the fake, and the fake answers the real
-// endpoints (/_ping and /libpod/secrets/json) with podman's real wire
-// shape. That lets the tests below assert both the bindings invocation and
-// the entity→DTO mapping without a real machine.
+// a fake podman HTTP server: the stub connection manager hands back a
+// context built by bindings.NewConnection against the fake, and the fake
+// answers the real endpoints (/_ping and /libpod/secrets/json) with podman's
+// real wire shape. That lets the tests below assert both the bindings
+// invocation and the entity→DTO mapping without a real machine.
 
 // fakePodman is a stand-in podman service API. It records every request it
 // serves so tests can assert what the bindings layer actually sent.
@@ -123,20 +114,20 @@ func newFakePodmanServer(t *testing.T, secretsJSON string) (*fakePodman, *httpte
 	})
 }
 
-// stubConnManager is a machines.ConnectionManagerInterface whose
-// GetConnection always returns the pre-built tunnel context (and records
-// the Release call so tests can assert the lease is handed back).
+// stubConnManager is a connections.Manager whose WithConnection always runs
+// fn with the pre-built tunnel context (and records each seam crossing so
+// tests can assert the service went through the connection seam — the
+// acquisition/release pairing itself is the seam's job).
 type stubConnManager struct {
-	connCtx  context.Context
-	released []string
+	connCtx       context.Context
+	withConnCalls []string
 }
 
-func (m *stubConnManager) GetConnection(machineID, userID string) (context.Context, error) {
-	return m.connCtx, nil
-}
+var _ connections.Manager = (*stubConnManager)(nil)
 
-func (m *stubConnManager) Release(machineID string) {
-	m.released = append(m.released, machineID)
+func (m *stubConnManager) WithConnection(ctx context.Context, userID, machineID, op string, fn func(connCtx context.Context) error) error {
+	m.withConnCalls = append(m.withConnCalls, machineID)
+	return fn(m.connCtx)
 }
 
 func (m *stubConnManager) TestConnection(ctx context.Context, hostname string, port int, sshUsername, sshPrivateKey, podmanSocketPath string) error {
@@ -145,6 +136,12 @@ func (m *stubConnManager) TestConnection(ctx context.Context, hostname string, p
 
 func (m *stubConnManager) ProbeMachine(machineID, userID string) error {
 	return nil
+}
+
+func (m *stubConnManager) RemoveMachine(machineID string) {
+}
+
+func (m *stubConnManager) Stop() {
 }
 
 // tunnelCtxTo builds a context carrying a bindings connection to the given
@@ -218,8 +215,8 @@ func TestSecretService_List_CallsBindingsAndMaps(t *testing.T) {
 	}
 	assert.Equal(t, expected, result, "entities must map to metadata-only DTOs")
 
-	assert.Equal(t, []string{"test-machine"}, connManager.released,
-		"the connection lease must be released after the call")
+	assert.Equal(t, []string{"test-machine"}, connManager.withConnCalls,
+		"the call must cross the connection seam exactly once (release is the seam's job)")
 }
 
 func TestSecretService_List_EmptyMachineReturnsEmptyList(t *testing.T) {
@@ -308,8 +305,8 @@ func TestSecretService_Get_MetadataOnly(t *testing.T) {
 	}, result, "the response must be the metadata DTO with NO value")
 	assert.Empty(t, result.SecretData, "a metadata inspect must never carry the secret value")
 
-	assert.Equal(t, []string{"test-machine"}, connManager.released,
-		"the connection lease must be released after the call")
+	assert.Equal(t, []string{"test-machine"}, connManager.withConnCalls,
+		"the call must cross the connection seam exactly once (release is the seam's job)")
 }
 
 // TestSecretService_Get_AdminRevealReturnsValue pins the admin reveal
@@ -383,8 +380,8 @@ func TestSecretService_Get_RevealBelowAdminIsDenied(t *testing.T) {
 			gotInspectCalls := fake.inspectCalls
 			fake.mu.Unlock()
 			assert.Equal(t, 0, gotInspectCalls, "a denied reveal must never reach podman")
-			assert.Empty(t, connManager.released,
-				"a denied reveal must not take a connection lease at all")
+			assert.Empty(t, connManager.withConnCalls,
+				"a denied reveal must not cross the connection seam at all")
 		})
 	}
 }
@@ -402,7 +399,7 @@ func TestSecretService_Get_RevealPermissionLookupFailure(t *testing.T) {
 
 	assert.Equal(t, appErrors.ErrInternalError, err, "a failing lookup must surface as INTERNAL_ERROR")
 	assert.Nil(t, result)
-	assert.Empty(t, connManager.released, "no connection lease may be taken when the lookup fails")
+	assert.Empty(t, connManager.withConnCalls, "the connection seam may not be crossed when the lookup fails")
 }
 
 // TestSecretService_Get_UnknownSecretIsNotFound pins the 404 mapping: a
@@ -421,8 +418,8 @@ func TestSecretService_Get_UnknownSecretIsNotFound(t *testing.T) {
 
 		assert.Equal(t, appErrors.ErrSecretNotFound, err, "a podman 404 must map to SECRET_NOT_FOUND")
 		assert.Nil(t, result)
-		assert.Equal(t, []string{"test-machine"}, connManager.released,
-			"the lease must still be released on a podman 404")
+		assert.Equal(t, []string{"test-machine"}, connManager.withConnCalls,
+			"the seam must still be crossed on a podman 404")
 	})
 
 	t.Run("admin reveal", func(t *testing.T) {
@@ -455,20 +452,6 @@ func TestSecretService_Get_OtherPodmanErrorsStayGeneric(t *testing.T) {
 	assert.NotEqual(t, appErrors.ErrSecretNotFound, err, "a podman 500 must not masquerade as 404")
 	var appErr *appErrors.AppError
 	assert.NotErrorAs(t, err, &appErr, "the raw error stays non-AppError so the handler 500s it")
-	assert.Nil(t, result)
-}
-
-// TestSecretService_Get_ConnectionFailure pins the connection seam for
-// inspect: a failed tunnel maps to ErrConnectionFailed (502), mirroring
-// List and the other machine-rider services.
-func TestSecretService_Get_ConnectionFailure(t *testing.T) {
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewSecretService(mockConnManager, testutils.NewMockMachineAccessRepository())
-
-	result, err := service.Get(context.Background(), "reader-1", "test-machine", "db-password", false)
-
-	assert.Equal(t, appErrors.ErrConnectionFailed, err, "a failed connection must map to ErrConnectionFailed")
 	assert.Nil(t, result)
 }
 
@@ -541,8 +524,8 @@ func TestSecretService_Create_SendsNameAndByteIdenticalBody(t *testing.T) {
 	assert.Equal(t, value, gotBody,
 		"the value must reach podman byte-identical — never trimmed or mutated")
 
-	assert.Equal(t, []string{"test-machine"}, connManager.released,
-		"the connection lease must be released after the call")
+	assert.Equal(t, []string{"test-machine"}, connManager.withConnCalls,
+		"the call must cross the connection seam exactly once (release is the seam's job)")
 }
 
 // TestSecretService_Create_DuplicateNameIsConflict pins the 409 mapping:
@@ -561,8 +544,8 @@ func TestSecretService_Create_DuplicateNameIsConflict(t *testing.T) {
 	assert.Equal(t, appErrors.ErrSecretAlreadyExists, err,
 		"a podman name-in-use answer must map to ErrSecretAlreadyExists")
 	assert.Nil(t, result)
-	assert.Equal(t, []string{"test-machine"}, connManager.released,
-		"the lease must still be released on a name conflict")
+	assert.Equal(t, []string{"test-machine"}, connManager.withConnCalls,
+		"the seam must still be crossed on a name conflict")
 }
 
 // TestSecretService_Create_OtherPodmanErrorsAreCreationFailed pins that any
@@ -581,23 +564,8 @@ func TestSecretService_Create_OtherPodmanErrorsAreCreationFailed(t *testing.T) {
 	assert.Equal(t, appErrors.ErrSecretCreationFailed, err,
 		"a podman failure other than name-in-use must map to ErrSecretCreationFailed")
 	assert.Nil(t, result)
-	assert.Equal(t, []string{"test-machine"}, connManager.released,
-		"the lease must still be released on a podman failure")
-}
-
-// TestSecretService_Create_ConnectionFailure pins the connection seam for
-// create: a failed tunnel maps to ErrConnectionFailed (502), mirroring
-// List/Get and the other machine-rider services.
-func TestSecretService_Create_ConnectionFailure(t *testing.T) {
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewSecretService(mockConnManager, testutils.NewMockMachineAccessRepository())
-
-	result, err := service.Create(context.Background(), "writer-1", "test-machine",
-		SecretCreateRequest{Name: "db-password", Value: "hunter2"})
-
-	assert.Equal(t, appErrors.ErrConnectionFailed, err, "a failed connection must map to ErrConnectionFailed")
-	assert.Nil(t, result)
+	assert.Equal(t, []string{"test-machine"}, connManager.withConnCalls,
+		"the seam must still be crossed on a podman failure")
 }
 
 // --- Mapping (pure functions) ---
@@ -692,8 +660,8 @@ func TestSecretService_Delete_Success(t *testing.T) {
 	assert.True(t, strings.HasSuffix(gotPath, "/libpod/secrets/db-password"),
 		"bindings must hit the single-secret endpoint, got %q", gotPath)
 
-	assert.Equal(t, []string{"test-machine"}, connManager.released,
-		"the connection lease must be released after the call")
+	assert.Equal(t, []string{"test-machine"}, connManager.withConnCalls,
+		"the call must cross the connection seam exactly once (release is the seam's job)")
 }
 
 // TestSecretService_Delete_UnknownSecretIsNotFound pins the 404 mapping: a
@@ -708,8 +676,8 @@ func TestSecretService_Delete_UnknownSecretIsNotFound(t *testing.T) {
 	err := service.Delete(context.Background(), "writer-1", "test-machine", "nope")
 
 	assert.Equal(t, appErrors.ErrSecretNotFound, err, "a podman 404 must map to SECRET_NOT_FOUND")
-	assert.Equal(t, []string{"test-machine"}, connManager.released,
-		"the lease must still be released on a podman 404")
+	assert.Equal(t, []string{"test-machine"}, connManager.withConnCalls,
+		"the seam must still be crossed on a podman 404")
 }
 
 // TestSecretService_Delete_InUseConflict pins the in-use mapping: podman
@@ -729,8 +697,8 @@ func TestSecretService_Delete_InUseConflict(t *testing.T) {
 		"an in-use refusal must map to SECRET_IN_USE")
 	assert.Contains(t, err.(*appErrors.AppError).Message, "in use by container 3f2e1d0c",
 		"the 409 must surface podman's own refusal message for the frontend")
-	assert.Equal(t, []string{"test-machine"}, connManager.released,
-		"the lease must still be released on an in-use refusal")
+	assert.Equal(t, []string{"test-machine"}, connManager.withConnCalls,
+		"the seam must still be crossed on an in-use refusal")
 }
 
 // TestSecretService_Delete_OtherPodmanErrorsStayGeneric pins that only 404
@@ -746,17 +714,4 @@ func TestSecretService_Delete_OtherPodmanErrorsStayGeneric(t *testing.T) {
 
 	var appErr *appErrors.AppError
 	assert.NotErrorAs(t, err, &appErr, "the raw error stays non-AppError so the handler 500s it")
-}
-
-// TestSecretService_Delete_ConnectionFailure pins the connection seam for
-// delete: a failed tunnel maps to ErrConnectionFailed (502), mirroring
-// List/Get/Create.
-func TestSecretService_Delete_ConnectionFailure(t *testing.T) {
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewSecretService(mockConnManager, testutils.NewMockMachineAccessRepository())
-
-	err := service.Delete(context.Background(), "writer-1", "test-machine", "db-password")
-
-	assert.Equal(t, appErrors.ErrConnectionFailed, err, "a failed connection must map to ErrConnectionFailed")
 }

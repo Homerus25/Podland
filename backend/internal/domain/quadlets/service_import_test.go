@@ -2,11 +2,9 @@ package quadlets
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
-	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
@@ -27,7 +25,7 @@ func TestServiceImport_InvocationShape(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	req := QuadletImportRequest{
@@ -58,35 +56,10 @@ func TestServiceImport_InvocationShape(t *testing.T) {
 	}
 }
 
-func TestServiceImport_ConnectionFailure(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager, nil)
-
-	req := QuadletImportRequest{
-		Quadlets: []QuadletImportEntry{
-			{
-				Name:     "web",
-				Resource: "container",
-				Content:  "[Container]\nImage=nginx\n",
-			},
-		},
-	}
-
-	response, err := service.Import(ctx, "user-1", "machine-1", req)
-
-	require.Error(t, err)
-	assert.Nil(t, response)
-	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed)
-}
-
 func TestServiceImport_EmptyRequest(t *testing.T) {
 	t.Parallel()
 
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	ctx := context.Background()
@@ -110,18 +83,19 @@ func TestServiceImport_EmptyRequest(t *testing.T) {
 func TestImportSingleQuadlet_InvocationShape(t *testing.T) {
 	t.Parallel()
 
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
-	connCtx, _ := mockConnManager.GetConnection("machine-1", "user-1")
-
-	entry := QuadletImportEntry{
-		Name:     "web",
-		Resource: "container",
-		Content:  "[Container]\nImage=nginx\n",
-	}
-
-	result, err := service.importSingleQuadlet(connCtx, entry)
+	var result QuadletImportResult
+	err := mockConnManager.WithConnection(context.Background(), "user-1", "machine-1", "quadlets.Import", func(connCtx context.Context) error {
+		var innerErr error
+		result, innerErr = service.importSingleQuadlet(connCtx, QuadletImportEntry{
+			Name:     "web",
+			Resource: "container",
+			Content:  "[Container]\nImage=nginx\n",
+		})
+		return innerErr
+	})
 
 	assert.Error(t, err, "Should return error from install call with mock connection")
 	assert.Equal(t, QuadletImportResult{}, result, "Should return zero result when install call fails")

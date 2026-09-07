@@ -38,8 +38,8 @@ type Manager interface {
 
 // Manager interface satisfaction is pinned at compile time. During the
 // expand phase the concrete manager also satisfies the old
-// machines.ConnectionManagerInterface, which the not-yet-migrated domains
-// (machines, quadlets, secrets) still require until the contract ticket.
+// machines.ConnectionManagerInterface, which the not-yet-migrated machines
+// domain still requires until the contract ticket.
 var _ Manager = (*ConnectionManager)(nil)
 
 // DefaultConnectionTestTimeout is the registration-probe deadline when no

@@ -2,10 +2,9 @@ package quadlets
 
 import (
 	"context"
-	"errors"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/testutils"
@@ -243,12 +242,11 @@ func TestBuildLifecycleResponse(t *testing.T) {
 // As with the other service seams in this package, the podman engine boundary
 // (QuadletList, used for the existence check + unit-name resolution in
 // resolveForLifecycle) is built inline and cannot be exercised under the mock
-// connection. The service-level tests therefore cover only:
-//
-//   - connection-stage error wrapping (GetConnection failure → ErrConnectionFailed)
-//   - invocation shape (the call reaches QuadletList but fails because there is
-//     no real podman backend behind the mock connection context — the error is
-//     NOT a connection error, proving we got past GetConnection)
+// connection. The service-level tests therefore cover only the invocation
+// shape: the call reaches QuadletList but fails because there is no real
+// podman backend behind the mock connection context — the error is NOT a
+// connection error, proving we got past the connection seam (whose failure
+// mapping is pinned once in the connections package tests).
 //
 // The domain logic this slice introduces (unit-name resolution, the wrong-state
 // guard, systemctl command construction, exit-code interpretation) is covered
@@ -256,22 +254,9 @@ func TestBuildLifecycleResponse(t *testing.T) {
 // the service so that, if resolveForLifecycle ever does return, runSystemctl is
 // exercised — but under the mock connection that path is not reached.
 
-func TestQuadletService_Start_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager, testutils.NewMockSSHExec())
-
-	result, err := service.Start(ctx, "test-user", "test-machine", "my-container.container")
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.Equal(t, appErrors.ErrConnectionFailed, err, "Should map to ErrConnectionFailed")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
-
 func TestQuadletService_Start_InvocationShape(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, testutils.NewMockSSHExec())
 
 	result, err := service.Start(ctx, "test-user", "test-machine", "my-container.container")
@@ -284,22 +269,9 @@ func TestQuadletService_Start_InvocationShape(t *testing.T) {
 		"Error should not be a connection error — connection should have succeeded")
 }
 
-func TestQuadletService_Stop_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager, testutils.NewMockSSHExec())
-
-	result, err := service.Stop(ctx, "test-user", "test-machine", "my-container.container", LifecycleOptions{Force: true, Timeout: 5})
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.Equal(t, appErrors.ErrConnectionFailed, err, "Should map to ErrConnectionFailed")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
-
 func TestQuadletService_Stop_InvocationShape(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, testutils.NewMockSSHExec())
 
 	result, err := service.Stop(ctx, "test-user", "test-machine", "my-container.container", LifecycleOptions{})
@@ -310,22 +282,9 @@ func TestQuadletService_Stop_InvocationShape(t *testing.T) {
 		"Error should not be a connection error — connection should have succeeded")
 }
 
-func TestQuadletService_Restart_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager, testutils.NewMockSSHExec())
-
-	result, err := service.Restart(ctx, "test-user", "test-machine", "my-container.container", LifecycleOptions{Force: true, Timeout: 10})
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.Equal(t, appErrors.ErrConnectionFailed, err, "Should map to ErrConnectionFailed")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
-
 func TestQuadletService_Restart_InvocationShape(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, testutils.NewMockSSHExec())
 
 	result, err := service.Restart(ctx, "test-user", "test-machine", "my-container.container", LifecycleOptions{})

@@ -172,27 +172,26 @@ func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name st
 // inline, matching the rest of the service) so the existence check and
 // unit-name resolution are consistent with the Get/Delete slices.
 func (s *QuadletService) resolveUnitNameForLifecycle(ctx context.Context, userID, machineID, name string, action lifecycleAction) (string, error) {
-	connCtx, err := s.connManager.GetConnection(machineID, userID)
-	if err != nil {
-		return "", appErrors.ErrConnectionFailed
-	}
-	defer s.connManager.Release(machineID)
+	var unit string
+	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Lifecycle", func(connCtx context.Context) error {
+		containerEngine := &tunnel.ContainerEngine{
+			ClientCtx: connCtx,
+		}
 
-	containerEngine := &tunnel.ContainerEngine{
-		ClientCtx: connCtx,
-	}
+		target, err := s.resolveTarget(containerEngine, name)
+		if err != nil {
+			return err
+		}
 
-	target, err := s.resolveTarget(containerEngine, name)
-	if err != nil {
-		return "", err
-	}
+		state := parseStateFromStatus(target.Status)
+		if err := action.checkPrecondition(state); err != nil {
+			return err
+		}
 
-	state := parseStateFromStatus(target.Status)
-	if err := action.checkPrecondition(state); err != nil {
-		return "", err
-	}
-
-	return resolveUnitName(target, name), nil
+		unit = resolveUnitName(target, name)
+		return nil
+	})
+	return unit, err
 }
 
 func (s *QuadletService) resolveTarget(containerEngine *tunnel.ContainerEngine, name string) (*entities.ListQuadlet, error) {

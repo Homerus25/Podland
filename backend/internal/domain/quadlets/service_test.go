@@ -8,7 +8,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
@@ -16,28 +16,25 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
+// Connection-failure mapping (502 CONNECTION_FAILED) is owned by the
+// connections.Manager seam and pinned once in the connections package
+// tests — not re-pinned per service method here.
+
 // TestQuadletService_ImplementsInterface is a compile-time check that
 // *QuadletService satisfies QuadletServiceInterface.
 func TestQuadletService_ImplementsInterface(t *testing.T) {
 	var _ QuadletServiceInterface = (*QuadletService)(nil)
 }
 
-// TestConnectionManager_ImplementsInterface is a compile-time check that
-// *connections.ConnectionManager satisfies ConnectionManagerInterface,
-// allowing it to be passed directly to NewQuadletService.
-func TestConnectionManager_ImplementsInterface(t *testing.T) {
-	// var _ machines.ConnectionManagerInterface = (*connections.ConnectionManager)(nil)
-}
-
 // TestNewQuadletService_WithMockConnManager verifies that QuadletService can be
-// constructed with a mock ConnectionManagerInterface, enabling unit testing.
+// constructed with a mock connections.Manager, enabling unit testing.
 func TestNewQuadletService_WithMockConnManager(t *testing.T) {
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 
 	service := NewQuadletService(mockConnManager, nil)
 
 	assert.NotNil(t, service)
-	assert.NotNil(t, service.connManager)
+	assert.NotNil(t, service.conn)
 }
 
 // --- Service seam: List ---
@@ -49,22 +46,9 @@ func TestNewQuadletService_WithMockConnManager(t *testing.T) {
 // connection context. The domain logic (filtering, mapping, state/resource
 // derivation) is covered directly on the pure functions further below.
 
-func TestQuadletService_List_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager, nil)
-
-	result, err := service.List(ctx, "test-user", "test-machine", ListFilters{})
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
-
 func TestQuadletService_List_InvocationShape(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.List(ctx, "test-user", "test-machine", ListFilters{})
@@ -79,22 +63,9 @@ func TestQuadletService_List_InvocationShape(t *testing.T) {
 
 // --- Service seam: Get ---
 
-func TestQuadletService_Get_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager, nil)
-
-	result, err := service.Get(ctx, "test-user", "test-machine", "my-container.container")
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
-
 func TestQuadletService_Get_InvocationShape(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Get(ctx, "test-user", "test-machine", "my-container.container")
@@ -109,26 +80,9 @@ func TestQuadletService_Get_InvocationShape(t *testing.T) {
 
 // --- Service seam: Create ---
 
-func TestQuadletService_Create_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager, nil)
-
-	result, err := service.Create(ctx, "test-user", "test-machine", QuadletCreateRequest{
-		Name:     "my-container",
-		Resource: "container",
-		Content:  "[Container]\nImage=nginx:latest\n",
-	})
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
-
 func TestQuadletService_Create_InvocationShape(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Create(ctx, "test-user", "test-machine", QuadletCreateRequest{
@@ -163,24 +117,9 @@ func TestQuadletService_Create_InvocationShape(t *testing.T) {
 //     removed) → cannot be exercised without a real podman backend; see the
 //     doc comment on Service.Update for the documented non-atomicity guarantee.
 
-func TestQuadletService_Update_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager, nil)
-
-	result, err := service.Update(ctx, "test-user", "test-machine", "my-container.container", QuadletUpdateRequest{
-		Content: "[Container]\nImage=nginx:1.25\n",
-	})
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
-
 func TestQuadletService_Update_InvocationShape(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Update(ctx, "test-user", "test-machine", "my-container.container", QuadletUpdateRequest{
@@ -203,21 +142,9 @@ func TestQuadletService_Update_InvocationShape(t *testing.T) {
 // fails because there is no real podman backend). The domain logic
 // (not-found / running guard) is covered directly via the pure helpers above.
 
-func TestQuadletService_Delete_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager, nil)
-
-	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", false, true)
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
-}
-
 func TestQuadletService_Delete_InvocationShape(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", false, true)
@@ -231,7 +158,7 @@ func TestQuadletService_Delete_InvocationShape(t *testing.T) {
 
 func TestQuadletService_Delete_ForceTrue_InvocationShape(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", true, true)
@@ -673,25 +600,9 @@ func TestIsResourceRunningError(t *testing.T) {
 
 // --- Service seam: Generate ---
 
-func TestQuadletService_Generate_ConnectionFailure(t *testing.T) {
-	ctx := context.Background()
-	connErr := errors.New("SSH connection failed")
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-	service := NewQuadletService(mockConnManager, nil)
-
-	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{
-		ResourceID:   "my-container",
-		ResourceType: "container",
-	})
-
-	assert.Error(t, err, "Should return error when connection fails")
-	assert.Equal(t, err, appErrors.ErrConnectionFailed, "Should map to ErrConnectionFailed")
-	assert.Nil(t, result, "Should return nil result when connection fails")
-}
-
 func TestQuadletService_Generate_Container_Success(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{
@@ -709,7 +620,7 @@ func TestQuadletService_Generate_Container_Success(t *testing.T) {
 
 func TestQuadletService_Generate_Pod_Success(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{
@@ -727,7 +638,7 @@ func TestQuadletService_Generate_Pod_Success(t *testing.T) {
 
 func TestQuadletService_Generate_InvalidResourceType(t *testing.T) {
 	ctx := context.Background()
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{

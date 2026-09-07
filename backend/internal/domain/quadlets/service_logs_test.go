@@ -3,12 +3,11 @@ package quadlets
 import (
 	"bytes"
 	"context"
-	stdErrors "errors"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
@@ -23,7 +22,7 @@ func TestQuadletService_GetLogs_Success(t *testing.T) {
 	machineID := "test-machine"
 	quadletName := "my-quadlet"
 
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	t.Run("service structure validation", func(t *testing.T) {
@@ -37,18 +36,6 @@ func TestQuadletService_GetLogs_Success(t *testing.T) {
 		}
 		assert.Equal(t, "test-quadlet", response.ID, "QuadletLogsResponse ID should be settable")
 		assert.Equal(t, "test log line", response.Logs, "QuadletLogsResponse Logs should be settable")
-	})
-
-	t.Run("connection error", func(t *testing.T) {
-		connErr := stdErrors.New("connection failed")
-		var mockConnManagerWithError machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-		serviceWithError := NewQuadletService(mockConnManagerWithError, nil)
-
-		result, err := serviceWithError.GetLogs(ctx, userID, machineID, quadletName, time.Time{}, 0)
-
-		assert.Error(t, err, "Should return error when connection fails")
-		assert.Equal(t, appErrors.ErrConnectionFailed, err, "Should return connection failed error")
-		assert.Nil(t, result, "Should return nil result when connection fails")
 	})
 
 	t.Run("missing parameters", func(t *testing.T) {
@@ -86,29 +73,11 @@ func TestQuadletService_GetLogs_Success(t *testing.T) {
 
 // TestQuadletService_GetLogs_ErrorMapping tests error mapping
 func TestQuadletService_GetLogs_ErrorMapping(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	quadletName := "my-quadlet"
-
 	// Verify that ErrQuadletNotFound exists and has correct status
 	t.Run("verify error constants", func(t *testing.T) {
 		assert.NotNil(t, appErrors.ErrQuadletNotFound, "ErrQuadletNotFound should be defined")
 		assert.Equal(t, "QUADLET_NOT_FOUND", appErrors.ErrQuadletNotFound.Code, "Error code should match")
 		assert.Equal(t, 404, appErrors.ErrQuadletNotFound.Status, "Status should be 404")
-	})
-
-	// Verify connection error mapping
-	t.Run("connection error mapping", func(t *testing.T) {
-		connErr := stdErrors.New("connection failed")
-		var mockConnManagerWithError machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-		serviceWithError := NewQuadletService(mockConnManagerWithError, nil)
-
-		result, err := serviceWithError.GetLogs(ctx, userID, machineID, quadletName, time.Time{}, 0)
-
-		assert.Error(t, err, "Should return error when connection fails")
-		assert.NotEqual(t, appErrors.ErrQuadletNotFound, err, "Connection error should not map to QuadletNotFound")
-		assert.Nil(t, result, "Should return nil result when connection fails")
 	})
 }
 
@@ -186,7 +155,7 @@ func TestQuadletService_GetLogsWithStream_Success(t *testing.T) {
 	machineID := "test-machine"
 	quadletName := "my-quadlet"
 
-	var mockConnManager machines.ConnectionManagerInterface = testutils.NewMockConnectionManager()
+	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 	service := NewQuadletService(mockConnManager, nil)
 
 	t.Run("service structure validation", func(t *testing.T) {
@@ -202,21 +171,6 @@ func TestQuadletService_GetLogsWithStream_Success(t *testing.T) {
 		assert.Equal(t, "2024-01-01T00:00:00Z", event.Timestamp, "QuadletLogEvent Timestamp should be settable")
 		assert.Equal(t, "INFO", event.Level, "QuadletLogEvent Level should be settable")
 		assert.Equal(t, "test log message", event.Message, "QuadletLogEvent Message should be settable")
-	})
-
-	t.Run("connection error", func(t *testing.T) {
-		connErr := stdErrors.New("connection failed")
-		var mockConnManagerWithError machines.ConnectionManagerInterface = testutils.NewMockConnectionManagerWithError(connErr)
-		serviceWithError := NewQuadletService(mockConnManagerWithError, nil)
-
-		var capturedEvents []QuadletLogEvent
-		err := serviceWithError.GetLogsWithStream(ctx, userID, machineID, quadletName, time.Time{}, 0, func(event QuadletLogEvent) {
-			capturedEvents = append(capturedEvents, event)
-		})
-
-		assert.Error(t, err, "Should return error when connection fails")
-		assert.Equal(t, appErrors.ErrConnectionFailed, err, "Should return connection failed error")
-		assert.Empty(t, capturedEvents, "Should not capture any events when connection fails")
 	})
 
 	t.Run("callback is called", func(t *testing.T) {
