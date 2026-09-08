@@ -12,17 +12,15 @@ import (
 
 // AuthHandler handles authentication requests
 type AuthHandler struct {
-	service      *AuthService
-	userRepo     models.UserRepositoryInterface
-	errorHandler *errors.ErrorHandler
+	service  *AuthService
+	userRepo models.UserRepositoryInterface
 }
 
 // NewAuthHandler creates a new AuthHandler
 func NewAuthHandler(service *AuthService, userRepo models.UserRepositoryInterface) *AuthHandler {
 	return &AuthHandler{
-		service:      service,
-		userRepo:     userRepo,
-		errorHandler: errors.NewErrorHandler(),
+		service:  service,
+		userRepo: userRepo,
 	}
 }
 
@@ -86,7 +84,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	token, refreshToken, user, err := h.service.Login(req.Username, req.Password)
 	if err != nil {
-		errors.RespondWithError(w, h.errorHandler.HandleError(err), requestID)
+		errors.RespondWithError(w, errors.ToAppError(err), requestID)
 		return
 	}
 
@@ -123,7 +121,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	token, refreshToken, user, err := h.service.Refresh(cookie.Value)
 	if err != nil {
-		errors.RespondWithError(w, h.errorHandler.HandleError(err), requestID)
+		errors.RespondWithError(w, errors.ToAppError(err), requestID)
 		return
 	}
 
@@ -159,7 +157,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 	if cookie, err := r.Cookie(refreshTokenCookieName); err == nil {
 		if err := h.service.Logout(cookie.Value); err != nil {
-			errors.RespondWithError(w, h.errorHandler.HandleError(err), requestID)
+			errors.RespondWithError(w, errors.ToAppError(err), requestID)
 			return
 		}
 	}

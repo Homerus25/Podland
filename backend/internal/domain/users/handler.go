@@ -10,15 +10,13 @@ import (
 
 // UserHandler handles user management requests.
 type UserHandler struct {
-	service      *UserService
-	errorHandler *errors.ErrorHandler
+	service *UserService
 }
 
 // NewUserHandler creates a new UserHandler.
 func NewUserHandler(service *UserService) *UserHandler {
 	return &UserHandler{
-		service:      service,
-		errorHandler: errors.NewErrorHandler(),
+		service: service,
 	}
 }
 
@@ -39,7 +37,7 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// creation path (cmd/initdb, seeding) goes through.
 	user, err := h.service.CreateUser(req.Username, req.Password)
 	if err != nil {
-		errors.RespondWithError(w, h.errorHandler.HandleError(err), requestID)
+		errors.RespondWithError(w, errors.ToAppError(err), requestID)
 		return
 	}
 

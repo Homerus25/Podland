@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"sync/atomic"
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
@@ -187,28 +186,9 @@ func parseLifecycleOptions(r *http.Request) LifecycleOptions {
 	return opts
 }
 
-// logStreamShutdownTimeout bounds how long the follow-mode logs handler
-// waits for the streaming goroutine to notice the canceled request context
-// after a client disconnect. It only trips on a stream that ignores
-// cancellation; healthy streams stop well within it.
-const logStreamShutdownTimeout = 15 * time.Second
-
 // GetLogs handles getting quadlet logs
 func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "Get quadlet logs")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
 
 	quadletID := chi.URLParam(r, "quadletId")
 	if quadletID == "" {
@@ -247,98 +227,91 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 
 	// Non-streaming mode
 	if !follow {
-		logs, err := h.service.GetLogs(r.Context(), userID, machineID, quadletID, since, tail)
-		if err != nil {
-			if appErr, ok := err.(*errors.AppError); ok {
-				errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-				return
-			}
-			errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-			slog.ErrorContext(r.Context(), "get logs", slog.Any("error", err), slog.String("userID", userID), slog.String("machineID", machineID), slog.String("quadletId", quadletID))
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(logs)
+		h.bufferedLogs(w, r, quadletID, since, tail)
 		return
 	}
 
-	// Streaming mode (follow=true)
-	streaming.SetNDJSONHeaders(w)
-	w.WriteHeader(http.StatusOK)
+	h.streamLogs(w, r, quadletID, since, tail)
+}
 
-	ndjsonWriter, err := streaming.NewNDJSONWriter(w)
+// bufferedLogs serves follow=false: one JSON document with the logs
+// collected so far. Identity checks stay here (the streaming branch gets
+// them from the streaming envelope instead).
+func (h *QuadletHandler) bufferedLogs(w http.ResponseWriter, r *http.Request, quadletID string, since time.Time, tail int64) {
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	logs, err := h.service.GetLogs(r.Context(), userID, machineID, quadletID, since, tail)
 	if err != nil {
+		if appErr, ok := err.(*errors.AppError); ok {
+			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+			return
+		}
 		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "Failed to create NDJSON writer", slog.Any("error", err))
+		slog.ErrorContext(r.Context(), "get logs", slog.Any("error", err), slog.String("userID", userID), slog.String("machineID", machineID), slog.String("quadletId", quadletID))
 		return
 	}
 
-	// Create a callback writer that converts QuadletLogEvent to NDJSON
-	// Track write errors to stop streaming when client disconnects
-	var writeError atomic.Bool
-	logCallback := func(event QuadletLogEvent) {
-		if writeError.Load() {
-			return
-		}
-		if err := ndjsonWriter.Write(event); err != nil {
-			slog.ErrorContext(r.Context(), "Failed to write log event", slog.Any("error", err))
-			writeError.Store(true)
-		}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(logs)
+}
+
+// streamLogs serves follow=true through the streaming envelope: Begin owns
+// headers, writer, and identity; Run owns the loop, disconnect
+// cancellation, and the error mapping. There is no callback writer and no
+// wait-for-goroutine-exit: event writes happen only inside Run's loop,
+// never from the service goroutine, so write-after-return is impossible by
+// construction.
+func (h *QuadletHandler) streamLogs(w http.ResponseWriter, r *http.Request, quadletID string, since time.Time, tail int64) {
+	stream := streaming.Begin(w, r)
+	if stream == nil {
+		return
 	}
 
-	// Create a disconnect channel
-	disconnectChan := streaming.DisconnectChan(r.Context())
-
-	// Start streaming logs in a goroutine
-	doneChan := make(chan error, 1)
-	go func() {
-		doneChan <- h.service.GetLogsWithStream(r.Context(), userID, machineID, quadletID, since, tail, logCallback)
-	}()
-
-	// Wait for either completion or client disconnect
-	select {
-	case err := <-doneChan:
-		if err != nil {
-			// Emit error event to the stream
-			errorEvent := map[string]any{
-				"timestamp": time.Now().UTC().Format(time.RFC3339),
-				"level":     "ERROR",
-				"message":   err.Error(),
+	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[QuadletLogEvent, struct{}]{
+		Operation: func(ctx context.Context, onProgress func(QuadletLogEvent)) (struct{}, error) {
+			return struct{}{}, h.service.GetLogsWithStream(ctx, stream.UserID, stream.MachineID, quadletID, since, tail, onProgress)
+		},
+		OnEvent: func(event QuadletLogEvent) error {
+			return stream.Writer.Write(event)
+		},
+		CompleteEvent: func(struct{}) any {
+			return QuadletLogEvent{
+				Timestamp: time.Now().UTC().Format(time.RFC3339),
+				Level:     streaming.StreamEndedLevel,
+				Message:   streaming.StreamEndedMessage,
 			}
-			if appErr, ok := err.(*errors.AppError); ok {
-				errorEvent["code"] = appErr.Code
-				errorEvent["message"] = appErr.Message
-			}
-			ndjsonWriter.Write(errorEvent)
-		}
-	case <-disconnectChan:
-		// Client disconnected, emit cancellation event
-		ndjsonWriter.Write(map[string]any{
-			"timestamp": time.Now().UTC().Format(time.RFC3339),
-			"level":     "ERROR",
-			"code":      "OPERATION_CANCELLED",
-			"message":   "Client disconnected",
-		})
-		// Stop accepting further events: logCallback checks this before
-		// every write, so the streaming goroutine becomes a no-op even
-		// before it notices the canceled context.
-		writeError.Store(true)
-		// Wait for GetLogsWithStream to return before this handler
-		// returns. The callback writes to this handler's ResponseWriter,
-		// and a write after the handler returned lands in the connection's
-		// recycled write buffer — corrupting whatever response is served
-		// on the reused keep-alive connection next. ContainerLogs aborts
-		// on the canceled request context, so this wait is brief; the
-		// timeout only guards a pathological stream that ignores
-		// cancellation (in which case the warning surfaces it).
-		select {
-		case <-doneChan:
-		case <-time.After(logStreamShutdownTimeout):
-			slog.WarnContext(r.Context(), "log stream did not stop after client disconnect",
-				slog.String("machineID", machineID), slog.String("quadletId", quadletID))
-		}
+		},
+		ErrorDefault: errors.ErrConnectionFailed,
+		ErrorEvent:   logStreamTerminalEvent,
+	})
+}
+
+// logStreamTerminalEvent stamps the module-mapped (code, message,
+// cancelled) into the shared log-event vocabulary: "CODE: human message"
+// at ERROR level, WARN when the stream was cancelled. The shape matches
+// the containers log stream, so the frontend parser surfaces these as
+// real ApiErrors.
+func logStreamTerminalEvent(code, message string, cancelled bool) any {
+	level := "ERROR"
+	if cancelled {
+		level = "WARN"
+	}
+	return QuadletLogEvent{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Level:     level,
+		Message:   code + ": " + message,
 	}
 }
 
@@ -380,28 +353,16 @@ func (h *QuadletHandler) Import(w http.ResponseWriter, r *http.Request) {
 // NDJSON streaming of remote output, terminating in a parsed report event.
 // Registry pulls make runs routinely exceed the global 30-second write
 // timeout, so this handler extends its own per-response write deadline to
-// 10 minutes without touching the server-wide setting.
+// 10 minutes without touching the server-wide setting. An operation-duration
+// fact like that stays handler-side; the streaming envelope (Begin + Run)
+// owns everything else.
 func (h *QuadletHandler) AutoUpdate(w http.ResponseWriter, r *http.Request) {
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
 	dryRun, _ := strconv.ParseBool(r.URL.Query().Get("dryRun"))
 
 	operationID := uuid.New().String()
 	slog.InfoContext(r.Context(), "AutoUpdate quadlets",
 		slog.String("requestID", contextutils.GetRequestID(r.Context())),
-		slog.String("userID", userID),
-		slog.String("machineID", machineID),
+		slog.String("machineID", chi.URLParam(r, "id")),
 		slog.String("operationID", operationID),
 		slog.Bool("dryRun", dryRun))
 
@@ -409,35 +370,26 @@ func (h *QuadletHandler) AutoUpdate(w http.ResponseWriter, r *http.Request) {
 		slog.WarnContext(r.Context(), "Failed to extend write deadline", slog.Any("error", err))
 	}
 
-	streaming.SetNDJSONHeaders(w)
-
-	ndjsonWriter, err := streaming.NewNDJSONWriter(w)
-	if err != nil {
-		errors.RespondWithHTTPError(w, http.StatusInternalServerError, "STREAMING_NOT_SUPPORTED", "Streaming not supported", contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "Streaming not supported")
+	stream := streaming.Begin(w, r)
+	if stream == nil {
 		return
 	}
 
-	streaming.Run(r.Context(), ndjsonWriter, streaming.StreamConfig[AutoUpdateEvent, AutoUpdateReport]{
+	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[AutoUpdateEvent, AutoUpdateReport]{
 		Operation: func(ctx context.Context, onProgress func(AutoUpdateEvent)) (AutoUpdateReport, error) {
-			return h.service.AutoUpdate(ctx, userID, machineID, dryRun, func(line sshexec.OutputLine) {
-				onProgress(NewAutoUpdateLogEvent(operationID, machineID, line))
+			return h.service.AutoUpdate(ctx, stream.UserID, stream.MachineID, dryRun, func(line sshexec.OutputLine) {
+				onProgress(NewAutoUpdateLogEvent(operationID, stream.MachineID, line))
 			})
 		},
 		OnEvent: func(event AutoUpdateEvent) error {
-			return ndjsonWriter.Write(event)
+			return stream.Writer.Write(event)
 		},
 		CompleteEvent: func(report AutoUpdateReport) any {
-			return NewAutoUpdateCompleteEvent(operationID, machineID, report)
+			return NewAutoUpdateCompleteEvent(operationID, stream.MachineID, report)
 		},
-		ErrorEvent: func(err error, cancelled bool) any {
-			if cancelled {
-				return NewAutoUpdateErrorEvent(operationID, machineID, errors.ErrOperationCancelled.Code, errors.ErrOperationCancelled.Message)
-			}
-			if appErr, ok := err.(*errors.AppError); ok {
-				return NewAutoUpdateErrorEvent(operationID, machineID, appErr.Code, appErr.Message)
-			}
-			return NewAutoUpdateErrorEvent(operationID, machineID, errors.ErrConnectionFailed.Code, errors.ErrConnectionFailed.Message)
+		ErrorDefault: errors.ErrConnectionFailed,
+		ErrorEvent: func(code, message string, _ bool) any {
+			return NewAutoUpdateErrorEvent(operationID, stream.MachineID, code, message)
 		},
 	})
 }

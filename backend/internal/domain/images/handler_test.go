@@ -461,7 +461,9 @@ func TestImageHandler_Pull_MissingUserID(t *testing.T) {
 	ctx := context.Background()
 	ctx = contextutils.SetRequestID(ctx, "test-request-id")
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", nil)
+	requestBody := map[string]string{"image": "nginx:latest"}
+	jsonBody, _ := json.Marshal(requestBody)
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody))
 	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -472,7 +474,8 @@ func TestImageHandler_Pull_MissingUserID(t *testing.T) {
 
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 when user ID is missing")
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "Missing identity is a wiring bug: 500")
+	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR", "Response should contain INTERNAL_ERROR error code")
 }
 
 // TestImageHandler_Pull_MissingMachineID tests that Pull handles missing machine ID
@@ -484,7 +487,9 @@ func TestImageHandler_Pull_MissingMachineID(t *testing.T) {
 	ctx = contextutils.SetUserID(ctx, "test-user")
 	ctx = contextutils.SetRequestID(ctx, "test-request-id")
 
-	req := httptest.NewRequest("POST", "/api/machines//images/pull", nil)
+	requestBody := map[string]string{"image": "nginx:latest"}
+	jsonBody, _ := json.Marshal(requestBody)
+	req := httptest.NewRequest("POST", "/api/machines//images/pull", bytes.NewReader(jsonBody))
 	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -495,7 +500,8 @@ func TestImageHandler_Pull_MissingMachineID(t *testing.T) {
 
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when machine ID is missing")
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "Missing identity is a wiring bug: 500")
+	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR", "Response should contain INTERNAL_ERROR error code")
 }
 
 // TestImageHandler_Pull_InvalidRequestBody tests that Pull handles invalid request body

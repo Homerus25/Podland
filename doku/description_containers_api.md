@@ -259,7 +259,7 @@ Get logs for a container.
 **Authentication:** Required
 
 **Query Parameters:**
-- `follow` (boolean, optional): Follow log output (accepted but not implemented in this slice)
+- `follow` (boolean, optional): Follow log output as an NDJSON stream
 - `since` (string, optional): Show logs since timestamp (ISO8601)
 - `tail` (integer, optional): Number of lines to show from the end
 
@@ -271,10 +271,32 @@ Get logs for a container.
 }
 ```
 
+For streaming logs (`follow=true`):
+- **Content-Type**: `application/json`
+- **Format**: Newline-delimited JSON (NDJSON)
+- Each line is a log line object:
+
+```json
+{
+  "timestamp": "ISO8601 timestamp",
+  "level": "INFO|WARN|ERROR",
+  "message": "string"
+}
+```
+
+The stream stays open while the container runs and terminates with exactly
+one terminal event:
+
+- A clean stream end (container stopped, podman EOF) emits `{"level": "INFO", "message": "STREAM_ENDED"}`.
+- A failure emits an ERROR-level event whose message embeds the error code:
+  `"CONTAINER_NOT_FOUND: Container not found"`, `"CONNECTION_FAILED: Failed to connect to machine"`, etc.
+- A client disconnect cancels the stream server-side and emits a WARN
+  `OPERATION_CANCELLED` event (to the already-closed connection).
+
 **Response (Error):**
-- 400: `INVALID_SINCE_PARAM`, `INVALID_TAIL_PARAM`, `MISSING_MACHINE_ID`, `MISSING_CONTAINER_ID`
+- 400: `INVALID_SINCE_PARAM`, `INVALID_TAIL_PARAM`, `MISSING_CONTAINER_ID` (buffered mode also answers `MISSING_MACHINE_ID`)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
 - 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
-- 500: `INTERNAL_ERROR`
+- 500: `INTERNAL_ERROR` (also for a miswired route missing identity), `STREAMING_NOT_SUPPORTED`
 - 502: `CONNECTION_FAILED`

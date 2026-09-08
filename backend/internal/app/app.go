@@ -26,7 +26,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/domain/auth"
 	"github.com/Homerus25/podland/backend/internal/domain/containers"
-	"github.com/Homerus25/podland/backend/internal/domain/events"
 	"github.com/Homerus25/podland/backend/internal/domain/images"
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	"github.com/Homerus25/podland/backend/internal/domain/quadlets"
@@ -34,7 +33,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/domain/users"
 	"github.com/Homerus25/podland/backend/internal/domain/volumes"
 	"github.com/Homerus25/podland/backend/internal/encryption"
-	"github.com/Homerus25/podland/backend/internal/errors"
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
@@ -139,7 +137,6 @@ func New(cfg *config.Config) (*App, error) {
 	imageService := images.NewImageService(connectionManager)
 	quadletService := quadlets.NewQuadletService(connectionManager, sshExecService)
 	secretService := secrets.NewSecretService(connectionManager, accessRepo)
-	eventService := events.NewEventService(connectionManager)
 	volumeService := volumes.NewVolumeService(connectionManager)
 
 	// Initialize handlers
@@ -150,7 +147,6 @@ func New(cfg *config.Config) (*App, error) {
 	imageHandler := images.NewImageHandler(imageService)
 	quadletHandler := quadlets.NewQuadletHandler(quadletService)
 	secretHandler := secrets.NewSecretHandler(secretService)
-	eventHandler := events.NewEventHandler(eventService, machineService, errors.NewErrorHandler())
 	volumeHandler := volumes.NewVolumeHandler(volumeService).
 		WithMaxUploadBytes(cfg.Volumes.MaxUploadBytes)
 
@@ -216,7 +212,7 @@ func New(cfg *config.Config) (*App, error) {
 				// caller's machine_access row: 403 ACCESS_DENIED for a
 				// machine the user cannot use, 404 MACHINE_NOT_FOUND
 				// for an unknown ID. One seam covers the machines
-				// endpoints and the containers/images/quadlets/events
+				// endpoints and the containers/images/quadlets/secrets/volumes
 				// families that ride on a machine.
 				r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
 					r.Get("/", machineHandler.Get)
@@ -231,8 +227,8 @@ func New(cfg *config.Config) (*App, error) {
 					// routes: the subtree-level RequireMachineAccess above
 					// only proves an access row exists, so without this a
 					// read-level grantee could change remote state. Read-only
-					// routes (lists, gets, logs, generate, events) stay at
-					// the subtree level.
+					// routes (lists, gets, logs, generate) stay at the
+					// subtree level.
 					requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
 
 					// Containers
@@ -293,9 +289,6 @@ func New(cfg *config.Config) (*App, error) {
 							r.With(requireWrite).Delete("/", secretHandler.Delete)
 						})
 					})
-
-					// Events
-					r.Get("/events", eventHandler.HandleEvents)
 
 					// Volumes — list/inspect stay read-level; create (and
 					// later slices) mutate remote state, so they gate at

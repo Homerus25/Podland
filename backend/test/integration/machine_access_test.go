@@ -38,7 +38,7 @@ import (
 //     enforced access since 080-04.
 //   - DownstreamEndpointsRejectNoAccessUser pins the downstream
 //     domains that ride on a registered machine (containers, images,
-//     quadlets, events). These are gated by the RequireMachineAccess
+//     quadlets). These are gated by the RequireMachineAccess
 //     route middleware, which also gives unknown machine IDs a uniform
 //     404 MACHINE_NOT_FOUND across those endpoints.
 
@@ -243,7 +243,7 @@ func containsMachine(listed []machineDTO, machineID string) bool {
 
 // Test_Integration_MachineAccess_DownstreamEndpointsRejectNoAccessUser
 // pins the authorization contract for every endpoint family that rides
-// ON a registered machine: containers, images, quadlets, and events.
+// ON a registered machine: containers, images, and quadlets.
 //
 // Unlike the machines domain (080-04), these handlers historically
 // trusted the JWT alone — a user with no machine_access row could list
@@ -284,11 +284,6 @@ func Test_Integration_MachineAccess_DownstreamEndpointsRejectNoAccessUser(t *tes
 
 	t.Run("CreateQuadletDenied", func(t *testing.T) {
 		expectAPIError(t, client, http.MethodPost, machineURL+"quadlets", `{}`,
-			http.StatusForbidden, "ACCESS_DENIED")
-	})
-
-	t.Run("MachineEventsDenied", func(t *testing.T) {
-		expectAPIError(t, client, http.MethodGet, machineURL+"events", "",
 			http.StatusForbidden, "ACCESS_DENIED")
 	})
 

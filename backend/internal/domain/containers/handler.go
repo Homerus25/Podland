@@ -20,8 +20,9 @@ import (
 // ContainerHandler handles container requests
 //
 // JSON endpoints cross the endpoint envelope (internal/web): extraction,
-// error envelope, and encoding live there. Logs keeps its own shape —
-// its follow branch streams NDJSON rather than encoding one DTO.
+// error envelope, and encoding live there. Follow-mode logs cross the
+// streaming envelope (internal/streaming): Begin + Run own headers,
+// identity, disconnect, and the terminal-event mapping.
 type ContainerHandler struct {
 	service ContainerServiceInterface
 }
@@ -190,19 +191,6 @@ func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "Logs")
 
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
 	containerID := chi.URLParam(r, "containerId")
 	if containerID == "" {
 		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_CONTAINER_ID", "Container ID is required", contextutils.GetRequestID(r.Context()))
@@ -247,7 +235,27 @@ func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
 
 	// Streaming mode when follow=true
 	if follow {
-		h.streamLogs(w, r, userID, machineID, containerID, since, tail)
+		h.streamLogs(w, r, containerID, since, tail)
+		return
+	}
+
+	h.bufferedLogs(w, r, containerID, since, tail)
+}
+
+// bufferedLogs serves follow=false: one JSON document with the logs
+// collected so far. Identity checks stay here (the streaming branch gets
+// them from the streaming envelope instead).
+func (h *ContainerHandler) bufferedLogs(w http.ResponseWriter, r *http.Request, containerID string, since time.Time, tail int64) {
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
+		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
+		return
+	}
+
+	machineID := chi.URLParam(r, "id")
+	if machineID == "" {
+		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
 		return
 	}
 
@@ -269,107 +277,49 @@ func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// streamLogs handles streaming logs for a container
-func (h *ContainerHandler) streamLogs(w http.ResponseWriter, r *http.Request, userID, machineID, containerID string, since time.Time, tail int64) {
+// streamLogs serves follow=true through the streaming envelope: Begin owns
+// headers, writer, and identity; Run owns the select loop, disconnect
+// cancellation, and the error mapping. The handler is config plus event
+// vocabulary — writes happen only inside Run's loop, never from the
+// service goroutine, so write-after-return is impossible by construction.
+func (h *ContainerHandler) streamLogs(w http.ResponseWriter, r *http.Request, containerID string, since time.Time, tail int64) {
 	slog.InfoContext(r.Context(), "streamLogs", slog.String("containerID", containerID), slog.Bool("follow", true))
 
-	// Create a cancelable context for the streaming operation
-	streamCtx, cancelStream := context.WithCancel(r.Context())
-	defer cancelStream()
-
-	// Set headers for streaming NDJSON response
-	streaming.SetNDJSONHeaders(w)
-
-	// Create NDJSON writer
-	ndjsonWriter, err := streaming.NewNDJSONWriter(w)
-	if err != nil {
-		errors.RespondWithHTTPError(w, http.StatusInternalServerError, "STREAMING_NOT_SUPPORTED", "Streaming not supported", contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "Streaming not supported")
+	stream := streaming.Begin(w, r)
+	if stream == nil {
 		return
 	}
 
-	// Create a channel to detect client disconnect
-	disconnectChan := streaming.DisconnectChan(streamCtx)
-
-	// Create a channel for log events
-	logEventChan := make(chan ContainerLogEvent, 10)
-	errorChan := make(chan error, 1)
-
-	// Start streaming logs in a goroutine
-	go func() {
-		err := h.service.GetLogsWithStream(streamCtx, userID, machineID, containerID, since, tail, func(event ContainerLogEvent) {
-			select {
-			case logEventChan <- event:
-			case <-streamCtx.Done():
-			}
-		})
-		if err != nil {
-			errorChan <- err
-		}
-	}()
-
-	// Stream events to client
-	streamComplete := false
-	for !streamComplete {
-		select {
-		case event := <-logEventChan:
-			if err := ndjsonWriter.Write(event); err != nil {
-				slog.ErrorContext(r.Context(), "Failed to write log event", slog.Any("error", err))
-				cancelStream()
-				streamComplete = true
-			}
-
-		case err := <-errorChan:
-			// Streaming failed or completed
-			var errorEvent ContainerLogEvent
-			if streamCtx.Err() == context.Canceled {
-				errorEvent = ContainerLogEvent{
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-					Level:     "WARN",
-					Message:   "OPERATION_CANCELLED",
-				}
-			} else if appErr, ok := err.(*errors.AppError); ok {
-				if appErr == errors.ErrContainerNotFound {
-					errorEvent = ContainerLogEvent{
-						Timestamp: time.Now().UTC().Format(time.RFC3339),
-						Level:     "ERROR",
-						Message:   "CONTAINER_NOT_FOUND: " + appErr.Message,
-					}
-				} else if appErr == errors.ErrOperationCancelled {
-					errorEvent = ContainerLogEvent{
-						Timestamp: time.Now().UTC().Format(time.RFC3339),
-						Level:     "WARN",
-						Message:   "OPERATION_CANCELLED: " + appErr.Message,
-					}
-				} else {
-					errorEvent = ContainerLogEvent{
-						Timestamp: time.Now().UTC().Format(time.RFC3339),
-						Level:     "ERROR",
-						Message:   appErr.Code + ": " + appErr.Message,
-					}
-				}
-			} else {
-				errorEvent = ContainerLogEvent{
-					Timestamp: time.Now().UTC().Format(time.RFC3339),
-					Level:     "ERROR",
-					Message:   "CONNECTION_FAILED: " + err.Error(),
-				}
-			}
-			ndjsonWriter.Write(errorEvent)
-			streamComplete = true
-
-		case <-disconnectChan:
-			// Client disconnected
-			slog.InfoContext(r.Context(), "Client disconnected, cancelling log stream")
-			cancelStream()
-			// Try to send cancellation event (best effort)
-			errorEvent := ContainerLogEvent{
+	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[ContainerLogEvent, struct{}]{
+		Operation: func(ctx context.Context, onProgress func(ContainerLogEvent)) (struct{}, error) {
+			return struct{}{}, h.service.GetLogsWithStream(ctx, stream.UserID, stream.MachineID, containerID, since, tail, onProgress)
+		},
+		OnEvent: func(event ContainerLogEvent) error {
+			return stream.Writer.Write(event)
+		},
+		CompleteEvent: func(struct{}) any {
+			return ContainerLogEvent{
 				Timestamp: time.Now().UTC().Format(time.RFC3339),
-				Level:     "WARN",
-				Message:   "OPERATION_CANCELLED",
+				Level:     streaming.StreamEndedLevel,
+				Message:   streaming.StreamEndedMessage,
 			}
-			ndjsonWriter.Write(errorEvent)
-			streamComplete = true
-		}
+		},
+		ErrorDefault: errors.ErrConnectionFailed,
+		ErrorEvent:   logStreamTerminalEvent,
+	})
+}
+
+// logStreamTerminalEvent stamps the module-mapped (code, message,
+// cancelled) into the log-event vocabulary: "CODE: human message" at ERROR
+// level, WARN when the stream was cancelled.
+func logStreamTerminalEvent(code, message string, cancelled bool) any {
+	level := "ERROR"
+	if cancelled {
+		level = "WARN"
+	}
+	return ContainerLogEvent{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Level:     level,
+		Message:   code + ": " + message,
 	}
 }

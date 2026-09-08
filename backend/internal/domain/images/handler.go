@@ -19,8 +19,9 @@ import (
 
 // ImageHandler handles image requests
 //
-// JSON endpoints cross the endpoint envelope (internal/web). Pull
-// keeps its own shape — it streams NDJSON progress via streaming.Run.
+// JSON endpoints cross the endpoint envelope (internal/web). Pull streams
+// NDJSON progress through the streaming envelope (internal/streaming):
+// Begin + Run own headers, identity, disconnect, and error mapping.
 type ImageHandler struct {
 	service ImageServiceInterface
 }
@@ -68,19 +69,8 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "Pull")
 
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
+	// Body validation answers 400s before the stream begins; the streaming
+	// envelope takes over from there.
 	var request ImagePullRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", contextutils.GetRequestID(r.Context()))
@@ -100,14 +90,8 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 	// Generate a unique operation ID for this pull
 	operationID := uuid.New().String()
 
-	// Set headers for streaming NDJSON response
-	streaming.SetNDJSONHeaders(w)
-
-	// Create NDJSON writer
-	ndjsonWriter, err := streaming.NewNDJSONWriter(w)
-	if err != nil {
-		errors.RespondWithHTTPError(w, http.StatusInternalServerError, "STREAMING_NOT_SUPPORTED", "Streaming not supported", contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "Streaming not supported")
+	stream := streaming.Begin(w, r)
+	if stream == nil {
 		return
 	}
 
@@ -124,28 +108,23 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 		pullOpts.Variant = variant
 	}
 
-	streaming.Run(r.Context(), ndjsonWriter, streaming.StreamConfig[PullProgressEvent, *entities.ImagePullReport]{
+	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[PullProgressEvent, *entities.ImagePullReport]{
 		Operation: func(pullCtx context.Context, onProgress func(PullProgressEvent)) (*entities.ImagePullReport, error) {
-			return h.service.PullWithProgress(pullCtx, userID, machineID, request.Image, pullOpts, func(event PullProgressEvent) {
+			return h.service.PullWithProgress(pullCtx, stream.UserID, stream.MachineID, request.Image, pullOpts, func(event PullProgressEvent) {
 				event.OperationID = operationID
-				event.MachineID = machineID
+				event.MachineID = stream.MachineID
 				onProgress(event)
 			})
 		},
 		OnEvent: func(event PullProgressEvent) error {
-			return ndjsonWriter.Write(event)
+			return stream.Writer.Write(event)
 		},
 		CompleteEvent: func(*entities.ImagePullReport) any {
-			return NewCompleteEvent(operationID, machineID)
+			return NewCompleteEvent(operationID, stream.MachineID)
 		},
-		ErrorEvent: func(err error, cancelled bool) any {
-			if cancelled {
-				return NewErrorEvent(operationID, machineID, errors.ErrOperationCancelled.Code, errors.ErrOperationCancelled.Message)
-			}
-			if appErr, ok := err.(*errors.AppError); ok {
-				return NewErrorEvent(operationID, machineID, appErr.Code, appErr.Message)
-			}
-			return NewErrorEvent(operationID, machineID, errors.ErrImagePullFailed.Code, errors.ErrImagePullFailed.Message)
+		ErrorDefault: errors.ErrImagePullFailed,
+		ErrorEvent: func(code, message string, _ bool) any {
+			return NewErrorEvent(operationID, stream.MachineID, code, message)
 		},
 	})
 }

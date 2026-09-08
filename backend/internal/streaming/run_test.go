@@ -3,9 +3,13 @@ package streaming
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"sync"
 	"testing"
+
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/stretchr/testify/assert"
 )
 
 func newTestWriter(t *testing.T) (*NDJSONWriter, *httptest.ResponseRecorder) {
@@ -55,7 +59,8 @@ func TestRunStreamsProgressAndCompletes(t *testing.T) {
 			return err
 		},
 		CompleteEvent: func(result string) any { return map[string]any{"complete": result} },
-		ErrorEvent:    func(err error, cancelled bool) any { return map[string]any{"error": err.Error()} },
+		ErrorDefault:  appErrors.ErrInternalError,
+		ErrorEvent:    func(code, message string, cancelled bool) any { return map[string]any{"error": code} },
 	})
 
 	lines := decodeLines(t, rec.Body.String())
@@ -73,7 +78,9 @@ func TestRunStreamsProgressAndCompletes(t *testing.T) {
 func TestRunWritesExactlyOneTerminalErrorEvent(t *testing.T) {
 	w, rec := newTestWriter(t)
 	terminal := errors.New("boom")
+	fallback := appErrors.NewAppError("TEST_FAILED", "test operation failed", 500)
 
+	var gotCancelled bool
 	Run(context.Background(), w, StreamConfig[int, string]{
 		Operation: func(ctx context.Context, onProgress func(int)) (string, error) {
 			onProgress(1)
@@ -81,24 +88,19 @@ func TestRunWritesExactlyOneTerminalErrorEvent(t *testing.T) {
 		},
 		OnEvent:       func(event int) error { return w.Write(event) },
 		CompleteEvent: func(result string) any { return map[string]any{"complete": result} },
-		ErrorEvent: func(err error, cancelled bool) any {
-			if cancelled {
-				t.Fatal("unexpected cancelled=true for non-context error")
-			}
-			if !errors.Is(err, terminal) {
-				t.Fatalf("got err %v, want %v", err, terminal)
-			}
-			return map[string]any{"error": err.Error()}
+		ErrorDefault:  fallback,
+		ErrorEvent: func(code, message string, cancelled bool) any {
+			gotCancelled = cancelled
+			return map[string]any{"code": code, "message": message}
 		},
 	})
 
+	assert.False(t, gotCancelled, "a plain operation failure must not be reported as cancelled")
 	lines := decodeLines(t, rec.Body.String())
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 NDJSON lines (progress + one error), got %d: %q", len(lines), rec.Body.String())
 	}
-	if lines[1] != `{"error":"boom"}` {
-		t.Fatalf("terminal line: got %s", lines[1])
-	}
+	assert.Equal(t, `{"code":"TEST_FAILED","message":"test operation failed"}`, lines[1])
 }
 
 func TestRunCancelsOperationOnClientDisconnect(t *testing.T) {
@@ -119,9 +121,13 @@ func TestRunCancelsOperationOnClientDisconnect(t *testing.T) {
 		},
 		OnEvent:       func(event int) error { return nil },
 		CompleteEvent: func(result string) any { return result },
-		ErrorEvent: func(err error, cancelled bool) any {
+		ErrorDefault:  appErrors.ErrInternalError,
+		ErrorEvent: func(code, message string, cancelled bool) any {
 			if !cancelled {
 				t.Fatal("disconnect must report cancelled=true")
+			}
+			if code != appErrors.ErrOperationCancelled.Code {
+				t.Fatalf("disconnect must map to OPERATION_CANCELLED, got %s", code)
 			}
 			return map[string]any{"error": "cancelled"}
 		},
@@ -157,7 +163,8 @@ func TestRunStopsWithoutTerminalEventWhenWriteFails(t *testing.T) {
 			return errors.New("write failed")
 		},
 		CompleteEvent: func(result string) any { return result },
-		ErrorEvent:    func(err error, cancelled bool) any { return err },
+		ErrorDefault:  appErrors.ErrInternalError,
+		ErrorEvent:    func(code, message string, cancelled bool) any { return code },
 	})
 
 	<-finished
@@ -167,4 +174,110 @@ func TestRunStopsWithoutTerminalEventWhenWriteFails(t *testing.T) {
 	if !completed {
 		t.Fatal("operation should have been cancelled after write failure")
 	}
+}
+
+// TestRunErrorMapping pins the error→event vocabulary table once, for
+// every domain: a (possibly wrapped) AppError surfaces its own code and
+// message; anything else surfaces the config's default sentinel (with the
+// raw cause logged server-side only); the cancelled flag rides along
+// unchanged and takes precedence on disconnects.
+func TestRunErrorMapping(t *testing.T) {
+	fallback := appErrors.NewAppError("TEST_DEFAULT", "test default message", 502)
+	notFound := appErrors.NewAppError("THING_NOT_FOUND", "Thing not found", 404)
+
+	tests := []struct {
+		name         string
+		operation    func(ctx context.Context, onProgress func(int)) (string, error)
+		errorDefault *appErrors.AppError
+		wantCode     string
+		wantMessage  string
+	}{
+		{
+			name: "plain AppError keeps its code and message",
+			operation: func(ctx context.Context, onProgress func(int)) (string, error) {
+				return "", notFound
+			},
+			wantCode:    "THING_NOT_FOUND",
+			wantMessage: "Thing not found",
+		},
+		{
+			name: "wrapped AppError is unwrapped",
+			operation: func(ctx context.Context, onProgress func(int)) (string, error) {
+				return "", fmt.Errorf("dial %s: %w", "machine-1", notFound)
+			},
+			wantCode:    "THING_NOT_FOUND",
+			wantMessage: "Thing not found",
+		},
+		{
+			name: "unknown error falls back to the default sentinel",
+			operation: func(ctx context.Context, onProgress func(int)) (string, error) {
+				return "", errors.New("boom")
+			},
+			errorDefault: fallback,
+			wantCode:     "TEST_DEFAULT",
+			wantMessage:  "test default message",
+		},
+		{
+			name: "nil default falls back to the internal-error sentinel",
+			operation: func(ctx context.Context, onProgress func(int)) (string, error) {
+				return "", errors.New("boom")
+			},
+			wantCode:    appErrors.ErrInternalError.Code,
+			wantMessage: appErrors.ErrInternalError.Message,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, rec := newTestWriter(t)
+
+			var gotCancelled bool
+			Run(context.Background(), w, StreamConfig[int, string]{
+				Operation:     tt.operation,
+				OnEvent:       func(event int) error { return nil },
+				CompleteEvent: func(result string) any { return result },
+				ErrorDefault:  tt.errorDefault,
+				ErrorEvent: func(code, message string, cancelled bool) any {
+					gotCancelled = cancelled
+					return map[string]any{"code": code, "message": message}
+				},
+			})
+
+			assert.False(t, gotCancelled)
+			lines := decodeLines(t, rec.Body.String())
+			assert.Len(t, lines, 1, "exactly one terminal event")
+			assert.JSONEq(t, `{"code":"`+tt.wantCode+`","message":"`+tt.wantMessage+`"}`, lines[0])
+		})
+	}
+}
+
+// TestRunForwardQueuedProgressBeforeTerminal pins the ordering invariant:
+// a terminal event never overtakes progress events the operation already
+// delivered — they cross the wire before the terminal line.
+func TestRunForwardQueuedProgressBeforeTerminal(t *testing.T) {
+	w, rec := newTestWriter(t)
+
+	Run(context.Background(), w, StreamConfig[int, string]{
+		Operation: func(ctx context.Context, onProgress func(int)) (string, error) {
+			onProgress(1)
+			onProgress(2)
+			onProgress(3)
+			return "done", nil
+		},
+		OnEvent:       func(event int) error { return w.Write(map[string]any{"progress": event}) },
+		CompleteEvent: func(result string) any { return map[string]any{"complete": result} },
+		ErrorDefault:  appErrors.ErrInternalError,
+		ErrorEvent:    func(code, message string, cancelled bool) any { return map[string]any{"error": code} },
+	})
+
+	lines := decodeLines(t, rec.Body.String())
+	assert.Len(t, lines, 4, "every progress event must cross the wire")
+	want := []string{`{"progress":1}`, `{"progress":2}`, `{"progress":3}`, `{"complete":"done"}`}
+	assert.Equal(t, want, lines)
+}
+
+// TestRunStreamEndedVocabulary pins the shared end-of-stream vocabulary.
+func TestRunStreamEndedVocabulary(t *testing.T) {
+	assert.Equal(t, "INFO", StreamEndedLevel)
+	assert.Equal(t, "STREAM_ENDED", StreamEndedMessage)
 }

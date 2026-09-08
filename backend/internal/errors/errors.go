@@ -1,6 +1,7 @@
 package errors
 
 import (
+	stderrors "errors"
 	"fmt"
 	"net/http"
 )
@@ -162,17 +163,11 @@ var (
 	ErrNotImplemented     = NewAppError("NOT_IMPLEMENTED", "Feature not implemented", http.StatusNotImplemented)
 )
 
-// ErrorHandler handles error responses
-type ErrorHandler struct{}
-
-// NewErrorHandler creates a new ErrorHandler
-func NewErrorHandler() *ErrorHandler {
-	return &ErrorHandler{}
-}
-
-// HandleError converts an error to an AppError
-func (h *ErrorHandler) HandleError(err error) *AppError {
-	if appErr, ok := err.(*AppError); ok {
+// ToAppError converts an error to its AppError: a (possibly wrapped)
+// *AppError comes back unwrapped; anything else becomes the
+// internal-error sentinel.
+func ToAppError(err error) *AppError {
+	if appErr, ok := stderrors.AsType[*AppError](err); ok {
 		return appErr
 	}
 	return ErrInternalError

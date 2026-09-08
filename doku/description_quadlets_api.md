@@ -271,16 +271,28 @@ For streaming logs:
 ```json
 {
   "timestamp": "ISO8601 timestamp",
-  "level": "string (optional, e.g., INFO, ERROR, WARN)",
+  "level": "string (INFO, WARN, ERROR)",
   "message": "string"
 }
 ```
 
+The stream terminates with exactly one terminal event:
+
+- A clean stream end emits `{"level": "INFO", "message": "STREAM_ENDED"}`.
+- A failure emits an ERROR-level log-shaped event whose message embeds the
+  error code, e.g. `"QUADLET_NOT_FOUND: Quadlet not found"` or
+  `"CONNECTION_FAILED: Failed to connect to machine"` — the same contract as
+  the containers log stream, so clients parse it with the shared
+  `"CODE: message"` heuristic.
+- A client disconnect cancels the stream server-side and emits a WARN
+  `OPERATION_CANCELLED` event (to the already-closed connection).
+
 **Response (Error):**
+- 400: `INVALID_SINCE_PARAM`, `MISSING_QUADLET_ID` (buffered mode also answers `MISSING_MACHINE_ID`)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
 - 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
-- 500: `INTERNAL_ERROR`
+- 500: `INTERNAL_ERROR` (also for a miswired route missing identity), `STREAMING_NOT_SUPPORTED`
 - 502: `CONNECTION_FAILED`
 
 ---

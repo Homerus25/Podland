@@ -43,9 +43,6 @@ backend/
 │   │   │   ├── handler.go
 │   │   │   ├── service.go
 │   │   │   └── repository.go
-│   │   └── events/             # SSE event streaming domain
-│   │       ├── handler.go
-│   │       └── service.go
 │   ├── middleware/             # HTTP middleware
 │   │   ├── auth.go             # JWT authentication middleware
 │   │   ├── ratelimit.go        # Rate limiting middleware
@@ -412,12 +409,6 @@ func GetUserIDFromContext(ctx context.Context) (string, error)
 
 See [description_secrets_api.md](description_secrets_api.md) for the full contract. Secret deletion is planned (slice 160-04); updates are a conscious non-goal (podman secrets are immutable).
 
-### Events
-
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| GET | `/api/machines/{id}/events` | SSE endpoint for Podman events | Yes |
-
 ---
 
 ## Error Handling
@@ -599,68 +590,6 @@ func RateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
 
 ---
 
-## SSE Implementation
-
-```go
-// internal/domain/events/handler.go
-func (h *EventHandler) HandleEvents(w http.ResponseWriter, r *http.Request) {
-    machineID := chi.URLParam(r, "id")
-    userID := GetUserIDFromContext(r.Context())
-    
-    // Verify user has access to machine
-    if !h.machineService.UserHasAccess(userID, machineID) {
-        respondWithError(w, http.StatusForbidden, "ACCESS_DENIED", "User does not have access to this machine")
-        return
-    }
-    
-    // Get or create connection to machine
-    conn, err := h.connectionManager.GetConnection(r.Context(), machineID, userID)
-    if err != nil {
-        respondWithError(w, http.StatusInternalServerError, "CONNECTION_FAILED", err.Error())
-        return
-    }
-    
-    // Set up SSE headers
-    w.Header().Set("Content-Type", "text/event-stream")
-    w.Header().Set("Cache-Control", "no-cache")
-    w.Header().Set("Connection", "keep-alive")
-    
-    // Create event stream to Podman Service API
-    req, err := conn.DoRequest(r.Context(), nil, http.MethodGet, "/events?stream=true", nil, nil)
-    if err != nil {
-        respondWithError(w, http.StatusInternalServerError, "EVENT_STREAM_FAILED", err.Error())
-        return
-    }
-    defer req.Body.Close()
-    
-    // Stream events from Podman to client
-    reader := bufio.NewReader(req.Response.Body)
-    for {
-        select {
-        case <-r.Context().Done():
-            // Client disconnected
-            return
-        default:
-            line, err := reader.ReadBytes(':')
-            if err != nil {
-                if err == io.EOF {
-                    return
-                }
-                // Log error and continue
-                h.logger.WithError(err).Error("Error reading from Podman event stream")
-                continue
-            }
-            
-            // Parse Podman event and forward to client
-            // Podman SSE format: "event: <type>\ndata: <json>\n\n"
-            w.Write(line)
-            if f, ok := w.(http.Flusher); ok {
-                f.Flush()
-            }
-        }
-    }
-}
-```
 
 ---
 
@@ -1007,7 +936,6 @@ func main() {
     containerService := services.NewContainerService(connectionManager)
     imageService := services.NewImageService(connectionManager)
     quadletService := services.NewQuadletService(connectionManager)
-    eventService := services.NewEventService(connectionManager)
     
     // Initialize handlers
     authHandler := handlers.NewAuthHandler(authService, userRepo)
@@ -1015,7 +943,6 @@ func main() {
     containerHandler := handlers.NewContainerHandler(containerService, machineService)
     imageHandler := handlers.NewImageHandler(imageService, machineService)
     quadletHandler := handlers.NewQuadletHandler(quadletService, machineService)
-    eventHandler := handlers.NewEventHandler(eventService, machineService)
     
     // Initialize middleware
     rateLimiter := middleware.NewRateLimiter(
@@ -1092,8 +1019,6 @@ func main() {
                         })
                     })
                     
-                    // Events
-                    r.Get("/events", eventHandler.events)
                 })
             })
         })

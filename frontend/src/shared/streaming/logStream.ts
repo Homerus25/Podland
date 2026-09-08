@@ -25,10 +25,12 @@ export function isLogEvent(value: unknown): value is LogEvent {
 }
 
 // The backend encodes stream failures as ERROR-level events whose message is
-// "CODE: human message" (backend/internal/domain/containers/handler.go
-// streamLogs). Only UPPER_SNAKE codes with at least one underscore qualify:
-// stderr lines also arrive as level ERROR with arbitrary text ("FATAL: could
-// not bind"), and the backend's error codes are always multi-word.
+// "CODE: human message" — the shared log-stream terminal contract of the
+// containers and quadlets follow-mode handlers (both driven by
+// backend/internal/streaming). Only UPPER_SNAKE codes with at least one
+// underscore qualify: stderr lines also arrive as level ERROR with arbitrary
+// text ("FATAL: could not bind"), and the backend's error codes are always
+// multi-word.
 export function parseLogErrorEvent(event: LogEvent): ApiError | null {
 	if (event.level !== "ERROR") return null;
 	const separator = event.message.indexOf(": ");

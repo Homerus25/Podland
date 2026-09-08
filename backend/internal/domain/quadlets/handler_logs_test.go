@@ -108,48 +108,6 @@ func TestQuadletHandler_GetLogs_WithTailParameter(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
 }
 
-// TestQuadletHandler_GetLogs_WithFollowParameter tests log retrieval with follow parameter
-func TestQuadletHandler_GetLogs_WithFollowParameter(t *testing.T) {
-	mockService := new(MockQuadletService)
-	handler := NewQuadletHandler(mockService)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/quadlets/my-quadlet/logs?follow=true&tail=0", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	// Mock the streaming service call to emit a log event
-	mockService.mockGetLogsWithStream = func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
-		logCallback(QuadletLogEvent{
-			Timestamp: "2024-01-01T00:00:00Z",
-			Level:     "INFO",
-			Message:   "Starting application",
-		})
-		logCallback(QuadletLogEvent{
-			Timestamp: "2024-01-01T00:00:01Z",
-			Level:     "INFO",
-			Message:   "Application started successfully",
-		})
-		return nil
-	}
-
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/quadlets/{quadletId}/logs", handler.GetLogs)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 with follow=true")
-	output := w.Body.String()
-	assert.Contains(t, output, `"level":"INFO"`, "Response should contain log level")
-	assert.Contains(t, output, `"message":"Starting application"`, "Response should contain first log message")
-	assert.Contains(t, output, `"message":"Application started successfully"`, "Response should contain second log message")
-}
-
 // TestQuadletHandler_GetLogs_InvalidSinceParameter tests log retrieval with invalid since parameter
 func TestQuadletHandler_GetLogs_InvalidSinceParameter(t *testing.T) {
 	mockService := new(MockQuadletService)
@@ -332,6 +290,7 @@ func TestQuadletHandler_GetLogs_StreamingHappyPath(t *testing.T) {
 	output := w.Body.String()
 	assert.Contains(t, output, `"message":"Starting application"`, "Response should contain first log")
 	assert.Contains(t, output, `"message":"Application started successfully"`, "Response should contain second log")
+	assert.Contains(t, output, `"level":"INFO","message":"STREAM_ENDED"`, "A clean stream end must emit the STREAM_ENDED terminal event")
 }
 
 // TestQuadletHandler_GetLogs_NonStreamingUnchanged tests that follow=false returns non-streaming response unchanged
@@ -393,58 +352,26 @@ func TestQuadletHandler_GetLogs_StreamingQuadletNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 even on error in streaming mode")
 	output := w.Body.String()
 	assert.Contains(t, output, `"level":"ERROR"`, "Response should contain error level")
-	assert.Contains(t, output, `QUADLET_NOT_FOUND`, "Response should contain QUADLET_NOT_FOUND error")
+	assert.Contains(t, output, `"message":"QUADLET_NOT_FOUND: Quadlet not found"`,
+		"Terminal errors are log-shaped CODE: message events the frontend parser understands")
+	assert.NotContains(t, output, `"code":`, "The ad-hoc code-field map shape is gone")
 }
 
-// TestQuadletHandler_GetLogs_StreamingClientDisconnect tests client disconnect during streaming
-func TestQuadletHandler_GetLogs_StreamingClientDisconnect(t *testing.T) {
+// TestQuadletHandler_GetLogs_StreamingMissingUserID pins the streaming
+// branch's identity ruling: a missing identity is a wiring bug answered
+// with 500 INTERNAL_ERROR, not a client error.
+func TestQuadletHandler_GetLogs_StreamingMissingUserID(t *testing.T) {
 	mockService := new(MockQuadletService)
 	handler := NewQuadletHandler(mockService)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/quadlets/my-quadlet/logs?follow=true&tail=0", nil)
-	req = req.WithContext(ctx)
-
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/quadlets/my-quadlet/logs?follow=true", nil)
 	w := httptest.NewRecorder()
-
-	// Create a channel to signal when the log event is written
-	logWritten := make(chan struct{}, 1)
-
-	// Mock the streaming service call to emit log events and simulate slow operation
-	mockService.mockGetLogsWithStream = func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
-		logCallback(QuadletLogEvent{
-			Timestamp: "2024-01-01T00:00:00Z",
-			Level:     "INFO",
-			Message:   "Before disconnect",
-		})
-		logWritten <- struct{}{}
-		// Simulate a delay to ensure the disconnect channel is set up
-		time.Sleep(50 * time.Millisecond)
-		// Cancel the context to simulate client disconnect
-		cancel()
-		// Wait a bit more to ensure disconnect is processed
-		time.Sleep(50 * time.Millisecond)
-		return nil
-	}
 
 	r := chi.NewRouter()
 	r.Get("/api/machines/{id}/quadlets/{quadletId}/logs", handler.GetLogs)
 
-	// Run handler in a goroutine to allow for disconnect timing
-	go func() {
-		r.ServeHTTP(w, req)
-	}()
+	r.ServeHTTP(w, req)
 
-	// Wait for the log event to be written
-	<-logWritten
-	// Give some time for the disconnect to be processed
-	time.Sleep(100 * time.Millisecond)
-
-	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 even on client disconnect")
-	output := w.Body.String()
-	assert.Contains(t, output, `"message":"Before disconnect"`, "Response should contain log before disconnect")
-	assert.Contains(t, output, `"OPERATION_CANCELLED"`, "Response should contain OPERATION_CANCELLED on disconnect")
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "Missing identity on a streaming route is a wiring bug: 500")
+	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR", "Response should contain INTERNAL_ERROR error code")
 }

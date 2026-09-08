@@ -19,7 +19,7 @@ import (
 
 // The level-aware access slice (160-00): machine access is no longer
 // boolean. A read-level grantee must keep the read surface (lists,
-// gets, logs, generate, events) but lose every mutating route across
+// gets, logs, generate) but lose every mutating route across
 // containers, images, and quadlets; write and admin keep mutating.
 //
 // The fixtures are real in the same sense as the no-access user in
@@ -161,7 +161,7 @@ func Test_Integration_MachinePermission_ReadUserRejectedOnMutatingRoutes(t *test
 
 // Test_Integration_MachinePermission_ReadUserKeepsReadRoutes pins the
 // other half of the read contract: the read surface (lists, gets,
-// logs, generate, events) stays open at the subtree level. A 403 here
+// logs, generate) stays open at the subtree level. A 403 here
 // would mean the level gate was mounted one level too high.
 //
 // Quadlet generate is the sharpest probe: it is a POST, so a careless

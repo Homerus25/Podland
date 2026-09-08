@@ -17,8 +17,28 @@ closest sibling that already exists. Rulings so far:
   belong to the envelope and the subtree middleware, never to handlers.
   Every domain has migrated (volumes, containers, quadlets, secrets,
   images, machines subtree). Exceptions that keep their own shape:
-  machines Create/List (outside the subtree, no machine ID) and the
-  streaming endpoints (logs, pull, auto-update, populate, export).
+  machines Create/List (outside the subtree, no machine ID).
+- **NDJSON streaming endpoints (the streaming envelope)** —
+  `streaming.Begin` + `streaming.Run` (`internal/streaming/`) are the
+  single entry point for every NDJSON endpoint (container logs follow
+  mode, quadlet logs follow mode, image pull, quadlet auto-update).
+  `Begin` owns the NDJSON headers, writer creation (including the early
+  500 `STREAMING_NOT_SUPPORTED`), and identity extraction — a missing
+  identity there is the same wiring-bug ruling as `web.Handle`: 500
+  `INTERNAL_ERROR` plus a loud log. `Run` owns the select loop,
+  disconnect cancellation, the error→event mapping, and the
+  exactly-one-terminal invariant — for log streams including `INFO`
+  `STREAM_ENDED` on a clean end, for progress streams the domain's own
+  complete event; the invariant is pinned once in the `streaming`
+  package tests, not per domain. Handlers shrink to config plus event
+  vocabulary: the config carries the domain's default error sentinel
+  (`ErrorDefault`), the error-event builder receives already-mapped
+  `(code, message, cancelled)` — never the raw error — and non-AppError
+  causes are logged once by the module, never surfaced on the wire. Log
+  streams use `Result = struct{}` and speak the shared terminal
+  contract: `"CODE: message"` log events (`ERROR` level; `WARN` when
+  cancelled). The images pull handler is the reference for progress
+  streams; the containers logs handler (`streamLogs`) for log streams.
 - **Handler contract tests** — `testutils.Perform` builds the
   request (identity, chi URL params, body) the way the router would;
   per-domain `recordXRequest` chi scaffolding is retired. The envelope's

@@ -95,6 +95,26 @@ describe("parseLogErrorEvent", () => {
 		).toEqual({ code: "CONTAINER_NOT_FOUND", message: "no such container" });
 	});
 
+	it("parses quadlet terminal errors into an ApiError", () => {
+		expect(
+			parseLogErrorEvent({
+				timestamp: "t",
+				level: "ERROR",
+				message: "QUADLET_NOT_FOUND: Quadlet not found",
+			}),
+		).toEqual({ code: "QUADLET_NOT_FOUND", message: "Quadlet not found" });
+		expect(
+			parseLogErrorEvent({
+				timestamp: "t",
+				level: "ERROR",
+				message: "CONNECTION_FAILED: Failed to connect to machine",
+			}),
+		).toEqual({
+			code: "CONNECTION_FAILED",
+			message: "Failed to connect to machine",
+		});
+	});
+
 	it("returns null for non-error events", () => {
 		expect(
 			parseLogErrorEvent({ timestamp: "t", level: "INFO", message: "fine" }),

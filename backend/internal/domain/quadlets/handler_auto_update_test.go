@@ -203,7 +203,8 @@ func TestQuadletHandler_AutoUpdate_MissingUserID(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, http.StatusInternalServerError, w.Code, "Missing identity is a wiring bug: 500")
+	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR", "Response should contain INTERNAL_ERROR error code")
 }
 
 func TestQuadletHandler_AutoUpdate_ExtendsWriteDeadline(t *testing.T) {
