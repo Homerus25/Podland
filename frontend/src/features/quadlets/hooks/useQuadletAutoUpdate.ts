@@ -1,3 +1,4 @@
+import { invalidateMachineResources } from "@shared/queries/useListInvalidatingMutation";
 import { consumeNdjsonValues } from "@shared/streaming/ndjsonStream";
 import type { ApiError } from "@shared/types/api";
 import {
@@ -127,15 +128,11 @@ export function useQuadletAutoUpdate(
 						// Restarted containers and pulled images only change on a real
 						// run; a dry run mutates nothing, so its queries stay fresh.
 						if (!runDryRun) {
-							queryClient.invalidateQueries({
-								queryKey: ["machines", machineId, "quadlets"],
-							});
-							queryClient.invalidateQueries({
-								queryKey: ["machines", machineId, "containers"],
-							});
-							queryClient.invalidateQueries({
-								queryKey: ["machines", machineId, "images"],
-							});
+							invalidateMachineResources(queryClient, machineId, [
+								"quadlets",
+								"containers",
+								"images",
+							]);
 						}
 					}
 				} else if (event.type === "error") {

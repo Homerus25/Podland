@@ -1,5 +1,6 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
+import { containersQueryKey } from "@shared/queries/queryKeys";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
@@ -115,11 +116,9 @@ describe("ContainerList", () => {
 		const { queryClient } = renderContainerList();
 
 		await screen.findByText("my-container");
-		const cached = queryClient.getQueryData<ContainerSummary[]>([
-			"machines",
-			"m-1",
-			"containers",
-		]);
+		const cached = queryClient.getQueryData<ContainerSummary[]>(
+			containersQueryKey("m-1"),
+		);
 		expect(cached).toHaveLength(1);
 		expect(cached?.[0].id).toBe("abc123def4567890");
 	});

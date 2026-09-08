@@ -1,0 +1,62 @@
+// Single owner of the machine-resource query key vocabulary. Every key in the
+// app is built here and every list invalidation targets these keys, so a
+// rename cannot strand a string literal in another feature. All keys are
+// plain `as const` tuples: invalidation is prefix-based, so the union carries
+// all the rename-safety that matters.
+
+// Exactly the invalidatable set; mirrors the machine detail page's resource
+// tabs.
+export type MachineResource =
+	| "containers"
+	| "volumes"
+	| "images"
+	| "quadlets"
+	| "secrets";
+
+export const machinesQueryKey = ["machines"] as const;
+
+export function containersQueryKey(machineId: string) {
+	return ["machines", machineId, "containers"] as const;
+}
+
+export function volumesQueryKey(machineId: string) {
+	return ["machines", machineId, "volumes"] as const;
+}
+
+export function imagesQueryKey(machineId: string) {
+	return ["machines", machineId, "images"] as const;
+}
+
+export function quadletsQueryKey(machineId: string) {
+	return ["machines", machineId, "quadlets"] as const;
+}
+
+export function secretsQueryKey(machineId: string) {
+	return ["machines", machineId, "secrets"] as const;
+}
+
+export function quadletQueryKey(machineId: string, quadletId: string) {
+	return [...quadletsQueryKey(machineId), quadletId] as const;
+}
+
+export function secretQueryKey(machineId: string, secretId: string) {
+	return [...secretsQueryKey(machineId), secretId] as const;
+}
+
+export function volumeQueryKey(machineId: string, volumeName: string) {
+	return [...volumesQueryKey(machineId), volumeName] as const;
+}
+
+export function machineDetailKey(id: string) {
+	return ["machines", id] as const;
+}
+
+// Sub-resources reuse the key shape but are never invalidation targets, so
+// they are deliberately not MachineResource members.
+export function machineStatusQueryKey(id: string) {
+	return ["machines", id, "status"] as const;
+}
+
+export function machineAccessQueryKey(id: string) {
+	return ["machines", id, "access"] as const;
+}

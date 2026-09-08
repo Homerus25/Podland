@@ -5,11 +5,9 @@ import {
 	getSecret,
 	listSecrets,
 } from "@features/secrets/services/secretsApi";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-
-function secretsQueryKey(machineId: string) {
-	return ["machines", machineId, "secrets"] as const;
-}
+import { secretQueryKey, secretsQueryKey } from "@shared/queries/queryKeys";
+import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 export function useSecrets(machineId: string) {
 	return useQuery({
@@ -21,17 +19,11 @@ export function useSecrets(machineId: string) {
 // A create extends the machine's secret list, so the list refetches on
 // success and shows the server's post-action state; no optimistic updates.
 export function useCreateSecret(machineId: string) {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (input: CreateSecretInput) => createSecret(machineId, input),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: secretsQueryKey(machineId) });
-		},
-	});
-}
-
-function secretQueryKey(machineId: string, secretId: string) {
-	return [...secretsQueryKey(machineId), secretId] as const;
+	return useListInvalidatingMutation(
+		machineId,
+		"secrets",
+		(input: CreateSecretInput) => createSecret(machineId, input),
+	);
 }
 
 // Detail view metadata. gcTime: 0 drops the cache entry the moment the
@@ -57,11 +49,7 @@ export function useRevealSecret(machineId: string) {
 // success; no optimistic updates. Errors (409 SECRET_IN_USE) surface in the
 // confirmation modal that owns the mutation.
 export function useDeleteSecret(machineId: string) {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (secretId: string) => deleteSecret(machineId, secretId),
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: secretsQueryKey(machineId) });
-		},
-	});
+	return useListInvalidatingMutation(machineId, "secrets", (secretId: string) =>
+		deleteSecret(machineId, secretId),
+	);
 }

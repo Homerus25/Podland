@@ -6,11 +6,9 @@ import {
 	startContainer,
 	stopContainer,
 } from "@features/containers/services/containersApi";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-
-function containersQueryKey(machineId: string) {
-	return ["machines", machineId, "containers"] as const;
-}
+import { containersQueryKey } from "@shared/queries/queryKeys";
+import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
+import { useQuery } from "@tanstack/react-query";
 
 export function useContainers(machineId: string) {
 	return useQuery({
@@ -19,51 +17,34 @@ export function useContainers(machineId: string) {
 	});
 }
 
-// Lifecycle mutations invalidate the machine's containers query on success so
-// the list refetches and shows the server's post-action state; no optimistic
-// updates.
-function useContainerLifecycle(
-	machineId: string,
-	run: (containerId: string) => Promise<void>,
-) {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: run,
-		onSuccess: () => {
-			queryClient.invalidateQueries({
-				queryKey: containersQueryKey(machineId),
-			});
-		},
-	});
-}
-
 export function useStartContainer(machineId: string) {
-	return useContainerLifecycle(machineId, (containerId) =>
-		startContainer(machineId, containerId),
+	return useListInvalidatingMutation(
+		machineId,
+		"containers",
+		(containerId: string) => startContainer(machineId, containerId),
 	);
 }
 
 export function useStopContainer(machineId: string) {
-	return useContainerLifecycle(machineId, (containerId) =>
-		stopContainer(machineId, containerId),
+	return useListInvalidatingMutation(
+		machineId,
+		"containers",
+		(containerId: string) => stopContainer(machineId, containerId),
 	);
 }
 
 export function useDeleteContainer(machineId: string) {
-	return useContainerLifecycle(machineId, (containerId) =>
-		deleteContainer(machineId, containerId),
+	return useListInvalidatingMutation(
+		machineId,
+		"containers",
+		(containerId: string) => deleteContainer(machineId, containerId),
 	);
 }
 
 export function useCreateContainer(machineId: string) {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: (input: CreateContainerInput) =>
-			createContainer(machineId, input),
-		onSuccess: () => {
-			queryClient.invalidateQueries({
-				queryKey: containersQueryKey(machineId),
-			});
-		},
-	});
+	return useListInvalidatingMutation(
+		machineId,
+		"containers",
+		(input: CreateContainerInput) => createContainer(machineId, input),
+	);
 }

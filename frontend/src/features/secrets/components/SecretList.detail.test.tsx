@@ -3,6 +3,7 @@ import type {
 	SecretInspect,
 	SecretSummary,
 } from "@features/secrets/services/secretsApi";
+import { secretQueryKey } from "@shared/queries/queryKeys";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -213,13 +214,13 @@ describe("SecretDetailModal", () => {
 
 		await openDetail();
 		expect(
-			queryClient.getQueryData(["machines", "m-1", "secrets", "db-password"]),
+			queryClient.getQueryData(secretQueryKey("m-1", "db-password")),
 		).toBeTruthy();
 
 		await userEvent.click(screen.getByRole("button", { name: /close/i }));
 		await waitFor(() => {
 			expect(
-				queryClient.getQueryData(["machines", "m-1", "secrets", "db-password"]),
+				queryClient.getQueryData(secretQueryKey("m-1", "db-password")),
 			).toBeUndefined();
 		});
 	});

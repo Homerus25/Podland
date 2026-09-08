@@ -1,5 +1,6 @@
 import { SecretList } from "@features/secrets/components/SecretList";
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
+import { secretsQueryKey } from "@shared/queries/queryKeys";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
@@ -92,11 +93,9 @@ describe("SecretList", () => {
 		const { queryClient } = renderSecretList();
 
 		await screen.findByText("db-password");
-		const cached = queryClient.getQueryData<SecretSummary[]>([
-			"machines",
-			"m-1",
-			"secrets",
-		]);
+		const cached = queryClient.getQueryData<SecretSummary[]>(
+			secretsQueryKey("m-1"),
+		);
 		expect(cached).toHaveLength(1);
 		expect(cached?.[0].id).toBe("3f2e1d0c");
 	});

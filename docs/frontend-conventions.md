@@ -14,8 +14,8 @@ Each feature lives in `src/features/<name>/`:
 
 ## React Query
 
-- Query keys: `['machines', machineId, '<resource>'] as const`, with a shared base-key helper when a feature has detail queries (`[...base, id]`).
-- List-invalidating mutations call `queryClient.invalidateQueries({ queryKey: base })` on success; no optimistic updates (matches backend "list reflects server state" simplicity).
+- Query keys come from the `shared/queries` constructors (`containersQueryKey`, `secretQueryKey`, `machineStatusQueryKey`, the `machinesQueryKey` constant, …); never build a `['machines', …]` array or a private key constructor in a feature. A new resource tab adds one `MachineResource` union member plus one plural list constructor in `queryKeys.ts`.
+- List-invalidating mutations go through `useListInvalidatingMutation(machineId, resourceOrResources, run)` (`shared/queries`); cross-feature or streaming invalidation calls `invalidateMachineResources(queryClient, machineId, resourceOrResources)`. No optimistic updates (matches backend "list reflects server state" simplicity).
 - Detail views that must always refetch use `gcTime: 0`. Values that must never be cached (revealed secrets) travel through `useMutation`, not `useQuery`.
 
 ## Components
@@ -32,6 +32,7 @@ Each feature lives in `src/features/<name>/`:
 - The full suite is a gate that must actually finish: it completes in under 2 minutes on a healthy tree (`npx vitest run`). During a change, run only the affected test files; run the full suite once at the end. A run that hangs or stretches past that is a bug to diagnose immediately, not a wait — a starved worker means an effect/async loop is blocking the event loop (see the LogViewer incident: unstable callback identities in a `useEffect` dep array).
 - Component tests wrap the component in a fresh `QueryClient` with `retry: false` inside `QueryClientProvider`; hook tests use `renderHook` with the same wrapper.
 - Test seams are the public interface (hook return value, rendered DOM), never internals.
+- Query invalidation is asserted at the factory test (`useListInvalidatingMutation.test.tsx`, the sanctioned `vi.spyOn(queryClient, "invalidateQueries")`); feature tests assert refetch through MSW instead of invalidation spies. Streaming-hook tests keep their invalidation spies — the dry-run skip is bespoke logic nothing else covers.
 - **Multipart/upload endpoints: MSW cannot consume FormData bodies in this environment** — any handler that reads the body (`request.formData()`, `request.text()`, …) hangs, and axios POSTs of FormData hang with it. Instead: extract the payload building into a pure function (e.g. `buildPopulateForm`) and unit-test that; in component tests, mock the single API function with `vi.mock` (partial mock keeping the rest of the module real) and note why. See `volumesApi.populate.test.ts` + `VolumeList.populate.test.tsx`.
 - Cross-realm caveat when asserting on parsed multipart parts outside this limitation: MSW parses bodies with its own `File`/`Blob` implementations, so `instanceof File` fails — check for `"name" in part` instead.
 

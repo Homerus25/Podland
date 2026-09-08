@@ -1,3 +1,4 @@
+import { invalidateMachineResources } from "@shared/queries/useListInvalidatingMutation";
 import {
 	consumeNdjsonStream,
 	type StreamEvent,
@@ -80,9 +81,7 @@ export function usePullImage(machineId: string): UsePullImageResult {
 					setProgress({ operationId: event.operationId, state: event.state });
 				} else if (event.type === "complete") {
 					if (finish())
-						queryClient.invalidateQueries({
-							queryKey: ["machines", machineId, "images"],
-						});
+						invalidateMachineResources(queryClient, machineId, "images");
 				} else if (event.type === "error") {
 					if (finish()) {
 						setError({

@@ -3,6 +3,7 @@ import {
 	listVolumes,
 	type VolumeSummary,
 } from "@features/volumes/services/volumesApi";
+import { volumesQueryKey } from "@shared/queries/queryKeys";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
@@ -54,9 +55,7 @@ describe("useVolumes", () => {
 		await waitFor(() => expect(result.current.isSuccess).toBe(true));
 		expect(result.current.data).toEqual(volumes);
 
-		expect(queryClient.getQueryData(["machines", "m-1", "volumes"])).toEqual(
-			volumes,
-		);
+		expect(queryClient.getQueryData(volumesQueryKey("m-1"))).toEqual(volumes);
 	});
 
 	it("surfaces request errors without retrying", async () => {

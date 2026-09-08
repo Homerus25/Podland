@@ -14,15 +14,9 @@ import {
 	stopQuadlet,
 	updateQuadlet,
 } from "@features/quadlets/services/quadletsApi";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-
-function quadletsQueryKey(machineId: string) {
-	return ["machines", machineId, "quadlets"] as const;
-}
-
-function quadletQueryKey(machineId: string, quadletId: string) {
-	return [...quadletsQueryKey(machineId), quadletId] as const;
-}
+import { quadletQueryKey, quadletsQueryKey } from "@shared/queries/queryKeys";
+import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
+import { useQuery } from "@tanstack/react-query";
 
 export function useQuadlets(machineId: string) {
 	return useQuery({
@@ -31,24 +25,11 @@ export function useQuadlets(machineId: string) {
 	});
 }
 
-// Mutations invalidate the machine's quadlets query on success so the list
-// refetches and shows the server's post-action state; no optimistic updates.
-function useQuadletMutation<TInput>(
-	machineId: string,
-	run: (input: TInput) => Promise<unknown>,
-) {
-	const queryClient = useQueryClient();
-	return useMutation({
-		mutationFn: run,
-		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: quadletsQueryKey(machineId) });
-		},
-	});
-}
-
 export function useCreateQuadlet(machineId: string) {
-	return useQuadletMutation(machineId, (input: CreateQuadletInput) =>
-		createQuadlet(machineId, input),
+	return useListInvalidatingMutation(
+		machineId,
+		"quadlets",
+		(input: CreateQuadletInput) => createQuadlet(machineId, input),
 	);
 }
 
@@ -66,8 +47,9 @@ export function useQuadlet(machineId: string, quadletId: string) {
 // A content update can change the quadlet's systemd state, so the list
 // refetches on success.
 export function useUpdateQuadlet(machineId: string) {
-	return useQuadletMutation(
+	return useListInvalidatingMutation(
 		machineId,
+		"quadlets",
 		({ quadletId, content }: { quadletId: string } & UpdateQuadletInput) =>
 			updateQuadlet(machineId, quadletId, { content }),
 	);
@@ -76,8 +58,9 @@ export function useUpdateQuadlet(machineId: string) {
 // A delete removes the unit from the machine, so the list refetches on
 // success and the quadlet disappears.
 export function useDeleteQuadlet(machineId: string) {
-	return useQuadletMutation(
+	return useListInvalidatingMutation(
 		machineId,
+		"quadlets",
 		({ quadletId, ...options }: { quadletId: string } & DeleteQuadletOptions) =>
 			deleteQuadlet(machineId, quadletId, options),
 	);
@@ -86,14 +69,17 @@ export function useDeleteQuadlet(machineId: string) {
 // Lifecycle actions change the unit's systemd state, so the list refetches on
 // success and the state badge reflects what the machine now reports.
 export function useStartQuadlet(machineId: string) {
-	return useQuadletMutation(machineId, (quadletId: string) =>
-		startQuadlet(machineId, quadletId),
+	return useListInvalidatingMutation(
+		machineId,
+		"quadlets",
+		(quadletId: string) => startQuadlet(machineId, quadletId),
 	);
 }
 
 export function useStopQuadlet(machineId: string) {
-	return useQuadletMutation(
+	return useListInvalidatingMutation(
 		machineId,
+		"quadlets",
 		({
 			quadletId,
 			...options
@@ -103,8 +89,9 @@ export function useStopQuadlet(machineId: string) {
 }
 
 export function useRestartQuadlet(machineId: string) {
-	return useQuadletMutation(
+	return useListInvalidatingMutation(
 		machineId,
+		"quadlets",
 		({
 			quadletId,
 			...options

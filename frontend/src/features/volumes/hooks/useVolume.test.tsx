@@ -1,5 +1,6 @@
 import { useVolume } from "@features/volumes/hooks/useVolume";
 import { inspectVolume } from "@features/volumes/services/volumesApi";
+import { volumeQueryKey } from "@shared/queries/queryKeys";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
@@ -46,9 +47,9 @@ describe("useVolume", () => {
 		await waitFor(() => expect(result.current.isSuccess).toBe(true));
 		expect(result.current.data).toEqual(volume);
 
-		expect(
-			queryClient.getQueryData(["machines", "m-1", "volumes", "app-data"]),
-		).toEqual(volume);
+		expect(queryClient.getQueryData(volumeQueryKey("m-1", "app-data"))).toEqual(
+			volume,
+		);
 	});
 
 	it("does not fetch when no volume is selected", () => {

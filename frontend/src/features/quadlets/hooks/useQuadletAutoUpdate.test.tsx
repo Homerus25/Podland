@@ -1,4 +1,9 @@
 import { useQuadletAutoUpdate } from "@features/quadlets/hooks/useQuadletAutoUpdate";
+import {
+	containersQueryKey,
+	imagesQueryKey,
+	quadletsQueryKey,
+} from "@shared/queries/queryKeys";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { type DefaultBodyType, HttpResponse, http } from "msw";
@@ -164,13 +169,13 @@ describe("useQuadletAutoUpdate", () => {
 
 		await waitFor(() => expect(result.current.isRunning).toBe(false));
 		expect(invalidateSpy).toHaveBeenCalledWith({
-			queryKey: ["machines", "m-1", "quadlets"],
+			queryKey: quadletsQueryKey("m-1"),
 		});
 		expect(invalidateSpy).toHaveBeenCalledWith({
-			queryKey: ["machines", "m-1", "containers"],
+			queryKey: containersQueryKey("m-1"),
 		});
 		expect(invalidateSpy).toHaveBeenCalledWith({
-			queryKey: ["machines", "m-1", "images"],
+			queryKey: imagesQueryKey("m-1"),
 		});
 	});
 

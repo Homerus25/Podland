@@ -13,14 +13,14 @@ import {
 	Tr,
 } from "@chakra-ui/react";
 import { useVolume } from "@features/volumes/hooks/useVolume";
-import { volumesQueryKey } from "@features/volumes/hooks/useVolumes";
 import type { VolumeDetail } from "@features/volumes/services/volumesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
+import { invalidateMachineResources } from "@shared/queries/useListInvalidatingMutation";
 import { getApiError } from "@shared/utils/api";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
 import { useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 function isNotFound(error: unknown): boolean {
 	return isAxiosError(error) && error.response?.status === 404;
@@ -141,15 +141,21 @@ export function VolumeInspectDrawer({
 		error,
 	} = useVolume(machineId, isOpen ? volumeName : null);
 
+	// The volumes list key is a prefix of the inspect key, so invalidating the
+	// list also refetches this query; each refetched 404 is a fresh error
+	// object, which would re-trigger this effect forever. One invalidation per
+	// stale volume is what the flow needs.
+	const invalidatedRef = useRef<string | null>(null);
+
 	useEffect(() => {
+		if (!isOpen) invalidatedRef.current = null;
 		// A 404 means the row was stale (the volume was deleted since the
 		// list loaded); refetch the list so the dead row disappears.
-		if (isOpen && isNotFound(error)) {
-			queryClient.invalidateQueries({
-				queryKey: volumesQueryKey(machineId),
-			});
+		if (isOpen && isNotFound(error) && invalidatedRef.current !== volumeName) {
+			invalidatedRef.current = volumeName;
+			invalidateMachineResources(queryClient, machineId, "volumes");
 		}
-	}, [isOpen, error, queryClient, machineId]);
+	}, [isOpen, volumeName, error, queryClient, machineId]);
 
 	return (
 		<Drawer isOpen={isOpen} onClose={onClose} size="md">

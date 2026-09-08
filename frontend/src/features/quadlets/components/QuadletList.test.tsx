@@ -1,5 +1,6 @@
 import { QuadletList } from "@features/quadlets/components/QuadletList";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
+import { quadletsQueryKey } from "@shared/queries/queryKeys";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
@@ -111,11 +112,9 @@ describe("QuadletList", () => {
 		const { queryClient } = renderQuadletList();
 
 		await screen.findByText("web");
-		const cached = queryClient.getQueryData<QuadletSummary[]>([
-			"machines",
-			"m-1",
-			"quadlets",
-		]);
+		const cached = queryClient.getQueryData<QuadletSummary[]>(
+			quadletsQueryKey("m-1"),
+		);
 		expect(cached).toHaveLength(1);
 		expect(cached?.[0].id).toBe("web");
 	});

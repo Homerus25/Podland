@@ -11,12 +11,21 @@ import {
 	type UpdateMachineInput,
 	updateMachine,
 } from "@features/machines/services/machinesApi";
+import {
+	machineAccessQueryKey,
+	machineDetailKey,
+	machineStatusQueryKey,
+	machinesQueryKey,
+} from "@shared/queries/queryKeys";
 import type { MachinePermission } from "@shared/types/api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 export function useMachines() {
-	return useQuery({ queryKey: ["machines"], queryFn: listMachines });
+	return useQuery({
+		queryKey: machinesQueryKey,
+		queryFn: listMachines,
+	});
 }
 
 // Per-machine live probe. staleTime 0 and no refetch interval: status is
@@ -25,7 +34,7 @@ export function useMachines() {
 // independently and the machines list is never blocked.
 export function useMachineStatus(machineId: string) {
 	return useQuery({
-		queryKey: ["machines", machineId, "status"],
+		queryKey: machineStatusQueryKey(machineId),
 		queryFn: () => getMachineStatus(machineId),
 		staleTime: 0,
 	});
@@ -37,7 +46,7 @@ export function useMachineStatus(machineId: string) {
 // permission for the detail page's gating (badges, secrets, settings).
 export function useMachine(id: string) {
 	const detail = useQuery({
-		queryKey: ["machines", id],
+		queryKey: machineDetailKey(id),
 		queryFn: () => getMachine(id),
 	});
 	const { data: machines } = useMachines();
@@ -52,12 +61,15 @@ export function useMachine(id: string) {
 	}, [detail, machines, id]);
 }
 
+// A machine change touches every query under the machines prefix, so these
+// mutations invalidate the whole family deliberately (unlike resource-list
+// mutations, which target a single resource list).
 export function useUpdateMachine(id: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: (input: UpdateMachineInput) => updateMachine(id, input),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["machines"] });
+			queryClient.invalidateQueries({ queryKey: machinesQueryKey });
 		},
 	});
 }
@@ -67,29 +79,31 @@ export function useDeleteMachine() {
 	return useMutation({
 		mutationFn: (id: string) => deleteMachine(id),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["machines"] });
+			queryClient.invalidateQueries({ queryKey: machinesQueryKey });
 		},
 	});
 }
 
 export function useMachineAccess(machineId: string) {
 	return useQuery({
-		queryKey: ["machines", machineId, "access"],
+		queryKey: machineAccessQueryKey(machineId),
 		queryFn: () => listMachineAccess(machineId),
 	});
 }
 
-// Sharing changes both the grant list and the current user's own permission
-// on the machine, so both query families are invalidated.
-function useInvalidateSharing() {
+// Sharing changes the machine's access list, so the access query refetches
+// on success.
+function useInvalidateSharing(machineId: string) {
 	const queryClient = useQueryClient();
 	return () => {
-		queryClient.invalidateQueries({ queryKey: ["machines"] });
+		queryClient.invalidateQueries({
+			queryKey: machineAccessQueryKey(machineId),
+		});
 	};
 }
 
 export function useGrantMachineAccess(machineId: string) {
-	const invalidate = useInvalidateSharing();
+	const invalidate = useInvalidateSharing(machineId);
 	return useMutation({
 		mutationFn: ({
 			userId,
@@ -103,7 +117,7 @@ export function useGrantMachineAccess(machineId: string) {
 }
 
 export function useRevokeMachineAccess(machineId: string) {
-	const invalidate = useInvalidateSharing();
+	const invalidate = useInvalidateSharing(machineId);
 	return useMutation({
 		mutationFn: (userId: string) => revokeMachineAccess(machineId, userId),
 		onSuccess: invalidate,
@@ -115,7 +129,7 @@ export function useCreateMachine() {
 	return useMutation({
 		mutationFn: (input: CreateMachineInput) => createMachine(input),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["machines"] });
+			queryClient.invalidateQueries({ queryKey: machinesQueryKey });
 		},
 	});
 }

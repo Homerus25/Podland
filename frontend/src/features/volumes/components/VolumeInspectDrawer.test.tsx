@@ -1,8 +1,9 @@
 import { VolumeInspectDrawer } from "@features/volumes/components/VolumeInspectDrawer";
+import { useVolumes } from "@features/volumes/hooks/useVolumes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { volumeFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
@@ -98,7 +99,7 @@ describe("VolumeInspectDrawer", () => {
 		).not.toBeInTheDocument();
 	});
 
-	it("on 404 shows a stale-volume message and invalidates the list", async () => {
+	it("on 404 shows a stale-volume message and refetches the volume list", async () => {
 		mockInspect("app-data", () =>
 			HttpResponse.json(
 				{
@@ -108,20 +109,38 @@ describe("VolumeInspectDrawer", () => {
 				{ status: 404 },
 			),
 		);
+		const listRequests: string[] = [];
+		server.use(
+			http.get("*/api/machines/m-1/volumes", ({ request }) => {
+				listRequests.push(new URL(request.url).pathname);
+				return HttpResponse.json([]);
+			}),
+		);
+		// A live list observer makes the invalidate-and-refetch observable
+		// through the public interface: the stale row dies via a real refetch.
+		function VolumeListProbe() {
+			useVolumes("m-1");
+			return null;
+		}
 		const queryClient = new QueryClient({
 			defaultOptions: { queries: { retry: false } },
 		});
-		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-		renderDrawer(queryClient);
+		render(
+			<QueryClientProvider client={queryClient}>
+				<VolumeListProbe />
+				<VolumeInspectDrawer
+					machineId="m-1"
+					volumeName="app-data"
+					isOpen={true}
+					onClose={() => {}}
+				/>
+			</QueryClientProvider>,
+		);
 
 		expect(
 			await screen.findByTestId("volume-drawer-not-found"),
 		).toHaveTextContent(/no longer exists/i);
-		await waitFor(() =>
-			expect(invalidateSpy).toHaveBeenCalledWith({
-				queryKey: ["machines", "m-1", "volumes"],
-			}),
-		);
+		await waitFor(() => expect(listRequests).toHaveLength(2));
 	});
 
 	it("shows the standard error treatment on server errors", async () => {

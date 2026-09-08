@@ -1,4 +1,5 @@
 import { usePullImage } from "@features/images/hooks/usePullImage";
+import { imagesQueryKey } from "@shared/queries/queryKeys";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { type DefaultBodyType, HttpResponse, http } from "msw";
@@ -87,7 +88,7 @@ describe("usePullImage", () => {
 
 		await waitFor(() => expect(result.current.isPulling).toBe(false));
 		expect(invalidateSpy).toHaveBeenCalledWith({
-			queryKey: ["machines", "m-1", "images"],
+			queryKey: imagesQueryKey("m-1"),
 		});
 	});
 
