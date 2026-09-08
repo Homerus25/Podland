@@ -3,24 +3,12 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
 const machinesFixture: Machine[] = [
-	{
-		id: "m-1",
-		name: "prod-web-01",
-		description: "",
-		hostname: "web01.example.com",
-		port: 22,
-		sshUsername: "deploy",
-		sshKeyFingerprint: "SHA256:aaa",
-		podmanSocketPath: "/run/podman/podman.sock",
-		ownerId: "u-owner",
-		permission: "admin",
-		createdAt: "2026-08-01T10:00:00Z",
-		updatedAt: "2026-08-01T10:00:00Z",
-	},
-	{
+	machineFixture({ description: "" }),
+	machineFixture({
 		id: "m-2",
 		name: "ci-runner",
 		description: "",
@@ -28,12 +16,10 @@ const machinesFixture: Machine[] = [
 		port: 2222,
 		sshUsername: "ci",
 		sshKeyFingerprint: "SHA256:bbb",
-		podmanSocketPath: "/run/podman/podman.sock",
-		ownerId: "u-owner",
 		permission: "read",
 		createdAt: "2026-08-02T10:00:00Z",
 		updatedAt: "2026-08-02T10:00:00Z",
-	},
+	}),
 ];
 
 function machinesHandler(body: Machine[]) {

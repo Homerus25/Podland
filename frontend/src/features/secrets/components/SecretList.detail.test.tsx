@@ -9,18 +9,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { secretFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-function secretFixture(overrides: Partial<SecretSummary> = {}): SecretSummary {
-	return {
-		id: "3f2e1d0c",
-		name: "db-password",
-		driver: "file",
-		createdAt: "2026-08-20T10:00:00Z",
-		updatedAt: "2026-08-21T10:00:00Z",
-		...overrides,
-	};
-}
 
 function mockSecrets(secrets: SecretSummary[]) {
 	server.use(
@@ -60,8 +50,13 @@ function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
 
 describe("SecretDetailModal", () => {
 	it("renders detail fields from the inspect endpoint", async () => {
-		mockSecrets([secretFixture()]);
-		mockInspect(secretFixture({ labels: { env: "prod" } }));
+		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
+		mockInspect(
+			secretFixture({
+				updatedAt: "2026-08-21T10:00:00Z",
+				labels: { env: "prod" },
+			}),
+		);
 		renderSecretList();
 
 		await openDetail();
@@ -87,13 +82,13 @@ describe("SecretDetailModal", () => {
 	});
 
 	it("sends reveal=true to the inspect endpoint when an admin reveals", async () => {
-		mockSecrets([secretFixture()]);
+		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
 		let requestedUrl = "";
 		server.use(
 			http.get("*/api/machines/m-1/secrets/db-password", ({ request }) => {
 				requestedUrl = request.url;
 				return HttpResponse.json({
-					...secretFixture(),
+					...secretFixture({ updatedAt: "2026-08-21T10:00:00Z" }),
 					secretData: "s3cr3t-value",
 				});
 			}),
@@ -110,8 +105,8 @@ describe("SecretDetailModal", () => {
 	it.each(["read", "write"] as const)(
 		"shows a hint instead of a reveal button for %s users",
 		async (permission) => {
-			mockSecrets([secretFixture()]);
-			mockInspect(secretFixture());
+			mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
+			mockInspect(secretFixture({ updatedAt: "2026-08-21T10:00:00Z" }));
 			renderSecretList(permission);
 
 			await openDetail();
@@ -124,8 +119,8 @@ describe("SecretDetailModal", () => {
 	);
 
 	it("renders the revealed value masked until the eye toggle is used", async () => {
-		mockSecrets([secretFixture()]);
-		mockInspect(secretFixture());
+		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
+		mockInspect(secretFixture({ updatedAt: "2026-08-21T10:00:00Z" }));
 		renderSecretList();
 
 		await openDetail();
@@ -141,7 +136,7 @@ describe("SecretDetailModal", () => {
 	});
 
 	it("renders a 403 reveal error through the shared error display", async () => {
-		mockSecrets([secretFixture()]);
+		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
 		server.use(
 			http.get("*/api/machines/m-1/secrets/db-password", ({ request }) => {
 				if (request.url.includes("reveal=true")) {
@@ -156,7 +151,9 @@ describe("SecretDetailModal", () => {
 						{ status: 403 },
 					);
 				}
-				return HttpResponse.json(secretFixture());
+				return HttpResponse.json(
+					secretFixture({ updatedAt: "2026-08-21T10:00:00Z" }),
+				);
 			}),
 		);
 		renderSecretList();
@@ -170,7 +167,7 @@ describe("SecretDetailModal", () => {
 	});
 
 	it("renders an inspect 404 through the shared error display", async () => {
-		mockSecrets([secretFixture()]);
+		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
 		server.use(
 			http.get("*/api/machines/m-1/secrets/db-password", () =>
 				HttpResponse.json(
@@ -193,7 +190,7 @@ describe("SecretDetailModal", () => {
 	});
 
 	it("renders a connection failure through the shared error display", async () => {
-		mockSecrets([secretFixture()]);
+		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
 		server.use(
 			http.get("*/api/machines/m-1/secrets/db-password", () =>
 				HttpResponse.error(),
@@ -208,8 +205,8 @@ describe("SecretDetailModal", () => {
 	});
 
 	it("keeps no inspect data in the React Query cache after the view closes", async () => {
-		mockSecrets([secretFixture()]);
-		mockInspect(secretFixture());
+		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
+		mockInspect(secretFixture({ updatedAt: "2026-08-21T10:00:00Z" }));
 		const { queryClient } = renderSecretList();
 
 		await openDetail();

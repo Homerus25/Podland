@@ -4,22 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-const machineFixture: Machine = {
-	id: "m-1",
-	name: "prod-web-01",
-	description: "Production web server",
-	hostname: "web01.example.com",
-	port: 22,
-	sshUsername: "deploy",
-	sshKeyFingerprint: "SHA256:aaa",
-	podmanSocketPath: "/run/podman/podman.sock",
-	ownerId: "u-owner",
-	permission: "admin",
-	createdAt: "2026-08-01T10:00:00Z",
-	updatedAt: "2026-08-01T10:00:00Z",
-};
 
 let deleteRequested = false;
 let machinesListRequests = 0;
@@ -45,7 +31,7 @@ function deleteHandler(machine: Machine, status = 204, delayMs = 0) {
 	});
 }
 
-async function renderSettingsTab(machine: Machine = machineFixture) {
+async function renderSettingsTab(machine: Machine = machineFixture()) {
 	deleteRequested = false;
 	server.use(machineHandler(machine));
 	server.use(
@@ -66,7 +52,7 @@ async function renderSettingsTab(machine: Machine = machineFixture) {
 
 describe("MachineDetailPage Settings tab (delete machine)", () => {
 	it("fires no delete request on cancel", async () => {
-		server.use(deleteHandler(machineFixture));
+		server.use(deleteHandler(machineFixture()));
 		await renderSettingsTab();
 
 		await userEvent.click(screen.getByTestId("delete-machine-button"));
@@ -80,7 +66,7 @@ describe("MachineDetailPage Settings tab (delete machine)", () => {
 	});
 
 	it("deletes, refetches the machines list, and navigates back on success", async () => {
-		server.use(deleteHandler(machineFixture));
+		server.use(deleteHandler(machineFixture()));
 		await renderSettingsTab();
 
 		await userEvent.click(screen.getByTestId("delete-machine-button"));
@@ -102,7 +88,7 @@ describe("MachineDetailPage Settings tab (delete machine)", () => {
 	});
 
 	it("renders the error envelope and keeps the pending state when the delete fails", async () => {
-		server.use(deleteHandler(machineFixture, 409, 50));
+		server.use(deleteHandler(machineFixture(), 409, 50));
 		await renderSettingsTab();
 
 		await userEvent.click(screen.getByTestId("delete-machine-button"));
@@ -120,7 +106,7 @@ describe("MachineDetailPage Settings tab (delete machine)", () => {
 	it.each(["write", "read"] as const)(
 		"hides the delete action for %s-permission users",
 		async (permission) => {
-			await renderSettingsTab({ ...machineFixture, permission });
+			await renderSettingsTab(machineFixture({ permission }));
 
 			expect(
 				screen.queryByTestId("delete-machine-button"),

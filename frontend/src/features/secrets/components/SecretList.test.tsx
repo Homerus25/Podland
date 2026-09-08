@@ -5,18 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { secretFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-function secretFixture(overrides: Partial<SecretSummary> = {}): SecretSummary {
-	return {
-		id: "3f2e1d0c",
-		name: "db-password",
-		driver: "file",
-		createdAt: "2026-08-20T10:00:00Z",
-		updatedAt: "2026-08-20T10:00:00Z",
-		...overrides,
-	};
-}
 
 function mockSecrets(secrets: SecretSummary[]) {
 	server.use(

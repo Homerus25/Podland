@@ -1,27 +1,12 @@
 import { useVolumes } from "@features/volumes/hooks/useVolumes";
-import {
-	listVolumes,
-	type VolumeSummary,
-} from "@features/volumes/services/volumesApi";
+import { listVolumes } from "@features/volumes/services/volumesApi";
 import { volumesQueryKey } from "@shared/queries/queryKeys";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { volumeFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-function volumeFixture(overrides: Partial<VolumeSummary> = {}): VolumeSummary {
-	return {
-		name: "app-data",
-		driver: "local",
-		createdAt: "2026-08-20T10:00:00Z",
-		anonymous: false,
-		labels: {},
-		options: {},
-		mountpoint: "/var/lib/containers/storage/volumes/app-data/_data",
-		...overrides,
-	};
-}
 
 describe("listVolumes", () => {
 	it("fetches the machine volumes through the API", async () => {

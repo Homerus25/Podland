@@ -4,16 +4,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { imageFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
 const imagesFixture = [
-	{
+	imageFixture({
 		id: "sha256:abc123def4567890abc123def4567890abc123def4567890abc123def4567890",
-		repoTags: ["docker.io/library/nginx:1.27"],
-		repoDigests: [],
-		createdAt: "2026-08-18T10:00:00Z",
-		size: 157286400,
-	},
+	}),
 ];
 
 let deleteRequests: { url: URL; count: number } = {

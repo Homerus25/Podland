@@ -6,25 +6,10 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { containerFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
-function containerFixture(
-	overrides: Partial<ContainerSummary> = {},
-): ContainerSummary {
-	return {
-		id: "c-1",
-		names: ["/existing"],
-		image: "docker.io/library/nginx:1.27",
-		createdAt: "2026-08-20T10:00:00Z",
-		state: "running",
-		status: "Up 2 hours",
-		restarts: 0,
-		exited: false,
-		...overrides,
-	};
-}
-
-const existing = containerFixture();
+const existing = containerFixture({ names: ["/existing"] });
 
 let createRequests: { count: number; body: unknown } = { count: 0, body: null };
 

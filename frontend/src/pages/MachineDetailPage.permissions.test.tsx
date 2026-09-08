@@ -12,22 +12,8 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-const machineFixture: Machine = {
-	id: "m-1",
-	name: "prod-web-01",
-	description: "Production web server",
-	hostname: "web01.example.com",
-	port: 22,
-	sshUsername: "deploy",
-	sshKeyFingerprint: "SHA256:aaa",
-	podmanSocketPath: "/run/podman/podman.sock",
-	ownerId: "u-owner",
-	permission: "admin",
-	createdAt: "2026-08-01T10:00:00Z",
-	updatedAt: "2026-08-01T10:00:00Z",
-};
 
 function mockMachineHandlers(machine: Machine) {
 	server.use(
@@ -41,7 +27,7 @@ function mockMachineHandlers(machine: Machine) {
 }
 
 async function renderSettings(permission: MachinePermission) {
-	const machine = { ...machineFixture, permission };
+	const machine = machineFixture({ permission });
 	mockMachineHandlers(machine);
 	renderApp(`/machines/${machine.id}`, {
 		resolveInitialState: async () => ({ username: "alice" }),
@@ -96,9 +82,9 @@ describe("permission gating on the machine detail page", () => {
 		// The backend only populates `permission` on GET /api/machines; the
 		// detail response omits it, so the page must merge the list's level in.
 		server.use(
-			http.get("*/api/machines", () => HttpResponse.json([machineFixture])),
+			http.get("*/api/machines", () => HttpResponse.json([machineFixture()])),
 			http.get("*/api/machines/m-1", () => {
-				const { permission: _permission, ...detail } = machineFixture;
+				const { permission: _permission, ...detail } = machineFixture();
 				return HttpResponse.json(detail);
 			}),
 			http.get("*/api/machines/m-1/secrets", () => HttpResponse.json([])),
@@ -106,7 +92,7 @@ describe("permission gating on the machine detail page", () => {
 		renderApp("/machines/m-1", {
 			resolveInitialState: async () => ({ username: "alice" }),
 		});
-		await screen.findByText(machineFixture.name);
+		await screen.findByText(machineFixture().name);
 		await userEvent.click(screen.getByRole("tab", { name: /secrets/i }));
 
 		await screen.findByTestId("create-secret-button");
@@ -121,7 +107,7 @@ describe("permission gating on the machine detail page", () => {
 		async (permission) => {
 			server.use(
 				http.get("*/api/machines", () =>
-					HttpResponse.json([{ ...machineFixture, permission }]),
+					HttpResponse.json([machineFixture({ permission })]),
 				),
 			);
 			renderApp("/machines", {
@@ -141,7 +127,7 @@ describe("permission gating on the machine detail page", () => {
 
 describe("permissions module", () => {
 	it("treats owner as admin via the backend-seeded permission and derives gating consistently", () => {
-		const ownerMachine = { ...machineFixture, permission: "admin" as const };
+		const ownerMachine = machineFixture({ permission: "admin" });
 		const permission = effectivePermission(ownerMachine);
 		expect(permission).toBe("admin");
 		expect(canEditMachine(permission)).toBe(true);

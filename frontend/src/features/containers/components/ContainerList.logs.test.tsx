@@ -7,24 +7,9 @@ import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
+import { containerFixture } from "@/test/factories";
 import { server } from "@/test/server";
 import { chunkedStream, streamResponse } from "@/test/stream";
-
-function containerFixture(
-	overrides: Partial<ContainerSummary> = {},
-): ContainerSummary {
-	return {
-		id: "c-1",
-		names: ["/my-container"],
-		image: "docker.io/library/nginx:1.27",
-		createdAt: "2026-08-20T10:00:00Z",
-		state: "running",
-		status: "Up 2 hours",
-		restarts: 0,
-		exited: false,
-		...overrides,
-	};
-}
 
 function logEvent(
 	overrides: Partial<{

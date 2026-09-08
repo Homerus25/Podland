@@ -3,16 +3,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { imageFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
 const imagesFixture = [
-	{
+	imageFixture({
 		id: "sha256:abc123def4567890abc123def4567890abc123def4567890abc123def4567890",
-		repoTags: ["docker.io/library/nginx:1.27"],
-		repoDigests: [],
-		createdAt: "2026-08-18T10:00:00Z",
-		size: 157286400,
-	},
+	}),
 ];
 
 function renderImageList() {
@@ -48,23 +45,19 @@ describe("ImageList", () => {
 		server.use(
 			http.get("*/api/machines/m-1/images", () =>
 				HttpResponse.json([
-					{
+					imageFixture({
 						id: "sha256:abc123def4567890abc123def4567890abc123def4567890abc123def4567890",
 						repoTags: [
 							"docker.io/library/nginx:1.27",
 							"docker.io/library/nginx:latest",
 						],
-						repoDigests: [],
-						createdAt: "2026-08-18T10:00:00Z",
-						size: 157286400,
-					},
-					{
+					}),
+					imageFixture({
 						id: "sha256:fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
 						repoTags: null,
-						repoDigests: [],
 						createdAt: "2026-08-20T10:00:00Z",
 						size: 3145728,
-					},
+					}),
 				]),
 			),
 		);

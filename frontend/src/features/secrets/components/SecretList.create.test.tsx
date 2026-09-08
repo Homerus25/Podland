@@ -5,20 +5,10 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { secretFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
-function secretFixture(overrides: Partial<SecretSummary> = {}): SecretSummary {
-	return {
-		id: "existing",
-		name: "existing",
-		driver: "file",
-		createdAt: "2026-08-20T10:00:00Z",
-		updatedAt: "2026-08-20T10:00:00Z",
-		...overrides,
-	};
-}
-
-const existing = secretFixture();
+const existing = secretFixture({ id: "existing", name: "existing" });
 
 let createRequests: { count: number; body: unknown } = { count: 0, body: null };
 

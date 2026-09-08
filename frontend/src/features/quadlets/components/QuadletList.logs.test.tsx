@@ -7,22 +7,9 @@ import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
+import { quadletFixture } from "@/test/factories";
 import { server } from "@/test/server";
 import { chunkedStream, streamResponse } from "@/test/stream";
-
-function quadletFixture(
-	overrides: Partial<QuadletSummary> = {},
-): QuadletSummary {
-	return {
-		id: "web",
-		name: "web",
-		path: "/etc/containers/systemd/web.container",
-		unit: "web.service",
-		resource: "container",
-		state: "running",
-		...overrides,
-	};
-}
 
 function logEvent(
 	overrides: Partial<{

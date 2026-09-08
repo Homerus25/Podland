@@ -4,22 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-const machineFixture: Machine = {
-	id: "m-1",
-	name: "prod-web-01",
-	description: "Production web server",
-	hostname: "web01.example.com",
-	port: 22,
-	sshUsername: "deploy",
-	sshKeyFingerprint: "SHA256:aaa",
-	podmanSocketPath: "/run/podman/podman.sock",
-	ownerId: "u-owner",
-	permission: "admin",
-	createdAt: "2026-08-01T10:00:00Z",
-	updatedAt: "2026-08-01T10:00:00Z",
-};
 
 function machineHandler(machine: Machine) {
 	return http.get(`*/api/machines/${machine.id}`, () =>
@@ -52,10 +38,10 @@ function renderMachineDetailPage(id = "m-1") {
 describe("MachineDetailPage", () => {
 	it("navigates from the machines list into the detail page via the card click", async () => {
 		server.use(
-			http.get("*/api/machines", () => HttpResponse.json([machineFixture])),
+			http.get("*/api/machines", () => HttpResponse.json([machineFixture()])),
 		);
 		server.use(
-			machineHandler(machineFixture),
+			machineHandler(machineFixture()),
 			emptyContainersHandler,
 			emptyQuadletsHandler,
 		);
@@ -72,7 +58,7 @@ describe("MachineDetailPage", () => {
 		server.use(
 			http.get("*/api/machines/m-1", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
-				return HttpResponse.json(machineFixture);
+				return HttpResponse.json(machineFixture());
 			}),
 		);
 		renderMachineDetailPage();
@@ -82,7 +68,7 @@ describe("MachineDetailPage", () => {
 
 	it("renders machine identity with permission badge", async () => {
 		server.use(
-			machineHandler(machineFixture),
+			machineHandler(machineFixture()),
 			emptyContainersHandler,
 			emptyQuadletsHandler,
 		);
@@ -98,7 +84,7 @@ describe("MachineDetailPage", () => {
 
 	it("switches between the Containers, Images, Quadlets, Secrets, and Settings tabs", async () => {
 		server.use(
-			machineHandler(machineFixture),
+			machineHandler(machineFixture()),
 			emptyContainersHandler,
 			emptyQuadletsHandler,
 			emptySecretsHandler,
@@ -131,7 +117,7 @@ describe("MachineDetailPage", () => {
 	});
 
 	it("renders the container list inside the Containers tab", async () => {
-		server.use(machineHandler(machineFixture), emptyQuadletsHandler);
+		server.use(machineHandler(machineFixture()), emptyQuadletsHandler);
 		server.use(
 			http.get("*/api/machines/m-1/containers", () =>
 				HttpResponse.json({
@@ -161,7 +147,7 @@ describe("MachineDetailPage", () => {
 
 	it("renders the image list inside the Images tab", async () => {
 		server.use(
-			machineHandler(machineFixture),
+			machineHandler(machineFixture()),
 			emptyContainersHandler,
 			emptyQuadletsHandler,
 		);
@@ -188,7 +174,7 @@ describe("MachineDetailPage", () => {
 	});
 
 	it("renders the quadlet list inside the Quadlets tab", async () => {
-		server.use(machineHandler(machineFixture), emptyContainersHandler);
+		server.use(machineHandler(machineFixture()), emptyContainersHandler);
 		server.use(
 			http.get("*/api/machines/m-1/quadlets", () =>
 				HttpResponse.json([
@@ -214,7 +200,7 @@ describe("MachineDetailPage", () => {
 
 	it("renders the secret list inside the Secrets tab", async () => {
 		server.use(
-			machineHandler(machineFixture),
+			machineHandler(machineFixture()),
 			emptyContainersHandler,
 			emptyQuadletsHandler,
 		);

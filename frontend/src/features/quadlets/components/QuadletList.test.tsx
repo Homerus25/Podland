@@ -6,21 +6,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { quadletFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-function quadletFixture(
-	overrides: Partial<QuadletSummary> = {},
-): QuadletSummary {
-	return {
-		id: "web",
-		name: "web",
-		path: "/etc/containers/systemd/web.container",
-		unit: "web.service",
-		resource: "container",
-		state: "running",
-		...overrides,
-	};
-}
 
 function mockQuadlets(quadlets: QuadletSummary[]) {
 	server.use(

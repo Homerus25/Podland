@@ -4,7 +4,8 @@ import { api } from "@shared/utils/api";
 // (backend/internal/domain/images/dto.go ImageListResponse).
 export interface ImageSummary {
 	id: string;
-	repoTags: string[];
+	// Podman reports null tags for dangling images.
+	repoTags: string[] | null;
 	repoDigests: string[];
 	parentID?: string;
 	createdAt: string;

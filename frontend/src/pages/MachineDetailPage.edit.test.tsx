@@ -4,22 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-const machineFixture: Machine = {
-	id: "m-1",
-	name: "prod-web-01",
-	description: "Production web server",
-	hostname: "web01.example.com",
-	port: 22,
-	sshUsername: "deploy",
-	sshKeyFingerprint: "SHA256:aaa",
-	podmanSocketPath: "/run/podman/podman.sock",
-	ownerId: "u-owner",
-	permission: "write",
-	createdAt: "2026-08-01T10:00:00Z",
-	updatedAt: "2026-08-01T10:00:00Z",
-};
 
 let updatePayload: Record<string, unknown> | undefined;
 
@@ -42,7 +28,9 @@ function updateHandler(
 	});
 }
 
-async function renderSettingsTab(machine: Machine = machineFixture) {
+async function renderSettingsTab(
+	machine: Machine = machineFixture({ permission: "write" }),
+) {
 	server.use(machineHandler(machine));
 	renderApp(`/machines/${machine.id}`, {
 		resolveInitialState: async () => ({ username: "alice" }),
@@ -80,7 +68,7 @@ describe("MachineDetailPage Settings tab (edit machine)", () => {
 	});
 
 	it("persists edits without requiring the key file", async () => {
-		server.use(updateHandler(machineFixture));
+		server.use(updateHandler(machineFixture({ permission: "write" })));
 		await renderSettingsTab();
 
 		await editAndSave();
@@ -99,7 +87,7 @@ describe("MachineDetailPage Settings tab (edit machine)", () => {
 	});
 
 	it("sends an uploaded key file in the update request body", async () => {
-		server.use(updateHandler(machineFixture));
+		server.use(updateHandler(machineFixture({ permission: "write" })));
 		await renderSettingsTab();
 
 		const keyFile = new File(
@@ -120,7 +108,7 @@ describe("MachineDetailPage Settings tab (edit machine)", () => {
 	it("renders the error envelope when the save fails", async () => {
 		server.use(
 			updateHandler(
-				machineFixture,
+				machineFixture({ permission: "write" }),
 				409,
 				{
 					requestId: "req-4",
@@ -143,7 +131,7 @@ describe("MachineDetailPage Settings tab (edit machine)", () => {
 	});
 
 	it("hides the edit form for read-permission users", async () => {
-		await renderSettingsTab({ ...machineFixture, permission: "read" });
+		await renderSettingsTab(machineFixture({ permission: "read" }));
 
 		expect(screen.queryByLabelText(/^name/i)).not.toBeInTheDocument();
 		expect(screen.queryByTestId("machine-form-submit")).not.toBeInTheDocument();

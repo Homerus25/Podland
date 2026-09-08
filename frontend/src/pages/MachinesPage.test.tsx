@@ -3,27 +3,12 @@ import { screen } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
-// Mirrors GET /api/machines item shape
-// (backend/internal/domain/machines/service.go MachineResponse +
-// doku/description_machines_api.md).
 const machinesFixture: Machine[] = [
-	{
-		id: "m-1",
-		name: "prod-web-01",
-		description: "Production web server",
-		hostname: "web01.example.com",
-		port: 22,
-		sshUsername: "deploy",
-		sshKeyFingerprint: "SHA256:aaa",
-		podmanSocketPath: "/run/podman/podman.sock",
-		ownerId: "u-owner",
-		permission: "admin",
-		createdAt: "2026-08-01T10:00:00Z",
-		updatedAt: "2026-08-01T10:00:00Z",
-	},
-	{
+	machineFixture(),
+	machineFixture({
 		id: "m-2",
 		name: "ci-runner",
 		description: "Shared CI runner",
@@ -31,12 +16,10 @@ const machinesFixture: Machine[] = [
 		port: 2222,
 		sshUsername: "ci",
 		sshKeyFingerprint: "SHA256:bbb",
-		podmanSocketPath: "/run/podman/podman.sock",
-		ownerId: "u-owner",
 		permission: "read",
 		createdAt: "2026-08-02T10:00:00Z",
 		updatedAt: "2026-08-02T10:00:00Z",
-	},
+	}),
 ];
 
 function machinesHandler(body: Machine[], status = 200) {

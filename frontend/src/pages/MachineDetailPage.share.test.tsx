@@ -1,29 +1,11 @@
-import type {
-	AccessGrant,
-	Machine,
-	MachinePermission,
-} from "@shared/types/api";
+import type { AccessGrant, MachinePermission } from "@shared/types/api";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
-
-const machineFixture: Machine = {
-	id: "m-1",
-	name: "prod-web-01",
-	description: "Production web server",
-	hostname: "web01.example.com",
-	port: 22,
-	sshUsername: "deploy",
-	sshKeyFingerprint: "SHA256:aaa",
-	podmanSocketPath: "/run/podman/podman.sock",
-	ownerId: "u-owner",
-	permission: "admin",
-	createdAt: "2026-08-01T10:00:00Z",
-	updatedAt: "2026-08-01T10:00:00Z",
-};
 
 const defaultGrants: AccessGrant[] = [
 	{ userId: "u-owner", permission: "admin", grantedAt: "2026-08-01T10:00:00Z" },
@@ -66,7 +48,7 @@ async function renderSharingSection(permission: MachinePermission = "admin") {
 			return new HttpResponse(null, { status: 204 });
 		}),
 	);
-	const machine = { ...machineFixture, permission };
+	const machine = machineFixture({ permission });
 	server.use(http.get("*/api/machines/m-1", () => HttpResponse.json(machine)));
 	renderApp("/machines/m-1", {
 		resolveInitialState: async () => ({ username: "alice" }),
