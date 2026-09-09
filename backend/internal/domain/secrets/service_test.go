@@ -26,27 +26,29 @@ import (
 // connections.Manager seam and pinned once in the connections package
 // tests — not re-pinned per service method here.
 
-// TestNewSecretService_WithMockConnManager verifies that SecretService can be
-// constructed with a mock connections.Manager, enabling unit testing.
-func TestNewSecretService_WithMockConnManager(t *testing.T) {
+// TestNewSecretService_WithEngineProvider verifies that SecretService can
+// be constructed with the production engine provider, enabling unit testing.
+func TestNewSecretService_WithEngineProvider(t *testing.T) {
 	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
 
-	service := NewSecretService(mockConnManager, testutils.NewMockMachineAccessRepository())
+	service := NewSecretService(NewSecretEngineProvider(mockConnManager), testutils.NewMockMachineAccessRepository())
 
 	assert.NotNil(t, service)
-	assert.NotNil(t, service.conn)
+	assert.NotNil(t, service.engines)
 }
 
 // --- Service seam: List through a fake podman service API ---
 //
 // The bindings boundary (go.podman.io/podman/v6/pkg/bindings/secrets) is a
 // package-level function that talks HTTP to whatever *bindings.Connection
-// the tunnel context carries, so the deepest seam a unit test can reach is
-// a fake podman HTTP server: the stub connection manager hands back a
-// context built by bindings.NewConnection against the fake, and the fake
-// answers the real endpoints (/_ping and /libpod/secrets/json) with podman's
-// real wire shape. That lets the tests below assert both the bindings
-// invocation and the entity→DTO mapping without a real machine.
+// the tunnel context carries, and the production engine adapter owns those
+// calls. So the widest behaviour test routes the service through the
+// production adapter over a stub connection manager and a fake podman HTTP
+// server: the fake answers the real endpoints (/_ping and
+// /libpod/secrets/json) with podman's real wire shape. That lets the tests
+// below assert both the adapter's wire behaviour and the entity→DTO
+// mapping without a real machine. The pure service-side mapping/acquire
+// rules are pinned against the fake engine in engine_fake_test.go.
 
 // fakePodman is a stand-in podman service API. It records every request it
 // serves so tests can assert what the bindings layer actually sent.
@@ -183,7 +185,7 @@ func TestSecretService_List_CallsBindingsAndMaps(t *testing.T) {
 	fake, server := newFakePodmanServer(t, secretsJSON)
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
 	accessRepo := testutils.NewMockMachineAccessRepository()
-	service := NewSecretService(connManager, accessRepo)
+	service := NewSecretService(NewSecretEngineProvider(connManager), accessRepo)
 
 	result, err := service.List(context.Background(), "test-user", "test-machine")
 
@@ -222,7 +224,7 @@ func TestSecretService_List_CallsBindingsAndMaps(t *testing.T) {
 func TestSecretService_List_EmptyMachineReturnsEmptyList(t *testing.T) {
 	fake, server := newFakePodmanServer(t, `[]`)
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
-	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+	service := NewSecretService(NewSecretEngineProvider(connManager), testutils.NewMockMachineAccessRepository())
 
 	result, err := service.List(context.Background(), "test-user", "test-machine")
 
@@ -276,7 +278,7 @@ func TestSecretService_Get_MetadataOnly(t *testing.T) {
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
 	accessRepo := testutils.NewMockMachineAccessRepository()
 	accessRepo.AddAccess("test-machine", "reader-1", models.PermissionRead, time.Now())
-	service := NewSecretService(connManager, accessRepo)
+	service := NewSecretService(NewSecretEngineProvider(connManager), accessRepo)
 
 	result, err := service.Get(context.Background(), "reader-1", "test-machine", "db-password", false)
 
@@ -327,7 +329,7 @@ func TestSecretService_Get_AdminRevealReturnsValue(t *testing.T) {
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
 	accessRepo := testutils.NewMockMachineAccessRepository()
 	accessRepo.AddAccess("test-machine", "admin-1", models.PermissionAdmin, time.Now())
-	service := NewSecretService(connManager, accessRepo)
+	service := NewSecretService(NewSecretEngineProvider(connManager), accessRepo)
 
 	result, err := service.Get(context.Background(), "admin-1", "test-machine", "db-password", true)
 
@@ -368,7 +370,7 @@ func TestSecretService_Get_RevealBelowAdminIsDenied(t *testing.T) {
 			if tt.level != "" {
 				accessRepo.AddAccess("test-machine", "caller-1", tt.level, time.Now())
 			}
-			service := NewSecretService(connManager, accessRepo)
+			service := NewSecretService(NewSecretEngineProvider(connManager), accessRepo)
 
 			result, err := service.Get(context.Background(), "caller-1", "test-machine", "db-password", true)
 
@@ -393,7 +395,7 @@ func TestSecretService_Get_RevealPermissionLookupFailure(t *testing.T) {
 	_, server := newSecretInspectServer(t, http.StatusOK, `{}`)
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
 	accessRepo := testutils.NewMockMachineAccessRepository().WithGetPermissionError(errors.New("db down"))
-	service := NewSecretService(connManager, accessRepo)
+	service := NewSecretService(NewSecretEngineProvider(connManager), accessRepo)
 
 	result, err := service.Get(context.Background(), "caller-1", "test-machine", "db-password", true)
 
@@ -412,7 +414,7 @@ func TestSecretService_Get_UnknownSecretIsNotFound(t *testing.T) {
 	t.Run("metadata inspect", func(t *testing.T) {
 		_, server := newSecretInspectServer(t, http.StatusNotFound, notFoundBody)
 		connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
-		service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+		service := NewSecretService(NewSecretEngineProvider(connManager), testutils.NewMockMachineAccessRepository())
 
 		result, err := service.Get(context.Background(), "reader-1", "test-machine", "nope", false)
 
@@ -427,7 +429,7 @@ func TestSecretService_Get_UnknownSecretIsNotFound(t *testing.T) {
 		connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
 		accessRepo := testutils.NewMockMachineAccessRepository()
 		accessRepo.AddAccess("test-machine", "admin-1", models.PermissionAdmin, time.Now())
-		service := NewSecretService(connManager, accessRepo)
+		service := NewSecretService(NewSecretEngineProvider(connManager), accessRepo)
 
 		result, err := service.Get(context.Background(), "admin-1", "test-machine", "nope", true)
 
@@ -444,7 +446,7 @@ func TestSecretService_Get_OtherPodmanErrorsStayGeneric(t *testing.T) {
 	_, server := newSecretInspectServer(t, http.StatusInternalServerError,
 		`{"cause":"boom","message":"internal podman error","response":500}`)
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
-	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+	service := NewSecretService(NewSecretEngineProvider(connManager), testutils.NewMockMachineAccessRepository())
 
 	result, err := service.Get(context.Background(), "reader-1", "test-machine", "db-password", false)
 
@@ -496,7 +498,7 @@ func newSecretCreateServer(t *testing.T, status int, body string) (*fakePodman, 
 func TestSecretService_Create_SendsNameAndByteIdenticalBody(t *testing.T) {
 	fake, server := newSecretCreateServer(t, http.StatusOK, `{"ID":"3f2e1d0c"}`)
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
-	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+	service := NewSecretService(NewSecretEngineProvider(connManager), testutils.NewMockMachineAccessRepository())
 
 	value := "  padded value \nwith embedded newline\n"
 	result, err := service.Create(context.Background(), "writer-1", "test-machine",
@@ -536,7 +538,7 @@ func TestSecretService_Create_DuplicateNameIsConflict(t *testing.T) {
 	_, server := newSecretCreateServer(t, http.StatusInternalServerError,
 		`{"cause":"secret name in use","message":"db-password: secret name in use","response":500}`)
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
-	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+	service := NewSecretService(NewSecretEngineProvider(connManager), testutils.NewMockMachineAccessRepository())
 
 	result, err := service.Create(context.Background(), "writer-1", "test-machine",
 		SecretCreateRequest{Name: "db-password", Value: "hunter2"})
@@ -556,7 +558,7 @@ func TestSecretService_Create_OtherPodmanErrorsAreCreationFailed(t *testing.T) {
 	_, server := newSecretCreateServer(t, http.StatusInternalServerError,
 		`{"cause":"boom","message":"internal podman error","response":500}`)
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
-	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+	service := NewSecretService(NewSecretEngineProvider(connManager), testutils.NewMockMachineAccessRepository())
 
 	result, err := service.Create(context.Background(), "writer-1", "test-machine",
 		SecretCreateRequest{Name: "db-password", Value: "hunter2"})
@@ -647,7 +649,7 @@ func newSecretDeleteServer(t *testing.T, status int, body string) (*fakePodman, 
 func TestSecretService_Delete_Success(t *testing.T) {
 	fake, server := newSecretDeleteServer(t, http.StatusNoContent, "")
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
-	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+	service := NewSecretService(NewSecretEngineProvider(connManager), testutils.NewMockMachineAccessRepository())
 
 	err := service.Delete(context.Background(), "writer-1", "test-machine", "db-password")
 
@@ -671,7 +673,7 @@ func TestSecretService_Delete_UnknownSecretIsNotFound(t *testing.T) {
 	notFoundBody := `{"cause":"no such secret","message":"no such secret with name or id \"nope\"","response":404}`
 	_, server := newSecretDeleteServer(t, http.StatusNotFound, notFoundBody)
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
-	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+	service := NewSecretService(NewSecretEngineProvider(connManager), testutils.NewMockMachineAccessRepository())
 
 	err := service.Delete(context.Background(), "writer-1", "test-machine", "nope")
 
@@ -689,7 +691,7 @@ func TestSecretService_Delete_InUseConflict(t *testing.T) {
 	inUseBody := `{"cause":"secret in use","message":"secret \"db-password\" is in use by container 3f2e1d0c","response":500}`
 	_, server := newSecretDeleteServer(t, http.StatusInternalServerError, inUseBody)
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
-	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+	service := NewSecretService(NewSecretEngineProvider(connManager), testutils.NewMockMachineAccessRepository())
 
 	err := service.Delete(context.Background(), "writer-1", "test-machine", "db-password")
 
@@ -708,7 +710,7 @@ func TestSecretService_Delete_OtherPodmanErrorsStayGeneric(t *testing.T) {
 	_, server := newSecretDeleteServer(t, http.StatusInternalServerError,
 		`{"cause":"boom","message":"internal podman error","response":500}`)
 	connManager := &stubConnManager{connCtx: tunnelCtxTo(t, server)}
-	service := NewSecretService(connManager, testutils.NewMockMachineAccessRepository())
+	service := NewSecretService(NewSecretEngineProvider(connManager), testutils.NewMockMachineAccessRepository())
 
 	err := service.Delete(context.Background(), "writer-1", "test-machine", "db-password")
 

@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
-	podmanSecrets "go.podman.io/podman/v6/pkg/bindings/secrets"
 )
 
 // Compile-time check that *SecretService satisfies SecretServiceInterface.
@@ -38,21 +35,23 @@ type accessPermissionGetter interface {
 // SecretService provides business logic for secrets. Secrets live only in
 // the remote machine's podman; this service proxies podman directly and
 // persists nothing locally, matching ContainerService/ImageService/
-// QuadletService.
+// QuadletService. Every machine-scoped podman call crosses the
+// SecretEngineProvider (the connection seam); the service itself owns only
+// domain mapping and the reveal gate.
 type SecretService struct {
-	conn connections.Manager
+	engines SecretEngineProvider
 	// accessRepo resolves the caller's permission level for the
 	// admin-only value reveal (?reveal=true): the gate is a query param,
 	// not a separate route, so it cannot ride on route-level middleware.
 	accessRepo accessPermissionGetter
 }
 
-// NewSecretService creates a new SecretService with the given connection
-// manager interface and machine-access repository (permission lookup for
-// the admin-only reveal).
-func NewSecretService(conn connections.Manager, accessRepo accessPermissionGetter) *SecretService {
+// NewSecretService creates a new SecretService with the given engine
+// provider and machine-access repository (permission lookup for the
+// admin-only reveal).
+func NewSecretService(engines SecretEngineProvider, accessRepo accessPermissionGetter) *SecretService {
 	return &SecretService{
-		conn:       conn,
+		engines:    engines,
 		accessRepo: accessRepo,
 	}
 }
@@ -60,8 +59,8 @@ func NewSecretService(conn connections.Manager, accessRepo accessPermissionGette
 // List returns the metadata of the secrets on the specified machine.
 func (s *SecretService) List(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
 	var response []SecretListResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "secrets.List", func(connCtx context.Context) error {
-		reports, err := podmanSecrets.List(connCtx, nil)
+	err := s.engines.WithEngine(ctx, userID, machineID, "secrets.List", func(e SecretEngine) error {
+		reports, err := e.List()
 		if err != nil {
 			return fmt.Errorf("failed to list secrets: %w", err)
 		}
@@ -97,13 +96,8 @@ func (s *SecretService) Get(ctx context.Context, userID, machineID, secretID str
 	}
 
 	var response *SecretInspectResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "secrets.Get", func(connCtx context.Context) error {
-		opts := new(podmanSecrets.InspectOptions)
-		if reveal {
-			opts = opts.WithShowSecret(true)
-		}
-
-		report, err := podmanSecrets.Inspect(connCtx, secretID, opts)
+	err := s.engines.WithEngine(ctx, userID, machineID, "secrets.Get", func(e SecretEngine) error {
+		report, err := e.Inspect(secretID, reveal)
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrSecretNotFound
@@ -127,9 +121,9 @@ func (s *SecretService) Get(ctx context.Context, userID, machineID, secretID str
 }
 
 // Create installs a new secret on the specified machine. Podman takes the
-// secret's value as the raw request body reader and the name in options
-// (secrets.Create), so the value is handed over via strings.NewReader —
-// byte-identical, never trimmed — under the file driver with no labels
+// secret's value as the raw request body reader (wired inside the engine
+// adapter) and the name in options, so the value reaches podman
+// byte-identical — never trimmed — under the file driver with no labels
 // (v1 ruling: driver/labels deferred). The response carries only the
 // created ID. A duplicate name surfaces as ErrSecretAlreadyExists (podman
 // reports the conflict as a 500 ErrorModel whose cause carries the common
@@ -139,10 +133,8 @@ func (s *SecretService) Get(ctx context.Context, userID, machineID, secretID str
 // log statement on this path.
 func (s *SecretService) Create(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
 	var response *SecretCreateResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "secrets.Create", func(connCtx context.Context) error {
-		opts := new(podmanSecrets.CreateOptions).WithName(req.Name)
-
-		report, err := podmanSecrets.Create(connCtx, strings.NewReader(req.Value), opts)
+	err := s.engines.WithEngine(ctx, userID, machineID, "secrets.Create", func(e SecretEngine) error {
+		report, err := e.Create(req.Name, req.Value)
 		if err != nil {
 			if podmanerr.IsAlreadyExists(err) {
 				return appErrors.ErrSecretAlreadyExists
@@ -176,8 +168,8 @@ func (s *SecretService) Create(ctx context.Context, userID, machineID string, re
 // Podman answers 204 with no body on success, and the API's response body
 // is empty too — the frontend series (170) invalidates the list on the 204.
 func (s *SecretService) Delete(ctx context.Context, userID, machineID, secretID string) error {
-	return s.conn.WithConnection(ctx, userID, machineID, "secrets.Delete", func(connCtx context.Context) error {
-		if err := podmanSecrets.Remove(connCtx, secretID); err != nil {
+	return s.engines.WithEngine(ctx, userID, machineID, "secrets.Delete", func(e SecretEngine) error {
+		if err := e.Remove(secretID); err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrSecretNotFound
 			}
