@@ -4,28 +4,53 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/libpod/define"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// TestContainerService_Get_Success tests successful container retrieval
-func TestContainerService_Get_Success(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	containerID := "container-123"
+func TestContainerService_Get_ReturnsInspectReport(t *testing.T) {
+	report := &entities.ContainerInspectReport{InspectContainerData: &define.InspectContainerData{Name: "web"}}
+	engine := &fakeContainerEngine{
+		inspectFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
+			return []*entities.ContainerInspectReport{report}, nil, nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	// Setup mock dependencies
-	mockConnManager := testutils.NewMockConnectionManager()
-	service := NewContainerService(mockConnManager)
+	got, err := service.Get(context.Background(), "user", "machine", "container-123")
 
-	// Test that the service properly handles container inspection
-	t.Run("container inspection error", func(t *testing.T) {
-		// This would require more complex mocking of the ContainerEngine
-		// For now, we'll just verify the basic structure works
-		_, err := service.Get(ctx, userID, machineID, containerID)
-		// This will fail because we can't easily mock the ContainerEngine creation
-		// but that's expected for this unit test
-		assert.Error(t, err, "Expected error due to mock limitations")
-	})
+	require.NoError(t, err)
+	assert.Same(t, report, got)
+}
+
+func TestContainerService_Get_MissingContainerIsAnError(t *testing.T) {
+	engine := &fakeContainerEngine{
+		inspectFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
+			return nil, nil, nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Get(context.Background(), "user", "machine", "container-123")
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "no container found with ID: container-123")
+}
+
+func TestContainerService_Get_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeContainerEngine{
+		inspectFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
+			return nil, nil, assert.AnError
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Get(context.Background(), "user", "machine", "container-123")
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "failed to inspect container")
 }

@@ -1,138 +1,144 @@
 package containers
 
 import (
-	"bytes"
 	"context"
+	"net/http"
 	"testing"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
-	"github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/Homerus25/podland/backend/internal/testutils"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/pkg/domain/entities"
+	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// TestContainerService_GetLogs_Success tests successful log retrieval
-func TestContainerService_GetLogs_Success(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	containerID := "container-123"
+// Service behaviour tests for the two logs modes: one-shot (GetLogs
+// concatenates stdout+stderr) and follow (GetLogsWithStream converts each
+// line to an event via the writers it hands the engine).
 
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewContainerService(mockConnManager)
+func TestContainerService_GetLogs_CombinesStdoutAndStderr(t *testing.T) {
+	engine := &fakeContainerEngine{
+		logsFn: func(_ string, opts entities.ContainerLogsOptions) error {
+			writeLogsInto(opts, "out line\n", "err line\n")
+			return nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	t.Run("container not found error", func(t *testing.T) {
-		// This would require mocking the ContainerEngine to return "no such container" error
-		// For now, we'll verify the service structure handles error cases
-		_, err := service.GetLogs(ctx, userID, machineID, containerID, time.Time{}, 0)
-		// This will fail because we can't easily mock the ContainerEngine creation
-		assert.Error(t, err, "Expected error due to mock limitations")
-	})
+	got, err := service.GetLogs(context.Background(), "user", "machine", "container-123", time.Time{}, 0)
 
-	t.Run("missing parameters", func(t *testing.T) {
-		testCases := []struct {
-			name        string
-			userID      string
-			machineID   string
-			containerID string
-		}{
-			{"missing userID", "", machineID, containerID},
-			{"missing machineID", userID, "", containerID},
-			{"missing containerID", userID, machineID, ""},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				result, err := service.GetLogs(ctx, tc.userID, tc.machineID, tc.containerID, time.Time{}, 0)
-
-				assert.Error(t, err, "Should return error for missing parameters")
-				assert.Contains(t, err.Error(), "required", "Error should mention required parameter")
-				assert.Nil(t, result, "Should return nil result when parameters are missing")
-			})
-		}
-	})
-
-	t.Run("service structure validation", func(t *testing.T) {
-		// Verify that GetLogs method exists on service
-		assert.NotNil(t, service.GetLogs, "GetLogs method should exist on service")
-
-		// Verify that ContainerLogsResponse DTO exists
-		response := &ContainerLogsResponse{
-			ID:   "test-container",
-			Logs: "test log line",
-		}
-		assert.Equal(t, "test-container", response.ID, "ContainerLogsResponse ID should be settable")
-		assert.Equal(t, "test log line", response.Logs, "ContainerLogsResponse Logs should be settable")
-	})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "container-123", got.ID)
+	assert.Equal(t, "out line\nerr line", got.Logs, "stdout comes first, stderr appended, trailing newline trimmed")
 }
 
-// TestContainerService_GetLogs_ErrorMapping tests error mapping
-func TestContainerService_GetLogs_ErrorMapping(t *testing.T) {
-	// Verify that ErrContainerNotFound exists and has correct status
-	t.Run("verify error constants", func(t *testing.T) {
-		assert.NotNil(t, errors.ErrContainerNotFound, "ErrContainerNotFound should be defined")
-		assert.Equal(t, "CONTAINER_NOT_FOUND", errors.ErrContainerNotFound.Code, "Error code should match")
-		assert.Equal(t, 404, errors.ErrContainerNotFound.Status, "Status should be 404")
-	})
+func TestContainerService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
+	engine := &fakeContainerEngine{
+		logsFn: func(string, entities.ContainerLogsOptions) error {
+			return &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	got, err := service.GetLogs(context.Background(), "user", "machine", "container-123", time.Time{}, 0)
+
+	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
+	assert.Nil(t, got)
 }
 
-// TestContainerService_GetLogs_Parameters tests parameter handling
-func TestContainerService_GetLogs_Parameters(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	containerID := "container-123"
+func TestContainerService_GetLogs_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeContainerEngine{
+		logsFn: func(string, entities.ContainerLogsOptions) error {
+			return assert.AnError
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewContainerService(mockConnManager)
+	got, err := service.GetLogs(context.Background(), "user", "machine", "container-123", time.Time{}, 0)
 
-	t.Run("since parameter", func(t *testing.T) {
-		since := time.Now().Add(-1 * time.Hour)
-		result, err := service.GetLogs(ctx, userID, machineID, containerID, since, 0)
-
-		// This will fail due to mock limitations, but we can verify parameters are passed
-		assert.Error(t, err, "Expected error due to mock limitations")
-		assert.Nil(t, result, "Should return nil result due to mock limitations")
-	})
-
-	t.Run("tail parameter", func(t *testing.T) {
-		tail := int64(100)
-		result, err := service.GetLogs(ctx, userID, machineID, containerID, time.Time{}, tail)
-
-		// This will fail due to mock limitations, but we can verify parameters are passed
-		assert.Error(t, err, "Expected error due to mock limitations")
-		assert.Nil(t, result, "Should return nil result due to mock limitations")
-	})
-
-	t.Run("both parameters", func(t *testing.T) {
-		since := time.Now().Add(-1 * time.Hour)
-		tail := int64(100)
-		result, err := service.GetLogs(ctx, userID, machineID, containerID, since, tail)
-
-		// This will fail due to mock limitations, but we can verify parameters are passed
-		assert.Error(t, err, "Expected error due to mock limitations")
-		assert.Nil(t, result, "Should return nil result due to mock limitations")
-	})
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "failed to get container logs")
 }
 
-// TestContainerService_GetLogs_Buffers tests buffer handling
-func TestContainerService_GetLogs_Buffers(t *testing.T) {
-	t.Run("buffer initialization", func(t *testing.T) {
-		// Verify that bytes.Buffer is available for capturing logs
-		var stdoutBuffer, stderrBuffer bytes.Buffer
+func TestContainerService_GetLogs_MissingParameters(t *testing.T) {
+	cases := []struct {
+		name        string
+		userID      string
+		machineID   string
+		containerID string
+	}{
+		{"missing userID", "", "machine", "c-1"},
+		{"missing machineID", "user", "", "c-1"},
+		{"missing containerID", "user", "machine", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The engine stays unarmed: a refused call must not reach podman.
+			service := NewContainerService(fakeEngineProvider{engine: &fakeContainerEngine{}})
 
-		testLog := "test log line"
-		stdoutBuffer.WriteString(testLog)
-		stderrBuffer.WriteString(testLog)
+			result, err := service.GetLogs(context.Background(), tc.userID, tc.machineID, tc.containerID, time.Time{}, 0)
 
-		assert.Equal(t, testLog, stdoutBuffer.String(), "Stdout buffer should capture logs")
-		assert.Equal(t, testLog, stderrBuffer.String(), "Stderr buffer should capture logs")
+			assert.Error(t, err, "Should return error for missing parameters")
+			assert.Contains(t, err.Error(), "required", "Error should mention required parameter")
+			assert.Nil(t, result, "Should return nil result when parameters are missing")
+		})
+	}
+}
 
-		// Test buffer trimming
-		combinedLogs := stdoutBuffer.String()
-		trimmedBytes := bytes.TrimSuffix(stdoutBuffer.Bytes(), []byte("\n"))
-		combinedLogs = string(trimmedBytes)
-		assert.Equal(t, testLog, string(combinedLogs), "Buffer trimming should work correctly")
-	})
+func TestContainerService_GetLogsWithStream_EmitsEventsPerLine(t *testing.T) {
+	var events []ContainerLogEvent
+	engine := &fakeContainerEngine{
+		logsFn: func(_ string, opts entities.ContainerLogsOptions) error {
+			// Podman prefixes each follow line with its timestamp.
+			writeLogsInto(opts,
+				"2026-09-01T10:00:00.000000000Z hello\n",
+				"2026-09-01T10:00:01.000000000Z broke\n")
+			return nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	err := service.GetLogsWithStream(context.Background(), "user", "machine", "container-123", time.Time{}, 0,
+		func(event ContainerLogEvent) { events = append(events, event) })
+
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, "INFO", events[0].Level)
+	assert.Equal(t, "hello", events[0].Message, "the podman timestamp must be parsed out of the message")
+	assert.Equal(t, "2026-09-01T10:00:00Z", events[0].Timestamp)
+	assert.Equal(t, "ERROR", events[1].Level, "stderr lines stream at ERROR level")
+	assert.Equal(t, "broke", events[1].Message)
+}
+
+func TestContainerService_GetLogsWithStream_MapsCancellationToOperationCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	engine := &fakeContainerEngine{
+		logsFn: func(string, entities.ContainerLogsOptions) error {
+			return context.Canceled
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	err := service.GetLogsWithStream(ctx, "user", "machine", "container-123", time.Time{}, 0,
+		func(ContainerLogEvent) {})
+
+	require.ErrorIs(t, err, appErrors.ErrOperationCancelled)
+}
+
+func TestContainerService_GetLogsWithStream_MapsMissingContainerTo404(t *testing.T) {
+	engine := &fakeContainerEngine{
+		logsFn: func(string, entities.ContainerLogsOptions) error {
+			return &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	err := service.GetLogsWithStream(context.Background(), "user", "machine", "container-123", time.Time{}, 0,
+		func(ContainerLogEvent) {})
+
+	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 }

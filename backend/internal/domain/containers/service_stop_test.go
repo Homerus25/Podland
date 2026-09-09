@@ -4,8 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/libpod/define"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // TestContainerService_Stop_MissingParameters tests that Stop validates input parameters
@@ -15,8 +17,8 @@ func TestContainerService_Stop_MissingParameters(t *testing.T) {
 	machineID := "test-machine"
 	containerID := "container-123"
 
-	mockConnManager := testutils.NewMockConnectionManager()
-	service := NewContainerService(mockConnManager)
+	// The engine stays unarmed: a refused call must not reach podman.
+	service := NewContainerService(fakeEngineProvider{engine: &fakeContainerEngine{}})
 
 	t.Run("empty userID", func(t *testing.T) {
 		result, err := service.Stop(ctx, "", machineID, containerID)
@@ -40,17 +42,37 @@ func TestContainerService_Stop_MissingParameters(t *testing.T) {
 	})
 }
 
-// TestContainerService_Stop_Success tests successful container stop (integration style)
-func TestContainerService_Stop_Success(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	containerID := "container-123"
+func TestContainerService_Stop_ReportsStoppedWithResolvedName(t *testing.T) {
+	engine := &fakeContainerEngine{
+		stopFn: func(string) ([]*entities.StopReport, error) {
+			return []*entities.StopReport{{Id: "container-123"}}, nil
+		},
+		inspectFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
+			return []*entities.ContainerInspectReport{{InspectContainerData: &define.InspectContainerData{Name: "/web"}}}, nil, nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	mockConnManager := testutils.NewMockConnectionManager()
-	service := NewContainerService(mockConnManager)
+	got, err := service.Stop(context.Background(), "user", "machine", "container-123")
 
-	_, err := service.Stop(ctx, userID, machineID, containerID)
-	// This will error due to mock limitations, but validates the structure
-	assert.Error(t, err, "Expected error due to mock limitations")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "container-123", got.ID)
+	assert.Equal(t, "web", got.Name, "the leading slash must be trimmed from podman's name")
+	assert.Equal(t, "stopped", got.State)
+}
+
+func TestContainerService_Stop_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeContainerEngine{
+		stopFn: func(string) ([]*entities.StopReport, error) {
+			return nil, assert.AnError
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Stop(context.Background(), "user", "machine", "container-123")
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "failed to stop container")
 }

@@ -8,11 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"go.podman.io/podman/v6/pkg/domain/entities"
-	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 	"go.podman.io/podman/v6/pkg/specgen"
 )
 
@@ -29,27 +27,26 @@ type ContainerServiceInterface interface {
 	GetLogsWithStream(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64, logCallback func(event ContainerLogEvent)) error
 }
 
-// ContainerService provides business logic for containers
+// ContainerService provides business logic for containers. Every
+// machine-scoped podman call crosses the ContainerEngineProvider (the
+// connection seam); the service itself owns only domain mapping,
+// composition, and the log-line event conversion.
 type ContainerService struct {
-	conn connections.Manager
+	engines ContainerEngineProvider
 }
 
 // NewContainerService creates a new ContainerService
-func NewContainerService(conn connections.Manager) *ContainerService {
+func NewContainerService(engines ContainerEngineProvider) *ContainerService {
 	return &ContainerService{
-		conn: conn,
+		engines: engines,
 	}
 }
 
 // List returns a list of containers on the specified machine
 func (s *ContainerService) List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error) {
 	var containers []entities.ListContainer
-	err := s.conn.WithConnection(ctx, userID, machineID, "containers.List", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		list, err := containerEngine.ContainerList(ctx, opts)
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.List", func(e ContainerEngine) error {
+		list, err := e.List(opts)
 		if err != nil {
 			return fmt.Errorf("failed to list containers: %w", err)
 		}
@@ -62,11 +59,7 @@ func (s *ContainerService) List(ctx context.Context, userID, machineID string, o
 // Create creates a new container on the specified machine
 func (s *ContainerService) Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*ContainerCreateResponse, error) {
 	var response *ContainerCreateResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "containers.Create", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Create", func(e ContainerEngine) error {
 		// Create a basic spec generator with the image
 		spec := specgen.NewSpecGenerator(request.Image, false)
 
@@ -106,7 +99,7 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 		// These can be added in a future enhancement.
 
 		// Create the container using Podman API
-		createResponse, err := containerEngine.ContainerCreate(ctx, spec)
+		createResponse, err := e.Create(spec)
 		if err != nil {
 			return fmt.Errorf("failed to create container: %w", err)
 		}
@@ -129,13 +122,9 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 // Get returns detailed information about a specific container
 func (s *ContainerService) Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
 	var report *entities.ContainerInspectReport
-	err := s.conn.WithConnection(ctx, userID, machineID, "containers.Get", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Get", func(e ContainerEngine) error {
 		// Call the official podman ContainerInspect method
-		containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
+		containerReports, _, err := e.Inspect(containerID)
 		if err != nil {
 			return fmt.Errorf("failed to inspect container: %w", err)
 		}
@@ -171,12 +160,8 @@ func (s *ContainerService) Start(ctx context.Context, userID, machineID, contain
 	}
 
 	var response *ContainerStartResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "containers.Start", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		startReports, err := containerEngine.ContainerStart(ctx, []string{containerID}, entities.ContainerStartOptions{})
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Start", func(e ContainerEngine) error {
+		startReports, err := e.Start(containerID)
 		if err != nil {
 			return fmt.Errorf("failed to start container: %w", err)
 		}
@@ -185,7 +170,7 @@ func (s *ContainerService) Start(ctx context.Context, userID, machineID, contain
 			return fmt.Errorf("no start report returned for container: %s", containerID)
 		}
 
-		containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
+		containerReports, _, err := e.Inspect(containerID)
 		containerName := containerID
 		if err == nil && len(containerReports) > 0 {
 			if len(containerReports[0].Name) > 0 {
@@ -211,12 +196,8 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 	}
 
 	var response *ContainerStopResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "containers.Stop", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		stopReports, err := containerEngine.ContainerStop(ctx, []string{containerID}, entities.StopOptions{})
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Stop", func(e ContainerEngine) error {
+		stopReports, err := e.Stop(containerID)
 		if err != nil {
 			return fmt.Errorf("failed to stop container: %w", err)
 		}
@@ -225,7 +206,7 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 			return fmt.Errorf("no stop report returned for container: %s", containerID)
 		}
 
-		containerReports, _, err := containerEngine.ContainerInspect(ctx, []string{containerID}, entities.InspectOptions{})
+		containerReports, _, err := e.Inspect(containerID)
 		containerName := containerID
 		if err == nil && len(containerReports) > 0 {
 			if len(containerReports[0].Name) > 0 {
@@ -251,14 +232,8 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 		return err
 	}
 
-	return s.conn.WithConnection(ctx, userID, machineID, "containers.Delete", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		rmReports, err := containerEngine.ContainerRm(ctx, []string{containerID}, entities.RmOptions{
-			Force: force,
-		})
+	return s.engines.WithEngine(ctx, userID, machineID, "containers.Delete", func(e ContainerEngine) error {
+		rmReports, err := e.Remove(containerID, force)
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrContainerNotFound
@@ -288,11 +263,7 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 	}
 
 	var response *ContainerLogsResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "containers.GetLogs", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.GetLogs", func(e ContainerEngine) error {
 		// Prepare buffers for stdout and stderr
 		var stdoutBuffer, stderrBuffer bytes.Buffer
 
@@ -309,7 +280,7 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 		logsOpts.StderrWriter = &stderrBuffer
 
 		// Fetch logs from container
-		err := containerEngine.ContainerLogs(ctx, []string{containerID}, logsOpts)
+		err := e.Logs(containerID, logsOpts)
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrContainerNotFound
@@ -344,11 +315,7 @@ func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machin
 		return err
 	}
 
-	return s.conn.WithConnection(ctx, userID, machineID, "containers.GetLogsWithStream", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
+	return s.engines.WithEngine(ctx, userID, machineID, "containers.GetLogsWithStream", func(e ContainerEngine) error {
 		// Set up container logs options for streaming
 		logsOpts := entities.ContainerLogsOptions{
 			Follow:     true,
@@ -374,7 +341,7 @@ func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machin
 		logsOpts.StderrWriter = stderrWriter
 
 		// Fetch logs from container (this will block until follow ends or context is cancelled)
-		err := containerEngine.ContainerLogs(ctx, []string{containerID}, logsOpts)
+		err := e.Logs(containerID, logsOpts)
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrContainerNotFound

@@ -4,8 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/libpod/define"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // TestContainerService_Start_MissingParameters tests that Start validates input parameters
@@ -15,8 +17,8 @@ func TestContainerService_Start_MissingParameters(t *testing.T) {
 	machineID := "test-machine"
 	containerID := "container-123"
 
-	mockConnManager := testutils.NewMockConnectionManager()
-	service := NewContainerService(mockConnManager)
+	// The engine stays unarmed: a refused call must not reach podman.
+	service := NewContainerService(fakeEngineProvider{engine: &fakeContainerEngine{}})
 
 	t.Run("empty userID", func(t *testing.T) {
 		result, err := service.Start(ctx, "", machineID, containerID)
@@ -40,17 +42,38 @@ func TestContainerService_Start_MissingParameters(t *testing.T) {
 	})
 }
 
-// TestContainerService_Start_Success tests successful container start (integration style)
-func TestContainerService_Start_Success(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	containerID := "container-123"
+func TestContainerService_Start_ReportsRunningWithResolvedName(t *testing.T) {
+	engine := &fakeContainerEngine{
+		startFn: func(string) ([]*entities.ContainerStartReport, error) {
+			return []*entities.ContainerStartReport{{Id: "container-123"}}, nil
+		},
+		inspectFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
+			// Podman reports container names with a leading slash.
+			return []*entities.ContainerInspectReport{{InspectContainerData: &define.InspectContainerData{Name: "/web"}}}, nil, nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	mockConnManager := testutils.NewMockConnectionManager()
-	service := NewContainerService(mockConnManager)
+	got, err := service.Start(context.Background(), "user", "machine", "container-123")
 
-	_, err := service.Start(ctx, userID, machineID, containerID)
-	// This will error due to mock limitations, but validates the structure
-	assert.Error(t, err, "Expected error due to mock limitations")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "container-123", got.ID)
+	assert.Equal(t, "web", got.Name, "the leading slash must be trimmed from podman's name")
+	assert.Equal(t, "running", got.State)
+}
+
+func TestContainerService_Start_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeContainerEngine{
+		startFn: func(string) ([]*entities.ContainerStartReport, error) {
+			return nil, assert.AnError
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Start(context.Background(), "user", "machine", "container-123")
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "failed to start container")
 }

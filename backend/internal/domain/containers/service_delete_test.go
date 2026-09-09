@@ -2,10 +2,14 @@ package containers
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/testutils"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
+	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
 // TestContainerService_Delete_MissingParameters tests that Delete validates input parameters
@@ -15,8 +19,8 @@ func TestContainerService_Delete_MissingParameters(t *testing.T) {
 	machineID := "test-machine"
 	containerID := "container-123"
 
-	mockConnManager := testutils.NewMockConnectionManager()
-	service := NewContainerService(mockConnManager)
+	// The engine stays unarmed: a refused call must not reach podman.
+	service := NewContainerService(fakeEngineProvider{engine: &fakeContainerEngine{}})
 
 	t.Run("empty userID", func(t *testing.T) {
 		err := service.Delete(ctx, "", machineID, containerID, false)
@@ -37,43 +41,62 @@ func TestContainerService_Delete_MissingParameters(t *testing.T) {
 	})
 }
 
-// TestContainerService_Delete_Success tests successful container deletion (integration style)
-func TestContainerService_Delete_Success(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	containerID := "container-123"
+func TestContainerService_Delete_Succeeds(t *testing.T) {
+	var gotForce bool
+	engine := &fakeContainerEngine{
+		removeFn: func(id string, force bool) ([]*reports.RmReport, error) {
+			gotForce = force
+			return []*reports.RmReport{{Id: id}}, nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	mockConnManager := testutils.NewMockConnectionManager()
-	service := NewContainerService(mockConnManager)
+	err := service.Delete(context.Background(), "user", "machine", "container-123", true)
 
-	err := service.Delete(ctx, userID, machineID, containerID, false)
-	// This will error due to mock limitations, but validates the structure
-	assert.Error(t, err, "Expected error due to mock limitations")
+	require.NoError(t, err)
+	assert.True(t, gotForce, "the force flag must reach the engine")
 }
 
-// TestContainerService_Delete_ForceParameter tests that the force parameter is accepted
-func TestContainerService_Delete_ForceParameter(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	containerID := "container-123"
+func TestContainerService_Delete_MapsNotFoundTo404(t *testing.T) {
+	notFound := &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
 
-	t.Run("force=true", func(t *testing.T) {
-		mockConnManager := testutils.NewMockConnectionManager()
-		service := NewContainerService(mockConnManager)
+	t.Run("transport-level refusal", func(t *testing.T) {
+		engine := &fakeContainerEngine{
+			removeFn: func(string, bool) ([]*reports.RmReport, error) {
+				return nil, notFound
+			},
+		}
+		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		err := service.Delete(ctx, userID, machineID, containerID, true)
-		// Error expected due to mock limitations
-		assert.Error(t, err, "Expected error due to mock limitations")
+		err := service.Delete(context.Background(), "user", "machine", "container-123", false)
+
+		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 	})
 
-	t.Run("force=false", func(t *testing.T) {
-		mockConnManager := testutils.NewMockConnectionManager()
-		service := NewContainerService(mockConnManager)
+	t.Run("per-report refusal", func(t *testing.T) {
+		engine := &fakeContainerEngine{
+			removeFn: func(string, bool) ([]*reports.RmReport, error) {
+				return []*reports.RmReport{{Err: notFound}}, nil
+			},
+		}
+		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		err := service.Delete(ctx, userID, machineID, containerID, false)
-		// Error expected due to mock limitations
-		assert.Error(t, err, "Expected error due to mock limitations")
+		err := service.Delete(context.Background(), "user", "machine", "container-123", false)
+
+		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 	})
+}
+
+func TestContainerService_Delete_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeContainerEngine{
+		removeFn: func(string, bool) ([]*reports.RmReport, error) {
+			return nil, assert.AnError
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	err := service.Delete(context.Background(), "user", "machine", "container-123", false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to remove container")
 }
