@@ -3,1451 +3,686 @@ package quadlets
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/libpod/define"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// errGeneric is a non-AppError used to exercise the handler's generic
-// error→500 mapping in TestQuadletHandler_Delete and TestQuadletHandler_Update.
-// The app errors package has no New constructor, so we synthesize a plain error
-// here.
-var errGeneric = fmt.Errorf("boom")
+// newTestHandler builds the handler around the real service running over
+// the given fake engine (and a passing SSH exec, which the lifecycle
+// endpoints run systemctl through). Tests arm only the operations their
+// scenario needs; an unarmed operation panics if the handler reaches it.
+func newTestHandler(engine *fakeQuadletEngine) *QuadletHandler {
+	return NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec()))
+}
+
+// newLifecycleTestHandler builds the handler around the real service whose
+// systemctl runs through the given SSH exec double.
+func newLifecycleTestHandler(engine *fakeQuadletEngine, sshExec sshexec.SSHExecInterface) *QuadletHandler {
+	return NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, sshExec))
+}
+
+// quadletFixture builds a ListQuadlet like podman's list answer: the name,
+// an install path (whose extension drives the resource derivation), and a
+// systemd status string.
+func quadletFixture(name, path, status string) *entities.ListQuadlet {
+	return &entities.ListQuadlet{Name: name, UnitName: unitNameFor(name), Path: path, Status: status}
+}
+
+// unitNameFor derives the systemd unit name the production quadlet list
+// reports for a fixture.
+func unitNameFor(name string) string {
+	if idx := strings.LastIndex(name, "."); idx > 0 {
+		return name[:idx] + ".service"
+	}
+	return name + ".service"
+}
+
+func listFixture() []*entities.ListQuadlet {
+	return []*entities.ListQuadlet{
+		quadletFixture("my-container.container", "/etc/containers/systemd/my-container.container", "running"),
+		quadletFixture("my-pod.pod", "/etc/containers/systemd/my-pod.pod", "stopped"),
+	}
+}
+
+// quadletRequest builds a request carrying the identity and chi URL params
+// the mounted route would extract.
+func quadletRequest(method, target, userID, machineID, quadletID string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, target, body)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", machineID)
+	if quadletID != "" {
+		rctx.URLParams.Add("quadletId", quadletID)
+	}
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, userID)
+	return req.WithContext(ctx)
+}
 
 func TestQuadletHandler_List(t *testing.T) {
 	tests := []struct {
-		name           string
-		userID         string
-		machineID      string
-		queryParams    string
-		mockQuadlets   []QuadletListResponse
-		mockError      error
-		expectedStatus int
-		expectedBody   string
+		name            string
+		queryParams     string
+		machineQuadlets []*entities.ListQuadlet
+		wantIDs         []string
+		expectedStatus  int
 	}{
 		{
-			name:        "successful list",
-			userID:      "user123",
-			machineID:   "machine123",
-			queryParams: "",
-			mockQuadlets: []QuadletListResponse{
-				{
-					ID:       "my-container.container",
-					Name:     "my-container.container",
-					Path:     "/etc/containers/systemd/my-container.container",
-					Unit:     "my-container.service",
-					Resource: "container",
-					State:    "running",
-				},
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `[{"id":"my-container.container","name":"my-container.container","path":"/etc/containers/systemd/my-container.container","unit":"my-container.service","resource":"container","state":"running"}]` + "\n",
+			name:            "successful list",
+			queryParams:     "",
+			machineQuadlets: listFixture(),
+			wantIDs:         []string{"my-container.container", "my-pod.pod"},
+			expectedStatus:  http.StatusOK,
 		},
 		{
-			name:           "successful list empty",
-			userID:         "user123",
-			machineID:      "machine123",
-			queryParams:    "",
-			mockQuadlets:   []QuadletListResponse{},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `[]` + "\n",
+			name:            "successful list empty",
+			queryParams:     "",
+			machineQuadlets: nil,
+			wantIDs:         []string{},
+			expectedStatus:  http.StatusOK,
 		},
 		{
-			name:           "connection failed",
-			userID:         "user123",
-			machineID:      "machine123",
-			queryParams:    "",
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-			expectedBody:   "",
+			name:            "filter by resource",
+			queryParams:     "?resource=container",
+			machineQuadlets: listFixture(),
+			wantIDs:         []string{"my-container.container"},
+			expectedStatus:  http.StatusOK,
 		},
 		{
-			name:        "filter by resource",
-			userID:      "user123",
-			machineID:   "machine123",
-			queryParams: "?resource=container",
-			mockQuadlets: []QuadletListResponse{
-				{
-					ID:       "my-container.container",
-					Name:     "my-container.container",
-					Path:     "/etc/containers/systemd/my-container.container",
-					Unit:     "my-container.service",
-					Resource: "container",
-					State:    "running",
-				},
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `[{"id":"my-container.container","name":"my-container.container","path":"/etc/containers/systemd/my-container.container","unit":"my-container.service","resource":"container","state":"running"}]` + "\n",
-		},
-		{
-			name:        "filter by name",
-			userID:      "user123",
-			machineID:   "machine123",
-			queryParams: "?name=pod",
-			mockQuadlets: []QuadletListResponse{
-				{
-					ID:       "my-pod.pod",
-					Name:     "my-pod.pod",
-					Path:     "/etc/containers/systemd/my-pod.pod",
-					Unit:     "my-pod.service",
-					Resource: "pod",
-					State:    "stopped",
-				},
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `[{"id":"my-pod.pod","name":"my-pod.pod","path":"/etc/containers/systemd/my-pod.pod","unit":"my-pod.service","resource":"pod","state":"stopped"}]` + "\n",
+			name:            "filter by name",
+			queryParams:     "?name=pod",
+			machineQuadlets: listFixture(),
+			wantIDs:         []string{"my-pod.pod"},
+			expectedStatus:  http.StatusOK,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockService := &MockQuadletService{
-				mockList: func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
-					if tt.mockError != nil {
-						return nil, tt.mockError
-					}
-					return tt.mockQuadlets, nil
+			engine := &fakeQuadletEngine{
+				listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+					return tt.machineQuadlets, nil
 				},
 			}
 
-			handler := NewQuadletHandler(mockService)
-
-			req := httptest.NewRequest("GET", "/api/machines/"+tt.machineID+"/quadlets"+tt.queryParams, nil)
-
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", tt.machineID)
-
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
+			req := quadletRequest("GET", "/api/machines/machine123/quadlets"+tt.queryParams, "user123", "machine123", "", nil)
 
 			rr := httptest.NewRecorder()
+			newTestHandler(engine).List(rr, req)
 
-			handler.List(rr, req)
+			require.Equal(t, tt.expectedStatus, rr.Code)
 
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
+			var got []QuadletListResponse
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+			ids := make([]string, 0, len(got))
+			for _, q := range got {
+				ids = append(ids, q.ID)
 			}
-
-			if tt.expectedBody != "" {
-				actualBody := rr.Body.String()
-				if actualBody != tt.expectedBody {
-					t.Errorf("handler returned unexpected body: got %q want %q", actualBody, tt.expectedBody)
-				}
+			assert.ElementsMatch(t, tt.wantIDs, ids)
+			for _, q := range got {
+				assert.NotEmpty(t, q.Resource, "resource must be derived from the install path")
+				assert.NotEmpty(t, q.State, "state must be parsed from the status")
 			}
 		})
 	}
 }
 
-// TestQuadletHandler_List_ForwardsQueryFiltersToService pins the HTTP seam of
-// the list filters: the `resource` and `name` query parameters (contract at
-// doku/description_api.md:831-833) must reach the service as ListFilters.
-// TestQuadletHandler_List returns canned payloads regardless of the filters
-// argument, so forwarding is asserted separately here by capturing what the
-// mock service actually receives.
-func TestQuadletHandler_List_ForwardsQueryFiltersToService(t *testing.T) {
-	tests := []struct {
-		name        string
-		queryParams string
-		wantFilters ListFilters
-	}{
-		{
-			name:        "resource only",
-			queryParams: "?resource=container",
-			wantFilters: ListFilters{Resource: "container"},
-		},
-		{
-			name:        "name only",
-			queryParams: "?name=web",
-			wantFilters: ListFilters{Name: "web"},
-		},
-		{
-			name:        "resource and name combined",
-			queryParams: "?resource=volume&name=data",
-			wantFilters: ListFilters{Resource: "volume", Name: "data"},
-		},
-		{
-			name:        "no query params yield empty filters",
-			queryParams: "",
-			wantFilters: ListFilters{},
+// TestQuadletHandler_List_PodResourceFields pins the list DTO rendering:
+// unit name and parsed state are carried next to the pod resource.
+func TestQuadletHandler_List_PodResourceFields(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return listFixture(), nil
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var gotFilters ListFilters
-			mockService := &MockQuadletService{
-				mockList: func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
-					gotFilters = filters
-					return []QuadletListResponse{}, nil
-				},
-			}
+	req := quadletRequest("GET", "/api/machines/machine123/quadlets?name=pod", "user123", "machine123", "", nil)
 
-			handler := NewQuadletHandler(mockService)
+	rr := httptest.NewRecorder()
+	newTestHandler(engine).List(rr, req)
 
-			req := httptest.NewRequest("GET", "/api/machines/machine123/quadlets"+tt.queryParams, nil)
-
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", "machine123")
-
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-			req = req.WithContext(ctx)
-
-			rr := httptest.NewRecorder()
-
-			handler.List(rr, req)
-
-			assert.Equal(t, http.StatusOK, rr.Code)
-			assert.Equal(t, tt.wantFilters, gotFilters,
-				"handler must forward the resource/name query params to the service as ListFilters")
-		})
-	}
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.JSONEq(t, `[{"id":"my-pod.pod","name":"my-pod.pod","path":"/etc/containers/systemd/my-pod.pod","unit":"my-pod.service","resource":"pod","state":"stopped"}]`, rr.Body.String())
 }
 
-type MockQuadletService struct {
-	mockList              func(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
-	mockGet               func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
-	mockCreate            func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
-	mockUpdate            func(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
-	mockDelete            func(ctx context.Context, userID, machineID, name string, force, stop bool) error
-	mockStart             func(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error)
-	mockStop              func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
-	mockRestart           func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
-	mockGetLogs           func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error)
-	mockGetLogsWithStream func(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error
-	mockGenerate          func(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error)
-	mockImport            func(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error)
-	mockAutoUpdate        func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error)
-}
-
-func (m *MockQuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
-	if m.mockList != nil {
-		return m.mockList(ctx, userID, machineID, filters)
-	}
-	return nil, nil
-}
-
-func (m *MockQuadletService) Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error) {
-	if m.mockGet != nil {
-		return m.mockGet(ctx, userID, machineID, name)
-	}
-	return nil, nil
-}
-
-func (m *MockQuadletService) Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
-	if m.mockCreate != nil {
-		return m.mockCreate(ctx, userID, machineID, req)
-	}
-	return nil, nil
-}
-
-func (m *MockQuadletService) Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
-	if m.mockUpdate != nil {
-		return m.mockUpdate(ctx, userID, machineID, name, req)
-	}
-	return nil, nil
-}
-
-func (m *MockQuadletService) Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error {
-	if m.mockDelete != nil {
-		return m.mockDelete(ctx, userID, machineID, name, force, stop)
-	}
-	return nil
-}
-
-func (m *MockQuadletService) Start(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error) {
-	if m.mockStart != nil {
-		return m.mockStart(ctx, userID, machineID, name)
-	}
-	return nil, nil
-}
-
-func (m *MockQuadletService) Stop(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-	if m.mockStop != nil {
-		return m.mockStop(ctx, userID, machineID, name, opts)
-	}
-	return nil, nil
-}
-
-func (m *MockQuadletService) Restart(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-	if m.mockRestart != nil {
-		return m.mockRestart(ctx, userID, machineID, name, opts)
-	}
-	return nil, nil
-}
-
-func (m *MockQuadletService) GetLogs(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error) {
-	if m.mockGetLogs != nil {
-		return m.mockGetLogs(ctx, userID, machineID, quadletName, since, tail)
-	}
-	return nil, nil
-}
-
-func (m *MockQuadletService) GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
-	if m.mockGetLogsWithStream != nil {
-		return m.mockGetLogsWithStream(ctx, userID, machineID, quadletName, since, tail, logCallback)
-	}
-	return nil
-}
-
-func (m *MockQuadletService) Generate(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error) {
-	if m.mockGenerate != nil {
-		return m.mockGenerate(ctx, userID, machineID, req)
-	}
-	return nil, nil
-}
-
-func (m *MockQuadletService) Import(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error) {
-	if m.mockImport != nil {
-		return m.mockImport(ctx, userID, machineID, req)
-	}
-	return nil, nil
-}
-
-func (m *MockQuadletService) AutoUpdate(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
-	if m.mockAutoUpdate != nil {
-		return m.mockAutoUpdate(ctx, userID, machineID, dryRun, onLine)
-	}
-	return AutoUpdateReport{}, nil
-}
-
+// TestQuadletHandler_Get pins the inspect contract through the real
+// service: the quadlet's metadata (resolved from the machine's list) is
+// answered together with the unit file's content (resolved via print).
 func TestQuadletHandler_Get(t *testing.T) {
 	tests := []struct {
 		name           string
-		userID         string
-		machineID      string
 		quadletID      string
-		mockQuadlet    *QuadletGetResponse
-		mockError      error
+		content        string
 		expectedStatus int
-		expectedBody   string
+		wantBody       string
 	}{
 		{
-			name:      "successful get",
-			userID:    "user123",
-			machineID: "machine123",
-			quadletID: "my-container.container",
-			mockQuadlet: &QuadletGetResponse{
-				ID:       "my-container.container",
-				Name:     "my-container.container",
-				Path:     "/etc/containers/systemd/my-container.container",
-				Unit:     "my-container.service",
-				Resource: "container",
-				State:    "running",
-				Content:  "[Unit]\nDescription=My Container\n\n[Container]\nImage=nginx:latest\n",
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `{"id":"my-container.container","name":"my-container.container","path":"/etc/containers/systemd/my-container.container","unit":"my-container.service","resource":"container","state":"running","content":"[Unit]\nDescription=My Container\n\n[Container]\nImage=nginx:latest\n"}` + "\n",
-		},
-		{
-			name:           "quadlet not found",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "nonexistent.container",
-			mockQuadlet:    nil,
-			mockError:      errors.ErrQuadletNotFound,
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "",
-		},
-		{
-			name:           "missing quadlet ID",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "",
-			mockQuadlet:    nil,
-			mockError:      nil,
-			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "",
-		},
-		{
-			name:           "connection failed",
-			userID:         "user123",
-			machineID:      "machine123",
+			name:           "successful get",
 			quadletID:      "my-container.container",
-			mockQuadlet:    nil,
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-			expectedBody:   "",
-		},
-		{
-			name:      "pod resource type",
-			userID:    "user123",
-			machineID: "machine123",
-			quadletID: "my-pod.pod",
-			mockQuadlet: &QuadletGetResponse{
-				ID:       "my-pod.pod",
-				Name:     "my-pod.pod",
-				Path:     "/etc/containers/systemd/my-pod.pod",
-				Unit:     "my-pod.service",
-				Resource: "pod",
-				State:    "stopped",
-				Content:  "[Unit]\nDescription=My Pod\n\n[Pod]\nPodmanArgs=--name=my-pod\n",
-			},
+			content:        "[Unit]\nDescription=My Container\n\n[Container]\nImage=nginx:latest\n",
 			expectedStatus: http.StatusOK,
-			expectedBody:   `{"id":"my-pod.pod","name":"my-pod.pod","path":"/etc/containers/systemd/my-pod.pod","unit":"my-pod.service","resource":"pod","state":"stopped","content":"[Unit]\nDescription=My Pod\n\n[Pod]\nPodmanArgs=--name=my-pod\n"}` + "\n",
+			wantBody:       `{"id":"my-container.container","name":"my-container.container","path":"/etc/containers/systemd/my-container.container","unit":"my-container.service","resource":"container","state":"running","content":"[Unit]\nDescription=My Container\n\n[Container]\nImage=nginx:latest\n"}`,
+		},
+		{
+			name:           "pod resource type",
+			quadletID:      "my-pod.pod",
+			content:        "[Unit]\nDescription=My Pod\n\n[Pod]\nPodmanArgs=--name=my-pod\n",
+			expectedStatus: http.StatusOK,
+			wantBody:       `{"id":"my-pod.pod","name":"my-pod.pod","path":"/etc/containers/systemd/my-pod.pod","unit":"my-pod.service","resource":"pod","state":"stopped","content":"[Unit]\nDescription=My Pod\n\n[Pod]\nPodmanArgs=--name=my-pod\n"}`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockService := &MockQuadletService{
-				mockGet: func(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error) {
-					if tt.mockError != nil {
-						return nil, tt.mockError
-					}
-					return tt.mockQuadlet, nil
+			engine := &fakeQuadletEngine{
+				printFn: func(name string) (string, error) {
+					assert.Equal(t, tt.quadletID, name)
+					return tt.content, nil
+				},
+				listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+					return listFixture(), nil
 				},
 			}
 
-			handler := NewQuadletHandler(mockService)
-
-			req := httptest.NewRequest("GET", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID, nil)
-
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", tt.machineID)
-			rctx.URLParams.Add("quadletId", tt.quadletID)
-
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
+			req := quadletRequest("GET", "/api/machines/machine123/quadlets/"+tt.quadletID, "user123", "machine123", tt.quadletID, nil)
 
 			rr := httptest.NewRecorder()
+			newTestHandler(engine).Get(rr, req)
 
-			handler.Get(rr, req)
-
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
-			}
-
-			if tt.expectedBody != "" {
-				actualBody := rr.Body.String()
-				if actualBody != tt.expectedBody {
-					t.Errorf("handler returned unexpected body: got %q want %q", actualBody, tt.expectedBody)
-				}
-			}
+			require.Equal(t, tt.expectedStatus, rr.Code)
+			assert.JSONEq(t, tt.wantBody, rr.Body.String())
 		})
 	}
+
+	t.Run("missing quadlet ID", func(t *testing.T) {
+		engine := &fakeQuadletEngine{}
+
+		req := quadletRequest("GET", "/api/machines/machine123/quadlets/", "user123", "machine123", "", nil)
+
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Get(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
 }
 
-func TestQuadletHandler_Create(t *testing.T) {
-	tests := []struct {
-		name           string
-		userID         string
-		machineID      string
-		requestBody    string
-		mockResponse   *QuadletCreateResponse
-		mockError      error
-		expectedStatus int
-		expectedBody   string
-	}{
-		{
-			name:        "successful create",
-			userID:      "user123",
-			machineID:   "machine123",
-			requestBody: `{"name":"my-container","resource":"container","content":"[Container]\nImage=nginx:latest\n"}`,
-			mockResponse: &QuadletCreateResponse{
-				ID:       "my-container",
-				Name:     "my-container",
-				Path:     "/etc/containers/systemd/my-container.container",
-				Resource: "container",
-				State:    "unknown",
-				Content:  "[Container]\nImage=nginx:latest\n",
+// TestQuadletHandler_Create pins the create contract through the real
+// service: the decoded request is installed under the derived filename and
+// the response echoes the created quadlet.
+func TestQuadletHandler_Create_Cases(t *testing.T) {
+	successBody := `{"name":"my-container","resource":"container","content":"[Container]\nImage=nginx:latest\n"}`
+
+	t.Run("successful create", func(t *testing.T) {
+		var gotFileName string
+		var gotContent []byte
+		var gotReplace bool
+		engine := &fakeQuadletEngine{
+			installFn: func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {
+				gotFileName, gotContent, gotReplace = fileName, content, replace
+				return &entities.QuadletInstallReport{
+					InstalledQuadlets: map[string]string{"src": "/etc/containers/systemd/my-container.container"},
+				}, nil
 			},
-			expectedStatus: http.StatusCreated,
-			expectedBody:   `{"id":"my-container","name":"my-container","path":"/etc/containers/systemd/my-container.container","resource":"container","state":"unknown","content":"[Container]\nImage=nginx:latest\n"}` + "\n",
-		},
-		{
-			name:           "malformed JSON body",
-			userID:         "user123",
-			machineID:      "machine123",
-			requestBody:    `{not valid json`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "validation failure: missing name",
-			userID:         "user123",
-			machineID:      "machine123",
-			requestBody:    `{"resource":"container","content":"y"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "validation failure: invalid resource",
-			userID:         "user123",
-			machineID:      "machine123",
-			requestBody:    `{"name":"x","resource":"kube","content":"y"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "validation failure: missing content",
-			userID:         "user123",
-			machineID:      "machine123",
-			requestBody:    `{"name":"x","resource":"container"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "conflict (already exists)",
-			userID:         "user123",
-			machineID:      "machine123",
-			requestBody:    `{"name":"dup","resource":"container","content":"y"}`,
-			mockError:      errors.ErrQuadletAlreadyExists,
-			expectedStatus: http.StatusConflict,
-		},
-		{
-			name:           "connection failed",
-			userID:         "user123",
-			machineID:      "machine123",
-			requestBody:    `{"name":"x","resource":"container","content":"y"}`,
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-		},
-	}
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockService := &MockQuadletService{
-				mockCreate: func(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
-					if tt.mockError != nil {
-						return nil, tt.mockError
-					}
-					return tt.mockResponse, nil
-				},
-			}
+		req := quadletRequest("POST", "/api/machines/machine123/quadlets", "user123", "machine123", "", bytes.NewBufferString(successBody))
 
-			handler := NewQuadletHandler(mockService)
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Create(rr, req)
 
-			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets", bytes.NewBufferString(tt.requestBody))
+		require.Equal(t, http.StatusCreated, rr.Code)
+		assert.Equal(t, "my-container.container", gotFileName, "the resource extension must complete the install name")
+		assert.Equal(t, "[Container]\nImage=nginx:latest\n", string(gotContent), "the content must be installed byte-identical")
+		assert.False(t, gotReplace, "a create must not replace an existing installation")
+		assert.JSONEq(t, `{"id":"my-container","name":"my-container","path":"/etc/containers/systemd/my-container.container","resource":"container","state":"unknown","content":"[Container]\nImage=nginx:latest\n"}`, rr.Body.String())
+	})
 
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", tt.machineID)
+	for _, tc := range []struct {
+		name        string
+		requestBody string
+	}{
+		{name: "malformed JSON body", requestBody: `{not valid json`},
+		{name: "validation failure: missing name", requestBody: `{"resource":"container","content":"y"}`},
+		{name: "validation failure: invalid resource", requestBody: `{"name":"x","resource":"kube","content":"y"}`},
+		{name: "validation failure: missing content", requestBody: `{"name":"x","resource":"container"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &fakeQuadletEngine{}
 
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
+			req := quadletRequest("POST", "/api/machines/machine123/quadlets", "user123", "machine123", "", bytes.NewBufferString(tc.requestBody))
 
 			rr := httptest.NewRecorder()
+			newTestHandler(engine).Create(rr, req)
 
-			handler.Create(rr, req)
-
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
-			}
-
-			if tt.expectedBody != "" {
-				actualBody := rr.Body.String()
-				if actualBody != tt.expectedBody {
-					t.Errorf("handler returned unexpected body: got %q want %q", actualBody, tt.expectedBody)
-				}
-			}
+			assert.Equal(t, http.StatusBadRequest, rr.Code)
 		})
 	}
 }
 
+// TestQuadletHandler_Update pins the update contract through the real
+// service: existence is resolved from the machine's list, the old quadlet
+// is removed forced, and the new content is installed with replace under
+// the preserved filename.
 func TestQuadletHandler_Update(t *testing.T) {
-	tests := []struct {
-		name           string
-		userID         string
-		machineID      string
-		quadletID      string
-		requestBody    string
-		mockResponse   *QuadletGetResponse
-		mockError      error
-		expectedStatus int
-		expectedBody   string
-	}{
-		{
-			name:        "successful update returns 200 with the updated quadlet",
-			userID:      "user123",
-			machineID:   "machine123",
-			quadletID:   "my-container.container",
-			requestBody: `{"content":"[Container]\nImage=nginx:1.25\n"}`,
-			mockResponse: &QuadletGetResponse{
-				ID:       "my-container.container",
-				Name:     "my-container.container",
-				Path:     "/etc/containers/systemd/my-container.container",
-				Unit:     "my-container.service",
-				Resource: "container",
-				State:    "unknown",
-				Content:  "[Container]\nImage=nginx:1.25\n",
+	successBody := `{"content":"[Container]\nImage=nginx:1.25\n"}`
+
+	t.Run("successful update returns 200 with the updated quadlet", func(t *testing.T) {
+		var removedName string
+		var removedForce bool
+		var gotFileName string
+		var gotContent []byte
+		var gotReplace bool
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return listFixture(), nil
 			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `{"id":"my-container.container","name":"my-container.container","path":"/etc/containers/systemd/my-container.container","unit":"my-container.service","resource":"container","state":"unknown","content":"[Container]\nImage=nginx:1.25\n"}` + "\n",
-		},
-		{
-			name:           "quadlet not found maps to 404",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "missing.container",
-			requestBody:    `{"content":"[Container]\nImage=nginx:1.25\n"}`,
-			mockError:      errors.ErrQuadletNotFound,
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "validation failure: missing content",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			requestBody:    `{}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "validation failure: empty content",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			requestBody:    `{"content":""}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "malformed JSON body",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			requestBody:    `{not valid json`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "missing quadlet ID",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "",
-			requestBody:    `{"content":"x"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "connection failed maps to 502",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			requestBody:    `{"content":"x"}`,
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-		},
-		{
-			name:           "generic error maps to 500",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			requestBody:    `{"content":"x"}`,
-			mockError:      errGeneric,
-			expectedStatus: http.StatusInternalServerError,
-		},
-	}
+			removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+				removedName, removedForce = name, force
+				return &entities.QuadletRemoveReport{}, nil
+			},
+			installFn: func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {
+				gotFileName, gotContent, gotReplace = fileName, content, replace
+				return &entities.QuadletInstallReport{
+					InstalledQuadlets: map[string]string{"src": "/etc/containers/systemd/my-container.container"},
+				}, nil
+			},
+		}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var capturedName string
-			var capturedReq QuadletUpdateRequest
-			mockService := &MockQuadletService{
-				mockUpdate: func(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
-					capturedName = name
-					capturedReq = req
-					if tt.mockError != nil {
-						return nil, tt.mockError
-					}
-					return tt.mockResponse, nil
-				},
-			}
+		req := quadletRequest("PUT", "/api/machines/machine123/quadlets/my-container.container", "user123", "machine123", "my-container.container", bytes.NewBufferString(successBody))
 
-			handler := NewQuadletHandler(mockService)
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Update(rr, req)
 
-			req := httptest.NewRequest("PUT", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID, bytes.NewBufferString(tt.requestBody))
+		require.Equal(t, http.StatusOK, rr.Code)
+		assert.Equal(t, "my-container.container", removedName)
+		assert.True(t, removedForce, "an update must remove forced so an active resource does not block the replace")
+		assert.Equal(t, "my-container.container", gotFileName, "the rebuilt install must keep the original filename")
+		assert.Equal(t, "[Container]\nImage=nginx:1.25\n", string(gotContent), "the new content must reach the machine")
+		assert.True(t, gotReplace, "an update must install with replace")
+		assert.JSONEq(t, `{"id":"my-container.container","name":"my-container.container","path":"/etc/containers/systemd/my-container.container","unit":"my-container.service","resource":"container","state":"unknown","content":"[Container]\nImage=nginx:1.25\n"}`, rr.Body.String())
+	})
 
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", tt.machineID)
-			rctx.URLParams.Add("quadletId", tt.quadletID)
+	for _, tc := range []struct {
+		name        string
+		quadletID   string
+		requestBody string
+	}{
+		{name: "validation failure: missing content", quadletID: "my-container.container", requestBody: `{}`},
+		{name: "validation failure: empty content", quadletID: "my-container.container", requestBody: `{"content":""}`},
+		{name: "malformed JSON body", quadletID: "my-container.container", requestBody: `{not valid json`},
+		{name: "missing quadlet ID", quadletID: "", requestBody: `{"content":"x"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &fakeQuadletEngine{}
 
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
+			req := quadletRequest("PUT", "/api/machines/machine123/quadlets/"+tc.quadletID, "user123", "machine123", tc.quadletID, bytes.NewBufferString(tc.requestBody))
 
 			rr := httptest.NewRecorder()
+			newTestHandler(engine).Update(rr, req)
 
-			handler.Update(rr, req)
-
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
-			}
-
-			if tt.expectedBody != "" {
-				actualBody := rr.Body.String()
-				if actualBody != tt.expectedBody {
-					t.Errorf("handler returned unexpected body: got %q want %q", actualBody, tt.expectedBody)
-				}
-			}
-
-			// On success, verify the quadlet name and request content were
-			// passed through to the service.
-			if tt.expectedStatus == http.StatusOK {
-				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
-				assert.Equal(t, "[Container]\nImage=nginx:1.25\n", capturedReq.Content, "request content should be passed through")
-			}
+			assert.Equal(t, http.StatusBadRequest, rr.Code)
 		})
 	}
 }
 
+// TestQuadletHandler_Delete pins the delete contract through the real
+// service: the parsed force/stop flags reach the machine's remove call,
+// a successful delete answers 204 with an empty body, and a malformed
+// force flag is ignored (deletes as unforced).
 func TestQuadletHandler_Delete(t *testing.T) {
 	tests := []struct {
-		name           string
-		userID         string
-		machineID      string
-		quadletID      string
-		queryParams    string
-		mockError      error
-		expectedStatus int
-		expectedForce  bool
-		expectedStop   bool
+		name          string
+		quadletID     string
+		queryParams   string
+		expectedForce bool
 	}{
 		{
-			name:           "successful delete returns 204 with empty body",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			queryParams:    "",
-			mockError:      nil,
-			expectedStatus: http.StatusNoContent,
-			expectedForce:  false,
-			expectedStop:   true, // default
+			name:          "successful delete returns 204 with empty body",
+			quadletID:     "my-container.container",
+			queryParams:   "",
+			expectedForce: false,
 		},
 		{
-			name:           "force=true query honoured",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			queryParams:    "?force=true",
-			mockError:      nil,
-			expectedStatus: http.StatusNoContent,
-			expectedForce:  true,
-			expectedStop:   true,
+			name:          "force=true query honoured",
+			quadletID:     "my-container.container",
+			queryParams:   "?force=true",
+			expectedForce: true,
 		},
 		{
-			name:           "stop=false query honoured",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			queryParams:    "?stop=false",
-			mockError:      nil,
-			expectedStatus: http.StatusNoContent,
-			expectedForce:  false,
-			expectedStop:   false,
+			name:          "stop=false query honoured",
+			quadletID:     "my-container.container",
+			queryParams:   "?stop=false",
+			expectedForce: false,
 		},
 		{
-			name:           "force=true&stop=false combined",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			queryParams:    "?force=true&stop=false",
-			mockError:      nil,
-			expectedStatus: http.StatusNoContent,
-			expectedForce:  true,
-			expectedStop:   false,
+			name:          "force=true&stop=false combined",
+			quadletID:     "my-container.container",
+			queryParams:   "?force=true&stop=false",
+			expectedForce: true,
 		},
 		{
-			name:           "running conflict maps to 400",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			queryParams:    "",
-			mockError:      errors.ErrQuadletResourceRunning,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "not found maps to 404",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "missing.container",
-			queryParams:    "",
-			mockError:      errors.ErrQuadletNotFound,
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "connection failed maps to 502",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			queryParams:    "",
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-		},
-		{
-			name:           "missing quadlet ID",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "",
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "invalid force boolean is ignored (defaults to false)",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			queryParams:    "?force=notabool",
-			mockError:      nil,
-			expectedStatus: http.StatusNoContent,
-			expectedForce:  false,
-			expectedStop:   true,
-		},
-		{
-			name:           "generic error maps to 500",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			queryParams:    "",
-			mockError:      errGeneric,
-			expectedStatus: http.StatusInternalServerError,
+			name:          "invalid force boolean is ignored (defaults to false)",
+			quadletID:     "my-container.container",
+			queryParams:   "?force=notabool",
+			expectedForce: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var capturedForce, capturedStop bool
 			var capturedName string
-			mockService := &MockQuadletService{
-				mockDelete: func(ctx context.Context, userID, machineID, name string, force, stop bool) error {
-					capturedForce = force
-					capturedStop = stop
-					capturedName = name
-					return tt.mockError
+			var capturedForce bool
+			engine := &fakeQuadletEngine{
+				listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+					// Status must be a non-running state so the
+					// running-guard does not refuse the delete.
+					return []*entities.ListQuadlet{
+						quadletFixture(tt.quadletID, "/etc/containers/systemd/"+tt.quadletID, "stopped"),
+					}, nil
+				},
+				removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+					capturedName, capturedForce = name, force
+					return &entities.QuadletRemoveReport{}, nil
 				},
 			}
 
-			handler := NewQuadletHandler(mockService)
-
-			req := httptest.NewRequest("DELETE", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+tt.queryParams, nil)
-
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", tt.machineID)
-			rctx.URLParams.Add("quadletId", tt.quadletID)
-
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
+			req := quadletRequest("DELETE", "/api/machines/machine123/quadlets/"+tt.quadletID+tt.queryParams, "user123", "machine123", tt.quadletID, nil)
 
 			rr := httptest.NewRecorder()
+			newTestHandler(engine).Delete(rr, req)
 
-			handler.Delete(rr, req)
-
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
-			}
-
-			// On success the body must be empty (204 No Content).
-			if tt.expectedStatus == http.StatusNoContent && rr.Body.String() != "" {
-				t.Errorf("handler returned non-empty body on 204: got %q", rr.Body.String())
-			}
-
-			// Verify the service was called with the right parsed params when
-			// the request was valid (had user + machine + quadlet).
-			if tt.expectedStatus == http.StatusNoContent {
-				assert.Equal(t, tt.expectedForce, capturedForce, "force flag should match expected")
-				assert.Equal(t, tt.expectedStop, capturedStop, "stop flag should match expected")
-				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
-			}
+			require.Equal(t, http.StatusNoContent, rr.Code)
+			assert.Empty(t, rr.Body.String(), "a 204 must carry no body")
+			assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
+			assert.Equal(t, tt.expectedForce, capturedForce, "force flag should match expected")
 		})
 	}
+
+	t.Run("missing quadlet ID", func(t *testing.T) {
+		engine := &fakeQuadletEngine{}
+
+		req := quadletRequest("DELETE", "/api/machines/machine123/quadlets/", "user123", "machine123", "", nil)
+
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Delete(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
 }
 
+// TestQuadletHandler_Start pins the start contract through the real
+// service: the resolved unit name drives systemctl over SSH and the
+// response reports the running state.
 func TestQuadletHandler_Start(t *testing.T) {
-	tests := []struct {
-		name           string
-		userID         string
-		machineID      string
-		quadletID      string
-		mockResponse   *QuadletLifecycleResponse
-		mockError      error
-		expectedStatus int
-		expectedBody   string
-	}{
-		{
-			name:      "successful start returns 200 with running state",
-			userID:    "user123",
-			machineID: "machine123",
-			quadletID: "my-container.container",
-			mockResponse: &QuadletLifecycleResponse{
-				ID:    "my-container.container",
-				State: "running",
-				Unit:  "my-container.service",
+	t.Run("successful start returns 200 with running state", func(t *testing.T) {
+		var gotArgs []string
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return []*entities.ListQuadlet{{
+					Name:     "my-container.container",
+					UnitName: "my-container.service",
+					Path:     "/etc/containers/systemd/my-container.container",
+					Status:   "stopped",
+				}}, nil
 			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `{"id":"my-container.container","state":"running","unit":"my-container.service"}` + "\n",
-		},
-		{
-			name:           "already running maps to 400",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			mockError:      errors.ErrQuadletAlreadyRunning,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "not found maps to 404",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "missing.container",
-			mockError:      errors.ErrQuadletNotFound,
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "connection failed maps to 502",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-		},
-		{
-			name:           "generic error maps to 500",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			mockError:      errGeneric,
-			expectedStatus: http.StatusInternalServerError,
-		},
-		{
-			name:           "missing quadlet ID",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "",
-			expectedStatus: http.StatusBadRequest,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var capturedName string
-			mockService := &MockQuadletService{
-				mockStart: func(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error) {
-					capturedName = name
-					if tt.mockError != nil {
-						return nil, tt.mockError
-					}
-					return tt.mockResponse, nil
-				},
-			}
-
-			handler := NewQuadletHandler(mockService)
-
-			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+"/start", nil)
-
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", tt.machineID)
-			rctx.URLParams.Add("quadletId", tt.quadletID)
-
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
-
-			rr := httptest.NewRecorder()
-
-			handler.Start(rr, req)
-
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
-			}
-
-			if tt.expectedBody != "" {
-				assert.Equal(t, tt.expectedBody, rr.Body.String())
-			}
-
-			if tt.expectedStatus == http.StatusOK {
-				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
-			}
+		}
+		sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+			gotArgs = opts.Args
+			return sshexec.ExecResult{ExitCode: 0}, nil
 		})
-	}
+
+		req := quadletRequest("POST", "/api/machines/machine123/quadlets/my-container.container/start", "user123", "machine123", "my-container.container", nil)
+
+		rr := httptest.NewRecorder()
+		newLifecycleTestHandler(engine, sshExec).Start(rr, req)
+
+		require.Equal(t, http.StatusOK, rr.Code)
+		assert.Equal(t, []string{"--user", "start", "my-container.service"}, gotArgs,
+			"the resolved unit name must drive the systemctl invocation")
+		assert.JSONEq(t, `{"id":"my-container.container","state":"running","unit":"my-container.service"}`, rr.Body.String())
+	})
+
+	t.Run("missing quadlet ID", func(t *testing.T) {
+		engine := &fakeQuadletEngine{}
+
+		req := quadletRequest("POST", "/api/machines/machine123/quadlets//start", "user123", "machine123", "", nil)
+
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Start(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
 }
 
+// runningContainerFixture is the quadlet whose managed resource is up:
+// stop and restart precondition on this state.
+func runningContainerFixture() []*entities.ListQuadlet {
+	return []*entities.ListQuadlet{{
+		Name:     "my-container.container",
+		UnitName: "my-container.service",
+		Path:     "/etc/containers/systemd/my-container.container",
+		Status:   "running",
+	}}
+}
+
+// TestQuadletHandler_Stop pins the stop contract through the real service:
+// force and timeout are decoded from the query into the systemctl
+// invocation, and the response reports the stopped state.
 func TestQuadletHandler_Stop(t *testing.T) {
 	tests := []struct {
-		name            string
-		userID          string
-		machineID       string
-		quadletID       string
-		queryParams     string
-		mockResponse    *QuadletLifecycleResponse
-		mockError       error
-		expectedStatus  int
-		expectedBody    string
-		expectedForce   bool
-		expectedTimeout int
+		name        string
+		queryParams string
+		wantArgs    []string
 	}{
 		{
 			name:        "successful stop returns 200 with stopped state",
-			userID:      "user123",
-			machineID:   "machine123",
-			quadletID:   "my-container.container",
 			queryParams: "",
-			mockResponse: &QuadletLifecycleResponse{
-				ID:    "my-container.container",
-				State: "stopped",
-				Unit:  "my-container.service",
-			},
-			expectedStatus:  http.StatusOK,
-			expectedBody:    `{"id":"my-container.container","state":"stopped","unit":"my-container.service"}` + "\n",
-			expectedForce:   false,
-			expectedTimeout: 0,
+			wantArgs:    []string{"--user", "stop", "my-container.service"},
 		},
 		{
-			name:            "force=true query honoured",
-			userID:          "user123",
-			machineID:       "machine123",
-			quadletID:       "my-container.container",
-			queryParams:     "?force=true",
-			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "stopped", Unit: "my-container.service"},
-			expectedStatus:  http.StatusOK,
-			expectedForce:   true,
-			expectedTimeout: 0,
+			name:        "force=true query honoured",
+			queryParams: "?force=true",
+			wantArgs:    []string{"--force", "--user", "stop", "my-container.service"},
 		},
 		{
-			name:            "timeout=10 query honoured",
-			userID:          "user123",
-			machineID:       "machine123",
-			quadletID:       "my-container.container",
-			queryParams:     "?timeout=10",
-			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "stopped", Unit: "my-container.service"},
-			expectedStatus:  http.StatusOK,
-			expectedForce:   false,
-			expectedTimeout: 10,
+			name:        "timeout=10 query honoured",
+			queryParams: "?timeout=10",
+			wantArgs:    []string{"--kill-seconds=10", "--user", "stop", "my-container.service"},
 		},
 		{
-			name:            "force and timeout combined",
-			userID:          "user123",
-			machineID:       "machine123",
-			quadletID:       "my-container.container",
-			queryParams:     "?force=true&timeout=5",
-			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "stopped", Unit: "my-container.service"},
-			expectedStatus:  http.StatusOK,
-			expectedForce:   true,
-			expectedTimeout: 5,
+			name:        "force and timeout combined",
+			queryParams: "?force=true&timeout=5",
+			wantArgs:    []string{"--force", "--kill-seconds=5", "--user", "stop", "my-container.service"},
 		},
 		{
-			name:            "invalid timeout is ignored",
-			userID:          "user123",
-			machineID:       "machine123",
-			quadletID:       "my-container.container",
-			queryParams:     "?timeout=notanint",
-			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "stopped", Unit: "my-container.service"},
-			expectedStatus:  http.StatusOK,
-			expectedForce:   false,
-			expectedTimeout: 0,
+			name:        "invalid timeout is ignored",
+			queryParams: "?timeout=notanint",
+			wantArgs:    []string{"--user", "stop", "my-container.service"},
 		},
 		{
-			name:            "negative timeout is ignored",
-			userID:          "user123",
-			machineID:       "machine123",
-			quadletID:       "my-container.container",
-			queryParams:     "?timeout=-1",
-			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "stopped", Unit: "my-container.service"},
-			expectedStatus:  http.StatusOK,
-			expectedForce:   false,
-			expectedTimeout: 0,
-		},
-		{
-			name:           "not running maps to 400",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			mockError:      errors.ErrQuadletNotRunning,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "not found maps to 404",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "missing.container",
-			mockError:      errors.ErrQuadletNotFound,
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "connection failed maps to 502",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-		},
-		{
-			name:           "generic error maps to 500",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			mockError:      errGeneric,
-			expectedStatus: http.StatusInternalServerError,
-		},
-		{
-			name:           "missing quadlet ID",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "",
-			expectedStatus: http.StatusBadRequest,
+			name:        "negative timeout is ignored",
+			queryParams: "?timeout=-1",
+			wantArgs:    []string{"--user", "stop", "my-container.service"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var capturedOpts LifecycleOptions
-			var capturedName string
-			mockService := &MockQuadletService{
-				mockStop: func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-					capturedOpts = opts
-					capturedName = name
-					if tt.mockError != nil {
-						return nil, tt.mockError
-					}
-					return tt.mockResponse, nil
+			var gotArgs []string
+			engine := &fakeQuadletEngine{
+				listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+					return runningContainerFixture(), nil
 				},
 			}
+			sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+				gotArgs = opts.Args
+				return sshexec.ExecResult{ExitCode: 0}, nil
+			})
 
-			handler := NewQuadletHandler(mockService)
-
-			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+"/stop"+tt.queryParams, nil)
-
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", tt.machineID)
-			rctx.URLParams.Add("quadletId", tt.quadletID)
-
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
+			req := quadletRequest("POST", "/api/machines/machine123/quadlets/my-container.container/stop"+tt.queryParams, "user123", "machine123", "my-container.container", nil)
 
 			rr := httptest.NewRecorder()
+			newLifecycleTestHandler(engine, sshExec).Stop(rr, req)
 
-			handler.Stop(rr, req)
-
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
-			}
-
-			if tt.expectedBody != "" {
-				assert.Equal(t, tt.expectedBody, rr.Body.String())
-			}
-
-			if tt.expectedStatus == http.StatusOK {
-				assert.Equal(t, tt.expectedForce, capturedOpts.Force, "force flag should match expected")
-				assert.Equal(t, tt.expectedTimeout, capturedOpts.Timeout, "timeout should match expected")
-				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
-			}
+			require.Equal(t, http.StatusOK, rr.Code)
+			assert.Equal(t, tt.wantArgs, gotArgs, "the decoded force/timeout flags must drive the systemctl invocation")
+			assert.JSONEq(t, `{"id":"my-container.container","state":"stopped","unit":"my-container.service"}`, rr.Body.String())
 		})
 	}
+
+	t.Run("missing quadlet ID", func(t *testing.T) {
+		engine := &fakeQuadletEngine{}
+
+		req := quadletRequest("POST", "/api/machines/machine123/quadlets//stop", "user123", "machine123", "", nil)
+
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Stop(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
 }
 
+// TestQuadletHandler_Restart pins the restart contract through the real
+// service: the response carries the running state and a restartedAt
+// timestamp, and force/timeout reach the systemctl invocation.
 func TestQuadletHandler_Restart(t *testing.T) {
-	tests := []struct {
-		name            string
-		userID          string
-		machineID       string
-		quadletID       string
-		queryParams     string
-		mockResponse    *QuadletLifecycleResponse
-		mockError       error
-		expectedStatus  int
-		expectedForce   bool
-		expectedTimeout int
-	}{
-		{
-			name:      "successful restart returns 200 with running state and restartedAt",
-			userID:    "user123",
-			machineID: "machine123",
-			quadletID: "my-container.container",
-			mockResponse: &QuadletLifecycleResponse{
-				ID:          "my-container.container",
-				State:       "running",
-				Unit:        "my-container.service",
-				RestartedAt: "2026-08-07T12:00:00Z",
+	t.Run("successful restart returns 200 with running state and restartedAt", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return runningContainerFixture(), nil
 			},
-			expectedStatus:  http.StatusOK,
-			expectedForce:   false,
-			expectedTimeout: 0,
-		},
-		{
-			name:            "force and timeout honoured",
-			userID:          "user123",
-			machineID:       "machine123",
-			quadletID:       "my-container.container",
-			queryParams:     "?force=true&timeout=20",
-			mockResponse:    &QuadletLifecycleResponse{ID: "my-container.container", State: "running", Unit: "my-container.service", RestartedAt: "2026-08-07T12:00:00Z"},
-			expectedStatus:  http.StatusOK,
-			expectedForce:   true,
-			expectedTimeout: 20,
-		},
-		{
-			name:           "not running maps to 400",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			mockError:      errors.ErrQuadletNotRunning,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "not found maps to 404",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "missing.container",
-			mockError:      errors.ErrQuadletNotFound,
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "connection failed maps to 502",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-		},
-		{
-			name:           "generic error maps to 500",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "my-container.container",
-			mockError:      errGeneric,
-			expectedStatus: http.StatusInternalServerError,
-		},
-		{
-			name:           "missing quadlet ID",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "",
-			expectedStatus: http.StatusBadRequest,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var capturedOpts LifecycleOptions
-			var capturedName string
-			mockService := &MockQuadletService{
-				mockRestart: func(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-					capturedOpts = opts
-					capturedName = name
-					if tt.mockError != nil {
-						return nil, tt.mockError
-					}
-					return tt.mockResponse, nil
-				},
-			}
-
-			handler := NewQuadletHandler(mockService)
-
-			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID+"/restart"+tt.queryParams, nil)
-
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", tt.machineID)
-			rctx.URLParams.Add("quadletId", tt.quadletID)
-
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
-
-			rr := httptest.NewRecorder()
-
-			handler.Restart(rr, req)
-
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
-			}
-
-			if tt.expectedStatus == http.StatusOK {
-				assert.Equal(t, tt.expectedForce, capturedOpts.Force, "force flag should match expected")
-				assert.Equal(t, tt.expectedTimeout, capturedOpts.Timeout, "timeout should match expected")
-				assert.Equal(t, tt.quadletID, capturedName, "quadlet name should be passed through")
-				// Restart success body must carry a restartedAt timestamp.
-				assert.Contains(t, rr.Body.String(), "restartedAt", "restart response must include restartedAt")
-			}
+		}
+		sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions) (sshexec.ExecResult, error) {
+			return sshexec.ExecResult{ExitCode: 0}, nil
 		})
-	}
+
+		req := quadletRequest("POST", "/api/machines/machine123/quadlets/my-container.container/restart", "user123", "machine123", "my-container.container", nil)
+
+		rr := httptest.NewRecorder()
+		newLifecycleTestHandler(engine, sshExec).Restart(rr, req)
+
+		require.Equal(t, http.StatusOK, rr.Code)
+		assert.Contains(t, rr.Body.String(), `"state":"running"`)
+		assert.Contains(t, rr.Body.String(), "restartedAt", "restart response must include restartedAt")
+	})
+
+	t.Run("force and timeout honoured", func(t *testing.T) {
+		var gotArgs []string
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return runningContainerFixture(), nil
+			},
+		}
+		sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+			gotArgs = opts.Args
+			return sshexec.ExecResult{ExitCode: 0}, nil
+		})
+
+		req := quadletRequest("POST", "/api/machines/machine123/quadlets/my-container.container/restart?force=true&timeout=20", "user123", "machine123", "my-container.container", nil)
+
+		rr := httptest.NewRecorder()
+		newLifecycleTestHandler(engine, sshExec).Restart(rr, req)
+
+		require.Equal(t, http.StatusOK, rr.Code)
+		assert.Equal(t, []string{"--force", "--kill-seconds=20", "--user", "restart", "my-container.service"}, gotArgs)
+	})
+
+	t.Run("missing quadlet ID", func(t *testing.T) {
+		engine := &fakeQuadletEngine{}
+
+		req := quadletRequest("POST", "/api/machines/machine123/quadlets//restart", "user123", "machine123", "", nil)
+
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Restart(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
 }
 
+// TestQuadletHandler_Generate pins the generate contract through the real
+// service: an existing container or pod on the machine is inspected and
+// converted into a quadlet unit file.
 func TestQuadletHandler_Generate(t *testing.T) {
-	tests := []struct {
-		name           string
-		userID         string
-		machineID      string
-		quadletID      string
-		requestBody    string
-		mockResponse   *QuadletGenerateResponse
-		mockError      error
-		expectedStatus int
-		expectedBody   string
+	t.Run("successful generate from container", func(t *testing.T) {
+		var gotResourceID string
+		engine := &fakeQuadletEngine{
+			inspectContainerFn: func(id string) ([]*entities.ContainerInspectReport, []error, error) {
+				gotResourceID = id
+				return []*entities.ContainerInspectReport{{
+					InspectContainerData: &define.InspectContainerData{
+						Name:   "my-container",
+						Config: &define.InspectContainerConfig{Image: "nginx:latest"},
+					},
+				}}, nil, nil
+			},
+		}
+
+		req := quadletRequest("POST", "/api/machines/machine123/quadlets/generate", "user123", "machine123", "generate",
+			bytes.NewBufferString(`{"resourceId":"my-container","resourceType":"container"}`))
+
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Generate(rr, req)
+
+		require.Equal(t, http.StatusOK, rr.Code)
+		assert.Equal(t, "my-container", gotResourceID, "the requested resource must be the inspected one")
+		assert.Contains(t, rr.Body.String(), `"resource":"container"`)
+		assert.Contains(t, rr.Body.String(), "ContainerName=my-container")
+		assert.Contains(t, rr.Body.String(), "Image=nginx:latest")
+	})
+
+	t.Run("successful generate from pod", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			inspectPodFn: func(string) ([]*entities.PodInspectReport, []error, error) {
+				return []*entities.PodInspectReport{{
+					InspectPodData: &define.InspectPodData{Name: "my-pod"},
+				}}, nil, nil
+			},
+		}
+
+		req := quadletRequest("POST", "/api/machines/machine123/quadlets/generate", "user123", "machine123", "generate",
+			bytes.NewBufferString(`{"resourceId":"my-pod","resourceType":"pod"}`))
+
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Generate(rr, req)
+
+		require.Equal(t, http.StatusOK, rr.Code)
+		assert.Contains(t, rr.Body.String(), `"resource":"pod"`)
+		assert.Contains(t, rr.Body.String(), "PodName=my-pod")
+	})
+
+	for _, tc := range []struct {
+		name        string
+		requestBody string
 	}{
-		{
-			name:        "successful generate from container",
-			userID:      "user123",
-			machineID:   "machine123",
-			quadletID:   "generate",
-			requestBody: `{"resourceId":"my-container","resourceType":"container"}`,
-			mockResponse: &QuadletGenerateResponse{
-				ID:       "my-container",
-				Name:     "my-container",
-				Resource: "container",
-				State:    "unknown",
-				Content:  "# Generated by Podland from container my-container\n[Unit]\nDescription=Podman container my-container\n\n[Container]\nContainerName=my-container\nImage=nginx:latest\n",
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `{"id":"my-container","name":"my-container","resource":"container","state":"unknown","content":"# Generated by Podland from container my-container\n[Unit]\nDescription=Podman container my-container\n\n[Container]\nContainerName=my-container\nImage=nginx:latest\n"}` + "\n",
-		},
-		{
-			name:        "successful generate from pod",
-			userID:      "user123",
-			machineID:   "machine123",
-			quadletID:   "generate",
-			requestBody: `{"resourceId":"my-pod","resourceType":"pod"}`,
-			mockResponse: &QuadletGenerateResponse{
-				ID:       "my-pod",
-				Name:     "my-pod",
-				Resource: "pod",
-				State:    "unknown",
-				Content:  "# Generated by Podland from pod my-pod\n[Unit]\nDescription=Podman pod my-pod\n\n[Pod]\nPodName=my-pod\n",
-			},
-			expectedStatus: http.StatusOK,
-			expectedBody:   `{"id":"my-pod","name":"my-pod","resource":"pod","state":"unknown","content":"# Generated by Podland from pod my-pod\n[Unit]\nDescription=Podman pod my-pod\n\n[Pod]\nPodName=my-pod\n"}` + "\n",
-		},
-		{
-			name:           "validation failure: missing resourceId",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceType":"container"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "validation failure: empty resourceId",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"","resourceType":"container"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "validation failure: missing resourceType",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"my-container"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "validation failure: empty resourceType",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"my-container","resourceType":""}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "validation failure: invalid resourceType",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"my-resource","resourceType":"invalid"}`,
-			expectedStatus: http.StatusBadRequest,
-		},
-		{
-			name:           "container not found maps to 404",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"missing-container","resourceType":"container"}`,
-			mockError:      errors.ErrContainerNotFound,
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "pod not found maps to 404",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"missing-pod","resourceType":"pod"}`,
-			mockError:      errors.ErrPodNotFound,
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "quadlet generation failed maps to 500",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"my-container","resourceType":"container"}`,
-			mockError:      errors.ErrQuadletGenerationFailed,
-			expectedStatus: http.StatusInternalServerError,
-		},
-		{
-			name:           "connection failed maps to 502",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"my-container","resourceType":"container"}`,
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-		},
-		{
-			name:           "generic error maps to 500",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{"resourceId":"my-container","resourceType":"container"}`,
-			mockError:      errGeneric,
-			expectedStatus: http.StatusInternalServerError,
-		},
+		{name: "validation failure: missing resourceId", requestBody: `{"resourceType":"container"}`},
+		{name: "validation failure: empty resourceId", requestBody: `{"resourceId":"","resourceType":"container"}`},
+		{name: "validation failure: missing resourceType", requestBody: `{"resourceId":"my-container"}`},
+		{name: "validation failure: empty resourceType", requestBody: `{"resourceId":"my-container","resourceType":""}`},
+		{name: "validation failure: invalid resourceType", requestBody: `{"resourceId":"my-resource","resourceType":"invalid"}`},
+		{name: "malformed JSON body", requestBody: `{not valid json`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &fakeQuadletEngine{}
 
-		{
-			name:           "malformed JSON body",
-			userID:         "user123",
-			machineID:      "machine123",
-			quadletID:      "generate",
-			requestBody:    `{not valid json`,
-			expectedStatus: http.StatusBadRequest,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var capturedReq QuadletGenerateRequest
-			mockService := &MockQuadletService{
-				mockGenerate: func(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error) {
-					capturedReq = req
-					if tt.mockError != nil {
-						return nil, tt.mockError
-					}
-					return tt.mockResponse, nil
-				},
-			}
-
-			handler := NewQuadletHandler(mockService)
-
-			req := httptest.NewRequest("POST", "/api/machines/"+tt.machineID+"/quadlets/"+tt.quadletID, bytes.NewBufferString(tt.requestBody))
-
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", tt.machineID)
-			rctx.URLParams.Add("quadletId", tt.quadletID)
-
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
+			req := quadletRequest("POST", "/api/machines/machine123/quadlets/generate", "user123", "machine123", "generate",
+				bytes.NewBufferString(tc.requestBody))
 
 			rr := httptest.NewRecorder()
+			newTestHandler(engine).Generate(rr, req)
 
-			handler.Generate(rr, req)
-
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
-			}
-
-			if tt.expectedBody != "" {
-				actualBody := rr.Body.String()
-				if actualBody != tt.expectedBody {
-					t.Errorf("handler returned unexpected body: got %q want %q", actualBody, tt.expectedBody)
-				}
-			}
-
-			// On success, verify the request was passed through correctly
-			if tt.expectedStatus == http.StatusOK {
-				assert.Equal(t, tt.requestBody, `{"resourceId":"`+capturedReq.ResourceID+`","resourceType":"`+capturedReq.ResourceType+`"}`, "request should be passed through correctly")
-			}
+			assert.Equal(t, http.StatusBadRequest, rr.Code)
 		})
 	}
 }

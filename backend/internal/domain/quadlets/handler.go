@@ -24,11 +24,11 @@ import (
 // and AutoUpdate keep their own shape — they stream NDJSON rather than
 // encoding one DTO.
 type QuadletHandler struct {
-	service QuadletServiceInterface
+	service *QuadletService
 }
 
 // NewQuadletHandler creates a new QuadletHandler
-func NewQuadletHandler(service QuadletServiceInterface) *QuadletHandler {
+func NewQuadletHandler(service *QuadletService) *QuadletHandler {
 	return &QuadletHandler{
 		service: service,
 	}

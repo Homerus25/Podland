@@ -25,7 +25,7 @@ import (
 
 // VolumeHandler handles volume requests
 type VolumeHandler struct {
-	service VolumeServiceInterface
+	service *VolumeService
 	// maxUploadBytes bounds populate uploads; enforced with the
 	// max-bytes reader while streaming parts to disk.
 	maxUploadBytes int64
@@ -36,7 +36,7 @@ type VolumeHandler struct {
 const DefaultMaxUploadBytes int64 = 2 << 30
 
 // NewVolumeHandler creates a new VolumeHandler
-func NewVolumeHandler(service VolumeServiceInterface) *VolumeHandler {
+func NewVolumeHandler(service *VolumeService) *VolumeHandler {
 	return &VolumeHandler{
 		service:        service,
 		maxUploadBytes: DefaultMaxUploadBytes,

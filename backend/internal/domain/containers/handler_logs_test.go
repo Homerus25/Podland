@@ -1,129 +1,97 @@
 package containers
 
 import (
-	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
-	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// TestContainerHandler_Logs_Success tests successful log retrieval
+// TestContainerHandler_Logs_Success tests successful buffered log retrieval
+// through the real service: the machine's log lines land in the response.
 func TestContainerHandler_Logs_Success(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
+	engine := &fakeContainerEngine{
+		logsFn: func(name string, opts entities.ContainerLogsOptions) error {
+			writeLogsInto(opts, "test log line 1\ntest log line 2\n", "")
+			return nil
+		},
+	}
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs", nil).
+		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
-	expectedResponse := &ContainerLogsResponse{
-		ID:   "container-123",
-		Logs: "test log line 1\ntest log line 2",
-	}
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(-1)).Return(expectedResponse, nil)
-
 	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
 	assert.Contains(t, w.Body.String(), `"id":"container-123"`, "Response should contain container ID")
 	assert.Contains(t, w.Body.String(), `"logs":"test log line 1\ntest log line 2"`, "Response should contain logs")
-	mockService.AssertExpectations(t)
 }
 
-// TestContainerHandler_Logs_WithSinceParameter tests log retrieval with since parameter
+// TestContainerHandler_Logs_WithSinceParameter tests that the since query
+// parameter is parsed and reaches the machine's log call.
 func TestContainerHandler_Logs_WithSinceParameter(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+	var gotOpts entities.ContainerLogsOptions
+	engine := &fakeContainerEngine{
+		logsFn: func(name string, opts entities.ContainerLogsOptions) error {
+			gotOpts = opts
+			return nil
+		},
+	}
 
 	sinceTime := "2024-01-01T00:00:00Z"
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?since="+sinceTime, nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?since="+sinceTime, nil).
+		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
-	expectedResponse := &ContainerLogsResponse{
-		ID:   "container-123",
-		Logs: "recent logs",
-	}
-
-	parsedSince, _ := time.Parse(time.RFC3339, sinceTime)
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", parsedSince, int64(-1)).Return(expectedResponse, nil)
-
 	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
-	mockService.AssertExpectations(t)
+	parsedSince, _ := time.Parse(time.RFC3339, sinceTime)
+	assert.Equal(t, parsedSince, gotOpts.Since, "the parsed since value must reach the machine")
 }
 
-// TestContainerHandler_Logs_WithTailParameter tests log retrieval with tail parameter
+// TestContainerHandler_Logs_WithTailParameter tests that the tail query
+// parameter is parsed and reaches the machine's log call.
 func TestContainerHandler_Logs_WithTailParameter(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
+	var gotOpts entities.ContainerLogsOptions
+	engine := &fakeContainerEngine{
+		logsFn: func(name string, opts entities.ContainerLogsOptions) error {
+			gotOpts = opts
+			return nil
+		},
+	}
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?tail=100", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?tail=100", nil).
+		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
-	expectedResponse := &ContainerLogsResponse{
-		ID:   "container-123",
-		Logs: "last 100 lines",
-	}
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(100)).Return(expectedResponse, nil)
-
 	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
-	mockService.AssertExpectations(t)
+	assert.Equal(t, int64(100), gotOpts.Tail, "the parsed tail value must reach the machine")
 }
 
 // TestContainerHandler_Logs_InvalidSinceParameter tests log retrieval with invalid since parameter
 func TestContainerHandler_Logs_InvalidSinceParameter(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
+	engine := &fakeContainerEngine{}
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?since=invalid-date", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?since=invalid-date", nil).
+		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
 	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid since parameter")
@@ -132,114 +100,30 @@ func TestContainerHandler_Logs_InvalidSinceParameter(t *testing.T) {
 
 // TestContainerHandler_Logs_InvalidTailParameter tests log retrieval with invalid tail parameter
 func TestContainerHandler_Logs_InvalidTailParameter(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
+	engine := &fakeContainerEngine{}
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?tail=not-a-number", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?tail=not-a-number", nil).
+		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
 	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid tail parameter")
 	assert.Contains(t, w.Body.String(), "INVALID_TAIL_PARAM", "Response should contain INVALID_TAIL_PARAM error code")
 }
 
-// TestContainerHandler_Logs_ContainerNotFound tests that Logs handles container not found error
-func TestContainerHandler_Logs_ContainerNotFound(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(-1)).Return(nil, appErrors.ErrContainerNotFound)
-
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code, "Should return 404 when container not found")
-	assert.Contains(t, w.Body.String(), "CONTAINER_NOT_FOUND", "Response should contain CONTAINER_NOT_FOUND error code")
-}
-
-// TestContainerHandler_Logs_ConnectionError tests that Logs handles connection errors
-func TestContainerHandler_Logs_ConnectionError(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	connErr := fmt.Errorf("connection failed")
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(-1)).Return(nil, connErr)
-
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code, "Should return 500 on connection error")
-}
-
-// TestContainerHandler_Logs_MissingUserID tests that Logs validates user ID
-func TestContainerHandler_Logs_MissingUserID(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
-
-	ctx := context.Background()
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusUnauthorized, w.Code, "Should return 401 when user ID is missing")
-}
-
 // TestContainerHandler_Logs_MissingMachineID tests that Logs validates machine ID
 func TestContainerHandler_Logs_MissingMachineID(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
+	engine := &fakeContainerEngine{}
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines//containers/container-123/logs", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines//containers/container-123/logs", nil).
+		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
 	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when machine ID is missing")
@@ -248,21 +132,14 @@ func TestContainerHandler_Logs_MissingMachineID(t *testing.T) {
 
 // TestContainerHandler_Logs_MissingContainerID tests that Logs validates container ID
 func TestContainerHandler_Logs_MissingContainerID(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
+	engine := &fakeContainerEngine{}
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers//logs", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers//logs", nil).
+		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
 	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when container ID is missing")
@@ -270,129 +147,56 @@ func TestContainerHandler_Logs_MissingContainerID(t *testing.T) {
 }
 
 // TestContainerHandler_Logs_StreamingHappyPath tests successful streaming
-// logs with follow=true: log events cross byte-identical and a clean end
-// fires exactly one INFO STREAM_ENDED terminal event.
+// logs with follow=true through the real service: podman's log lines are
+// decoded into events, cross byte-identical, and a clean end fires exactly
+// one INFO STREAM_ENDED terminal event.
 func TestContainerHandler_Logs_StreamingHappyPath(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
+	var gotOpts entities.ContainerLogsOptions
+	engine := &fakeContainerEngine{
+		logsFn: func(name string, opts entities.ContainerLogsOptions) error {
+			gotOpts = opts
+			// Simulate podman's follow-mode delivery: each line arrives
+			// with a podman timestamp prefix.
+			writeLogsInto(opts, "2024-01-01T00:00:00.000000000Z Starting application\n", "")
+			writeLogsInto(opts, "2024-01-01T00:00:01.000000000Z Application started successfully\n", "")
+			return nil
+		},
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true&tail=0", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true&tail=0", nil).
+		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
-	// Mock the streaming service call to emit some log events
-	mockService.On("GetLogsWithStream", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0), mock.AnythingOfType("func(containers.ContainerLogEvent)")).
-		Run(func(args mock.Arguments) {
-			callback := args.Get(6).(func(event ContainerLogEvent))
-			// Emit some log events
-			callback(ContainerLogEvent{
-				Timestamp: "2024-01-01T00:00:00Z",
-				Level:     "INFO",
-				Message:   "Starting application",
-			})
-			callback(ContainerLogEvent{
-				Timestamp: "2024-01-01T00:00:01Z",
-				Level:     "INFO",
-				Message:   "Application started successfully",
-			})
-		}).Return(nil)
-
 	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on streaming success")
+	assert.True(t, gotOpts.Follow, "follow=true must reach the machine as a follow request")
 	output := w.Body.String()
 	assert.Contains(t, output, `"message":"Starting application"`, "Response should contain first log")
 	assert.Contains(t, output, `"message":"Application started successfully"`, "Response should contain second log")
 	assert.Contains(t, output, `"level":"INFO","message":"STREAM_ENDED"`, "A clean stream end must emit the STREAM_ENDED terminal event")
-	mockService.AssertExpectations(t)
 }
 
 // TestContainerHandler_Logs_NonStreamingUnchanged tests that follow=false returns non-streaming response unchanged
 func TestContainerHandler_Logs_NonStreamingUnchanged(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
+	engine := &fakeContainerEngine{
+		logsFn: func(name string, opts entities.ContainerLogsOptions) error {
+			writeLogsInto(opts, "test log line 1\ntest log line 2\n", "")
+			return nil
+		},
+	}
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=false", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=false", nil).
+		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
-	expectedResponse := &ContainerLogsResponse{
-		ID:   "container-123",
-		Logs: "test log line 1\ntest log line 2",
-	}
-	mockService.On("GetLogs", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(-1)).Return(expectedResponse, nil)
-
 	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
 	assert.Contains(t, w.Body.String(), `"id":"container-123"`, "Response should contain container ID")
 	assert.Contains(t, w.Body.String(), `"logs":"test log line 1\ntest log line 2"`, "Response should contain logs as single field")
-	mockService.AssertExpectations(t)
-}
-
-// TestContainerHandler_Logs_StreamingContainerNotFound tests streaming with container not found
-func TestContainerHandler_Logs_StreamingContainerNotFound(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true&tail=0", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	// Mock the streaming service call to return container not found error
-	mockService.On("GetLogsWithStream", mock.Anything, "test-user", "test-machine", "container-123", time.Time{}, int64(0), mock.AnythingOfType("func(containers.ContainerLogEvent)")).
-		Return(appErrors.ErrContainerNotFound)
-
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 even on error in streaming mode")
-	output := w.Body.String()
-	assert.Contains(t, output, `"level":"ERROR"`, "Response should contain error level")
-	assert.Contains(t, output, `CONTAINER_NOT_FOUND`, "Response should contain CONTAINER_NOT_FOUND error")
-	mockService.AssertExpectations(t)
-}
-
-// TestContainerHandler_Logs_StreamingMissingUserID pins the streaming
-// branch's identity ruling: a missing identity is a wiring bug answered
-// with 500 INTERNAL_ERROR, not a client error.
-func TestContainerHandler_Logs_StreamingMissingUserID(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true", nil)
-	w := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", handler.Logs)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code, "Missing identity on a streaming route is a wiring bug: 500")
-	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR", "Response should contain INTERNAL_ERROR error code")
-	mockService.AssertNotCalled(t, "GetLogsWithStream")
 }

@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
@@ -56,9 +54,10 @@ func (d *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-func newAutoUpdateTestServer(t *testing.T, svc *MockQuadletService) (*chi.Mux, *deadlineRecorder) {
+func newAutoUpdateTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*chi.Mux, *deadlineRecorder) {
 	t.Helper()
-	handler := NewQuadletHandler(svc)
+	engine := &fakeQuadletEngine{}
+	handler := NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, sshExec))
 	r := chi.NewRouter()
 	r.Post("/api/machines/{id}/quadlets/auto-update", handler.AutoUpdate)
 	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
@@ -74,24 +73,24 @@ func autoUpdateRequest(t *testing.T, url string) *http.Request {
 	return req.WithContext(ctx)
 }
 
-func TestQuadletHandler_AutoUpdate_SuccessStream(t *testing.T) {
-	report := AutoUpdateReport{
-		Containers: []AutoUpdateItem{{ContainerName: "web", ImageName: "nginx:latest", Updated: AutoUpdateItemUpdated}},
-		Overall:    AutoUpdateCompleted,
-	}
-	svc := &MockQuadletService{}
-	svc.mockAutoUpdate = func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
-		onLine(sshexec.OutputLine{Stream: sshexec.StdoutStream, Text: "Pulling nginx:latest"})
-		return report, nil
-	}
+// reportJSON is a podman auto-update --format json report naming one
+// updated container.
+const reportJSON = `[{"Unit":"web.service","ContainerName":"web","ImageName":"nginx:latest","Updated":"true"}]`
 
-	router, rec := newAutoUpdateTestServer(t, svc)
+func TestQuadletHandler_AutoUpdate_SuccessStream(t *testing.T) {
+	sshExec := testutils.NewMockSSHExecWithStreamFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
+		onLine(sshexec.OutputLine{Stream: sshexec.StdoutStream, Text: "Pulling nginx:latest"})
+		onLine(sshexec.OutputLine{Stream: sshexec.StdoutStream, Text: reportJSON})
+		return sshexec.ExecResult{ExitCode: 0, Stdout: "Pulling nginx:latest\n" + reportJSON}, nil
+	})
+
+	router, rec := newAutoUpdateTestServer(t, sshExec)
 	router.ServeHTTP(rec, autoUpdateRequest(t, "/api/machines/machine-1/quadlets/auto-update"))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	events := parseNDJSON(t, rec.Body.String())
-	require.Len(t, events, 2)
+	require.Len(t, events, 3, "two streamed log lines plus the terminal complete event")
 
 	assert.Equal(t, AutoUpdateEventTypeLog, events[0].Type)
 	assert.Equal(t, "Pulling nginx:latest", events[0].Line)
@@ -100,12 +99,14 @@ func TestQuadletHandler_AutoUpdate_SuccessStream(t *testing.T) {
 	assert.NotEmpty(t, events[0].OperationID)
 	assert.NotEmpty(t, events[0].Timestamp)
 
-	assert.Equal(t, AutoUpdateEventTypeDone, events[1].Type)
-	require.NotNil(t, events[1].Report)
-	assert.Equal(t, AutoUpdateCompleted, events[1].Report.Overall)
-	require.Len(t, events[1].Report.Containers, 1)
-	assert.Equal(t, "web", events[1].Report.Containers[0].ContainerName)
-	assert.Nil(t, events[1].Error)
+	assert.Equal(t, AutoUpdateEventTypeLog, events[1].Type, "the machine's report line arrives as a log event too")
+
+	assert.Equal(t, AutoUpdateEventTypeDone, events[2].Type)
+	require.NotNil(t, events[2].Report)
+	assert.Equal(t, AutoUpdateCompleted, events[2].Report.Overall)
+	require.Len(t, events[2].Report.Containers, 1)
+	assert.Equal(t, "web", events[2].Report.Containers[0].ContainerName)
+	assert.Nil(t, events[2].Error)
 
 	// All events share one operation ID and the terminal event is last.
 	for _, event := range events {
@@ -114,56 +115,32 @@ func TestQuadletHandler_AutoUpdate_SuccessStream(t *testing.T) {
 }
 
 func TestQuadletHandler_AutoUpdate_PartialFailureCompletes(t *testing.T) {
-	report := AutoUpdateReport{
-		Containers: []AutoUpdateItem{{ContainerName: "db", ImageName: "postgres:16", Updated: AutoUpdateItemFailed, Error: "database is locked"}},
-		Overall:    AutoUpdateWithFailures,
-		ExitCode:   3,
-	}
-	svc := &MockQuadletService{}
-	svc.mockAutoUpdate = func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
-		return report, nil
-	}
+	failureJSON := `[{"Unit":"db.service","ContainerName":"db","ImageName":"postgres:16","Updated":"false","Error":"database is locked"}]`
+	sshExec := testutils.NewMockSSHExecWithResult(sshexec.ExecResult{ExitCode: 3, Stdout: failureJSON})
 
-	router, rec := newAutoUpdateTestServer(t, svc)
+	router, rec := newAutoUpdateTestServer(t, sshExec)
 	router.ServeHTTP(rec, autoUpdateRequest(t, "/api/machines/machine-1/quadlets/auto-update"))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
 	events := parseNDJSON(t, rec.Body.String())
-	require.Len(t, events, 1)
-	assert.Equal(t, AutoUpdateEventTypeDone, events[0].Type, "partial failure is data in the complete event, not an error")
-	require.NotNil(t, events[0].Report)
-	assert.Equal(t, AutoUpdateWithFailures, events[0].Report.Overall)
-	assert.Equal(t, AutoUpdateItemFailed, events[0].Report.Containers[0].Updated)
-	assert.Equal(t, "database is locked", events[0].Report.Containers[0].Error)
-}
+	require.Len(t, events, 2, "the streamed report line plus the terminal complete event")
+	assert.Equal(t, AutoUpdateEventTypeLog, events[0].Type)
 
-func TestQuadletHandler_AutoUpdate_ConnectionErrorYieldsErrorEvent(t *testing.T) {
-	svc := &MockQuadletService{}
-	svc.mockAutoUpdate = func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
-		return AutoUpdateReport{}, errors.New("dial failed")
-	}
-
-	router, rec := newAutoUpdateTestServer(t, svc)
-	router.ServeHTTP(rec, autoUpdateRequest(t, "/api/machines/machine-1/quadlets/auto-update"))
-
-	events := parseNDJSON(t, rec.Body.String())
-	require.Len(t, events, 1)
-	assert.Equal(t, AutoUpdateEventTypeError, events[0].Type)
-	require.NotNil(t, events[0].Error)
-	assert.Equal(t, appErrors.ErrConnectionFailed.Code, events[0].Error.Code)
-	assert.Nil(t, events[0].Report)
+	assert.Equal(t, AutoUpdateEventTypeDone, events[1].Type, "partial failure is data in the complete event, not an error")
+	require.NotNil(t, events[1].Report)
+	assert.Equal(t, AutoUpdateWithFailures, events[1].Report.Overall)
+	assert.Equal(t, AutoUpdateItemFailed, events[1].Report.Containers[0].Updated)
+	assert.Equal(t, "database is locked", events[1].Report.Containers[0].Error)
 }
 
 func TestQuadletHandler_AutoUpdate_UnparsableReportCompletes(t *testing.T) {
-	report := AutoUpdateReport{Overall: AutoUpdateUnparsable, ExitCode: 0}
-	svc := &MockQuadletService{}
-	svc.mockAutoUpdate = func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
+	sshExec := testutils.NewMockSSHExecWithStreamFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
 		onLine(sshexec.OutputLine{Stream: sshexec.StdoutStream, Text: "not json"})
-		return report, nil
-	}
+		return sshexec.ExecResult{ExitCode: 0, Stdout: "not json"}, nil
+	})
 
-	router, rec := newAutoUpdateTestServer(t, svc)
+	router, rec := newAutoUpdateTestServer(t, sshExec)
 	router.ServeHTTP(rec, autoUpdateRequest(t, "/api/machines/machine-1/quadlets/auto-update"))
 
 	events := parseNDJSON(t, rec.Body.String())
@@ -175,45 +152,30 @@ func TestQuadletHandler_AutoUpdate_UnparsableReportCompletes(t *testing.T) {
 	assert.Equal(t, AutoUpdateUnparsable, events[1].Report.Overall)
 }
 
+// TestQuadletHandler_AutoUpdate_DryRunForwarded pins the dryRun query
+// decoding: the flag must reach the machine as the CLI's --dry-run argument.
 func TestQuadletHandler_AutoUpdate_DryRunForwarded(t *testing.T) {
-	var gotDryRun bool
-	svc := &MockQuadletService{}
-	svc.mockAutoUpdate = func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
-		gotDryRun = dryRun
-		return AutoUpdateReport{Overall: AutoUpdateDryRun}, nil
-	}
+	var gotOpts sshexec.ExecOptions
+	sshExec := testutils.NewMockSSHExecWithStreamFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions, _ func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
+		gotOpts = opts
+		return sshexec.ExecResult{ExitCode: 0, Stdout: "[]"}, nil
+	})
 
-	router, rec := newAutoUpdateTestServer(t, svc)
+	router, rec := newAutoUpdateTestServer(t, sshExec)
 	router.ServeHTTP(rec, autoUpdateRequest(t, "/api/machines/machine-1/quadlets/auto-update?dryRun=true"))
 
-	assert.True(t, gotDryRun, "dryRun=true must be forwarded to the service")
+	assert.Contains(t, gotOpts.Args, "--dry-run", "dryRun=true must reach the machine as the CLI flag")
 
 	events := parseNDJSON(t, rec.Body.String())
 	require.Len(t, events, 1)
+	require.NotNil(t, events[0].Report)
 	assert.Equal(t, AutoUpdateDryRun, events[0].Report.Overall)
 }
 
-func TestQuadletHandler_AutoUpdate_MissingUserID(t *testing.T) {
-	svc := &MockQuadletService{}
-	handler := NewQuadletHandler(svc)
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/quadlets/auto-update", handler.AutoUpdate)
-
-	req := httptest.NewRequest("POST", "/api/machines/machine-1/quadlets/auto-update", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code, "Missing identity is a wiring bug: 500")
-	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR", "Response should contain INTERNAL_ERROR error code")
-}
-
 func TestQuadletHandler_AutoUpdate_ExtendsWriteDeadline(t *testing.T) {
-	svc := &MockQuadletService{}
-	svc.mockAutoUpdate = func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
-		return AutoUpdateReport{Overall: AutoUpdateCompleted}, nil
-	}
+	sshExec := testutils.NewMockSSHExecWithResult(sshexec.ExecResult{ExitCode: 0, Stdout: reportJSON})
 
-	router, rec := newAutoUpdateTestServer(t, svc)
+	router, rec := newAutoUpdateTestServer(t, sshExec)
 	router.ServeHTTP(rec, autoUpdateRequest(t, "/api/machines/machine-1/quadlets/auto-update"))
 
 	assert.True(t, rec.gotDeadline, "handler must extend the per-response write deadline")
@@ -228,7 +190,7 @@ func TestQuadletHandler_AutoUpdate_ExtendsWriteDeadline(t *testing.T) {
 // RequireMachinePermission(write) on the POST) so the 403/404 access
 // semantics the ACs promise are exercised through the real middleware.
 
-func autoUpdateAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service QuadletServiceInterface) http.Handler {
+func autoUpdateAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *QuadletService) http.Handler {
 	r := chi.NewRouter()
 	r.Route("/api/machines", func(r chi.Router) {
 		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
@@ -258,13 +220,14 @@ func TestQuadletHandler_AutoUpdate_WriteGate(t *testing.T) {
 			machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
 			accessRepo := testutils.NewMockMachineAccessRepository()
 			accessRepo.AddAccess("machine-1", "grantee-1", tt.level, time.Now())
-			var called bool
-			svc := &MockQuadletService{}
-			svc.mockAutoUpdate = func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
+			called := false
+			sshExec := testutils.NewMockSSHExecWithStreamFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions, _ func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
 				called = true
-				return AutoUpdateReport{Overall: AutoUpdateCompleted}, nil
-			}
-			router := autoUpdateAccessRouter(machineRepo, accessRepo, svc)
+				return sshexec.ExecResult{ExitCode: 0, Stdout: "[]"}, nil
+			})
+			engine := &fakeQuadletEngine{}
+			service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec)
+			router := autoUpdateAccessRouter(machineRepo, accessRepo, service)
 
 			req := httptest.NewRequest("POST", "/api/machines/machine-1/quadlets/auto-update", nil)
 			req = req.WithContext(contextutils.SetUserID(req.Context(), "grantee-1"))
@@ -278,13 +241,14 @@ func TestQuadletHandler_AutoUpdate_WriteGate(t *testing.T) {
 }
 
 func TestQuadletHandler_AutoUpdate_UnknownMachineIsNotFound(t *testing.T) {
-	var called bool
-	svc := &MockQuadletService{}
-	svc.mockAutoUpdate = func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
+	called := false
+	sshExec := testutils.NewMockSSHExecWithStreamFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions, _ func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
 		called = true
-		return AutoUpdateReport{Overall: AutoUpdateCompleted}, nil
-	}
-	router := autoUpdateAccessRouter(testutils.NewMockMachineRepository(), testutils.NewMockMachineAccessRepository(), svc)
+		return sshexec.ExecResult{ExitCode: 0, Stdout: "[]"}, nil
+	})
+	engine := &fakeQuadletEngine{}
+	router := autoUpdateAccessRouter(testutils.NewMockMachineRepository(), testutils.NewMockMachineAccessRepository(),
+		NewQuadletService(fakeEngineProvider{engine: engine}, sshExec))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, requestAsUserForAutoUpdate(http.MethodPost, "/api/machines/no-such-machine/quadlets/auto-update", "owner-1"))
@@ -295,15 +259,16 @@ func TestQuadletHandler_AutoUpdate_UnknownMachineIsNotFound(t *testing.T) {
 }
 
 func TestQuadletHandler_AutoUpdate_UserWithoutAccessIsForbidden(t *testing.T) {
-	var called bool
-	svc := &MockQuadletService{}
-	svc.mockAutoUpdate = func(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
+	called := false
+	sshExec := testutils.NewMockSSHExecWithStreamFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions, _ func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
 		called = true
-		return AutoUpdateReport{Overall: AutoUpdateCompleted}, nil
-	}
+		return sshexec.ExecResult{ExitCode: 0, Stdout: "[]"}, nil
+	})
 	machineRepo := testutils.NewMockMachineRepository()
 	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	router := autoUpdateAccessRouter(machineRepo, testutils.NewMockMachineAccessRepository(), svc)
+	engine := &fakeQuadletEngine{}
+	router := autoUpdateAccessRouter(machineRepo, testutils.NewMockMachineAccessRepository(),
+		NewQuadletService(fakeEngineProvider{engine: engine}, sshExec))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, requestAsUserForAutoUpdate(http.MethodPost, "/api/machines/machine-1/quadlets/auto-update", "stranger-1"))

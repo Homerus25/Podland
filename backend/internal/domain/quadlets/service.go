@@ -13,27 +13,6 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// Compile-time check that *QuadletService satisfies QuadletServiceInterface.
-var _ QuadletServiceInterface = (*QuadletService)(nil)
-
-// QuadletServiceInterface defines the interface for quadlet services.
-// This interface is used for dependency injection and testing.
-type QuadletServiceInterface interface {
-	List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error)
-	Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error)
-	Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error)
-	Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error)
-	Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error
-	Start(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error)
-	Stop(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
-	Restart(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error)
-	GetLogs(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error)
-	GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error
-	Generate(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error)
-	Import(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error)
-	AutoUpdate(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error)
-}
-
 // ListFilters represents the filters for listing quadlets.
 type ListFilters struct {
 	Resource string

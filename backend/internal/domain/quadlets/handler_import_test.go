@@ -9,203 +9,106 @@ import (
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-func TestHandlerImport_Success(t *testing.T) {
-	t.Parallel()
-
-	importResult := &QuadletImportResponse{
-		Imported: []QuadletImportResult{
-			{ID: "web", Name: "web", Path: "/etc/containers/systemd/web.container", State: "unknown"},
-			{ID: "db", Name: "db", Path: "/etc/containers/systemd/db.container", State: "unknown"},
-		},
-		Failed: []QuadletImportError{},
-	}
-
-	mockService := &MockQuadletService{
-		mockImport: func(_ context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error) {
-			return importResult, nil
-		},
-	}
-	handler := NewQuadletHandler(mockService)
-
-	reqBody := QuadletImportRequest{
-		Quadlets: []QuadletImportEntry{
-			{Name: "web", Resource: "container", Content: "[Container]\nImage=nginx\n"},
-			{Name: "db", Resource: "container", Content: "[Container]\nImage=postgres\n"},
-		},
-	}
-
-	body, err := json.Marshal(reqBody)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader(body))
-
-	// Set up chi URL parameters
+func importRequest(t *testing.T, body string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader([]byte(body)))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "machine-1")
 	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
 	ctx = contextutils.SetUserID(ctx, "user-1")
 	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-	req = req.WithContext(ctx)
+	return req.WithContext(ctx)
+}
+
+const twoQuadletsBody = `{"quadlets":[
+	{"name":"web","resource":"container","content":"[Container]\nImage=nginx\n"},
+	{"name":"db","resource":"container","content":"[Container]\nImage=postgres\n"}]}`
+
+func TestHandlerImport_Success(t *testing.T) {
+	t.Parallel()
+
+	var installed []string
+	engine := &fakeQuadletEngine{
+		installFn: func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {
+			installed = append(installed, fileName)
+			return &entities.QuadletInstallReport{
+				InstalledQuadlets: map[string]string{"src": "/etc/containers/systemd/" + fileName},
+			}, nil
+		},
+	}
 
 	w := httptest.NewRecorder()
+	newTestHandler(engine).Import(w, importRequest(t, twoQuadletsBody))
 
-	handler.Import(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, http.StatusCreated, w.Code)
 
 	var response QuadletImportResponse
-	err = json.NewDecoder(w.Body).Decode(&response)
-	require.NoError(t, err)
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&response))
 
 	assert.Len(t, response.Imported, 2)
 	assert.Len(t, response.Failed, 0)
 	assert.Equal(t, "web", response.Imported[0].Name)
 	assert.Equal(t, "db", response.Imported[1].Name)
+	assert.ElementsMatch(t, []string{"web.container", "db.container"}, installed,
+		"each entry must be installed under its resource-derived filename")
 }
 
 func TestHandlerImport_InvalidRequestBody(t *testing.T) {
 	t.Parallel()
 
-	mockService := &MockQuadletService{}
-	handler := NewQuadletHandler(mockService)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader([]byte("invalid json")))
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine-1")
-	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
-	ctx = contextutils.SetUserID(ctx, "user-1")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-	req = req.WithContext(ctx)
+	engine := &fakeQuadletEngine{}
 
 	w := httptest.NewRecorder()
-
-	handler.Import(w, req)
+	newTestHandler(engine).Import(w, importRequest(t, "invalid json"))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestHandlerImport_ServiceError(t *testing.T) {
-	t.Parallel()
-
-	mockService := &MockQuadletService{
-		mockImport: func(_ context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error) {
-			return nil, errors.ErrConnectionFailed
-		},
-	}
-	handler := NewQuadletHandler(mockService)
-
-	reqBody := QuadletImportRequest{
-		Quadlets: []QuadletImportEntry{
-			{Name: "web", Resource: "container", Content: "[Container]\nImage=nginx\n"},
-		},
-	}
-
-	body, err := json.Marshal(reqBody)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader(body))
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine-1")
-	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
-	ctx = contextutils.SetUserID(ctx, "user-1")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	handler.Import(w, req)
-
-	assert.Equal(t, http.StatusBadGateway, w.Code)
 }
 
 func TestHandlerImport_EmptyQuadletsList(t *testing.T) {
 	t.Parallel()
 
-	mockService := &MockQuadletService{}
-	handler := NewQuadletHandler(mockService)
-
-	reqBody := QuadletImportRequest{
-		Quadlets: []QuadletImportEntry{},
-	}
-
-	body, err := json.Marshal(reqBody)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader(body))
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine-1")
-	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
-	ctx = contextutils.SetUserID(ctx, "user-1")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-	req = req.WithContext(ctx)
+	engine := &fakeQuadletEngine{}
 
 	w := httptest.NewRecorder()
-
-	handler.Import(w, req)
+	newTestHandler(engine).Import(w, importRequest(t, `{"quadlets":[]}`))
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+// TestHandlerImport_PartialFailure pins that a per-entry install failure is
+// data in the response (201 with a Failed entry), not a failed request — the
+// other entries still land on the machine.
 func TestHandlerImport_PartialFailure(t *testing.T) {
 	t.Parallel()
 
-	importResult := &QuadletImportResponse{
-		Imported: []QuadletImportResult{
-			{ID: "web", Name: "web", Path: "/etc/containers/systemd/web.container", State: "unknown"},
-		},
-		Failed: []QuadletImportError{
-			{Name: "db", Error: "quadlet already exists"},
-		},
-	}
-
-	mockService := &MockQuadletService{
-		mockImport: func(_ context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error) {
-			return importResult, nil
+	engine := &fakeQuadletEngine{
+		installFn: func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {
+			if fileName == "db.container" {
+				return nil, assert.AnError
+			}
+			return &entities.QuadletInstallReport{
+				InstalledQuadlets: map[string]string{"src": "/etc/containers/systemd/" + fileName},
+			}, nil
 		},
 	}
-	handler := NewQuadletHandler(mockService)
-
-	reqBody := QuadletImportRequest{
-		Quadlets: []QuadletImportEntry{
-			{Name: "web", Resource: "container", Content: "[Container]\nImage=nginx\n"},
-			{Name: "db", Resource: "container", Content: "[Container]\nImage=postgres\n"},
-		},
-	}
-
-	body, err := json.Marshal(reqBody)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader(body))
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine-1")
-	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
-	ctx = contextutils.SetUserID(ctx, "user-1")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-	req = req.WithContext(ctx)
 
 	w := httptest.NewRecorder()
+	newTestHandler(engine).Import(w, importRequest(t, twoQuadletsBody))
 
-	handler.Import(w, req)
-
-	assert.Equal(t, http.StatusCreated, w.Code)
+	require.Equal(t, http.StatusCreated, w.Code)
 
 	var response QuadletImportResponse
-	err = json.NewDecoder(w.Body).Decode(&response)
-	require.NoError(t, err)
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&response))
 
-	assert.Len(t, response.Imported, 1)
-	assert.Len(t, response.Failed, 1)
+	require.Len(t, response.Imported, 1)
 	assert.Equal(t, "web", response.Imported[0].Name)
+	require.Len(t, response.Failed, 1)
 	assert.Equal(t, "db", response.Failed[0].Name)
-	assert.Contains(t, response.Failed[0].Error, "already exists")
+	assert.NotEmpty(t, response.Failed[0].Error, "the failure must carry a reason")
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
@@ -24,12 +23,13 @@ func TestImageHandler_Prune_Success(t *testing.T) {
 		{Id: "sha256:aaa", Size: 4096},
 		{Id: "sha256:bbb", Size: 0, Err: fmt.Errorf("image is used by container")},
 	}
+	engine := &fakeImageEngine{
+		pruneFn: func() ([]*reports.PruneReport, error) {
+			return prunes, nil
+		},
+	}
 
-	mockService := new(MockImageService)
-	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return(prunes, nil)
-	handler := NewImageHandler(mockService)
-
-	w := recordPruneRequest(handler.Prune, "test-machine")
+	w := recordPruneRequest(newTestHandler(engine).Prune, "test-machine")
 
 	assert.Equal(t, 200, w.Code, "prune should return 200")
 	var got []ImagePruneResponse
@@ -45,28 +45,19 @@ func TestImageHandler_Prune_Success(t *testing.T) {
 // TestImageHandler_Prune_EmptyReport pins that pruning with nothing to
 // remove still returns 200 with an empty JSON array (not null).
 func TestImageHandler_Prune_EmptyReport(t *testing.T) {
-	mockService := new(MockImageService)
-	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return([]*reports.PruneReport{}, nil)
-	handler := NewImageHandler(mockService)
+	engine := &fakeImageEngine{
+		pruneFn: func() ([]*reports.PruneReport, error) {
+			return []*reports.PruneReport{}, nil
+		},
+	}
 
-	w := recordPruneRequest(handler.Prune, "test-machine")
+	w := recordPruneRequest(newTestHandler(engine).Prune, "test-machine")
 
 	assert.Equal(t, 200, w.Code)
 	var got []ImagePruneResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.NotNil(t, got, "response must decode as an empty array, not null")
 	assert.Empty(t, got)
-}
-
-func TestImageHandler_Prune_ServiceError(t *testing.T) {
-	mockService := new(MockImageService)
-	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return(nil, fmt.Errorf("boom"))
-	handler := NewImageHandler(mockService)
-
-	w := recordPruneRequest(handler.Prune, "test-machine")
-
-	assert.Equal(t, 500, w.Code)
-	assert.Contains(t, w.Body.String(), "requestId")
 }
 
 // TestFromImagePruneReports_NilEntries pins that nil reports are skipped

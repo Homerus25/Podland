@@ -37,12 +37,6 @@ func TestNewQuadletService_WithEngineProvider(t *testing.T) {
 	assert.NotNil(t, service.engines)
 }
 
-// TestQuadletService_ImplementsInterface is a compile-time check that
-// *QuadletService satisfies QuadletServiceInterface.
-func TestQuadletService_ImplementsInterface(t *testing.T) {
-	var _ QuadletServiceInterface = (*QuadletService)(nil)
-}
-
 func TestQuadletService_List_ReturnsFilteredQuadlets(t *testing.T) {
 	engine := &fakeQuadletEngine{
 		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {

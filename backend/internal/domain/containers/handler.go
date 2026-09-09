@@ -24,11 +24,11 @@ import (
 // streaming envelope (internal/streaming): Begin + Run own headers,
 // identity, disconnect, and the terminal-event mapping.
 type ContainerHandler struct {
-	service ContainerServiceInterface
+	service *ContainerService
 }
 
 // NewContainerHandler creates a new ContainerHandler
-func NewContainerHandler(service ContainerServiceInterface) *ContainerHandler {
+func NewContainerHandler(service *ContainerService) *ContainerHandler {
 	return &ContainerHandler{
 		service: service,
 	}

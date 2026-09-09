@@ -23,11 +23,11 @@ import (
 // NDJSON progress through the streaming envelope (internal/streaming):
 // Begin + Run own headers, identity, disconnect, and error mapping.
 type ImageHandler struct {
-	service ImageServiceInterface
+	service *ImageService
 }
 
 // NewImageHandler creates a new ImageHandler
-func NewImageHandler(service ImageServiceInterface) *ImageHandler {
+func NewImageHandler(service *ImageService) *ImageHandler {
 	return &ImageHandler{
 		service: service,
 	}

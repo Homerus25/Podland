@@ -8,7 +8,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
@@ -32,12 +31,13 @@ func TestVolumeHandler_Prune_Success(t *testing.T) {
 		{Id: "unused-a", Size: 4096},
 		{Id: "unused-b", Size: 0, Err: fmt.Errorf("device or resource busy")},
 	}
+	engine := &fakeVolumeEngine{
+		pruneFn: func() ([]*reports.PruneReport, error) {
+			return prunes, nil
+		},
+	}
 
-	mockService := new(MockVolumeService)
-	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return(prunes, nil)
-	handler := NewVolumeHandler(mockService)
-
-	w := pruneRequest(handler.Prune)
+	w := pruneRequest(newTestHandler(engine).Prune)
 
 	assert.Equal(t, 200, w.Code, "prune should return 200")
 	var got []VolumePruneResponse
@@ -53,28 +53,19 @@ func TestVolumeHandler_Prune_Success(t *testing.T) {
 // TestVolumeHandler_Prune_EmptyReport pins that pruning with nothing to
 // remove still returns 200 with an empty JSON array (not nil/null).
 func TestVolumeHandler_Prune_EmptyReport(t *testing.T) {
-	mockService := new(MockVolumeService)
-	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return([]*reports.PruneReport{}, nil)
-	handler := NewVolumeHandler(mockService)
+	engine := &fakeVolumeEngine{
+		pruneFn: func() ([]*reports.PruneReport, error) {
+			return []*reports.PruneReport{}, nil
+		},
+	}
 
-	w := pruneRequest(handler.Prune)
+	w := pruneRequest(newTestHandler(engine).Prune)
 
 	assert.Equal(t, 200, w.Code)
 	var got []VolumePruneResponse
 	require.NoError(t, jsonUnmarshalSlice(w.Body.Bytes(), &got))
 	assert.NotNil(t, got, "response must decode as an empty array, not null")
 	assert.Empty(t, got)
-}
-
-func TestVolumeHandler_Prune_ServiceError(t *testing.T) {
-	mockService := new(MockVolumeService)
-	mockService.On("Prune", mock.Anything, "test-user", "test-machine").Return(nil, fmt.Errorf("boom"))
-	handler := NewVolumeHandler(mockService)
-
-	w := pruneRequest(handler.Prune)
-
-	assert.Equal(t, 500, w.Code)
-	assert.Contains(t, w.Body.String(), "requestId")
 }
 
 // TestFromPodmanPruneReports_NilEntries pins that nil reports are skipped

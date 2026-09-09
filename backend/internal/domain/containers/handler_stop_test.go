@@ -1,68 +1,48 @@
 package containers
 
 import (
-	"context"
-	"errors"
+	"encoding/json"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/libpod/define"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// TestContainerHandler_Stop_ConnectionError tests that Stop handles connection errors
-func TestContainerHandler_Stop_ConnectionError(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers/container-123/stop", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	connErr := errors.New("connection failed")
-	mockService.On("Stop", mock.Anything, "test-user", "test-machine", "container-123").Return(nil, connErr)
-
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/containers/{containerId}/stop", handler.Stop)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, 500, w.Code, "Should return 500 on connection error")
-}
-
-// TestContainerHandler_Stop_Success tests successful container stop
+// TestContainerHandler_Stop_Success pins the stop contract through the
+// real service: 200 with the stopped container's ID, its inspect-resolved
+// name, and the stopped state.
 func TestContainerHandler_Stop_Success(t *testing.T) {
-	mockService := new(MockContainerService)
-	handler := NewContainerHandler(mockService)
+	var gotID string
+	engine := &fakeContainerEngine{
+		stopFn: func(id string) ([]*entities.StopReport, error) {
+			gotID = id
+			return []*entities.StopReport{{Id: id}}, nil
+		},
+		inspectFn: func(id string) ([]*entities.ContainerInspectReport, []error, error) {
+			return []*entities.ContainerInspectReport{{
+				InspectContainerData: &define.InspectContainerData{Name: "/test-container"},
+			}}, nil, nil
+		},
+	}
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers/container-123/stop", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers/container-123/stop", nil).
+		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
-	expectedResponse := &ContainerStopResponse{
-		ID:        "container-123",
-		Name:      "test-container",
-		State:     "stopped",
-		Timestamp: "2026-07-30T13:00:00Z",
-	}
-	mockService.On("Stop", mock.Anything, "test-user", "test-machine", "container-123").Return(expectedResponse, nil)
-
 	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/containers/{containerId}/stop", handler.Stop)
-
+	r.Post("/api/machines/{id}/containers/{containerId}/stop", newTestHandler(engine).Stop)
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, 200, w.Code, "Should return 200 on success")
+	require.Equal(t, 200, w.Code, "Should return 200 on success")
+	assert.Equal(t, "container-123", gotID, "the URL param must be the stopped container")
+	var got ContainerStopResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.Equal(t, "container-123", got.ID)
+	assert.Equal(t, "test-container", got.Name, "the inspect-resolved name must be reported")
+	assert.Equal(t, "stopped", got.State)
+	assert.NotEmpty(t, got.Timestamp)
 }

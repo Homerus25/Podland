@@ -1,15 +1,10 @@
 package volumes
 
 import (
-	"context"
-	"io"
 	"time"
-
-	"github.com/stretchr/testify/mock"
 
 	"go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
-	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
 func mustParseCreatedAt(value string) time.Time {
@@ -40,57 +35,9 @@ func anonymousVolumeFixture() entities.VolumeConfigResponse {
 	}}
 }
 
-// MockVolumeService is the volumes-domain test double for
-// VolumeServiceInterface. Lives in the domain's test package (not
-// testutils) so the mock can reference the domain's request type without
-// an import cycle.
-type MockVolumeService struct {
-	mock.Mock
-}
-
-func (m *MockVolumeService) List(ctx context.Context, userID, machineID string, opts entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
-	args := m.Called(ctx, userID, machineID, opts)
-	if reports, ok := args.Get(0).([]*entities.VolumeListReport); ok {
-		return reports, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *MockVolumeService) Get(ctx context.Context, userID, machineID, volumeName string) (*entities.VolumeInspectReport, error) {
-	args := m.Called(ctx, userID, machineID, volumeName)
-	if report, ok := args.Get(0).(*entities.VolumeInspectReport); ok {
-		return report, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *MockVolumeService) Create(ctx context.Context, userID, machineID string, req VolumeCreateRequest) (*entities.VolumeInspectReport, error) {
-	args := m.Called(ctx, userID, machineID, req)
-	if report, ok := args.Get(0).(*entities.VolumeInspectReport); ok {
-		return report, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *MockVolumeService) Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error {
-	args := m.Called(ctx, userID, machineID, volumeName, force)
-	return args.Error(0)
-}
-
-func (m *MockVolumeService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
-	args := m.Called(ctx, userID, machineID)
-	if prunes, ok := args.Get(0).([]*reports.PruneReport); ok {
-		return prunes, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *MockVolumeService) Export(ctx context.Context, userID, machineID, volumeName string, w io.Writer) error {
-	args := m.Called(ctx, userID, machineID, volumeName, w)
-	return args.Error(0)
-}
-
-func (m *MockVolumeService) Import(ctx context.Context, userID, machineID, volumeName string, r io.Reader) error {
-	args := m.Called(ctx, userID, machineID, volumeName, r)
-	return args.Error(0)
+// newTestHandler builds the handler around the real service running over
+// the given fake engine; tests arm only the operations their scenario
+// needs (an unarmed operation panics if the handler reaches it).
+func newTestHandler(engine *fakeVolumeEngine) *VolumeHandler {
+	return NewVolumeHandler(NewVolumeService(fakeEngineProvider{engine: engine}))
 }

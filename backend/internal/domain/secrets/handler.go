@@ -17,11 +17,11 @@ import (
 // SecretHandler handles secret requests. All endpoints are JSON and
 // cross the endpoint envelope (internal/web).
 type SecretHandler struct {
-	service SecretServiceInterface
+	service *SecretService
 }
 
 // NewSecretHandler creates a new SecretHandler
-func NewSecretHandler(service SecretServiceInterface) *SecretHandler {
+func NewSecretHandler(service *SecretService) *SecretHandler {
 	return &SecretHandler{
 		service: service,
 	}

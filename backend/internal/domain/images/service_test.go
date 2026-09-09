@@ -19,12 +19,6 @@ import (
 // seam: the connections package owns that contract and pins it in its own
 // tests.
 
-// TestImageService_ImplementsInterface is a compile-time check that *ImageService
-// satisfies ImageServiceInterface.
-func TestImageService_ImplementsInterface(t *testing.T) {
-	var _ ImageServiceInterface = (*ImageService)(nil)
-}
-
 func TestImageService_List_ReturnsEngineSummaries(t *testing.T) {
 	summaries := []*entities.ImageSummary{{ID: "sha256:abc"}}
 	engine := &fakeImageEngine{

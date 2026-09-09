@@ -11,18 +11,6 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
-// VolumeServiceInterface defines the interface for volume services
-// This interface is used for dependency injection and testing
-type VolumeServiceInterface interface {
-	List(ctx context.Context, userID, machineID string, opts entities.VolumeListOptions) ([]*entities.VolumeListReport, error)
-	Get(ctx context.Context, userID, machineID, volumeName string) (*entities.VolumeInspectReport, error)
-	Create(ctx context.Context, userID, machineID string, req VolumeCreateRequest) (*entities.VolumeInspectReport, error)
-	Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error
-	Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error)
-	Export(ctx context.Context, userID, machineID, volumeName string, w io.Writer) error
-	Import(ctx context.Context, userID, machineID, volumeName string, r io.Reader) error
-}
-
 // VolumeService provides business logic for volumes. Every machine-scoped
 // podman call crosses the VolumeEngineProvider (the connection seam); the
 // service itself owns only domain mapping and composition.

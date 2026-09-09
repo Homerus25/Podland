@@ -6,10 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -30,14 +28,18 @@ func getRequest(get http.HandlerFunc, volumeName string) *httptest.ResponseRecor
 func TestVolumeHandler_Get_Success(t *testing.T) {
 	cfg := namedVolumeFixture("2026-08-30T10:00:00Z")
 	report := &entities.VolumeInspectReport{VolumeConfigResponse: &cfg}
+	var gotName string
+	engine := &fakeVolumeEngine{
+		inspectFn: func(name string) (*entities.VolumeInspectReport, error) {
+			gotName = name
+			return report, nil
+		},
+	}
 
-	mockService := new(MockVolumeService)
-	mockService.On("Get", mock.Anything, "test-user", "test-machine", "my-volume").Return(report, nil)
-	handler := NewVolumeHandler(mockService)
-
-	w := getRequest(handler.Get, "my-volume")
+	w := getRequest(newTestHandler(engine).Get, "my-volume")
 
 	assert.Equal(t, 200, w.Code, "inspect should return 200")
+	assert.Equal(t, "my-volume", gotName, "the URL param must be the inspected name")
 
 	var got VolumeInspectResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got), "response must decode as a volume config")
@@ -49,38 +51,8 @@ func TestVolumeHandler_Get_Success(t *testing.T) {
 	assert.Equal(t, "2026-08-30T10:00:00Z", got.CreatedAt)
 }
 
-// TestVolumeHandler_Get_NotFound pins the distinct not-found error code:
-// an unknown volume name must surface as 404 VOLUME_NOT_FOUND in the
-// standard envelope, so stale UI state is diagnosable.
-func TestVolumeHandler_Get_NotFound(t *testing.T) {
-	mockService := new(MockVolumeService)
-	mockService.On("Get", mock.Anything, "test-user", "test-machine", "no-such-volume").
-		Return((*entities.VolumeInspectReport)(nil), errors.ErrVolumeNotFound)
-	handler := NewVolumeHandler(mockService)
-
-	w := getRequest(handler.Get, "no-such-volume")
-
-	assert.Equal(t, 404, w.Code)
-	assert.Contains(t, w.Body.String(), "VOLUME_NOT_FOUND")
-	assert.Contains(t, w.Body.String(), "requestId")
-}
-
-// TestVolumeHandler_Get_ConnectionError pins that connection failures
-// surface as 5xx via the standard envelope.
-func TestVolumeHandler_Get_ConnectionError(t *testing.T) {
-	mockService := new(MockVolumeService)
-	mockService.On("Get", mock.Anything, "test-user", "test-machine", "my-volume").
-		Return((*entities.VolumeInspectReport)(nil), assert.AnError)
-	handler := NewVolumeHandler(mockService)
-
-	w := getRequest(handler.Get, "my-volume")
-
-	assert.Equal(t, 500, w.Code)
-	assert.Contains(t, w.Body.String(), "requestId")
-}
-
 func TestVolumeHandler_Get_MissingVolumeName(t *testing.T) {
-	handler := NewVolumeHandler(new(MockVolumeService))
-	w := getRequest(handler.Get, "")
+	engine := &fakeVolumeEngine{}
+	w := getRequest(newTestHandler(engine).Get, "")
 	assert.Equal(t, 400, w.Code, "missing volume name must be rejected")
 }

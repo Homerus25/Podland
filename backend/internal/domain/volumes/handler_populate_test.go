@@ -9,11 +9,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // buildMultipartBody assembles a multipart/form-data body with the
@@ -48,7 +47,7 @@ func recordPopulateRequest(handler http.HandlerFunc, machineID, volumeName strin
 	})
 }
 
-// readTarEntries untars the reader handed to the service mock.
+// readTarEntries untars the reader handed to the fake engine.
 func readTarEntries(t *testing.T, r io.Reader) map[string][]byte {
 	t.Helper()
 	tr := tar.NewReader(r)
@@ -70,7 +69,7 @@ func readTarEntries(t *testing.T, r io.Reader) map[string][]byte {
 
 // TestVolumeHandler_Populate_FilesShape pins the files contract: the
 // spooled parts land in the assembled tar with their relative paths
-// preserved, and the service receives it as the import source.
+// preserved, and the machine's import receives it as the source.
 func TestVolumeHandler_Populate_FilesShape(t *testing.T) {
 	body, contentType := buildMultipartBody(t, map[string]map[string][]byte{
 		"files": {
@@ -80,23 +79,25 @@ func TestVolumeHandler_Populate_FilesShape(t *testing.T) {
 	})
 
 	var entries map[string][]byte
-	mockService := new(MockVolumeService)
-	mockService.On("Import", mock.Anything, "test-user", "test-machine", "my-volume", mock.Anything).
-		Return(nil).Run(func(args mock.Arguments) {
-		// Read inside the callback: temp files are closed once the
-		// handler returns.
-		entries = readTarEntries(t, args.Get(4).(io.Reader))
-	})
-	handler := NewVolumeHandler(mockService)
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return inspectFixture("my-volume"), nil
+		},
+		importFn: func(_ string, r io.Reader) error {
+			// Read inside the callback: temp files are closed once the
+			// handler returns.
+			entries = readTarEntries(t, r)
+			return nil
+		},
+	}
 
-	w := recordPopulateRequest(handler.Populate, "test-machine", "my-volume", body, contentType)
+	w := recordPopulateRequest(newTestHandler(engine).Populate, "test-machine", "my-volume", body, contentType)
 
 	assert.Equal(t, 204, w.Code, "populate should return 204 on success")
-	require.NotNil(t, entries, "service must receive the assembled tar")
+	require.NotNil(t, entries, "the machine must receive the assembled tar")
 	require.Len(t, entries, 2, "each uploaded file must be a tar entry")
 	assert.Equal(t, []byte("hello"), entries["docs/readme.txt"], "relative paths must be preserved")
 	assert.Equal(t, []byte{0x00, 0x01}, entries["data.bin"])
-	mockService.AssertExpectations(t)
 }
 
 // TestVolumeHandler_Populate_ArchiveShape pins the archive contract: a
@@ -114,18 +115,21 @@ func TestVolumeHandler_Populate_ArchiveShape(t *testing.T) {
 	})
 
 	var got []byte
-	mockService := new(MockVolumeService)
-	mockService.On("Import", mock.Anything, "test-user", "test-machine", "my-volume", mock.Anything).
-		Return(nil).Run(func(args mock.Arguments) {
-		// Read inside the callback: temp files are closed once the
-		// handler returns.
-		data, err := io.ReadAll(args.Get(4).(io.Reader))
-		require.NoError(t, err)
-		got = data
-	})
-	handler := NewVolumeHandler(mockService)
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return inspectFixture("my-volume"), nil
+		},
+		importFn: func(_ string, r io.Reader) error {
+			// Read inside the callback: temp files are closed once the
+			// handler returns.
+			data, err := io.ReadAll(r)
+			require.NoError(t, err)
+			got = data
+			return nil
+		},
+	}
 
-	w := recordPopulateRequest(handler.Populate, "test-machine", "my-volume", body, contentType)
+	w := recordPopulateRequest(newTestHandler(engine).Populate, "test-machine", "my-volume", body, contentType)
 
 	assert.Equal(t, 204, w.Code)
 	assert.Equal(t, tarBuf.Bytes(), got, "archive must be imported as-is")
@@ -134,7 +138,7 @@ func TestVolumeHandler_Populate_ArchiveShape(t *testing.T) {
 // TestVolumeHandler_Populate_ShapeValidation pins the 400s: both shapes
 // at once, an empty upload, and a non-multipart body.
 func TestVolumeHandler_Populate_ShapeValidation(t *testing.T) {
-	handler := NewVolumeHandler(new(MockVolumeService))
+	handler := newTestHandler(&fakeVolumeEngine{})
 
 	t.Run("BothShapesGets400", func(t *testing.T) {
 		body, contentType := buildMultipartBody(t, map[string]map[string][]byte{
@@ -165,7 +169,7 @@ func TestVolumeHandler_Populate_ShapeValidation(t *testing.T) {
 // in part filenames is rejected. Leading slashes are normalized into the
 // volume root rather than rejected (they cannot escape), covered below.
 func TestVolumeHandler_Populate_TraversalRejected(t *testing.T) {
-	handler := NewVolumeHandler(new(MockVolumeService))
+	handler := newTestHandler(&fakeVolumeEngine{})
 
 	for _, name := range []string{"../escape.txt", "../../etc/passwd", "a/../../up.txt"} {
 		body, contentType := buildMultipartBody(t, map[string]map[string][]byte{
@@ -180,7 +184,7 @@ func TestVolumeHandler_Populate_TraversalRejected(t *testing.T) {
 // handler-local cap turns an oversized upload into 413
 // VOLUME_UPLOAD_TOO_LARGE, and the service is never called.
 func TestVolumeHandler_Populate_CapEnforced(t *testing.T) {
-	handler := NewVolumeHandler(new(MockVolumeService)).WithMaxUploadBytes(16)
+	handler := newTestHandler(&fakeVolumeEngine{}).WithMaxUploadBytes(16)
 
 	body, contentType := buildMultipartBody(t, map[string]map[string][]byte{
 		"files": {"big.bin": bytes.Repeat([]byte{0xAA}, 64)},
@@ -197,12 +201,15 @@ func TestVolumeHandler_Populate_NotFound(t *testing.T) {
 	body, contentType := buildMultipartBody(t, map[string]map[string][]byte{
 		"files": {"a.txt": []byte("x")},
 	})
-	mockService := new(MockVolumeService)
-	mockService.On("Import", mock.Anything, "test-user", "test-machine", "no-such-volume", mock.Anything).
-		Return(apperrors.ErrVolumeNotFound)
-	handler := NewVolumeHandler(mockService)
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return nil, notFoundErr()
+		},
+		// importFn stays unarmed: the archive must not be consumed for
+		// a missing volume.
+	}
 
-	w := recordPopulateRequest(handler.Populate, "test-machine", "no-such-volume", body, contentType)
+	w := recordPopulateRequest(newTestHandler(engine).Populate, "test-machine", "no-such-volume", body, contentType)
 
 	assert.Equal(t, 404, w.Code)
 	assert.Contains(t, w.Body.String(), "VOLUME_NOT_FOUND")

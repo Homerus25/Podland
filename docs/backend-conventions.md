@@ -41,9 +41,16 @@ closest sibling that already exists. Rulings so far:
   streams; the containers logs handler (`streamLogs`) for log streams.
 - **Handler contract tests** — `testutils.Perform` builds the
   request (identity, chi URL params, body) the way the router would;
-  per-domain `recordXRequest` chi scaffolding is retired. The envelope's
-  own behaviour (5xx rewrite, missing-identity invariant, status+encode)
-  is pinned once in `internal/web/web_test.go`, not per domain.
+  per-domain `recordXRequest` chi scaffolding is retired. Handler tests
+  drive the **real domain service over the domain's fake engine** (the
+  function-field fake in `engine_fake_test.go` behind its fake provider)
+  — no service mock sits between handler and service. They pin only what
+  the handler owns: routing, URL/query/body decoding, and the service's
+  real behaviour through the HTTP surface. The envelope's own behaviour
+  (5xx rewrite, missing-identity invariant, status+encode) is pinned once
+  in `internal/web/web_test.go` (and `internal/streaming` for the
+  streaming envelope), not per domain; a handler test whose only value
+  was re-pinning that mapping is deleted, not ported.
 - **Prune endpoints** — volumes prune is the reference pattern:
   `internal/domain/volumes/service.go` (`Prune`), `handler.go`
   (`Prune`), `dto.go` (`FromPodmanPruneReports`), and
@@ -124,11 +131,14 @@ is incomplete.
 
 ## Testing expectations
 
-- Unit tests per domain package: handler contract tests against a
-  testify mock (`Mock*Service`), plus service behaviour tests against a
-  per-domain function-field fake engine (`engine_fake_test.go`;
-  `internal/testutils` keeps `MockConnectionManager` for the machines
-  domain, which still crosses the manager directly).
+- Unit tests per domain package: handler tests against the real
+  service over a per-domain function-field fake engine
+  (`engine_fake_test.go`), plus service behaviour tests against the
+  same fake engine — the handler-test pattern is the engine-seam shape
+  and there is no per-domain service mock (see the handler contract
+  tests ruling above). `internal/testutils` keeps `MockConnectionManager`
+  for the machines domain, which still crosses the manager directly, and
+  `MockSSHExec` for the quadlets lifecycle's systemctl-over-SSH seam.
 - Integration tests live in `test/integration/` behind the
   `integration` build tag, follow the run-scoped-tag isolation model
   (see the header comment of `test/integration/images_test.go`), and

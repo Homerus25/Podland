@@ -4,69 +4,35 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
-	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
-// MockImageService is a mock implementation of ImageServiceInterface for testing.
-type MockImageService struct {
-	mock.Mock
+// newTestHandler builds the handler around the real service running over
+// the given fake engine; tests arm only the operations their scenario
+// needs (an unarmed operation panics if the handler reaches it).
+func newTestHandler(engine *fakeImageEngine) *ImageHandler {
+	return NewImageHandler(NewImageService(fakeEngineProvider{engine: engine}))
 }
 
-func (m *MockImageService) List(ctx context.Context, userID, machineID string, opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
-	args := m.Called(ctx, userID, machineID, opts)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).([]*entities.ImageSummary), args.Error(1)
-}
-
-func (m *MockImageService) Delete(ctx context.Context, userID, machineID, imageID string, force bool) error {
-	args := m.Called(ctx, userID, machineID, imageID, force)
-	return args.Error(0)
-}
-
-func (m *MockImageService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
-	args := m.Called(ctx, userID, machineID)
-	if prunes, ok := args.Get(0).([]*reports.PruneReport); ok {
-		return prunes, args.Error(1)
-	}
-	return nil, args.Error(1)
-}
-
-func (m *MockImageService) Pull(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {
-	args := m.Called(ctx, userID, machineID, rawImage, opts)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*entities.ImagePullReport), args.Error(1)
-}
-
-func (m *MockImageService) PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(PullProgressEvent)) (*entities.ImagePullReport, error) {
-	args := m.Called(ctx, userID, machineID, rawImage, opts, progressWriter)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*entities.ImagePullReport), args.Error(1)
-}
-
-// TestImageHandler_List_Success tests successful image listing through the handler.
-func TestImageHandler_List_Success(t *testing.T) {
+// authedContext adds the identity the router would extract from the JWT.
+func authedContext() context.Context {
 	ctx := context.Background()
 	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+	return contextutils.SetRequestID(ctx, "test-request-id")
+}
 
+// TestImageHandler_List_Success pins the list contract through the real
+// service: 200, JSON array, and the DTO fields the API promises.
+func TestImageHandler_List_Success(t *testing.T) {
 	created := int64(1700000000)
 	testImages := []*entities.ImageSummary{
 		{
@@ -87,18 +53,16 @@ func TestImageHandler_List_Success(t *testing.T) {
 			Size:     5000000,
 		},
 	}
+	engine := &fakeImageEngine{
+		listFn: func(entities.ImageListOptions) ([]*entities.ImageSummary, error) {
+			return testImages, nil
+		},
+	}
+	handler := newTestHandler(engine)
 
-	mockService := new(MockImageService)
-	opts := entities.ImageListOptions{}
-	mockService.On("List", mock.Anything, "test-user", "test-machine", opts).Return(testImages, nil)
-
-	handler := NewImageHandler(mockService)
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/images", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/images", nil).WithContext(authedContext())
 
 	rr := httptest.NewRecorder()
-
 	r := chi.NewRouter()
 	r.Get("/api/machines/{id}/images", handler.List)
 	r.ServeHTTP(rr, req)
@@ -108,7 +72,7 @@ func TestImageHandler_List_Success(t *testing.T) {
 
 	var result []ImageListResponse
 	err := json.Unmarshal(rr.Body.Bytes(), &result)
-	assert.NoError(t, err, "Should be able to parse JSON response")
+	require.NoError(t, err, "Should be able to parse JSON response")
 	assert.Equal(t, 2, len(result), "Should return correct number of images")
 
 	assert.Equal(t, "sha256:abc123", result[0].ID)
@@ -123,96 +87,36 @@ func TestImageHandler_List_Success(t *testing.T) {
 	assert.Equal(t, "sha256:def456", result[1].ID)
 	assert.Empty(t, result[1].ParentID)
 	assert.Empty(t, result[1].OS)
-
-	mockService.AssertExpectations(t)
-}
-
-// TestImageHandler_List_ServiceError tests that List returns 500 when the service returns an error.
-func TestImageHandler_List_ServiceError(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	opts := entities.ImageListOptions{}
-	mockService.On("List", mock.Anything, "test-user", "test-machine", opts).
-		Return(([]*entities.ImageSummary)(nil), errors.New("connection refused"))
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/images", nil)
-	req = req.WithContext(ctx)
-
-	rr := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/images", handler.List)
-	r.ServeHTTP(rr, req)
-
-	assert.Equal(t, http.StatusInternalServerError, rr.Code, "Should return 500 on service error")
-	mockService.AssertExpectations(t)
-}
-
-// TestImageHandler_List_AppError tests that List responds with the structured error
-// when the service returns a known AppError.
-func TestImageHandler_List_AppError(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	opts := entities.ImageListOptions{}
-	mockService.On("List", mock.Anything, "test-user", "test-machine", opts).
-		Return(([]*entities.ImageSummary)(nil), appErrors.ErrConnectionFailed)
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/images", nil)
-	req = req.WithContext(ctx)
-
-	rr := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/images", handler.List)
-	r.ServeHTTP(rr, req)
-
-	assert.Equal(t, appErrors.ErrConnectionFailed.Status, rr.Code,
-		"Should return the AppError's HTTP status")
 }
 
 // TestImageHandler_List_AllQueryParam tests that the all query parameter is parsed
-// and passed to the service.
+// and reaches the machine's list call.
 func TestImageHandler_List_AllQueryParam(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
+	var gotOpts entities.ImageListOptions
+	engine := &fakeImageEngine{
+		listFn: func(opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
+			gotOpts = opts
+			return []*entities.ImageSummary{}, nil
+		},
+	}
+	handler := newTestHandler(engine)
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	opts := entities.ImageListOptions{All: true}
-	mockService.On("List", mock.Anything, "test-user", "test-machine", opts).
-		Return([]*entities.ImageSummary{}, nil)
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/images?all=true", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/images?all=true", nil).WithContext(authedContext())
 
 	rr := httptest.NewRecorder()
-
 	r := chi.NewRouter()
 	r.Get("/api/machines/{id}/images", handler.List)
 	r.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
-	mockService.AssertExpectations(t)
+	assert.True(t, gotOpts.All, "the all query param must reach the machine as All")
 }
 
 // TestImageHandler_List_FiltersQueryParam pins the HTTP seam of the list
 // filters: the `filters` query parameter (a JSON map[string][]string, contract
-// at doku/description_images_api.md:15-16) must reach the service as flattened
-// "key=value" entries in ImageListOptions.Filter. The opts are captured via
-// the mock because map iteration order makes the flattened order
-// non-deterministic, so the assertions use ElementsMatch.
+// at doku/description_images_api.md:15-16) must reach the machine as flattened
+// "key=value" entries in ImageListOptions.Filter. Map iteration order makes
+// the flattened order non-deterministic, so the assertions use ElementsMatch.
 func TestImageHandler_List_FiltersQueryParam(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -249,24 +153,17 @@ func TestImageHandler_List_FiltersQueryParam(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var capturedOpts entities.ImageListOptions
-			mockService := new(MockImageService)
-			mockService.On("List", mock.Anything, "test-user", "test-machine", mock.AnythingOfType("entities.ImageListOptions")).
-				Run(func(args mock.Arguments) {
-					capturedOpts = args.Get(3).(entities.ImageListOptions)
-				}).
-				Return([]*entities.ImageSummary{}, nil)
+			engine := &fakeImageEngine{
+				listFn: func(opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
+					capturedOpts = opts
+					return []*entities.ImageSummary{}, nil
+				},
+			}
+			handler := newTestHandler(engine)
 
-			handler := NewImageHandler(mockService)
-
-			ctx := context.Background()
-			ctx = contextutils.SetUserID(ctx, "test-user")
-			ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-			req := httptest.NewRequest("GET", "/api/machines/test-machine/images"+tt.queryParams, nil)
-			req = req.WithContext(ctx)
+			req := httptest.NewRequest("GET", "/api/machines/test-machine/images"+tt.queryParams, nil).WithContext(authedContext())
 
 			rr := httptest.NewRecorder()
-
 			r := chi.NewRouter()
 			r.Get("/api/machines/{id}/images", handler.List)
 			r.ServeHTTP(rr, req)
@@ -277,103 +174,65 @@ func TestImageHandler_List_FiltersQueryParam(t *testing.T) {
 			if tt.name == "filters combine with the all param" {
 				assert.True(t, capturedOpts.All, "the all param must still be parsed alongside filters")
 			}
-			mockService.AssertExpectations(t)
 		})
 	}
 }
 
 // TestImageHandler_Delete_Success tests successful image deletion
 func TestImageHandler_Delete_Success(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
+	var gotID string
+	var gotForce bool
+	engine := &fakeImageEngine{
+		removeFn: func(id string, force bool) (*entities.ImageRemoveReport, []error) {
+			gotID, gotForce = id, force
+			return &entities.ImageRemoveReport{}, nil
+		},
+	}
+	handler := newTestHandler(engine)
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil).WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
-	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", false).Return(nil)
-
 	r := chi.NewRouter()
 	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
-
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code, "Should return 204 on success")
-	mockService.AssertExpectations(t)
+	assert.Equal(t, "sha256:abc123", gotID)
+	assert.False(t, gotForce, "a missing force param must delete unforced")
 }
 
 // TestImageHandler_Delete_Force tests deletion with force query parameter
 func TestImageHandler_Delete_Force(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
+	var gotForce bool
+	engine := &fakeImageEngine{
+		removeFn: func(id string, force bool) (*entities.ImageRemoveReport, []error) {
+			gotForce = force
+			return &entities.ImageRemoveReport{}, nil
+		},
+	}
+	handler := newTestHandler(engine)
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123?force=true", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123?force=true", nil).WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
-	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", true).Return(nil)
-
 	r := chi.NewRouter()
 	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
-
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code, "Should return 204 on success with force=true")
-	mockService.AssertExpectations(t)
-}
-
-// TestImageHandler_Delete_ConnectionError tests that Delete handles connection errors
-func TestImageHandler_Delete_ConnectionError(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	connErr := errors.New("connection failed")
-	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", false).Return(connErr)
-
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code, "Should return 500 on connection error")
+	assert.True(t, gotForce, "force=true must reach the machine")
 }
 
 // TestImageHandler_Delete_MissingImageID tests that Delete validates image ID
 func TestImageHandler_Delete_MissingImageID(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
+	handler := newTestHandler(&fakeImageEngine{})
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/", nil).WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-
 	r := chi.NewRouter()
 	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
-
 	r.ServeHTTP(w, req)
 
 	// Chi returns 404 for route not found when trailing slash doesn't match
@@ -381,147 +240,17 @@ func TestImageHandler_Delete_MissingImageID(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code, "Should return 404 when image ID is missing (route not matched)")
 }
 
-// TestImageHandler_Delete_ImageNotFound tests that Delete handles image not found errors
-func TestImageHandler_Delete_ImageNotFound(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", false).Return(appErrors.ErrImageNotFound)
-
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusNotFound, w.Code, "Should return 404 when image not found")
-}
-
-// TestImageHandler_Delete_ImageUsedByContainers tests that Delete handles image in use errors
-func TestImageHandler_Delete_ImageUsedByContainers(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", false).Return(appErrors.ErrImageUsedByContainers)
-
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when image is used by containers")
-}
-
-// TestImageHandler_Delete_ServiceError tests that Delete handles general service errors
-func TestImageHandler_Delete_ServiceError(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil)
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-
-	mockService.On("Delete", mock.Anything, "test-user", "test-machine", "sha256:abc123", false).Return(appErrors.ErrInternalError)
-
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code, "Should return 500 on general service error")
-}
-
-// TestImageHandler_Pull_MissingUserID tests that Pull handles missing user ID
-func TestImageHandler_Pull_MissingUserID(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	requestBody := map[string]string{"image": "nginx:latest"}
-	jsonBody, _ := json.Marshal(requestBody)
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody))
-	req = req.WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/images/pull", handler.Pull)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code, "Missing identity is a wiring bug: 500")
-	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR", "Response should contain INTERNAL_ERROR error code")
-}
-
-// TestImageHandler_Pull_MissingMachineID tests that Pull handles missing machine ID
-func TestImageHandler_Pull_MissingMachineID(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	requestBody := map[string]string{"image": "nginx:latest"}
-	jsonBody, _ := json.Marshal(requestBody)
-	req := httptest.NewRequest("POST", "/api/machines//images/pull", bytes.NewReader(jsonBody))
-	req = req.WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/images/pull", handler.Pull)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code, "Missing identity is a wiring bug: 500")
-	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR", "Response should contain INTERNAL_ERROR error code")
-}
-
 // TestImageHandler_Pull_InvalidRequestBody tests that Pull handles invalid request body
 func TestImageHandler_Pull_InvalidRequestBody(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
+	handler := newTestHandler(&fakeImageEngine{})
 
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", nil)
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", nil).
+		WithContext(authedContext())
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
-
 	r := chi.NewRouter()
 	r.Post("/api/machines/{id}/images/pull", handler.Pull)
-
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when request body is invalid")
@@ -529,27 +258,20 @@ func TestImageHandler_Pull_InvalidRequestBody(t *testing.T) {
 
 // TestImageHandler_Pull_ValidationFailure tests that Pull handles validation failures
 func TestImageHandler_Pull_ValidationFailure(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+	handler := newTestHandler(&fakeImageEngine{})
 
 	requestBody := map[string]any{
 		"platform": "linux/amd64",
 	}
 	jsonBody, _ := json.Marshal(requestBody)
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody))
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody)).
+		WithContext(authedContext())
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
-
 	r := chi.NewRouter()
 	r.Post("/api/machines/{id}/images/pull", handler.Pull)
-
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when validation fails")
@@ -566,175 +288,52 @@ func splitLines(s string) []string {
 	return lines
 }
 
-// TestImageHandler_Pull_ServiceError tests that Pull handles service errors
-func TestImageHandler_Pull_ServiceError(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	requestBody := map[string]string{
-		"image": "nginx:latest",
-	}
-	jsonBody, _ := json.Marshal(requestBody)
-
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody))
-	req = req.WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-
-	mockService.On("PullWithProgress", mock.Anything, "test-user", "test-machine", "nginx:latest", mock.Anything, mock.Anything).Return((*entities.ImagePullReport)(nil), appErrors.ErrImagePullFailed)
-
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/images/pull", handler.Pull)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 for streaming response")
-	assert.Equal(t, "application/json", w.Header().Get("Content-Type"), "Should set Content-Type to application/json")
-
-	// Parse the streaming response
-	body := w.Body.String()
-	lines := splitLines(body)
-
-	assert.True(t, len(lines) > 0, "Should have at least one event")
-
-	// Find the error event
-	var errorEvent PullProgressEvent
-	for _, line := range lines {
+// findEvent decodes the first NDJSON line whose event carries the wanted
+// type.
+func findEvent(t *testing.T, body string, eventType string) PullProgressEvent {
+	t.Helper()
+	for _, line := range splitLines(body) {
 		var event PullProgressEvent
-		if err := json.Unmarshal([]byte(line), &event); err == nil && event.Type == EventTypeError {
-			errorEvent = event
-			break
+		if err := json.Unmarshal([]byte(line), &event); err == nil && event.Type == eventType {
+			return event
 		}
 	}
-
-	assert.Equal(t, EventTypeError, errorEvent.Type, "Should have error event type")
-	assert.Equal(t, appErrors.ErrImagePullFailed.Code, errorEvent.Error.Code, "Should have correct error code")
+	t.Fatalf("no %s event found in stream: %s", eventType, body)
+	return PullProgressEvent{}
 }
 
-// TestImageHandler_Pull_Success_Streaming tests successful pull with streaming events
+// TestImageHandler_Pull_Success_Streaming pins the pull stream through the
+// real service: progress emitted inside the machine's pull surfaces as
+// NDJSON events, and the stream ends with the complete event carrying the
+// machine ID.
 func TestImageHandler_Pull_Success_Streaming(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
+	engine := &fakeImageEngine{
+		pullFn: func(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {
+			require.NotNil(t, opts.Writer, "the service must arm the pull options' progress writer")
+			_, err := opts.Writer.Write([]byte("layer 1 pulling"))
+			require.NoError(t, err)
+			return &entities.ImagePullReport{Images: []string{"sha256:abc123"}}, nil
+		},
+	}
+	handler := newTestHandler(engine)
 
 	requestBody := map[string]string{
 		"image": "nginx:latest",
 	}
 	jsonBody, _ := json.Marshal(requestBody)
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody))
-	req = req.WithContext(ctx)
+	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody)).
+		WithContext(authedContext())
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
-
-	progressEvents := []PullProgressEvent{}
-	report := &entities.ImagePullReport{
-		Images: []string{"sha256:abc123"},
-	}
-
-	mockService.On("PullWithProgress", mock.Anything, "test-user", "test-machine", "nginx:latest", mock.Anything, mock.Anything).
-		Run(func(args mock.Arguments) {
-			progressWriter := args.Get(5).(func(PullProgressEvent))
-			// Simulate some progress events
-			progressEvents = append(progressEvents, NewProgressEvent("op-1", "test-machine", "pulling", "Downloading layers", 1, 5))
-			progressWriter(progressEvents[len(progressEvents)-1])
-
-			progressEvents = append(progressEvents, NewProgressEvent("op-1", "test-machine", "pulling", "Verifying checksum", 2, 5))
-			progressWriter(progressEvents[len(progressEvents)-1])
-		}).
-		Return(report, nil)
-
 	r := chi.NewRouter()
 	r.Post("/api/machines/{id}/images/pull", handler.Pull)
-
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 for streaming response")
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"), "Should set Content-Type to application/json")
 
-	// Parse the streaming response
-	body := w.Body.String()
-	lines := splitLines(body)
-
-	assert.True(t, len(lines) >= 2, "Should have at least progress and complete events")
-
-	// Find the complete event
-	var completeEvent PullProgressEvent
-	for _, line := range lines {
-		var event PullProgressEvent
-		if err := json.Unmarshal([]byte(line), &event); err == nil && event.Type == EventTypeComplete {
-			completeEvent = event
-			break
-		}
-	}
-
-	assert.Equal(t, EventTypeComplete, completeEvent.Type, "Should have complete event type")
+	completeEvent := findEvent(t, w.Body.String(), EventTypeComplete)
 	assert.Equal(t, "test-machine", completeEvent.MachineID, "Should have correct machine ID")
-}
-
-// TestImageHandler_Pull_ClientCancellation tests that client cancellation is handled
-func TestImageHandler_Pull_ClientCancellation(t *testing.T) {
-	mockService := new(MockImageService)
-	handler := NewImageHandler(mockService)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-
-	requestBody := map[string]string{
-		"image": "nginx:latest",
-	}
-	jsonBody, _ := json.Marshal(requestBody)
-
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody))
-	req = req.WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-
-	w := httptest.NewRecorder()
-
-	// Simulate immediate cancellation
-	go func() {
-		cancel()
-	}()
-
-	mockService.On("PullWithProgress", mock.Anything, "test-user", "test-machine", "nginx:latest", mock.Anything, mock.Anything).
-		Run(func(args mock.Arguments) {
-			// Simulate context cancellation
-			<-args.Get(0).(context.Context).Done()
-		}).
-		Return((*entities.ImagePullReport)(nil), appErrors.ErrOperationCancelled)
-
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/images/pull", handler.Pull)
-
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 for streaming response")
-
-	// Parse the streaming response
-	body := w.Body.String()
-	lines := splitLines(body)
-
-	// Should have at least error event
-	if len(lines) > 0 {
-		var errorEvent PullProgressEvent
-		for _, line := range lines {
-			var event PullProgressEvent
-			if err := json.Unmarshal([]byte(line), &event); err == nil && event.Type == EventTypeError {
-				errorEvent = event
-				break
-			}
-		}
-
-		assert.Equal(t, appErrors.ErrOperationCancelled.Code, errorEvent.Error.Code, "Should have OPERATION_CANCELLED error code")
-	}
 }

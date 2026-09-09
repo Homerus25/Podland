@@ -10,18 +10,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 )
 
-// Compile-time check that *SecretService satisfies SecretServiceInterface.
-var _ SecretServiceInterface = (*SecretService)(nil)
-
-// SecretServiceInterface defines the interface for secret services.
-// This interface is used for dependency injection and testing.
-type SecretServiceInterface interface {
-	List(ctx context.Context, userID, machineID string) ([]SecretListResponse, error)
-	Get(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error)
-	Create(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error)
-	Delete(ctx context.Context, userID, machineID, secretID string) error
-}
-
 // accessPermissionGetter is the slice of the machine-access repository
 // SecretService needs: the caller's stored permission level (empty string
 // when no row exists). Declared locally — mirroring the middleware's

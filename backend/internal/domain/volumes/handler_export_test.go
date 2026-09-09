@@ -6,10 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // exportRequest serves GET
@@ -28,15 +27,17 @@ func exportRequest(export http.HandlerFunc, machineID, volumeName string) *httpt
 // tar headers carrying the volume's filename, and the streamed bytes
 // passed through unbuffered to the response.
 func TestVolumeHandler_Export_Success(t *testing.T) {
-	mockService := new(MockVolumeService)
-	mockService.On("Export", mock.Anything, "test-user", "test-machine", "my-volume", mock.Anything).
-		Return(nil).Run(func(args mock.Arguments) {
-		w := args.Get(4).(io.Writer)
-		_, _ = w.Write([]byte("tar-bytes"))
-	})
-	handler := NewVolumeHandler(mockService)
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return inspectFixture("my-volume"), nil
+		},
+		exportFn: func(_ string, w io.Writer) error {
+			_, err := w.Write([]byte("tar-bytes"))
+			return err
+		},
+	}
 
-	w := exportRequest(handler.Export, "test-machine", "my-volume")
+	w := exportRequest(newTestHandler(engine).Export, "test-machine", "my-volume")
 
 	assert.Equal(t, 200, w.Code)
 	assert.Equal(t, "application/x-tar", w.Header().Get("Content-Type"))
@@ -47,12 +48,15 @@ func TestVolumeHandler_Export_Success(t *testing.T) {
 // TestVolumeHandler_Export_NotFound pins that an unknown volume name
 // gets the standard 404 envelope — no tar headers may leak into it.
 func TestVolumeHandler_Export_NotFound(t *testing.T) {
-	mockService := new(MockVolumeService)
-	mockService.On("Export", mock.Anything, "test-user", "test-machine", "no-such-volume", mock.Anything).
-		Return(apperrors.ErrVolumeNotFound)
-	handler := NewVolumeHandler(mockService)
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return nil, notFoundErr()
+		},
+		// exportFn stays unarmed: it must never be reached for a
+		// missing volume.
+	}
 
-	w := exportRequest(handler.Export, "test-machine", "no-such-volume")
+	w := exportRequest(newTestHandler(engine).Export, "test-machine", "no-such-volume")
 
 	assert.Equal(t, 404, w.Code)
 	assert.Contains(t, w.Body.String(), "VOLUME_NOT_FOUND")
@@ -62,24 +66,28 @@ func TestVolumeHandler_Export_NotFound(t *testing.T) {
 }
 
 func TestVolumeHandler_Export_ServiceError(t *testing.T) {
-	mockService := new(MockVolumeService)
-	mockService.On("Export", mock.Anything, "test-user", "test-machine", "my-volume", mock.Anything).
-		Return(assert.AnError)
-	handler := NewVolumeHandler(mockService)
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return inspectFixture("my-volume"), nil
+		},
+		exportFn: func(string, io.Writer) error {
+			return assert.AnError
+		},
+	}
 
-	w := exportRequest(handler.Export, "test-machine", "my-volume")
+	w := exportRequest(newTestHandler(engine).Export, "test-machine", "my-volume")
 
 	assert.Equal(t, 500, w.Code)
 }
 
 func TestVolumeHandler_Export_MissingVolumeName(t *testing.T) {
-	handler := NewVolumeHandler(new(MockVolumeService))
-	w := exportRequest(handler.Export, "test-machine", "")
+	engine := &fakeVolumeEngine{}
+	w := exportRequest(newTestHandler(engine).Export, "test-machine", "")
 	assert.Equal(t, 400, w.Code)
 }
 
 func TestVolumeHandler_Export_MissingMachineID(t *testing.T) {
-	handler := NewVolumeHandler(new(MockVolumeService))
-	w := exportRequest(handler.Export, "", "my-volume")
+	engine := &fakeVolumeEngine{}
+	w := exportRequest(newTestHandler(engine).Export, "", "my-volume")
 	assert.Equal(t, 400, w.Code)
 }

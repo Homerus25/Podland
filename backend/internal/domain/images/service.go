@@ -11,19 +11,6 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
-// Compile-time check that *ImageService satisfies ImageServiceInterface.
-var _ ImageServiceInterface = (*ImageService)(nil)
-
-// ImageServiceInterface defines the interface for image services.
-// This interface is used for dependency injection and testing.
-type ImageServiceInterface interface {
-	List(ctx context.Context, userID, machineID string, opts entities.ImageListOptions) ([]*entities.ImageSummary, error)
-	Delete(ctx context.Context, userID, machineID, imageID string, force bool) error
-	Pull(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error)
-	PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(event PullProgressEvent)) (*entities.ImagePullReport, error)
-	Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error)
-}
-
 // ImageService provides business logic for images. Every machine-scoped
 // podman call crosses the ImageEngineProvider (the connection seam); the
 // service itself owns only domain mapping and progress conversion.

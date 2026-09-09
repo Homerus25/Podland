@@ -14,19 +14,6 @@ import (
 	"go.podman.io/podman/v6/pkg/specgen"
 )
 
-// ContainerServiceInterface defines the interface for container services
-// This interface is used for dependency injection and testing
-type ContainerServiceInterface interface {
-	List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error)
-	Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*ContainerCreateResponse, error)
-	Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error)
-	Start(ctx context.Context, userID, machineID, containerID string) (*ContainerStartResponse, error)
-	Stop(ctx context.Context, userID, machineID, containerID string) (*ContainerStopResponse, error)
-	Delete(ctx context.Context, userID, machineID, containerID string, force bool) error
-	GetLogs(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64) (*ContainerLogsResponse, error)
-	GetLogsWithStream(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64, logCallback func(event ContainerLogEvent)) error
-}
-
 // ContainerService provides business logic for containers. Every
 // machine-scoped podman call crosses the ContainerEngineProvider (the
 // connection seam); the service itself owns only domain mapping,

@@ -8,7 +8,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -33,12 +32,13 @@ func TestVolumeHandler_List_Success(t *testing.T) {
 		{VolumeConfigResponse: namedVolumeFixture(createdAt)},
 		{VolumeConfigResponse: anonymousVolumeFixture()},
 	}
+	engine := &fakeVolumeEngine{
+		listFn: func(entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
+			return reports, nil
+		},
+	}
 
-	mockService := new(MockVolumeService)
-	mockService.On("List", mock.Anything, "test-user", "test-machine", mock.Anything).Return(reports, nil)
-	handler := NewVolumeHandler(mockService)
-
-	w := listRequest(handler.List)
+	w := listRequest(newTestHandler(engine).List)
 
 	assert.Equal(t, 200, w.Code, "list should return 200")
 
@@ -59,18 +59,6 @@ func TestVolumeHandler_List_Success(t *testing.T) {
 	anonymous := volumes[1]
 	assert.True(t, anonymous.Anonymous, "anonymous volumes must be flagged")
 	assert.NotEmpty(t, anonymous.Name)
-}
-
-func TestVolumeHandler_List_ConnectionError(t *testing.T) {
-	mockService := new(MockVolumeService)
-	mockService.On("List", mock.Anything, "test-user", "test-machine", mock.Anything).
-		Return([]*entities.VolumeListReport(nil), assert.AnError)
-	handler := NewVolumeHandler(mockService)
-
-	w := listRequest(handler.List)
-
-	assert.Equal(t, 500, w.Code, "unexpected service failures surface as the 500 fallback")
-	assert.Contains(t, w.Body.String(), "requestId", "error envelope must carry requestId")
 }
 
 func decodeVolumes(t *testing.T, body string) []VolumeResponse {

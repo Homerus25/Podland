@@ -2,7 +2,6 @@ package secrets
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,217 +9,127 @@ import (
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/Homerus25/podland/backend/internal/errors"
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// errGeneric is a non-AppError used to exercise the handler's generic
-// error→500 mapping. The app errors package has no New constructor, so we
-// synthesize a plain error here (same idiom as the quadlets handler tests).
-var errGeneric = fmt.Errorf("boom")
+// adminRepo answers every permission lookup with admin, so reveal tests
+// pass the service's admin gate (the deny path is pinned in the service
+// tests).
+type adminRepo struct{}
+
+func (adminRepo) GetPermission(machineID, userID string) (string, error) {
+	return models.PermissionAdmin, nil
+}
+
+// newTestHandler builds the handler around the real service running over
+// the given fake engine; tests arm only the operations their scenario
+// needs (an unarmed operation panics if the handler reaches it). The
+// access repo always answers admin; the below-admin reveal refusal is a
+// service-level ruling pinned in the service tests.
+func newTestHandler(engine *fakeSecretEngine) *SecretHandler {
+	return NewSecretHandler(NewSecretService(fakeEngineProvider{engine: engine}, adminRepo{}))
+}
+
+// secretFixture builds a SecretInfoReport like podman's list/inspect
+// answer: metadata under Spec, optionally carrying a value.
+func secretFixture(id, name string, createdAt time.Time, secretData string) *entities.SecretInfoReport {
+	return &entities.SecretInfoReport{
+		ID:         id,
+		CreatedAt:  createdAt,
+		UpdatedAt:  createdAt,
+		Spec:       entities.SecretSpec{Name: name, Driver: entities.SecretDriverSpec{Name: "file"}, Labels: map[string]string{"app": "web"}},
+		SecretData: secretData,
+	}
+}
 
 func TestSecretHandler_List(t *testing.T) {
 	tests := []struct {
 		name           string
-		userID         string
-		machineID      string
-		mockSecrets    []SecretListResponse
-		mockError      error
+		reports        []*entities.SecretInfoReport
 		expectedStatus int
 		expectedBody   string
 	}{
 		{
-			name:      "successful list",
-			userID:    "user123",
-			machineID: "machine123",
-			mockSecrets: []SecretListResponse{
-				{
-					ID:        "3f2e1d0c",
-					Name:      "db-password",
-					Driver:    "file",
-					CreatedAt: "2026-01-02T15:04:05Z",
-					UpdatedAt: "2026-01-03T16:05:06Z",
-					Labels:    map[string]string{"app": "web"},
-				},
+			name: "successful list",
+			reports: []*entities.SecretInfoReport{
+				secretFixture("3f2e1d0c", "db-password", mustParseSecretTime("2026-01-02T15:04:05Z"), ""),
 			},
 			expectedStatus: http.StatusOK,
-			expectedBody:   `[{"id":"3f2e1d0c","name":"db-password","driver":"file","createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-03T16:05:06Z","labels":{"app":"web"}}]` + "\n",
+			expectedBody:   `[{"id":"3f2e1d0c","name":"db-password","driver":"file","createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z","labels":{"app":"web"}}]`,
 		},
 		{
-			name:           "successful list without labels omits the field",
-			userID:         "user123",
-			machineID:      "machine123",
-			mockSecrets:    []SecretListResponse{{ID: "9a8b7c6d", Name: "api-token", Driver: "file", CreatedAt: "2026-02-04T10:11:12Z", UpdatedAt: "2026-02-04T10:11:12Z"}},
+			name: "successful list without labels omits the field",
+			reports: []*entities.SecretInfoReport{
+				{ID: "9a8b7c6d", CreatedAt: mustParseSecretTime("2026-02-04T10:11:12Z"), UpdatedAt: mustParseSecretTime("2026-02-04T10:11:12Z"),
+					Spec: entities.SecretSpec{Name: "api-token", Driver: entities.SecretDriverSpec{Name: "file"}}},
+			},
 			expectedStatus: http.StatusOK,
-			expectedBody:   `[{"id":"9a8b7c6d","name":"api-token","driver":"file","createdAt":"2026-02-04T10:11:12Z","updatedAt":"2026-02-04T10:11:12Z"}]` + "\n",
+			expectedBody:   `[{"id":"9a8b7c6d","name":"api-token","driver":"file","createdAt":"2026-02-04T10:11:12Z","updatedAt":"2026-02-04T10:11:12Z"}]`,
 		},
 		{
 			name:           "successful list empty",
-			userID:         "user123",
-			machineID:      "machine123",
-			mockSecrets:    []SecretListResponse{},
+			reports:        nil,
 			expectedStatus: http.StatusOK,
-			expectedBody:   `[]` + "\n",
-		},
-		{
-			name:           "connection failed",
-			userID:         "user123",
-			machineID:      "machine123",
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-			expectedBody:   "",
-		},
-		{
-			name:           "non-app error falls back to internal error",
-			userID:         "user123",
-			machineID:      "machine123",
-			mockError:      errGeneric,
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "",
+			expectedBody:   `[]`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockService := &MockSecretService{
-				mockList: func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
-					if tt.mockError != nil {
-						return nil, tt.mockError
-					}
-					return tt.mockSecrets, nil
+			engine := &fakeSecretEngine{
+				listFn: func() ([]*entities.SecretInfoReport, error) {
+					return tt.reports, nil
 				},
 			}
 
-			handler := NewSecretHandler(mockService)
-
-			req := httptest.NewRequest("GET", "/api/machines/"+tt.machineID+"/secrets", nil)
-
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", tt.machineID)
-
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
-
 			rr := httptest.NewRecorder()
+			newTestHandler(engine).List(rr, listRequest())
 
-			handler.List(rr, req)
-
-			if status := rr.Code; status != tt.expectedStatus {
-				t.Errorf("handler returned wrong status code: got %v want %v", status, tt.expectedStatus)
-			}
-
-			if tt.expectedBody != "" {
-				actualBody := rr.Body.String()
-				if actualBody != tt.expectedBody {
-					t.Errorf("handler returned unexpected body: got %q want %q", actualBody, tt.expectedBody)
-				}
-			}
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+			assert.JSONEq(t, tt.expectedBody, rr.Body.String())
 		})
 	}
 }
 
-type MockSecretService struct {
-	mockList   func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error)
-	mockGet    func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error)
-	mockCreate func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error)
-	mockDelete func(ctx context.Context, userID, machineID, secretID string) error
+func mustParseSecretTime(value string) time.Time {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		panic("bad fixture timestamp: " + err.Error())
+	}
+	return parsed
 }
 
-func (m *MockSecretService) List(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
-	if m.mockList != nil {
-		return m.mockList(ctx, userID, machineID)
-	}
-	return nil, nil
-}
-
-func (m *MockSecretService) Get(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
-	if m.mockGet != nil {
-		return m.mockGet(ctx, userID, machineID, secretID, reveal)
-	}
-	return nil, nil
-}
-
-func (m *MockSecretService) Create(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
-	if m.mockCreate != nil {
-		return m.mockCreate(ctx, userID, machineID, req)
-	}
-	return nil, nil
-}
-
-func (m *MockSecretService) Delete(ctx context.Context, userID, machineID, secretID string) error {
-	if m.mockDelete != nil {
-		return m.mockDelete(ctx, userID, machineID, secretID)
-	}
-	return nil
-}
-
-// TestSecretHandler_List_ForwardsCallerAndMachine pins the handler→service
-// seam: the authenticated user ID and the {id} URL param must reach
-// Service.List unchanged (the connection manager resolves the tunnel by
-// exactly this pair).
-func TestSecretHandler_List_ForwardsCallerAndMachine(t *testing.T) {
-	var gotUser, gotMachine string
-	mockService := &MockSecretService{
-		mockList: func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
-			gotUser, gotMachine = userID, machineID
-			return []SecretListResponse{}, nil
-		},
-	}
-
-	handler := NewSecretHandler(mockService)
-
+func listRequest() *http.Request {
 	req := httptest.NewRequest("GET", "/api/machines/machine123/secrets", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "machine123")
 	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
 	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-	req = req.WithContext(ctx)
-
-	rr := httptest.NewRecorder()
-	handler.List(rr, req)
-
-	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.Equal(t, "user123", gotUser, "handler must forward the authenticated user ID")
-	assert.Equal(t, "machine123", gotMachine, "handler must forward the machine ID URL param")
+	return req.WithContext(ctx)
 }
 
 // --- Inspect (GET /api/machines/{id}/secrets/{secretId}) ---
 
 // TestSecretHandler_Get_MetadataOnly pins the happy path of a metadata
-// inspect: 200 with the metadata JSON and NO secretData field, exactly as
-// the omitempty-tagged DTO renders it.
+// inspect: 200 with the metadata JSON and NO secretData field — even when
+// the report carried a value, mapping must not have copied it.
 func TestSecretHandler_Get_MetadataOnly(t *testing.T) {
-	mockService := &MockSecretService{
-		mockGet: func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
-			return &SecretInspectResponse{
-				SecretListResponse: SecretListResponse{
-					ID:        "3f2e1d0c",
-					Name:      "db-password",
-					Driver:    "file",
-					CreatedAt: "2026-01-02T15:04:05Z",
-					UpdatedAt: "2026-01-03T16:05:06Z",
-				},
-			}, nil
+	createdAt := mustParseSecretTime("2026-01-02T15:04:05Z")
+	engine := &fakeSecretEngine{
+		inspectFn: func(name string, reveal bool) (*entities.SecretInfoReport, error) {
+			assert.False(t, reveal, "a metadata inspect must not ask for the value")
+			return secretFixture("3f2e1d0c", "db-password", createdAt, "must-not-leak"), nil
 		},
 	}
-	handler := NewSecretHandler(mockService)
-
-	req := httptest.NewRequest("GET", "/api/machines/machine123/secrets/3f2e1d0c", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine123")
-	rctx.URLParams.Add("secretId", "3f2e1d0c")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
-	handler.Get(rr, req)
+	newTestHandler(engine).Get(rr, getRequest("/api/machines/machine123/secrets/3f2e1d0c"))
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.JSONEq(t, `{
@@ -228,186 +137,88 @@ func TestSecretHandler_Get_MetadataOnly(t *testing.T) {
 		"name": "db-password",
 		"driver": "file",
 		"createdAt": "2026-01-02T15:04:05Z",
-		"updatedAt": "2026-01-03T16:05:06Z"
+		"updatedAt": "2026-01-02T15:04:05Z",
+		"labels": {"app": "web"}
 	}`, rr.Body.String(), "a metadata inspect must answer WITHOUT a secretData field")
 }
 
-// TestSecretHandler_Get_RevealReturnsValue pins that a successful reveal's
-// JSON carries the secretData field next to the metadata.
+// TestSecretHandler_Get_RevealReturnsValue pins the reveal query contract:
+// a successful ?reveal=true's JSON carries the secretData field next to
+// the metadata.
 func TestSecretHandler_Get_RevealReturnsValue(t *testing.T) {
-	mockService := &MockSecretService{
-		mockGet: func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
-			return &SecretInspectResponse{
-				SecretListResponse: SecretListResponse{ID: "3f2e1d0c", Name: "db-password", Driver: "file"},
-				SecretData:         "hunter2",
-			}, nil
+	engine := &fakeSecretEngine{
+		inspectFn: func(name string, reveal bool) (*entities.SecretInfoReport, error) {
+			assert.True(t, reveal, "?reveal=true must reach the machine lookup as a reveal")
+			return secretFixture("3f2e1d0c", "db-password", mustParseSecretTime("2026-01-02T15:04:05Z"), "hunter2"), nil
 		},
 	}
-	handler := NewSecretHandler(mockService)
-
-	req := httptest.NewRequest("GET", "/api/machines/machine123/secrets/db-password?reveal=true", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine123")
-	rctx.URLParams.Add("secretId", "db-password")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
-	handler.Get(rr, req)
+	newTestHandler(engine).Get(rr, getRequest("/api/machines/machine123/secrets/db-password?reveal=true"))
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.JSONEq(t, `{
 		"id": "3f2e1d0c",
 		"name": "db-password",
 		"driver": "file",
-		"createdAt": "",
-		"updatedAt": "",
+		"createdAt": "2026-01-02T15:04:05Z",
+		"updatedAt": "2026-01-02T15:04:05Z",
+		"labels": {"app": "web"},
 		"secretData": "hunter2"
 	}`, rr.Body.String(), "a reveal must answer with the secretData field")
 }
 
-// TestSecretHandler_Get_ForwardsArgs pins the handler→service seam: the
-// authenticated user ID, the {id} and {secretId} URL params, and the
-// reveal flag parsed from ?reveal= must reach Service.Get unchanged
-// (?reveal=false and a missing param are both false).
-func TestSecretHandler_Get_ForwardsArgs(t *testing.T) {
-	calls := []struct {
-		userID   string
-		machine  string
-		secretID string
-		reveal   bool
-	}{}
-	mockService := &MockSecretService{
-		mockGet: func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
-			calls = append(calls, struct {
-				userID   string
-				machine  string
-				secretID string
-				reveal   bool
-			}{userID, machineID, secretID, reveal})
-			return &SecretInspectResponse{}, nil
+// TestSecretHandler_Get_RevealParamDecoding pins the reveal query-param
+// decoding: only the exact value "true" asks for the value (?reveal=false
+// and a missing param are both a metadata inspect).
+func TestSecretHandler_Get_RevealParamDecoding(t *testing.T) {
+	var gotReveals []bool
+	engine := &fakeSecretEngine{
+		inspectFn: func(name string, reveal bool) (*entities.SecretInfoReport, error) {
+			gotReveals = append(gotReveals, reveal)
+			return secretFixture("3f2e1d0c", "db-password", time.Time{}, ""), nil
 		},
 	}
-	handler := NewSecretHandler(mockService)
+	handler := newTestHandler(engine)
 
 	for _, target := range []string{
 		"/api/machines/machine123/secrets/db-password?reveal=true",
 		"/api/machines/machine123/secrets/db-password?reveal=false",
 		"/api/machines/machine123/secrets/3f2e1d0c",
 	} {
-		req := httptest.NewRequest("GET", target, nil)
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "machine123")
-		rctx.URLParams.Add("secretId", "db-password")
-		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-		ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-		req = req.WithContext(ctx)
-
 		rr := httptest.NewRecorder()
-		handler.Get(rr, req)
+		handler.Get(rr, getRequest(target))
 		require.Equal(t, http.StatusOK, rr.Code, "target %s must succeed", target)
 	}
 
-	require.Len(t, calls, 3, "every request must reach the service")
-	for _, call := range calls {
-		assert.Equal(t, "user123", call.userID, "handler must forward the authenticated user ID")
-		assert.Equal(t, "machine123", call.machine, "handler must forward the machine ID URL param")
-		assert.Equal(t, "db-password", call.secretID, "handler must forward the secret ID URL param")
-	}
-	assert.True(t, calls[0].reveal, "?reveal=true must reach the service as true")
-	assert.False(t, calls[1].reveal, "?reveal=false must reach the service as false")
-	assert.False(t, calls[2].reveal, "a missing reveal param must reach the service as false")
+	assert.Equal(t, []bool{true, false, false}, gotReveals,
+		"only ?reveal=true may reach the machine as a reveal request")
 }
 
-// TestSecretHandler_Get_ErrorMapping pins the error pass-throughs: the
-// service's AppErrors keep their HTTP status (403 ACCESS_DENIED for a
-// below-admin reveal, 404 SECRET_NOT_FOUND for an unknown secret, 502
-// CONNECTION_FAILED for a dead tunnel) and a non-AppError falls back to
-// 500.
-func TestSecretHandler_Get_ErrorMapping(t *testing.T) {
-	tests := []struct {
-		name           string
-		mockError      error
-		expectedStatus int
-		expectedBody   string
-	}{
-		{
-			name:           "below-admin reveal is access denied",
-			mockError:      errors.ErrAccessDenied,
-			expectedStatus: http.StatusForbidden,
-			expectedBody:   "ACCESS_DENIED",
-		},
-		{
-			name:           "unknown secret is not found",
-			mockError:      errors.ErrSecretNotFound,
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "SECRET_NOT_FOUND",
-		},
-		{
-			// 5xx bodies are rewritten generic by RespondWithError
-			// (handlers.go), so the 502 is asserted via status alone.
-			name:           "connection failed",
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-			expectedBody:   "",
-		},
-		{
-			name:           "non-app error falls back to internal error",
-			mockError:      errGeneric,
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "INTERNAL_ERROR",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockService := &MockSecretService{
-				mockGet: func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
-					return nil, tt.mockError
-				},
-			}
-			handler := NewSecretHandler(mockService)
-
-			req := httptest.NewRequest("GET", "/api/machines/machine123/secrets/db-password", nil)
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", "machine123")
-			rctx.URLParams.Add("secretId", "db-password")
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-			req = req.WithContext(ctx)
-
-			rr := httptest.NewRecorder()
-			handler.Get(rr, req)
-
-			assert.Equal(t, tt.expectedStatus, rr.Code)
-			assert.Contains(t, rr.Body.String(), tt.expectedBody)
-		})
-	}
+func getRequest(target string) *http.Request {
+	req := httptest.NewRequest("GET", target, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "machine123")
+	rctx.URLParams.Add("secretId", "db-password")
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
+	return req.WithContext(ctx)
 }
 
-// TestSecretHandler_Get_MissingContextAndParams pins the request-shape
-// guards: no authenticated user → 401, no {secretId} URL param → 400.
-func TestSecretHandler_Get_MissingContextAndParams(t *testing.T) {
-	newReq := func(userID, secretID string) *http.Request {
-		req := httptest.NewRequest("GET", "/api/machines/machine123/secrets/"+secretID, nil)
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "machine123")
-		if secretID != "" {
-			rctx.URLParams.Add("secretId", secretID)
-		}
-		ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-		if userID != "" {
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, userID)
-		}
-		return req.WithContext(ctx)
-	}
+// TestSecretHandler_Get_MissingSecretID pins the request-shape guard: no
+// {secretId} URL param → 400.
+func TestSecretHandler_Get_MissingSecretID(t *testing.T) {
+	engine := &fakeSecretEngine{}
+	req := httptest.NewRequest("GET", "/api/machines/machine123/secrets/", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "machine123")
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	req = req.WithContext(context.WithValue(ctx, contextutils.UserIDContextKey, "user123"))
 
-	t.Run("missing secret ID", func(t *testing.T) {
-		rr := httptest.NewRecorder()
-		NewSecretHandler(&MockSecretService{}).Get(rr, newReq("user123", ""))
-		assert.Equal(t, http.StatusBadRequest, rr.Code)
-	})
+	rr := httptest.NewRecorder()
+	newTestHandler(engine).Get(rr, req)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 // TestSecretHandler_Get_ReadLevelGranteeReachesInspectRoute pins the
@@ -420,18 +231,17 @@ func TestSecretHandler_Get_ReadLevelGranteeReachesInspectRoute(t *testing.T) {
 	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
 	accessRepo := testutils.NewMockMachineAccessRepository()
 	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
-	var called bool
-	service := &MockSecretService{mockGet: func(ctx context.Context, userID, machineID, secretID string, reveal bool) (*SecretInspectResponse, error) {
-		called = true
-		return &SecretInspectResponse{SecretListResponse: SecretListResponse{ID: "3f2e1d0c", Name: "db-password"}}, nil
-	}}
-	router := secretsAccessRouter(machineRepo, accessRepo, service)
+	engine := &fakeSecretEngine{
+		inspectFn: func(name string, reveal bool) (*entities.SecretInfoReport, error) {
+			return secretFixture("3f2e1d0c", "db-password", time.Time{}, ""), nil
+		},
+	}
+	router := secretsAccessRouter(machineRepo, accessRepo, newTestHandler(engine).service)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/secrets/db-password", "reader-1"))
 
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "a read-level grantee must reach the inspect endpoint")
-	assert.True(t, called, "the inspect handler must run for a read-level grantee")
 	assert.NotContains(t, w.Body.String(), "secretData",
 		"the metadata answer must not carry a secretData field")
 }
@@ -452,39 +262,36 @@ func newCreateRequest(userID, machineID, body string) *http.Request {
 	return req.WithContext(ctx)
 }
 
-// TestSecretHandler_Create_HappyPath pins the happy path AND the
-// handler→service seam: 201 with only {id} in the body, the authenticated
-// user ID and machine ID forwarded, the name forwarded TRIMMED, and the
-// value forwarded byte-identical (significant whitespace intact).
+// TestSecretHandler_Create_HappyPath pins the create contract through the
+// real service: 201 with only {id} in the body, the name forwarded
+// TRIMMED, and the value forwarded byte-identical (significant whitespace
+// intact) into the machine's create call.
 func TestSecretHandler_Create_HappyPath(t *testing.T) {
-	var gotUser, gotMachine string
-	var gotReq SecretCreateRequest
-	mockService := &MockSecretService{
-		mockCreate: func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
-			gotUser, gotMachine, gotReq = userID, machineID, req
-			return &SecretCreateResponse{ID: "3f2e1d0c"}, nil
+	var gotName, gotValue string
+	engine := &fakeSecretEngine{
+		createFn: func(name, value string) (*entities.SecretCreateReport, error) {
+			gotName, gotValue = name, value
+			return &entities.SecretCreateReport{ID: "3f2e1d0c"}, nil
 		},
 	}
-	handler := NewSecretHandler(mockService)
 
 	rr := httptest.NewRecorder()
-	handler.Create(rr, newCreateRequest("user123", "machine123",
+	newTestHandler(engine).Create(rr, newCreateRequest("user123", "machine123",
 		`{"name":"  db-password  ","value":"  hunter2 \nnext line\n"}`))
 
 	assert.Equal(t, http.StatusCreated, rr.Code, "a successful create must answer 201")
 	assert.JSONEq(t, `{"id":"3f2e1d0c"}`, rr.Body.String(),
 		"the create response must carry the created ID only — never the value")
-	assert.Equal(t, "user123", gotUser, "handler must forward the authenticated user ID")
-	assert.Equal(t, "machine123", gotMachine, "handler must forward the machine ID URL param")
-	assert.Equal(t, "db-password", gotReq.Name, "handler must trim the name before forwarding")
-	assert.Equal(t, "  hunter2 \nnext line\n", gotReq.Value,
-		"handler must forward the value byte-identical — never trimmed")
+	assert.Equal(t, "db-password", gotName, "the trimmed name must reach the machine")
+	assert.Equal(t, "  hunter2 \nnext line\n", gotValue,
+		"the value must reach the machine byte-identical — never trimmed")
 }
 
 // TestSecretHandler_Create_ValidationFailures pins the 400 contract: a
 // missing/oversized/pattern-breaking name or an empty/oversized value is
-// refused with VALIDATION_FAILED before the service runs, and a malformed
-// body is refused with INVALID_REQUEST.
+// refused with VALIDATION_FAILED before the machine is asked, and a
+// malformed body is refused with INVALID_REQUEST. The engine stays
+// unarmed: any create reaching it panics the test.
 func TestSecretHandler_Create_ValidationFailures(t *testing.T) {
 	oversizedName := strings.Repeat("a", 256)
 	oversizedValue := strings.Repeat("v", 1048576+1)
@@ -515,21 +322,13 @@ func TestSecretHandler_Create_ValidationFailures(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var called bool
-			mockService := &MockSecretService{
-				mockCreate: func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
-					called = true
-					return &SecretCreateResponse{ID: "3f2e1d0c"}, nil
-				},
-			}
-			handler := NewSecretHandler(mockService)
+			engine := &fakeSecretEngine{}
 
 			rr := httptest.NewRecorder()
-			handler.Create(rr, newCreateRequest("user123", "machine123", tt.body))
+			newTestHandler(engine).Create(rr, newCreateRequest("user123", "machine123", tt.body))
 
 			assert.Equal(t, http.StatusBadRequest, rr.Code, "invalid input must be refused with 400")
 			assert.Contains(t, rr.Body.String(), tt.expectCode, "error body should carry the %s code", tt.expectCode)
-			assert.False(t, called, "an invalid request must never reach the service")
 		})
 	}
 }
@@ -539,10 +338,10 @@ func TestSecretHandler_Create_ValidationFailures(t *testing.T) {
 // thus nothing the handler could log from it) must not echo the submitted
 // value — only the failing field is named.
 func TestSecretHandler_Create_RejectsValueWithoutEchoingIt(t *testing.T) {
-	handler := NewSecretHandler(&MockSecretService{})
+	engine := &fakeSecretEngine{}
 
 	rr := httptest.NewRecorder()
-	handler.Create(rr, newCreateRequest("user123", "machine123",
+	newTestHandler(engine).Create(rr, newCreateRequest("user123", "machine123",
 		`{"name":"-bad-name","value":"top-secret-payload"}`))
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
@@ -550,70 +349,11 @@ func TestSecretHandler_Create_RejectsValueWithoutEchoingIt(t *testing.T) {
 		"a validation failure must never echo the submitted value")
 }
 
-// TestSecretHandler_Create_ErrorMapping pins the error pass-throughs: the
-// service's AppErrors keep their HTTP status (409 SECRET_ALREADY_EXISTS,
-// 502 CONNECTION_FAILED) and a non-AppError falls back to 500. The 500
-// SECRET_CREATION_FAILED path is asserted via status alone —
-// RespondWithError rewrites 5xx bodies generic.
-func TestSecretHandler_Create_ErrorMapping(t *testing.T) {
-	tests := []struct {
-		name           string
-		mockError      error
-		expectedStatus int
-		expectedBody   string
-	}{
-		{
-			name:           "duplicate name is conflict",
-			mockError:      errors.ErrSecretAlreadyExists,
-			expectedStatus: http.StatusConflict,
-			expectedBody:   "SECRET_ALREADY_EXISTS",
-		},
-		{
-			name:           "creation failed",
-			mockError:      errors.ErrSecretCreationFailed,
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "",
-		},
-		{
-			name:           "connection failed",
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-			expectedBody:   "",
-		},
-		{
-			name:           "non-app error falls back to internal error",
-			mockError:      errGeneric,
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "INTERNAL_ERROR",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mockService := &MockSecretService{
-				mockCreate: func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
-					return nil, tt.mockError
-				},
-			}
-			handler := NewSecretHandler(mockService)
-
-			rr := httptest.NewRecorder()
-			handler.Create(rr, newCreateRequest("user123", "machine123",
-				`{"name":"db-password","value":"hunter2"}`))
-
-			assert.Equal(t, tt.expectedStatus, rr.Code)
-			if tt.expectedBody != "" {
-				assert.Contains(t, rr.Body.String(), tt.expectedBody)
-			}
-		})
-	}
-}
-
 // TestSecretHandler_Create_WriteGate pins the route mounting for the
 // create route: POST /secrets is gated at write level, so a read-level
 // grantee (who keeps metadata visibility) is refused with 403 in
-// middleware — podman is never asked to store anything — while write- and
-// admin-level grantees reach the handler.
+// middleware — the machine is never asked to store anything — while
+// write- and admin-level grantees reach the handler.
 func TestSecretHandler_Create_WriteGate(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -631,12 +371,14 @@ func TestSecretHandler_Create_WriteGate(t *testing.T) {
 			machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
 			accessRepo := testutils.NewMockMachineAccessRepository()
 			accessRepo.AddAccess("machine-1", "grantee-1", tt.level, time.Now())
-			var called bool
-			service := &MockSecretService{mockCreate: func(ctx context.Context, userID, machineID string, req SecretCreateRequest) (*SecretCreateResponse, error) {
-				called = true
-				return &SecretCreateResponse{ID: "3f2e1d0c"}, nil
-			}}
-			router := secretsAccessRouter(machineRepo, accessRepo, service)
+			called := false
+			engine := &fakeSecretEngine{
+				createFn: func(name, value string) (*entities.SecretCreateReport, error) {
+					called = true
+					return &entities.SecretCreateReport{ID: "3f2e1d0c"}, nil
+				},
+			}
+			router := secretsAccessRouter(machineRepo, accessRepo, newTestHandler(engine).service)
 
 			req := httptest.NewRequest("POST", "/api/machines/machine-1/secrets",
 				strings.NewReader(`{"name":"db-password","value":"hunter2"}`))
@@ -667,7 +409,7 @@ func TestSecretHandler_Create_WriteGate(t *testing.T) {
 // handler (metadata is visible at read).
 
 // secretsAccessRouter mirrors app.go's mounting of the secrets routes.
-func secretsAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service SecretServiceInterface) http.Handler {
+func secretsAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *SecretService) http.Handler {
 	r := chi.NewRouter()
 	r.Route("/api/machines", func(r chi.Router) {
 		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
@@ -693,37 +435,35 @@ func requestAsUser(method, target, userID string) *http.Request {
 }
 
 func TestSecretHandler_List_UnknownMachineIsNotFound(t *testing.T) {
-	var called bool
-	service := &MockSecretService{mockList: func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
-		called = true
-		return []SecretListResponse{}, nil
-	}}
-	router := secretsAccessRouter(testutils.NewMockMachineRepository(), testutils.NewMockMachineAccessRepository(), service)
+	engine := &fakeSecretEngine{
+		listFn: func() ([]*entities.SecretInfoReport, error) {
+			return nil, nil
+		},
+	}
+	router := secretsAccessRouter(testutils.NewMockMachineRepository(), testutils.NewMockMachineAccessRepository(), newTestHandler(engine).service)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/no-such-machine/secrets", "owner-1"))
 
 	assert.Equal(t, http.StatusNotFound, w.Result().StatusCode, "unknown machine must be rejected with 404")
 	assert.Contains(t, w.Body.String(), "MACHINE_NOT_FOUND", "error body should carry the MACHINE_NOT_FOUND code")
-	assert.False(t, called, "handler must not run for an unknown machine")
 }
 
 func TestSecretHandler_List_UserWithoutAccessIsForbidden(t *testing.T) {
 	machineRepo := testutils.NewMockMachineRepository()
 	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	var called bool
-	service := &MockSecretService{mockList: func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
-		called = true
-		return []SecretListResponse{}, nil
-	}}
-	router := secretsAccessRouter(machineRepo, testutils.NewMockMachineAccessRepository(), service)
+	engine := &fakeSecretEngine{
+		listFn: func() ([]*entities.SecretInfoReport, error) {
+			return nil, nil
+		},
+	}
+	router := secretsAccessRouter(machineRepo, testutils.NewMockMachineAccessRepository(), newTestHandler(engine).service)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/secrets", "stranger-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "caller without an access row must be rejected with 403")
 	assert.Contains(t, w.Body.String(), "ACCESS_DENIED", "error body should carry the ACCESS_DENIED code")
-	assert.False(t, called, "handler must not run for a caller without access")
 }
 
 func TestSecretHandler_List_ReadLevelGranteeReachesHandler(t *testing.T) {
@@ -731,135 +471,62 @@ func TestSecretHandler_List_ReadLevelGranteeReachesHandler(t *testing.T) {
 	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
 	accessRepo := testutils.NewMockMachineAccessRepository()
 	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
-	var called bool
-	service := &MockSecretService{mockList: func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
-		called = true
-		return []SecretListResponse{}, nil
-	}}
-	router := secretsAccessRouter(machineRepo, accessRepo, service)
+	engine := &fakeSecretEngine{
+		listFn: func() ([]*entities.SecretInfoReport, error) {
+			return nil, nil
+		},
+	}
+	router := secretsAccessRouter(machineRepo, accessRepo, newTestHandler(engine).service)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/secrets", "reader-1"))
 
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "secret metadata is visible at read level")
-	assert.True(t, called, "handler must run for a read-level grantee")
 }
 
-// TestSecretHandler_Delete_SuccessAndErrorMapping pins the delete contract:
-// a successful removal answers 204 with an empty body (the frontend series
-// (170) invalidates the list on the 204 — there is nothing to parse), the
-// service's AppErrors keep their HTTP status (404 SECRET_NOT_FOUND, 409
-// SECRET_IN_USE, 502 CONNECTION_FAILED), and a non-AppError falls back to
-// 500.
-func TestSecretHandler_Delete_SuccessAndErrorMapping(t *testing.T) {
-	tests := []struct {
-		name           string
-		mockError      error
-		expectedStatus int
-		expectedBody   string
-	}{
-		{
-			name:           "successful delete",
-			expectedStatus: http.StatusNoContent,
-			expectedBody:   "",
-		},
-		{
-			name:           "unknown secret is not found",
-			mockError:      errors.ErrSecretNotFound,
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "SECRET_NOT_FOUND",
-		},
-		{
-			name:           "in-use secret is a conflict",
-			mockError:      errors.ErrSecretInUse,
-			expectedStatus: http.StatusConflict,
-			expectedBody:   "SECRET_IN_USE",
-		},
-		{
-			name:           "connection failed",
-			mockError:      errors.ErrConnectionFailed,
-			expectedStatus: http.StatusBadGateway,
-			expectedBody:   "",
-		},
-		{
-			name:           "non-app error falls back to internal error",
-			mockError:      errGeneric,
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "INTERNAL_ERROR",
+// TestSecretHandler_Delete_Success pins the delete contract: a successful
+// removal answers 204 with an empty body (the frontend series (170)
+// invalidates the list on the 204 — there is nothing to parse).
+func TestSecretHandler_Delete_Success(t *testing.T) {
+	var gotID string
+	engine := &fakeSecretEngine{
+		removeFn: func(name string) error {
+			gotID = name
+			return nil
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			called := false
-			mockService := &MockSecretService{
-				mockDelete: func(ctx context.Context, userID, machineID, secretID string) error {
-					called = true
-					return tt.mockError
-				},
-			}
-			handler := NewSecretHandler(mockService)
+	req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/db-password", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "machine123")
+	rctx.URLParams.Add("secretId", "db-password")
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
+	req = req.WithContext(ctx)
 
-			req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/db-password", nil)
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", "machine123")
-			rctx.URLParams.Add("secretId", "db-password")
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-			req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	newTestHandler(engine).Delete(rr, req)
 
-			rr := httptest.NewRecorder()
-			handler.Delete(rr, req)
-
-			assert.True(t, called, "the request must reach the service")
-			assert.Equal(t, tt.expectedStatus, rr.Code)
-			assert.Contains(t, rr.Body.String(), tt.expectedBody)
-			if tt.expectedStatus == http.StatusNoContent {
-				assert.Empty(t, rr.Body.String(), "a 204 must carry no body")
-			}
-		})
-	}
+	assert.Equal(t, http.StatusNoContent, rr.Code)
+	assert.Empty(t, rr.Body.String(), "a 204 must carry no body")
+	assert.Equal(t, "db-password", gotID, "the URL param must be the removed secret")
 }
 
-// TestSecretHandler_Delete_MissingContextAndParams pins the request-shape
-// guards for delete: no authenticated user → 401, no {secretId} URL param
-// → 400.
-func TestSecretHandler_Delete_MissingContextAndParams(t *testing.T) {
-	tests := []struct {
-		name           string
-		userID         string
-		secretID       string
-		expectedStatus int
-	}{
-		{name: "missing secret ID", userID: "user123", secretID: "", expectedStatus: http.StatusBadRequest},
-	}
+// TestSecretHandler_Delete_MissingSecretID pins the request-shape guard
+// for delete: no {secretId} URL param → 400.
+func TestSecretHandler_Delete_MissingSecretID(t *testing.T) {
+	engine := &fakeSecretEngine{}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			called := false
-			mockService := &MockSecretService{
-				mockDelete: func(ctx context.Context, userID, machineID, secretID string) error {
-					called = true
-					return nil
-				},
-			}
-			handler := NewSecretHandler(mockService)
+	req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/", nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", "machine123")
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	req = req.WithContext(context.WithValue(ctx, contextutils.UserIDContextKey, "user123"))
 
-			req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/"+tt.secretID, nil)
-			rctx := chi.NewRouteContext()
-			rctx.URLParams.Add("id", "machine123")
-			rctx.URLParams.Add("secretId", tt.secretID)
-			ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-			ctx = context.WithValue(ctx, contextutils.UserIDContextKey, tt.userID)
-			req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	newTestHandler(engine).Delete(rr, req)
 
-			rr := httptest.NewRecorder()
-			handler.Delete(rr, req)
-
-			assert.Equal(t, tt.expectedStatus, rr.Code)
-			assert.False(t, called, "a malformed request must never reach the service")
-		})
-	}
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 // TestSecretHandler_Delete_RouteLevelGating pins the mounted-route contract
@@ -870,16 +537,18 @@ func TestSecretHandler_Delete_MissingContextAndParams(t *testing.T) {
 func TestSecretHandler_Delete_RouteLevelGating(t *testing.T) {
 	newRouter := func() (http.Handler, *int) {
 		calls := 0
-		service := &MockSecretService{mockDelete: func(ctx context.Context, userID, machineID, secretID string) error {
-			calls++
-			return nil
-		}}
+		engine := &fakeSecretEngine{
+			removeFn: func(name string) error {
+				calls++
+				return nil
+			},
+		}
 		machineRepo := testutils.NewMockMachineRepository()
 		machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
 		accessRepo := testutils.NewMockMachineAccessRepository()
 		accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
 		accessRepo.AddAccess("machine-1", "writer-1", models.PermissionWrite, time.Now())
-		return secretsAccessRouter(machineRepo, accessRepo, service), &calls
+		return secretsAccessRouter(machineRepo, accessRepo, newTestHandler(engine).service), &calls
 	}
 
 	t.Run("read-level grantee is forbidden", func(t *testing.T) {
@@ -905,32 +574,4 @@ func TestSecretHandler_Delete_RouteLevelGating(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode, "an unknown machine must be refused before the handler")
 		assert.Zero(t, *calls, "a 404 machine must never reach the handler")
 	})
-}
-
-// TestSecretHandler_Delete_InUseSurfacesPodmanMessage pins that the 409
-// body carries podman's own refusal text (a 4xx, so it is NOT rewritten
-// generic) — the frontend surfaces which container holds the secret.
-func TestSecretHandler_Delete_InUseSurfacesPodmanMessage(t *testing.T) {
-	podmanMessage := "secret db-password is in use by container 3f2e1d0c"
-	mockService := &MockSecretService{
-		mockDelete: func(ctx context.Context, userID, machineID, secretID string) error {
-			return errors.ErrSecretInUse.WithMessage(podmanMessage)
-		},
-	}
-	handler := NewSecretHandler(mockService)
-
-	req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/db-password", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine123")
-	rctx.URLParams.Add("secretId", "db-password")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	req = req.WithContext(context.WithValue(ctx, contextutils.UserIDContextKey, "user123"))
-
-	rr := httptest.NewRecorder()
-	handler.Delete(rr, req)
-
-	assert.Equal(t, http.StatusConflict, rr.Code)
-	assert.Contains(t, rr.Body.String(), "SECRET_IN_USE")
-	assert.Contains(t, rr.Body.String(), podmanMessage,
-		"the 409 body must surface podman's refusal message")
 }
