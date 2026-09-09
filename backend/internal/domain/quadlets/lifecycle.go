@@ -9,7 +9,6 @@ import (
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"go.podman.io/podman/v6/pkg/domain/entities"
-	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
 // lifecycleAction represents a systemd lifecycle operation on a quadlet.
@@ -168,17 +167,13 @@ func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name st
 // the action (400 if the current state disallows it), and resolves the systemd
 // unit name to act on.
 //
-// The quadlet lookup goes through the podman QuadletList primitive (built
-// inline, matching the rest of the service) so the existence check and
-// unit-name resolution are consistent with the Get/Delete slices.
+// The quadlet lookup goes through the domain's engine provider (the
+// connection seam) so the existence check and unit-name resolution are
+// consistent with the Get/Delete slices.
 func (s *QuadletService) resolveUnitNameForLifecycle(ctx context.Context, userID, machineID, name string, action lifecycleAction) (string, error) {
 	var unit string
-	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Lifecycle", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		target, err := s.resolveTarget(containerEngine, name)
+	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Lifecycle", func(e QuadletEngine) error {
+		target, err := s.resolveTarget(e, name)
 		if err != nil {
 			return err
 		}
@@ -194,8 +189,8 @@ func (s *QuadletService) resolveUnitNameForLifecycle(ctx context.Context, userID
 	return unit, err
 }
 
-func (s *QuadletService) resolveTarget(containerEngine *tunnel.ContainerEngine, name string) (*entities.ListQuadlet, error) {
-	list, err := containerEngine.QuadletList(context.Background(), entities.QuadletListOptions{Filters: []string{"name=" + name}})
+func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.ListQuadlet, error) {
+	list, err := e.List(entities.QuadletListOptions{Filters: []string{"name=" + name}})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quadlets: %w", err)
 	}

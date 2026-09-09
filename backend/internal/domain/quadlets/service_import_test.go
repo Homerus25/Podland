@@ -2,65 +2,89 @@ package quadlets
 
 import (
 	"context"
+	"errors"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
-	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/pkg/domain/entities"
+	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// TestServiceImport_InvocationShape covers the connection-stage behaviour and
-// the invocation shape, matching the convention used by the other service
-// seams (List/Get/Create/Update/Delete): the podman engine boundary is built
-// inline and is not mocked, so the bindings-level Install call fails because
-// there is no real podman backend behind the mock connection context.
-//
-// Unlike Create, Import collects per-entry failures instead of surfacing a
-// top-level error, so the invocation shape here is: the connection succeeds
-// (no top-level error), every entry's install fails, and each failure is
-// captured in response.Failed with an install error (not a connection error).
-func TestServiceImport_InvocationShape(t *testing.T) {
+// TestServiceImport_ImportsAndCollectsFailures pins the per-entry contract:
+// every entry is installed independently, successful installs are collected
+// with their reported path, and name collisions land in Failed with the
+// already-exists message instead of failing the whole request.
+func TestServiceImport_ImportsAndCollectsFailures(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
+	engine := &fakeQuadletEngine{
+		installFn: func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {
+			if fileName == "db.container" {
+				return nil, &errorhandling.ErrorModel{
+					ResponseCode: 500,
+					Message:      "db.container: conflict",
+					Because:      "name in use",
+				}
+			}
+			return &entities.QuadletInstallReport{
+				InstalledQuadlets: map[string]string{"/tmp/" + fileName: "/etc/containers/systemd/" + fileName},
+			}, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
 
 	req := QuadletImportRequest{
 		Quadlets: []QuadletImportEntry{
-			{
-				Name:     "web",
-				Resource: "container",
-				Content:  "[Container]\nImage=nginx\n",
-			},
-			{
-				Name:     "db",
-				Resource: "container",
-				Content:  "[Container]\nImage=postgres\n",
-			},
+			{Name: "web", Resource: "container", Content: "[Container]\nImage=nginx\n"},
+			{Name: "db", Resource: "container", Content: "[Container]\nImage=postgres\n"},
 		},
 	}
 
-	response, err := service.Import(ctx, "user-1", "machine-1", req)
+	response, err := service.Import(context.Background(), "user-1", "machine-1", req)
 
-	require.NoError(t, err, "Connection should succeed; per-entry failures are collected, not returned")
+	require.NoError(t, err, "per-entry failures are collected, not returned")
 	require.NotNil(t, response)
-	assert.Len(t, response.Imported, 0, "No entry can be imported without a real podman backend")
-	assert.Len(t, response.Failed, 2, "Every entry should be reported as failed")
+	require.Len(t, response.Imported, 1)
+	assert.Equal(t, "web", response.Imported[0].Name)
+	assert.Equal(t, "/etc/containers/systemd/web.container", response.Imported[0].Path)
+	require.Len(t, response.Failed, 1)
+	assert.Equal(t, "db", response.Failed[0].Name)
+	assert.Contains(t, response.Failed[0].Error, "quadlet already exists",
+		"a name-in-use refusal must be reported as an already-exists failure")
+}
 
-	for _, f := range response.Failed {
-		assert.NotContains(t, f.Error, "CONNECTION_FAILED",
-			"Per-entry error should be an install failure, not a connection failure")
+// TestServiceImport_InstallFailureIsCollected pins that a non-collision
+// install failure also stays per-entry (wrapped install error, not a
+// top-level failure).
+func TestServiceImport_InstallFailureIsCollected(t *testing.T) {
+	t.Parallel()
+
+	engine := &fakeQuadletEngine{
+		installFn: func(string, []byte, bool) (*entities.QuadletInstallReport, error) {
+			return nil, errors.New("systemd reload failed")
+		},
 	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	response, err := service.Import(context.Background(), "user-1", "machine-1", QuadletImportRequest{
+		Quadlets: []QuadletImportEntry{
+			{Name: "web", Resource: "container", Content: "[Container]\nImage=nginx\n"},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, response.Failed, 1)
+	assert.Contains(t, response.Failed[0].Error, "failed to install quadlet")
+	assert.Len(t, response.Imported, 0)
 }
 
 func TestServiceImport_EmptyRequest(t *testing.T) {
 	t.Parallel()
 
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
+	// The engine stays unarmed: an empty request must not touch podman.
+	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil)
 
 	ctx := context.Background()
 	req := QuadletImportRequest{
@@ -73,34 +97,6 @@ func TestServiceImport_EmptyRequest(t *testing.T) {
 	require.NotNil(t, response)
 	assert.Len(t, response.Imported, 0)
 	assert.Len(t, response.Failed, 0)
-}
-
-// TestImportSingleQuadlet_InvocationShape covers the invocation shape of the
-// per-entry helper: the mock connection context carries no real podman client,
-// so the bindings-level Install call fails. The success/error mapping and
-// already-exists handling are pure branches tested via the DTO and helper
-// functions; exercising the happy path requires a real podman backend.
-func TestImportSingleQuadlet_InvocationShape(t *testing.T) {
-	t.Parallel()
-
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
-
-	var result QuadletImportResult
-	err := mockConnManager.WithConnection(context.Background(), "user-1", "machine-1", "quadlets.Import", func(connCtx context.Context) error {
-		var innerErr error
-		result, innerErr = service.importSingleQuadlet(connCtx, QuadletImportEntry{
-			Name:     "web",
-			Resource: "container",
-			Content:  "[Container]\nImage=nginx\n",
-		})
-		return innerErr
-	})
-
-	assert.Error(t, err, "Should return error from install call with mock connection")
-	assert.Equal(t, QuadletImportResult{}, result, "Should return zero result when install call fails")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
 }
 
 func TestQuadletImportRequest_Validation(t *testing.T) {

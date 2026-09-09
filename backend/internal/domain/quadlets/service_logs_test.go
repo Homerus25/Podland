@@ -1,84 +1,197 @@
 package quadlets
 
 import (
-	"bytes"
 	"context"
-	"strings"
+	"net/http"
 	"testing"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// TestQuadletService_GetLogs_Success tests successful log retrieval
-func TestQuadletService_GetLogs_Success(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	quadletName := "my-quadlet"
+// TestQuadletService_GetLogs_ResolvesSystemdContainerName pins the payoff
+// behaviour of the engine seam: for a container-type quadlet without an
+// explicit name, logs are fetched from the systemd-spawned container
+// (systemd-<basename>) and stdout/stderr combine into one multiline string.
+func TestQuadletService_GetLogs_ResolvesSystemdContainerName(t *testing.T) {
+	var loggedContainer string
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{Name: "web.container", Status: "running"}}, nil
+		},
+		printFn: func(string) (string, error) {
+			return "[Container]\nImage=nginx\n", nil
+		},
+		logsFn: func(containerName string, opts entities.ContainerLogsOptions) error {
+			loggedContainer = containerName
+			if opts.StdoutWriter != nil {
+				_, _ = opts.StdoutWriter.Write([]byte("out line\n"))
+			}
+			if opts.StderrWriter != nil {
+				_, _ = opts.StderrWriter.Write([]byte("err line\n"))
+			}
+			return nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
 
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
+	got, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
 
-	t.Run("service structure validation", func(t *testing.T) {
-		// Verify that GetLogs method exists on service
-		assert.NotNil(t, service.GetLogs, "GetLogs method should exist on service")
-
-		// Verify that QuadletLogsResponse DTO exists
-		response := &QuadletLogsResponse{
-			ID:   "test-quadlet",
-			Logs: "test log line",
-		}
-		assert.Equal(t, "test-quadlet", response.ID, "QuadletLogsResponse ID should be settable")
-		assert.Equal(t, "test log line", response.Logs, "QuadletLogsResponse Logs should be settable")
-	})
-
-	t.Run("missing parameters", func(t *testing.T) {
-		testCases := []struct {
-			name        string
-			userID      string
-			machineID   string
-			quadletName string
-		}{
-			{"missing userID", "", machineID, quadletName},
-			{"missing machineID", userID, "", quadletName},
-			{"missing quadletName", userID, machineID, ""},
-		}
-
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				result, err := service.GetLogs(ctx, tc.userID, tc.machineID, tc.quadletName, time.Time{}, 0)
-
-				assert.Error(t, err, "Should return error for missing parameters")
-				assert.NotNil(t, err, "Error should not be nil")
-				assert.Nil(t, result, "Should return nil result when parameters are missing")
-			})
-		}
-	})
-
-	t.Run("parameter handling", func(t *testing.T) {
-		since := time.Now().Add(-1 * time.Hour)
-		tail := int64(100)
-		result, err := service.GetLogs(ctx, userID, machineID, quadletName, since, tail)
-
-		assert.Error(t, err, "Expected error due to mock limitations")
-		assert.Nil(t, result, "Should return nil result due to mock limitations")
-	})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "systemd-web", loggedContainer,
+		"container-type quadlets must log from the systemd-spawned container")
+	assert.Equal(t, "out line\nerr line", got.Logs, "stdout comes first, stderr appended, trailing newline trimmed")
+	assert.Equal(t, "web.container", got.ID)
 }
 
-// TestQuadletService_GetLogs_ErrorMapping tests error mapping
-func TestQuadletService_GetLogs_ErrorMapping(t *testing.T) {
-	// Verify that ErrQuadletNotFound exists and has correct status
-	t.Run("verify error constants", func(t *testing.T) {
-		assert.NotNil(t, appErrors.ErrQuadletNotFound, "ErrQuadletNotFound should be defined")
-		assert.Equal(t, "QUADLET_NOT_FOUND", appErrors.ErrQuadletNotFound.Code, "Error code should match")
-		assert.Equal(t, 404, appErrors.ErrQuadletNotFound.Status, "Status should be 404")
-	})
+// TestQuadletService_GetLogs_ExplicitContainerNameWins pins that an
+// explicit ContainerName= key in the unit content overrides the
+// systemd-<basename> convention.
+func TestQuadletService_GetLogs_ExplicitContainerNameWins(t *testing.T) {
+	var loggedContainer string
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{Name: "web.container"}}, nil
+		},
+		printFn: func(string) (string, error) {
+			return "[Container]\nImage=nginx\nContainerName=my-explicit-container\n", nil
+		},
+		logsFn: func(containerName string, opts entities.ContainerLogsOptions) error {
+			loggedContainer = containerName
+			return nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	_, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
+
+	require.NoError(t, err)
+	assert.Equal(t, "my-explicit-container", loggedContainer)
+}
+
+// TestQuadletService_GetLogs_PodQuadletUsesPodContainer pins the pod branch
+// of the name resolution: a pod-type quadlet logs from the pod container
+// reported by the list.
+func TestQuadletService_GetLogs_PodQuadletUsesPodContainer(t *testing.T) {
+	var loggedContainer string
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{Name: "stack.pod", Pod: "stack-the-pod"}}, nil
+		},
+		printFn: func(string) (string, error) {
+			return "[Pod]\n", nil
+		},
+		logsFn: func(containerName string, opts entities.ContainerLogsOptions) error {
+			loggedContainer = containerName
+			return nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	_, err := service.GetLogs(context.Background(), "user", "machine", "stack.pod", time.Time{}, 0)
+
+	require.NoError(t, err)
+	assert.Equal(t, "stack-the-pod", loggedContainer)
+}
+
+func TestQuadletService_GetLogs_MissingQuadletIs404BeforeLogs(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return nil, nil
+		},
+		// printFn/logsFn stay unarmed: a missing quadlet must not touch
+		// the machine beyond the existence check.
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	got, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
+
+	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+	assert.Nil(t, got)
+}
+
+func TestQuadletService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{Name: "web.container"}}, nil
+		},
+		printFn: func(string) (string, error) {
+			return "[Container]\n", nil
+		},
+		logsFn: func(string, entities.ContainerLogsOptions) error {
+			return &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	got, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
+
+	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+	assert.Nil(t, got)
+}
+
+// TestQuadletService_GetLogsWithStream_EmitsEventsPerLine pins the follow
+// mode: each line arrives as an event through the writers the service hands
+// the engine, stdout at INFO and stderr at ERROR, with podman's line
+// timestamps parsed out.
+func TestQuadletService_GetLogsWithStream_EmitsEventsPerLine(t *testing.T) {
+	var events []QuadletLogEvent
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{Name: "web.container"}}, nil
+		},
+		printFn: func(string) (string, error) {
+			return "[Container]\n", nil
+		},
+		logsFn: func(_ string, opts entities.ContainerLogsOptions) error {
+			if opts.StdoutWriter != nil {
+				_, _ = opts.StdoutWriter.Write([]byte("2026-09-01T10:00:00.000000000Z hello\n"))
+			}
+			if opts.StderrWriter != nil {
+				_, _ = opts.StderrWriter.Write([]byte("2026-09-01T10:00:01.000000000Z broke\n"))
+			}
+			return nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	err := service.GetLogsWithStream(context.Background(), "user", "machine", "web.container", time.Time{}, 0,
+		func(event QuadletLogEvent) { events = append(events, event) })
+
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	assert.Equal(t, "INFO", events[0].Level)
+	assert.Equal(t, "hello", events[0].Message, "the podman timestamp must be parsed out of the message")
+	assert.Equal(t, "2026-09-01T10:00:00Z", events[0].Timestamp)
+	assert.Equal(t, "ERROR", events[1].Level)
+	assert.Equal(t, "broke", events[1].Message)
+}
+
+func TestQuadletService_GetLogsWithStream_MapsCancellationToOperationCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{Name: "web.container"}}, nil
+		},
+		printFn: func(string) (string, error) {
+			return "[Container]\n", nil
+		},
+		logsFn: func(string, entities.ContainerLogsOptions) error {
+			return context.Canceled
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	err := service.GetLogsWithStream(ctx, "user", "machine", "web.container", time.Time{}, 0,
+		func(QuadletLogEvent) {})
+
+	require.ErrorIs(t, err, appErrors.ErrOperationCancelled)
 }
 
 // TestQuadletService_GetLogs_ResolveContainerName tests container name resolution
@@ -145,42 +258,6 @@ Exec=echo ContainerName=not-a-key
 	t.Run("empty value returns empty", func(t *testing.T) {
 		content := "[Container]\nContainerName=\n"
 		assert.Equal(t, "", explicitContainerNameFromQuadletContent(content))
-	})
-}
-
-// TestQuadletService_GetLogsWithStream_Success tests successful streaming log retrieval
-func TestQuadletService_GetLogsWithStream_Success(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	quadletName := "my-quadlet"
-
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
-
-	t.Run("service structure validation", func(t *testing.T) {
-		// Verify that GetLogsWithStream method exists on service
-		assert.NotNil(t, service.GetLogsWithStream, "GetLogsWithStream method should exist on service")
-
-		// Verify that QuadletLogEvent DTO exists
-		event := QuadletLogEvent{
-			Timestamp: "2024-01-01T00:00:00Z",
-			Level:     "INFO",
-			Message:   "test log message",
-		}
-		assert.Equal(t, "2024-01-01T00:00:00Z", event.Timestamp, "QuadletLogEvent Timestamp should be settable")
-		assert.Equal(t, "INFO", event.Level, "QuadletLogEvent Level should be settable")
-		assert.Equal(t, "test log message", event.Message, "QuadletLogEvent Message should be settable")
-	})
-
-	t.Run("callback is called", func(t *testing.T) {
-		var capturedEvents []QuadletLogEvent
-		err := service.GetLogsWithStream(ctx, userID, machineID, quadletName, time.Time{}, 0, func(event QuadletLogEvent) {
-			capturedEvents = append(capturedEvents, event)
-		})
-
-		assert.Error(t, err, "Expected error due to mock limitations")
-		assert.Empty(t, capturedEvents, "Should not capture events due to mock limitations")
 	})
 }
 
@@ -278,68 +355,5 @@ func TestQuadletLogEventWriter(t *testing.T) {
 		assert.Len(t, capturedEvents, 2, "Should capture two events")
 		assert.Equal(t, "First message", capturedEvents[0].Message, "First event should have first message")
 		assert.Equal(t, "Second message", capturedEvents[1].Message, "Second event should have second message")
-	})
-}
-
-// TestQuadletService_GetLogs_Buffers tests buffer handling
-func TestQuadletService_GetLogs_Buffers(t *testing.T) {
-	t.Run("buffer initialization", func(t *testing.T) {
-		// Verify that bytes.Buffer is available for capturing logs
-		var stdoutBuffer, stderrBuffer bytes.Buffer
-
-		testLog := "test log line"
-		stdoutBuffer.WriteString(testLog)
-		stderrBuffer.WriteString(testLog)
-
-		assert.Equal(t, testLog, stdoutBuffer.String(), "Stdout buffer should capture logs")
-		assert.Equal(t, testLog, stderrBuffer.String(), "Stderr buffer should capture logs")
-
-		// Test buffer trimming
-		combinedLogs := stdoutBuffer.String()
-		trimmedBytes := bytes.TrimSuffix(stdoutBuffer.Bytes(), []byte("\n"))
-		combinedLogs = string(trimmedBytes)
-		assert.Equal(t, testLog, string(combinedLogs), "Buffer trimming should work correctly")
-	})
-
-	t.Run("buffer combination", func(t *testing.T) {
-		// Test the combination logic from GetLogs
-		var stdoutBuffer, stderrBuffer bytes.Buffer
-
-		stdoutBuffer.WriteString("stdout line 1\n")
-		stdoutBuffer.WriteString("stdout line 2\n")
-		stderrBuffer.WriteString("stderr line 1\n")
-
-		combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
-		if stderrBuffer.Len() > 0 {
-			stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
-			if combinedLogs != "" {
-				combinedLogs += "\n" + stderrContent
-			} else {
-				combinedLogs = stderrContent
-			}
-		}
-
-		expected := "stdout line 1\nstdout line 2\nstderr line 1"
-		assert.Equal(t, expected, combinedLogs, "Combined logs should match expected format")
-	})
-
-	t.Run("stderr only", func(t *testing.T) {
-		var stdoutBuffer, stderrBuffer bytes.Buffer
-
-		stderrBuffer.WriteString("stderr line 1\n")
-		stderrBuffer.WriteString("stderr line 2\n")
-
-		combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
-		if stderrBuffer.Len() > 0 {
-			stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
-			if combinedLogs != "" {
-				combinedLogs += "\n" + stderrContent
-			} else {
-				combinedLogs = stderrContent
-			}
-		}
-
-		expected := "stderr line 1\nstderr line 2"
-		assert.Equal(t, expected, combinedLogs, "Combined logs should handle stderr-only case")
 	})
 }

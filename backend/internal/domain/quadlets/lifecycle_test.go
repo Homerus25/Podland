@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -254,52 +254,75 @@ func TestBuildLifecycleResponse(t *testing.T) {
 // the service so that, if resolveForLifecycle ever does return, runSystemctl is
 // exercised — but under the mock connection that path is not reached.
 
-func TestQuadletService_Start_InvocationShape(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, testutils.NewMockSSHExec())
+// TestQuadletService_Start_ResolvesUnitThenRunsSystemctl pins the lifecycle
+// flow end to end: the quadlet lookup runs through the engine provider, the
+// resolved unit name drives `systemctl --user start <unit>` over SSH, and
+// the response reports the running state.
+func TestQuadletService_Start_ResolvesUnitThenRunsSystemctl(t *testing.T) {
+	var listedFilters entities.QuadletListOptions
+	engine := &fakeQuadletEngine{
+		listFn: func(opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			listedFilters = opts
+			return []*entities.ListQuadlet{{
+				Name:     "web.container",
+				UnitName: "web.service",
+				Path:     "/x/web.container",
+				Status:   "stopped",
+			}}, nil
+		},
+	}
+	sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+		assert.Equal(t, []string{"--user", "start", "web.service"}, opts.Args,
+			"the resolved unit name must drive the systemctl invocation")
+		return sshexec.ExecResult{ExitCode: 0}, nil
+	})
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec)
 
-	result, err := service.Start(ctx, "test-user", "test-machine", "my-container.container")
+	got, err := service.Start(context.Background(), "user", "machine", "web.container")
 
-	// The mock connection succeeds but the QuadletList lookup fails because
-	// there is no real podman backend behind the mock connection context.
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.Nil(t, result, "Should return nil result when engine call fails")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, []string{"name=web.container"}, listedFilters.Filters,
+		"the lookup must filter by name")
+	assert.Equal(t, "running", got.State)
+	assert.Equal(t, "web.service", got.Unit)
 }
 
-func TestQuadletService_Stop_InvocationShape(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, testutils.NewMockSSHExec())
+func TestQuadletService_Stop_MissingQuadletIs404(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return nil, nil
+		},
+	}
+	// The SSH exec stays unarmed: a missing quadlet must not run systemctl.
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec())
 
-	result, err := service.Stop(ctx, "test-user", "test-machine", "my-container.container", LifecycleOptions{})
+	got, err := service.Stop(context.Background(), "user", "machine", "web.container", LifecycleOptions{})
 
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.Nil(t, result, "Should return nil result when engine call fails")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
+	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+	assert.Nil(t, got)
 }
 
-func TestQuadletService_Restart_InvocationShape(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, testutils.NewMockSSHExec())
+func TestQuadletService_Restart_NonRunningRefused(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{Name: "web.container", Status: "stopped"}}, nil
+		},
+	}
+	// The SSH exec stays unarmed: a wrong-state quadlet must not run systemctl.
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec())
 
-	result, err := service.Restart(ctx, "test-user", "test-machine", "my-container.container", LifecycleOptions{})
+	got, err := service.Restart(context.Background(), "user", "machine", "web.container", LifecycleOptions{})
 
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.Nil(t, result, "Should return nil result when engine call fails")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
+	require.ErrorIs(t, err, appErrors.ErrQuadletNotRunning)
+	assert.Nil(t, got)
 }
 
 // TestQuadletService_Lifecycle_NilSSHExec tests the defensive nil-check in
 // runSystemctl. When a nil sshExec is configured, the service should return
 // ErrInternalError rather than panic.
 func TestQuadletService_Lifecycle_NilSSHExec(t *testing.T) {
-	service := NewQuadletService(testutils.NewMockConnectionManager(), nil)
+	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil)
 	ctx := context.Background()
 
 	result, err := service.runSystemctl(ctx, "test-machine", "test-user", "start", "test.service", LifecycleOptions{})
@@ -312,7 +335,7 @@ func TestQuadletService_Lifecycle_NilSSHExec(t *testing.T) {
 // be constructed with nil dependencies for defensive programming, matching
 // the established pattern in this package.
 func TestQuadletService_Lifecycle_ServiceConstruction(t *testing.T) {
-	service := NewQuadletService(testutils.NewMockConnectionManager(), nil)
+	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil)
 	assert.NotNil(t, service, "Service should construct even with nil sshExec")
 	assert.Nil(t, service.sshExec, "sshExec should be nil")
 }

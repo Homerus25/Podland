@@ -1,21 +1,16 @@
 package quadlets
 
 import (
-	"archive/tar"
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"strings"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
-	"go.podman.io/podman/v6/pkg/bindings/quadlets"
 	"go.podman.io/podman/v6/pkg/domain/entities"
-	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
 // Compile-time check that *QuadletService satisfies QuadletServiceInterface.
@@ -45,24 +40,27 @@ type ListFilters struct {
 	Name     string
 }
 
-// QuadletService provides business logic for quadlets
+// QuadletService provides business logic for quadlets. Every machine-scoped
+// podman call crosses the QuadletEngineProvider (the connection seam); the
+// service itself owns only domain mapping, composition, and the lifecycle's
+// systemctl-via-SSH transport.
 type QuadletService struct {
-	conn connections.Manager
+	engines QuadletEngineProvider
 	// sshExec runs systemctl over SSH for the lifecycle (Start/Stop/Restart)
-	// operations. It is a SEPARATE dependency from conn (which is a
-	// podman-socket tunnel only) per the 070-10 SSH-exec infra slice.
+	// operations. It is a SEPARATE dependency from the engine provider (which
+	// is a podman-socket seam only) per the 070-10 SSH-exec infra slice.
 	sshExec sshexec.SSHExecInterface
 }
 
-// NewQuadletService creates a new QuadletService with the given connection
-// manager interface and SSH-exec interface. The SSH-exec dependency is required
+// NewQuadletService creates a new QuadletService with the given engine
+// provider and SSH-exec interface. The SSH-exec dependency is required
 // by the lifecycle endpoints (Start/Stop/Restart) which run systemctl over SSH;
 // the other operations (List/Get/Create/Update/Delete) use only the connection
 // manager and are unaffected by it. Tests that do not exercise lifecycle may
 // pass nil for sshExec.
-func NewQuadletService(conn connections.Manager, sshExec sshexec.SSHExecInterface) *QuadletService {
+func NewQuadletService(engines QuadletEngineProvider, sshExec sshexec.SSHExecInterface) *QuadletService {
 	return &QuadletService{
-		conn:    conn,
+		engines: engines,
 		sshExec: sshExec,
 	}
 }
@@ -70,12 +68,8 @@ func NewQuadletService(conn connections.Manager, sshExec sshexec.SSHExecInterfac
 // List returns a list of quadlets on the specified machine.
 func (s *QuadletService) List(ctx context.Context, userID, machineID string, filters ListFilters) ([]QuadletListResponse, error) {
 	var quadlets []QuadletListResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.List", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		list, err := containerEngine.QuadletList(ctx, entities.QuadletListOptions{})
+	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.List", func(e QuadletEngine) error {
+		list, err := e.List(entities.QuadletListOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to list quadlets: %w", err)
 		}
@@ -109,17 +103,13 @@ func applyFilters(quadlets []QuadletListResponse, filters ListFilters) []Quadlet
 // Get returns a specific quadlet by name on the specified machine.
 func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string) (*QuadletGetResponse, error) {
 	var response *QuadletGetResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Get", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		content, err := containerEngine.QuadletPrint(ctx, name)
+	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Get", func(e QuadletEngine) error {
+		content, err := e.Print(name)
 		if err != nil {
 			return fmt.Errorf("failed to get quadlet content: %w", err)
 		}
 
-		quadlets, err := containerEngine.QuadletList(ctx, entities.QuadletListOptions{})
+		quadlets, err := e.List(entities.QuadletListOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to list quadlets: %w", err)
 		}
@@ -146,28 +136,16 @@ func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string
 }
 
 // Create installs a new quadlet on the specified machine.
-// The request content is wrapped as an in-memory tar (single file named
-// `<name>.<resource-extension>`) and passed to the podman QuadletInstall
-// primitive with ReloadSystemd enabled so systemd picks up the new unit.
-// A name collision in the install report is mapped to ErrQuadletAlreadyExists.
+// The request content is installed under the name `<name>.<resource-extension>`
+// with systemd reload enabled so systemd picks up the new unit (the tar
+// framing podman requires is the engine adapter's job). A name collision in
+// the install report is mapped to ErrQuadletAlreadyExists.
 func (s *QuadletService) Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
 	var response *QuadletCreateResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Create", func(connCtx context.Context) error {
-		// Build the in-memory tar: a single file named `<name>.<resource-extension>`.
-		// Podman's QuadletInstall primitive accepts a tar body, not raw content —
-		// see ~/repos/podman/pkg/domain/infra/tunnel/quadlet.go:161 (createTarFromReader).
+	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Create", func(e QuadletEngine) error {
 		fileName := req.Name + resourceToExtension(req.Resource)
-		body, err := createTarBody(fileName, []byte(req.Content))
-		if err != nil {
-			return fmt.Errorf("failed to build quadlet tar body: %w", err)
-		}
 
-		// Call the podman bindings-level Install directly. The engine-level
-		// QuadletInstall only accepts on-disk paths / URLs; we already hold the
-		// content in memory, so we skip its path-resolution step.
-		options := new(quadlets.QuadletInstallOptions).WithReloadSystemd(true)
-
-		report, err := quadlets.Install(connCtx, options, body)
+		report, err := e.Install(fileName, []byte(req.Content), false)
 		if err != nil {
 			if podmanerr.IsAlreadyExists(err) {
 				return appErrors.ErrQuadletAlreadyExists
@@ -206,17 +184,16 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 // Update replaces an existing quadlet's content on the specified machine.
 //
 // Podman has no dedicated update primitive, so the service composes
-// QuadletRemove + QuadletInstall (with Replace: true) of the new content
+// Remove + Install (with replace) of the new content
 // (doku/description_quadlets_api.md:114-138):
 //
-//  1. Existence check: locate the quadlet via QuadletList. A missing quadlet
+//  1. Existence check: locate the quadlet via List. A missing quadlet
 //     maps to ErrQuadletNotFound (404). The list result also supplies the
-//     resource extension used to name the rebuilt tar entry.
-//  2. Remove the existing quadlet (Force: true so an active managed resource
+//     resource extension used to name the rebuilt file.
+//  2. Remove the existing quadlet (forced, so an active managed resource
 //     does not block the replace; the PUT contract exposes no running-conflict
 //     error, so an update is allowed even while the resource is up).
-//  3. Install the new content as an in-memory tar (single file named
-//     `<name>.<resource-extension>`), with Replace: true and ReloadSystemd: true.
+//  3. Install the new content, with replace and ReloadSystemd enabled.
 //
 // IMPORTANT: this flow is NOT atomic across the remove/install pair. A failure
 // after the remove succeeds but before the install completes leaves the quadlet
@@ -228,13 +205,9 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 // yet reloaded to report a fresh status — matching the Create slice's behaviour.
 func (s *QuadletService) Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
 	var response *QuadletGetResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Update", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
+	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Update", func(e QuadletEngine) error {
 		// 1. Existence check + resource derivation. A missing quadlet is a 404.
-		list, err := containerEngine.QuadletList(ctx, entities.QuadletListOptions{})
+		list, err := e.List(entities.QuadletListOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to list quadlets: %w", err)
 		}
@@ -247,10 +220,7 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 		// 2. Remove the existing quadlet. Force: true so an active managed resource
 		//    does not block the replace (the PUT contract has no running-conflict
 		//    error). ReloadSystemd: true so systemd drops the old unit.
-		if _, err := containerEngine.QuadletRemove(ctx, []string{name}, entities.QuadletRemoveOptions{
-			Force:         true,
-			ReloadSystemd: true,
-		}); err != nil {
+		if _, err := e.Remove(name, true); err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrQuadletNotFound
 			}
@@ -258,8 +228,8 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 		}
 
 		// 3. Install the new content. The filename preserves the original resource
-		//    extension so the rebuilt quadlet keeps its type. Replace: true overwrites
-		//    any leftover file from a partial state; ReloadSystemd: true picks up the
+		//    extension so the rebuilt quadlet keeps its type. Replace overwrites
+		//    any leftover file from a partial state; ReloadSystemd picks up the
 		//    change.
 		//    The derive→extension round-trip re-normalizes the contract enum (so a
 		//    .kube/.build path rebuilds as .container/.image), matching Create's use
@@ -272,13 +242,8 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 		ext := resourceToExtension(resource)
 		baseName := strings.TrimSuffix(name, ext)
 		fileName := baseName + ext
-		body, err := createTarBody(fileName, []byte(req.Content))
-		if err != nil {
-			return fmt.Errorf("failed to build quadlet tar body: %w", err)
-		}
 
-		options := new(quadlets.QuadletInstallOptions).WithReplace(true).WithReloadSystemd(true)
-		report, err := quadlets.Install(connCtx, options, body)
+		report, err := e.Install(fileName, []byte(req.Content), true)
 		if err != nil {
 			return fmt.Errorf("failed to install updated quadlet: %w", err)
 		}
@@ -299,11 +264,11 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 // The flow honours the contract's `force` and `stop` query parameters
 // (doku/description_quadlets_api.md:140-161):
 //
-//   - The quadlet is located via a QuadletList pre-check. A missing quadlet
+//   - The quadlet is located via a List pre-check. A missing quadlet
 //     maps to ErrQuadletNotFound (404).
 //   - If the managed resource is currently running and force is not set, the
 //     delete is refused with ErrQuadletResourceRunning (400).
-//   - Otherwise QuadletRemove is called with Force=force and ReloadSystemd=true
+//   - Otherwise Remove is called with Force=force (systemd reload included)
 //     so systemd picks up the removal.
 //
 // `stop` (default true) would normally trigger a systemctl stop over SSH before
@@ -314,14 +279,10 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error {
 	_ = stop // honoured once SSH-exec (070-10) is available; see doc comment.
 
-	return s.conn.WithConnection(ctx, userID, machineID, "quadlets.Delete", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
+	return s.engines.WithEngine(ctx, userID, machineID, "quadlets.Delete", func(e QuadletEngine) error {
 		// Pre-check: locate the quadlet and evaluate the running guard so we map
 		// not-found / running-conflict before attempting the destructive call.
-		list, err := containerEngine.QuadletList(ctx, entities.QuadletListOptions{})
+		list, err := e.List(entities.QuadletListOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to list quadlets: %w", err)
 		}
@@ -330,10 +291,7 @@ func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name str
 			return err
 		}
 
-		report, err := containerEngine.QuadletRemove(ctx, []string{name}, entities.QuadletRemoveOptions{
-			Force:         force,
-			ReloadSystemd: true,
-		})
+		report, err := e.Remove(name, force)
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrQuadletNotFound
@@ -363,38 +321,12 @@ func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name str
 	})
 }
 
-// createTarBody builds an in-memory tar containing a single file with the given
-// name and content. Mirrors the framing of podman's createTarFromReader
-// (~/repos/podman/pkg/domain/infra/tunnel/quadlet.go:161) but operates on an
-// in-memory byte slice instead of a pipe + goroutine. Writes target an
-// in-memory bytes.Buffer and so should not fail in practice, but errors are
-// propagated rather than swallowed.
-func createTarBody(fileName string, content []byte) (io.Reader, error) {
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	hdr := &tar.Header{
-		Name:    fileName,
-		Mode:    0o644,
-		Size:    int64(len(content)),
-		ModTime: time.Now(),
-	}
-	if err := tw.WriteHeader(hdr); err != nil {
-		return nil, fmt.Errorf("failed to write tar header: %w", err)
-	}
-	if _, err := tw.Write(content); err != nil {
-		return nil, fmt.Errorf("failed to write tar content: %w", err)
-	}
-	if err := tw.Close(); err != nil {
-		return nil, fmt.Errorf("failed to close tar: %w", err)
-	}
-	return &buf, nil
-}
-
 // firstInstalledPath returns the destination path of the first installed
-// quadlet reported by QuadletInstall, or the empty string when none is present.
-// The install report's InstalledQuadlets is a path→path map whose ordering is
-// non-deterministic, so "first" is arbitrary — callers only need *a* populated
-// path to echo back, mirroring the install primitive's own reporting.
+// quadlet reported by the install primitive, or the empty string when none is
+// present. The install report's InstalledQuadlets is a path→path map whose
+// ordering is non-deterministic, so "first" is arbitrary — callers only need
+// *a* populated path to echo back, mirroring the install primitive's own
+// reporting.
 func firstInstalledPath(installed map[string]string) string {
 	for _, dest := range installed {
 		return dest
@@ -406,7 +338,7 @@ func firstInstalledPath(installed map[string]string) string {
 // quadlet. State is reported as "unknown" because systemd has not yet reloaded
 // to report a fresh status (matching the Create slice's behaviour). Extracted as
 // a pure function so the success-shape mapping is unit-testable independently of
-// the unmockable engine boundary (see the service-seam note in service_test.go).
+// the engine boundary.
 func buildUpdateResponse(name, unit, resource, installedPath, content string) *QuadletGetResponse {
 	return &QuadletGetResponse{
 		ID:       name,
@@ -468,28 +400,24 @@ func isResourceRunningError(err error) bool {
 
 // GetLogs retrieves logs for the managed container of a quadlet.
 // Per the issue spec, this resolves the quadlet name → managed container name
-// and then streams logs via ContainerEngine.ContainerLogs, mirroring the
-// 060-04 image-pull NDJSON pattern. The non-streaming mode returns a single
-// multiline string; the streaming mode emits NDJSON events via callback.
+// and then streams logs via the engine's Logs, mirroring the 060-04 image-pull
+// NDJSON pattern. The non-streaming mode returns a single multiline string; the
+// streaming mode emits NDJSON events via callback.
 //
 // The flow (doku/description_quadlets_api.md:247-285):
 //
-//  1. Resolve the quadlet via QuadletList — existence check (404 if absent)
+//  1. Resolve the quadlet via List — existence check (404 if absent)
 //     and managed container name resolution (prefer the Pod container name,
 //     fall back to deriving it from the quadlet name).
-//  2. Call ContainerEngine.ContainerLogs with Follow=false, concatenating
-//     stdout and stderr into a single multiline string.
+//  2. Call Logs with Follow=false, concatenating stdout and stderr into a
+//     single multiline string.
 //  3. Map "no such container" → QUADLET_NOT_FOUND (404).
 //
 // Returns `{id, logs}` on success. Supports `since` and `tail` query params.
 func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error) {
 	var response *QuadletLogsResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.GetLogs", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		containerName, err := s.resolveForLogs(containerEngine, userID, machineID, quadletName)
+	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.GetLogs", func(e QuadletEngine) error {
+		containerName, err := s.resolveForLogs(e, quadletName)
 		if err != nil {
 			return err
 		}
@@ -504,7 +432,7 @@ func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadlet
 			StderrWriter: &stderrBuffer,
 		}
 
-		err = containerEngine.ContainerLogs(ctx, []string{containerName}, logsOpts)
+		err = e.Logs(containerName, logsOpts)
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrQuadletNotFound
@@ -542,12 +470,8 @@ func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadlet
 //
 // Supports `since` and `tail` query params. Emits NDJSON events via callback.
 func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
-	return s.conn.WithConnection(ctx, userID, machineID, "quadlets.GetLogsWithStream", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		containerName, err := s.resolveForLogs(containerEngine, userID, machineID, quadletName)
+	return s.engines.WithEngine(ctx, userID, machineID, "quadlets.GetLogsWithStream", func(e QuadletEngine) error {
+		containerName, err := s.resolveForLogs(e, quadletName)
 		if err != nil {
 			return err
 		}
@@ -573,7 +497,7 @@ func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineI
 		logsOpts.StdoutWriter = stdoutWriter
 		logsOpts.StderrWriter = stderrWriter
 
-		err = containerEngine.ContainerLogs(ctx, []string{containerName}, logsOpts)
+		err = e.Logs(containerName, logsOpts)
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrQuadletNotFound
@@ -592,13 +516,12 @@ func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineI
 // it locates the quadlet (404 if absent) and resolves the managed container name.
 // For container-type quadlets, the managed container name is the quadlet name;
 // for pod-type quadlets, we use the Pod container name from the ListQuadlet result.
-// Returns the connection context and resolved container name to avoid redundant connection acquisition.
-func (s *QuadletService) resolveForLogs(containerEngine *tunnel.ContainerEngine, userID, machineID, quadletName string) (string, error) {
-	target, err := s.resolveTarget(containerEngine, quadletName)
+func (s *QuadletService) resolveForLogs(e QuadletEngine, quadletName string) (string, error) {
+	target, err := s.resolveTarget(e, quadletName)
 	if err != nil {
 		return "", err
 	}
-	content, err := containerEngine.QuadletPrint(context.Background(), quadletName)
+	content, err := e.Print(quadletName)
 	if err == nil {
 		if name := explicitContainerNameFromQuadletContent(content); name != "" {
 			return name, nil
@@ -663,10 +586,10 @@ const (
 	resourceTypePod       resourceType = "pod"
 )
 
-func (rt resourceType) inspectAndConvert(ctx context.Context, engine *tunnel.ContainerEngine, resourceID string) (string, string, error) {
+func (rt resourceType) inspectAndConvert(engine QuadletEngine, resourceID string) (string, string, error) {
 	switch rt {
 	case resourceTypeContainer:
-		containerReports, _, err := engine.ContainerInspect(ctx, []string{resourceID}, entities.InspectOptions{})
+		containerReports, _, err := engine.InspectContainer(resourceID)
 		if err != nil {
 			return "", "", appErrors.ErrContainerNotFound
 		}
@@ -687,7 +610,7 @@ func (rt resourceType) inspectAndConvert(ctx context.Context, engine *tunnel.Con
 		return quadletName, content, nil
 
 	case resourceTypePod:
-		podReports, _, err := engine.PodInspect(ctx, []string{resourceID}, entities.InspectOptions{})
+		podReports, _, err := engine.InspectPod(resourceID)
 		if err != nil {
 			return "", "", appErrors.ErrPodNotFound
 		}
@@ -717,13 +640,9 @@ func (rt resourceType) inspectAndConvert(ctx context.Context, engine *tunnel.Con
 // converts it to quadlet format using the pkg/systemd/quadlet converter.
 func (s *QuadletService) Generate(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error) {
 	var response *QuadletGenerateResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Generate", func(connCtx context.Context) error {
-		containerEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
+	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Generate", func(e QuadletEngine) error {
 		rt := resourceType(req.ResourceType)
-		quadletName, content, err := rt.inspectAndConvert(ctx, containerEngine, req.ResourceID)
+		quadletName, content, err := rt.inspectAndConvert(e, req.ResourceID)
 		if err != nil {
 			return err
 		}
@@ -848,19 +767,19 @@ func generatePodQuadlet(inspect *entities.PodInspectReport) (string, error) {
 }
 
 // Import installs multiple quadlets on the specified machine from uploaded content.
-// Each entry in the request is wrapped as an in-memory tar and passed to podman's
-// QuadletInstall primitive. The method handles partial failures by collecting
-// successful and failed imports separately.
+// Each entry is installed by name+resource with systemd reload enabled (the tar
+// framing is the engine adapter's job). The method handles partial failures by
+// collecting successful and failed imports separately.
 func (s *QuadletService) Import(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error) {
 	var response *QuadletImportResponse
-	err := s.conn.WithConnection(ctx, userID, machineID, "quadlets.Import", func(connCtx context.Context) error {
+	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Import", func(e QuadletEngine) error {
 		response = &QuadletImportResponse{
 			Imported: make([]QuadletImportResult, 0),
 			Failed:   make([]QuadletImportError, 0),
 		}
 
 		for _, entry := range req.Quadlets {
-			importResult, err := s.importSingleQuadlet(connCtx, entry)
+			importResult, err := s.importSingleQuadlet(e, entry)
 			if err != nil {
 				response.Failed = append(response.Failed, QuadletImportError{
 					Name:  entry.Name,
@@ -876,18 +795,12 @@ func (s *QuadletService) Import(ctx context.Context, userID, machineID string, r
 	return response, err
 }
 
-// importSingleQuadlet imports a single quadlet entry using QuadletInstall.
+// importSingleQuadlet imports a single quadlet entry.
 // Returns the import result or an error explaining why the import failed.
-func (s *QuadletService) importSingleQuadlet(connCtx context.Context, entry QuadletImportEntry) (QuadletImportResult, error) {
+func (s *QuadletService) importSingleQuadlet(e QuadletEngine, entry QuadletImportEntry) (QuadletImportResult, error) {
 	fileName := entry.Name + resourceToExtension(entry.Resource)
-	body, err := createTarBody(fileName, []byte(entry.Content))
-	if err != nil {
-		return QuadletImportResult{}, fmt.Errorf("failed to build quadlet tar body: %w", err)
-	}
 
-	options := new(quadlets.QuadletInstallOptions).WithReloadSystemd(true)
-
-	report, err := quadlets.Install(connCtx, options, body)
+	report, err := e.Install(fileName, []byte(entry.Content), false)
 	if err != nil {
 		if podmanerr.IsAlreadyExists(err) {
 			return QuadletImportResult{}, fmt.Errorf("quadlet already exists")

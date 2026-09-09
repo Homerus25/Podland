@@ -6,19 +6,36 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// Connection-failure mapping (502 CONNECTION_FAILED) is owned by the
-// connections.Manager seam and pinned once in the connections package
-// tests — not re-pinned per service method here.
+// Service behaviour tests run the real QuadletService against the fake
+// engine, so the composition rules (Update's remove+install, Delete's
+// precondition ordering, GetLogs' name resolution) are pinned as behaviour,
+// not invocation shape. Connection acquisition (and its 502 mapping) is the
+// provider seam: the connections package owns that contract and pins it in
+// its own tests. The domain logic on pure helpers keeps its direct tests
+// further below.
+
+// TestNewQuadletService_WithEngineProvider verifies that QuadletService can
+// be constructed with the production engine provider, enabling unit testing.
+func TestNewQuadletService_WithEngineProvider(t *testing.T) {
+	mockConnManager := testutils.NewMockConnectionManager()
+
+	service := NewQuadletService(NewQuadletEngineProvider(mockConnManager), nil)
+
+	assert.NotNil(t, service)
+	assert.NotNil(t, service.engines)
+}
 
 // TestQuadletService_ImplementsInterface is a compile-time check that
 // *QuadletService satisfies QuadletServiceInterface.
@@ -26,148 +43,402 @@ func TestQuadletService_ImplementsInterface(t *testing.T) {
 	var _ QuadletServiceInterface = (*QuadletService)(nil)
 }
 
-// TestNewQuadletService_WithMockConnManager verifies that QuadletService can be
-// constructed with a mock connections.Manager, enabling unit testing.
-func TestNewQuadletService_WithMockConnManager(t *testing.T) {
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
+func TestQuadletService_List_ReturnsFilteredQuadlets(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{
+				{Name: "alpha.container", UnitName: "alpha.service", Path: "/x/alpha.container", Status: "running"},
+				{Name: "bravo.pod", UnitName: "bravo.service", Path: "/x/bravo.pod", Status: "stopped"},
+			}, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
 
-	service := NewQuadletService(mockConnManager, nil)
+	got, err := service.List(context.Background(), "user", "machine", ListFilters{Resource: "pod"})
 
-	assert.NotNil(t, service)
-	assert.NotNil(t, service.conn)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "bravo.pod", got[0].Name)
+	assert.Equal(t, "stopped", got[0].State)
 }
 
-// --- Service seam: List ---
-//
-// The podman engine boundary is no longer mocked (it is built inline, matching
-// the images/containers convention). Service-level tests therefore cover only
-// connection-stage error wrapping and the invocation shape: the call reaches the
-// engine step but fails because there is no real podman backend behind the mock
-// connection context. The domain logic (filtering, mapping, state/resource
-// derivation) is covered directly on the pure functions further below.
+func TestQuadletService_List_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
 
-func TestQuadletService_List_InvocationShape(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
+	got, err := service.List(context.Background(), "user", "machine", ListFilters{})
 
-	result, err := service.List(ctx, "test-user", "test-machine", ListFilters{})
-
-	// The mock connection succeeds but the engine call fails because there is
-	// no real podman backend behind the mock connection context.
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.Nil(t, result, "Should return nil result when engine call fails")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "failed to list quadlets", "engine failures must be wrapped consistently")
 }
 
-// --- Service seam: Get ---
+func TestQuadletService_Get_ReturnsContentWithMetadata(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		printFn: func(string) (string, error) {
+			return "[Container]\nImage=nginx\n", nil
+		},
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: "running"}}, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
 
-func TestQuadletService_Get_InvocationShape(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
+	got, err := service.Get(context.Background(), "user", "machine", "web.container")
 
-	result, err := service.Get(ctx, "test-user", "test-machine", "my-container.container")
-
-	// The mock connection succeeds but the engine call fails because there is
-	// no real podman backend behind the mock connection context.
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.Nil(t, result, "Should return nil result when engine call fails")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "[Container]\nImage=nginx\n", got.Content)
+	assert.Equal(t, "web.service", got.Unit)
+	assert.Equal(t, "container", got.Resource)
+	assert.Equal(t, "running", got.State)
 }
 
-// --- Service seam: Create ---
+func TestQuadletService_Get_MissingQuadletIs404(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		printFn: func(string) (string, error) {
+			return "", nil
+		},
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return nil, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
 
-func TestQuadletService_Create_InvocationShape(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
+	got, err := service.Get(context.Background(), "user", "machine", "web.container")
 
-	result, err := service.Create(ctx, "test-user", "test-machine", QuadletCreateRequest{
-		Name:     "my-container",
+	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+	assert.Nil(t, got)
+}
+
+func TestQuadletService_Create_InstallsUnderResourceExtension(t *testing.T) {
+	var gotFile, gotContent string
+	var gotReplace bool
+	engine := &fakeQuadletEngine{
+		installFn: func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {
+			gotFile, gotContent, gotReplace = fileName, string(content), replace
+			return &entities.QuadletInstallReport{
+				InstalledQuadlets: map[string]string{"/tmp/web.container": "/etc/containers/systemd/web.container"},
+			}, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+		Name:     "web",
 		Resource: "container",
-		Content:  "[Container]\nImage=nginx:latest\n",
+		Content:  "[Container]\nImage=nginx\n",
 	})
 
-	// The mock connection succeeds but the bindings-level Install call fails
-	// because there is no real podman backend behind the mock connection context.
-	assert.Error(t, err, "Should return error from install call with mock connection")
-	assert.Nil(t, result, "Should return nil result when install call fails")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "web.container", gotFile, "the file must be installed under the resource extension")
+	assert.Equal(t, "[Container]\nImage=nginx\n", gotContent)
+	assert.False(t, gotReplace, "create must not replace an existing installation")
+	assert.Equal(t, "/etc/containers/systemd/web.container", got.Path)
+	assert.Equal(t, "unknown", got.State)
 }
 
-// --- Service seam: Update ---
-//
-// Podman has no dedicated update primitive, so Update composes QuadletRemove +
-// QuadletInstall(Replace:true). As with the other service seams, the podman
-// engine boundary is built inline and cannot be exercised under the mock
-// connection, so these tests cover only connection-stage error wrapping and the
-// invocation shape (the call reaches the QuadletList existence check but fails
-// because there is no real podman backend behind the mock connection context).
-//
-// The remaining acceptance-criterion cases for Update are covered outside the
-// service seam:
-//   - success-shape mapping → buildUpdateResponse (pure helper, tested below);
-//   - not-found → findQuadletByName returning nil + the trivial nil check
-//     (findQuadletByName is tested below; the nil check is a one-liner);
-//   - mid-flow failure (remove succeeds, install fails, leaving the quadlet
-//     removed) → cannot be exercised without a real podman backend; see the
-//     doc comment on Service.Update for the documented non-atomicity guarantee.
+func TestQuadletService_Create_MapsAlreadyExists(t *testing.T) {
+	t.Run("transport-level refusal", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			installFn: func(string, []byte, bool) (*entities.QuadletInstallReport, error) {
+				return nil, &errorhandling.ErrorModel{
+					ResponseCode: http.StatusInternalServerError,
+					Message:      "web.container: conflict",
+					Because:      "name in use",
+				}
+			},
+		}
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
 
-func TestQuadletService_Update_InvocationShape(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
+		got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+			Name: "web", Resource: "container", Content: "c",
+		})
 
-	result, err := service.Update(ctx, "test-user", "test-machine", "my-container.container", QuadletUpdateRequest{
+		require.ErrorIs(t, err, appErrors.ErrQuadletAlreadyExists)
+		assert.Nil(t, got)
+	})
+
+	t.Run("per-file refusal in the install report", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			installFn: func(string, []byte, bool) (*entities.QuadletInstallReport, error) {
+				return &entities.QuadletInstallReport{
+					QuadletErrors: map[string]error{
+						"web.container": errors.New("web.container: already exists"),
+					},
+				}, nil
+			},
+		}
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+		got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+			Name: "web", Resource: "container", Content: "c",
+		})
+
+		require.ErrorIs(t, err, appErrors.ErrQuadletAlreadyExists)
+		assert.Nil(t, got)
+	})
+}
+
+func TestQuadletService_Update_ReplacesViaRemoveThenInstall(t *testing.T) {
+	var order []string
+	var removedName string
+	var removedForce bool
+	var installedFile, installedContent string
+	var installedReplace bool
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			order = append(order, "list")
+			return []*entities.ListQuadlet{{
+				Name:     "web.container",
+				UnitName: "web.service",
+				Path:     "/etc/containers/systemd/web.container",
+				Status:   "stopped",
+			}}, nil
+		},
+		removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+			order = append(order, "remove")
+			removedName, removedForce = name, force
+			return &entities.QuadletRemoveReport{}, nil
+		},
+		installFn: func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {
+			order = append(order, "install")
+			installedFile, installedContent, installedReplace = fileName, string(content), replace
+			return &entities.QuadletInstallReport{
+				InstalledQuadlets: map[string]string{"/tmp/web.container": "/etc/containers/systemd/web.container"},
+			}, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
 		Content: "[Container]\nImage=nginx:1.25\n",
 	})
 
-	// The mock connection succeeds but the QuadletList existence check fails
-	// because there is no real podman backend behind the mock connection context.
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.Nil(t, result, "Should return nil result when engine call fails")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"list", "remove", "install"}, order, "update must locate, remove, then install")
+	assert.Equal(t, "web.container", removedName)
+	assert.True(t, removedForce, "the remove half of an update must be forced (PUT has no running-conflict answer)")
+	assert.Equal(t, "web.container", installedFile, "the rebuilt file must keep the original resource extension")
+	assert.Equal(t, "[Container]\nImage=nginx:1.25\n", installedContent)
+	assert.True(t, installedReplace, "the install half must replace any leftover from a partial state")
+	require.NotNil(t, got)
+	assert.Equal(t, "web.service", got.Unit)
+	assert.Equal(t, "[Container]\nImage=nginx:1.25\n", got.Content)
+	assert.Equal(t, "unknown", got.State)
 }
 
-// --- Service seam: Delete ---
-//
-// As with List/Get/Create, the engine boundary is built inline and cannot be
-// exercised under the mock connection. These tests cover the connection-stage
-// error wrapping and the invocation shape (the call reaches the engine step but
-// fails because there is no real podman backend). The domain logic
-// (not-found / running guard) is covered directly via the pure helpers above.
+// TestQuadletService_Update_InstallFailureLeavesQuadletRemoved pins the
+// documented non-atomicity of the remove+install composition: when the
+// install half fails after the remove half succeeded, the quadlet is gone
+// and the service surfaces the install failure without attempting any
+// rollback. Making Update atomic is a future decision.
+func TestQuadletService_Update_InstallFailureLeavesQuadletRemoved(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{
+				Name:     "web.container",
+				UnitName: "web.service",
+				Path:     "/etc/containers/systemd/web.container",
+				Status:   "stopped",
+			}}, nil
+		},
+		removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
+			return &entities.QuadletRemoveReport{}, nil
+		},
+		installFn: func(string, []byte, bool) (*entities.QuadletInstallReport, error) {
+			return nil, errors.New("systemd reload failed")
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
 
-func TestQuadletService_Delete_InvocationShape(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
+	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+		Content: "[Container]\nImage=nginx:1.25\n",
+	})
 
-	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", false, true)
-
-	// The mock connection succeeds but the QuadletList pre-check fails because
-	// there is no real podman backend behind the mock connection context.
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "failed to install updated quadlet")
 }
 
-func TestQuadletService_Delete_ForceTrue_InvocationShape(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
+func TestQuadletService_Update_MissingQuadletIs404BeforeAnyMutation(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return nil, nil
+		},
+		// removeFn/installFn stay unarmed: a missing quadlet must not
+		// touch the machine.
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
 
-	err := service.Delete(ctx, "test-user", "test-machine", "my-container.container", true, true)
+	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+		Content: "c",
+	})
 
-	// Same shape as above — force only affects the post-list guard, which we
-	// never reach under the mock connection.
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
+	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+	assert.Nil(t, got)
+}
+
+func TestQuadletService_Delete_PreconditionsRunBeforeRemove(t *testing.T) {
+	t.Run("missing quadlet is 404 before remove", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return nil, nil
+			},
+			// removeFn stays unarmed.
+		}
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+
+		require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+	})
+
+	t.Run("running without force is refused before remove", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return []*entities.ListQuadlet{{Name: "web.container", Status: "running (5s ago)"}}, nil
+			},
+			// removeFn stays unarmed.
+		}
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+
+		require.ErrorIs(t, err, appErrors.ErrQuadletResourceRunning)
+	})
+
+	t.Run("running with force proceeds to remove", func(t *testing.T) {
+		var removedForce bool
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return []*entities.ListQuadlet{{Name: "web.container", Status: "running (5s ago)"}}, nil
+			},
+			removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+				removedForce = force
+				return &entities.QuadletRemoveReport{}, nil
+			},
+		}
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+		err := service.Delete(context.Background(), "user", "machine", "web.container", true, true)
+
+		require.NoError(t, err)
+		assert.True(t, removedForce)
+	})
+}
+
+func TestQuadletService_Delete_MapsRemoveRefusals(t *testing.T) {
+	t.Run("podman's running refusal maps to the 400 sentinel", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return []*entities.ListQuadlet{{Name: "web.container", Status: "stopped"}}, nil
+			},
+			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
+				return nil, errors.New("quadlet web.container is running and force is not set, refusing to remove")
+			},
+		}
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+
+		require.ErrorIs(t, err, appErrors.ErrQuadletResourceRunning)
+	})
+
+	t.Run("per-name report refusal maps too", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return []*entities.ListQuadlet{{Name: "web.container", Status: "stopped"}}, nil
+			},
+			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
+				return &entities.QuadletRemoveReport{
+					Errors: map[string]error{
+						"web.container": &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such quadlet"},
+					},
+				}, nil
+			},
+		}
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+
+		require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+	})
+}
+
+func TestQuadletService_Generate_FromContainer(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		inspectContainerFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
+			return []*entities.ContainerInspectReport{{
+				InspectContainerData: &define.InspectContainerData{
+					Name:   "web",
+					Config: &define.InspectContainerConfig{Image: "nginx:latest"},
+				},
+			}}, nil, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	got, err := service.Generate(context.Background(), "user", "machine", QuadletGenerateRequest{
+		ResourceID: "web", ResourceType: "container",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "web", got.ID)
+	assert.Contains(t, got.Content, "ContainerName=web")
+	assert.Contains(t, got.Content, "Image=nginx:latest")
+}
+
+func TestQuadletService_Generate_FromPod(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		inspectPodFn: func(string) ([]*entities.PodInspectReport, []error, error) {
+			return []*entities.PodInspectReport{{
+				InspectPodData: &define.InspectPodData{Name: "stack"},
+			}}, nil, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	got, err := service.Generate(context.Background(), "user", "machine", QuadletGenerateRequest{
+		ResourceID: "stack", ResourceType: "pod",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "stack", got.ID)
+	assert.Contains(t, got.Content, "PodName=stack")
+}
+
+func TestQuadletService_Generate_InvalidResourceType(t *testing.T) {
+	// The engine stays unarmed: an invalid resource type must be refused
+	// without touching the machine.
+	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil)
+
+	got, err := service.Generate(context.Background(), "user", "machine", QuadletGenerateRequest{
+		ResourceID: "x", ResourceType: "invalid",
+	})
+
+	require.ErrorIs(t, err, appErrors.ErrInvalidRequest)
+	assert.Nil(t, got)
+}
+
+// TestQuadletService_AcquireFailureIsThe502Sentinel pins the service-side
+// half of the connection-failure contract: the provider's sentinel crosses
+// untouched — the service never wraps, maps, or swallows it (the 502
+// mapping itself is pinned in the connections package).
+func TestQuadletService_AcquireFailureIsThe502Sentinel(t *testing.T) {
+	service := NewQuadletService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}, nil)
+
+	got, err := service.List(context.Background(), "user", "machine", ListFilters{})
+
+	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
+	assert.Nil(t, got)
 }
 
 // --- Internal seams: pure domain logic ---
@@ -556,59 +827,6 @@ func TestIsResourceRunningError(t *testing.T) {
 			assert.Equal(t, tt.want, isResourceRunningError(tt.err))
 		})
 	}
-}
-
-// --- Service seam: Generate ---
-
-func TestQuadletService_Generate_Container_Success(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
-
-	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{
-		ResourceID:   "my-container",
-		ResourceType: "container",
-	})
-
-	// The mock connection succeeds but the engine call fails because there is
-	// no real podman backend behind the mock connection context.
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.Nil(t, result, "Should return nil result when engine call fails")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
-}
-
-func TestQuadletService_Generate_Pod_Success(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
-
-	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{
-		ResourceID:   "my-pod",
-		ResourceType: "pod",
-	})
-
-	// The mock connection succeeds but the engine call fails because there is
-	// no real podman backend behind the mock connection context.
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.Nil(t, result, "Should return nil result when engine call fails")
-	assert.NotContains(t, err.Error(), "CONNECTION_FAILED",
-		"Error should not be a connection error — connection should have succeeded")
-}
-
-func TestQuadletService_Generate_InvalidResourceType(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewQuadletService(mockConnManager, nil)
-
-	result, err := service.Generate(ctx, "test-user", "test-machine", QuadletGenerateRequest{
-		ResourceID:   "my-resource",
-		ResourceType: "invalid",
-	})
-
-	assert.Error(t, err, "Should return error for invalid resource type")
-	assert.Equal(t, err, appErrors.ErrInvalidRequest, "Should map to ErrInvalidRequest")
-	assert.Nil(t, result, "Should return nil result for invalid resource type")
 }
 
 // --- Pure helpers used by Generate ---

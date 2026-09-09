@@ -13,7 +13,9 @@ import (
 )
 
 func newAutoUpdateService(mockSSH *testutils.MockSSHExec) *QuadletService {
-	return NewQuadletService(testutils.NewMockConnectionManager(), mockSSH)
+	// AutoUpdate runs over the SSH-exec seam only; the engine provider is
+	// never touched.
+	return NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, mockSSH)
 }
 
 func TestQuadletService_AutoUpdate_CommandAssembly(t *testing.T) {
