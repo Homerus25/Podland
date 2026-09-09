@@ -89,9 +89,9 @@ closest sibling that already exists. Rulings so far:
   exercise real behaviour through a function-field fake engine
   (colocated in the domain's tests); an acquire failure is simulated by
   the fake provider returning `ErrConnectionFailed`. The machines
-  domain keeps calling `connections.Manager` directly — ProbeMachine
-  and TestConnection are the manager's own entry points, and
-  registration (`TestConnection`) is the third.
+  domain keeps calling `connections.Manager` directly — ProbeMachine,
+  TestConnection, and RemoveMachine are the manager's other entry
+  points.
 
 ## Duplication across domains
 

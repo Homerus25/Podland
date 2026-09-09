@@ -439,6 +439,9 @@ func TestQuadletService_AcquireFailureIsThe502Sentinel(t *testing.T) {
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, got)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusBadGateway, appErr.Status)
 }
 
 // --- Internal seams: pure domain logic ---

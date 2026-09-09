@@ -157,6 +157,33 @@ func TestImageService_Pull_MapsCancellationToOperationCancelled(t *testing.T) {
 	assert.Nil(t, got)
 }
 
+// TestImageService_PullWithProgress_ArmsTheProgressWriter pins the progress
+// seam: a pull with a progress callback hands the engine options carrying a
+// writer (podman streams its progress into it), so progress events flow
+// without the engine knowing about the NDJSON vocabulary.
+func TestImageService_PullWithProgress_ArmsTheProgressWriter(t *testing.T) {
+	var writerArmed bool
+	var events []PullProgressEvent
+	engine := &fakeImageEngine{
+		pullFn: func(_ string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {
+			writerArmed = opts.Writer != nil
+			if opts.Writer != nil {
+				_, _ = opts.Writer.Write([]byte("layer 1 pulling"))
+			}
+			return &entities.ImagePullReport{ID: "nginx:latest"}, nil
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
+
+	got, err := service.PullWithProgress(context.Background(), "user", "machine", "nginx:latest",
+		entities.ImagePullOptions{}, func(event PullProgressEvent) { events = append(events, event) })
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.True(t, writerArmed, "a progress callback must arm the pull options' writer")
+	require.Len(t, events, 1, "the engine's progress bytes must arrive as progress events")
+}
+
 func TestImageService_Prune_ReturnsEngineReports(t *testing.T) {
 	prunes := []*reports.PruneReport{{Id: "sha256:abc", Size: 4096}}
 	engine := &fakeImageEngine{

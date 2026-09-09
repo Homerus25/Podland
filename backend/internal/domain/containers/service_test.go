@@ -2,6 +2,7 @@ package containers
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -108,4 +109,7 @@ func TestContainerService_AcquireFailureIsThe502Sentinel(t *testing.T) {
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, got)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusBadGateway, appErr.Status)
 }
