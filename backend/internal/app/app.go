@@ -134,7 +134,7 @@ func New(cfg *config.Config) (*App, error) {
 	// Initialize services
 	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService)
 	containerService := containers.NewContainerService(containers.NewContainerEngineProvider(connectionManager))
-	imageService := images.NewImageService(connectionManager)
+	imageService := images.NewImageService(images.NewImageEngineProvider(connectionManager))
 	quadletService := quadlets.NewQuadletService(connectionManager, sshExecService)
 	secretService := secrets.NewSecretService(secrets.NewSecretEngineProvider(connectionManager), accessRepo)
 	volumeService := volumes.NewVolumeService(volumes.NewVolumeEngineProvider(connectionManager))

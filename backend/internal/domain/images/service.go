@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
-	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
 // Compile-time check that *ImageService satisfies ImageServiceInterface.
@@ -18,7 +16,6 @@ var _ ImageServiceInterface = (*ImageService)(nil)
 
 // ImageServiceInterface defines the interface for image services.
 // This interface is used for dependency injection and testing.
-// Method signatures will be added as slices 1–3 (List, Delete, Pull) are implemented.
 type ImageServiceInterface interface {
 	List(ctx context.Context, userID, machineID string, opts entities.ImageListOptions) ([]*entities.ImageSummary, error)
 	Delete(ctx context.Context, userID, machineID, imageID string, force bool) error
@@ -27,27 +24,25 @@ type ImageServiceInterface interface {
 	Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error)
 }
 
-// ImageService provides business logic for images.
+// ImageService provides business logic for images. Every machine-scoped
+// podman call crosses the ImageEngineProvider (the connection seam); the
+// service itself owns only domain mapping and progress conversion.
 type ImageService struct {
-	conn connections.Manager
+	engines ImageEngineProvider
 }
 
-// NewImageService creates a new ImageService with the given connection manager.
-func NewImageService(conn connections.Manager) *ImageService {
+// NewImageService creates a new ImageService with the given engine provider.
+func NewImageService(engines ImageEngineProvider) *ImageService {
 	return &ImageService{
-		conn: conn,
+		engines: engines,
 	}
 }
 
 // List returns a list of images on the specified machine.
 func (s *ImageService) List(ctx context.Context, userID, machineID string, opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
 	var summaries []*entities.ImageSummary
-	err := s.conn.WithConnection(ctx, userID, machineID, "images.List", func(connCtx context.Context) error {
-		imageEngine := &tunnel.ImageEngine{
-			ClientCtx: connCtx,
-		}
-
-		list, err := imageEngine.List(ctx, opts)
+	err := s.engines.WithEngine(ctx, userID, machineID, "images.List", func(e ImageEngine) error {
+		list, err := e.List(opts)
 		if err != nil {
 			return fmt.Errorf("failed to list images: %w", err)
 		}
@@ -58,16 +53,9 @@ func (s *ImageService) List(ctx context.Context, userID, machineID string, opts 
 }
 
 // Delete removes an image by ID on the specified machine.
-// Stub — implemented in slice 060-02-image-delete.
 func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID string, force bool) error {
-	return s.conn.WithConnection(ctx, userID, machineID, "images.Delete", func(connCtx context.Context) error {
-		imageEngine := &tunnel.ImageEngine{
-			ClientCtx: connCtx,
-		}
-
-		report, errs := imageEngine.Remove(ctx, []string{imageID}, entities.ImageRemoveOptions{
-			Force: force,
-		})
+	return s.engines.WithEngine(ctx, userID, machineID, "images.Delete", func(e ImageEngine) error {
+		report, errs := e.Remove(imageID, force)
 
 		if len(errs) > 0 && errs[0] != nil {
 			// The adapter's conflict predicate is a superset of the pair of
@@ -97,22 +85,18 @@ func (s *ImageService) Pull(ctx context.Context, userID, machineID, rawImage str
 
 // PullWithProgress pulls an image on the specified machine and reports progress via the provided callback.
 func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(event PullProgressEvent)) (*entities.ImagePullReport, error) {
+	// Set up progress writer if callback is provided
+	if progressWriter != nil {
+		opts.Writer = &progressAdapter{
+			writer:      progressWriter,
+			machineID:   machineID,
+			operationID: generateOperationID(),
+		}
+	}
+
 	var report *entities.ImagePullReport
-	err := s.conn.WithConnection(ctx, userID, machineID, "images.Pull", func(connCtx context.Context) error {
-		imageEngine := &tunnel.ImageEngine{
-			ClientCtx: connCtx,
-		}
-
-		// Set up progress writer if callback is provided
-		if progressWriter != nil {
-			opts.Writer = &progressAdapter{
-				writer:      progressWriter,
-				machineID:   machineID,
-				operationID: generateOperationID(),
-			}
-		}
-
-		pullReport, err := imageEngine.Pull(ctx, rawImage, opts)
+	err := s.engines.WithEngine(ctx, userID, machineID, "images.Pull", func(e ImageEngine) error {
+		pullReport, err := e.Pull(rawImage, opts)
 		if err != nil {
 			if ctx.Err() == context.Canceled {
 				return appErrors.ErrOperationCancelled
@@ -132,14 +116,8 @@ func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, 
 // report per removed image with its reclaimed size.
 func (s *ImageService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
 	var pruned []*reports.PruneReport
-	err := s.conn.WithConnection(ctx, userID, machineID, "images.Prune", func(connCtx context.Context) error {
-		imageEngine := &tunnel.ImageEngine{
-			ClientCtx: connCtx,
-		}
-
-		pruneReports, err := imageEngine.Prune(ctx, entities.ImagePruneOptions{
-			All: true,
-		})
+	err := s.engines.WithEngine(ctx, userID, machineID, "images.Prune", func(e ImageEngine) error {
+		pruneReports, err := e.Prune()
 		if err != nil {
 			return fmt.Errorf("failed to prune images: %w", err)
 		}

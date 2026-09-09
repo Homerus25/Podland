@@ -3,18 +3,21 @@ package images
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
+	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// Connection-failure mapping (502 CONNECTION_FAILED) is owned by the
-// connections.Manager seam and pinned once in the connections package
-// tests — not re-pinned per service method here.
+// Service behaviour tests run the real ImageService against the fake
+// engine. Connection acquisition (and its 502 mapping) is the provider
+// seam: the connections package owns that contract and pins it in its own
+// tests.
 
 // TestImageService_ImplementsInterface is a compile-time check that *ImageService
 // satisfies ImageServiceInterface.
@@ -22,113 +25,182 @@ func TestImageService_ImplementsInterface(t *testing.T) {
 	var _ ImageServiceInterface = (*ImageService)(nil)
 }
 
-// TestNewImageService_WithMockConnManager verifies that ImageService can be
-// constructed with a mock connections.Manager, enabling unit testing.
-func TestNewImageService_WithMockConnManager(t *testing.T) {
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
+func TestImageService_List_ReturnsEngineSummaries(t *testing.T) {
+	summaries := []*entities.ImageSummary{{ID: "sha256:abc"}}
+	engine := &fakeImageEngine{
+		listFn: func(entities.ImageListOptions) ([]*entities.ImageSummary, error) {
+			return summaries, nil
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	service := NewImageService(mockConnManager)
+	got, err := service.List(context.Background(), "user", "machine", entities.ImageListOptions{})
 
-	assert.NotNil(t, service)
-	assert.NotNil(t, service.conn)
+	require.NoError(t, err)
+	assert.Equal(t, summaries, got)
 }
 
-// TestNewImageService_WithErrorMockConnManager verifies the service can be
-// constructed with a mock that simulates connection errors.
-func TestNewImageService_WithErrorMockConnManager(t *testing.T) {
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManagerWithAcquireError(
-		errors.New("simulated connection failure"),
-	)
+func TestImageService_List_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeImageEngine{
+		listFn: func(entities.ImageListOptions) ([]*entities.ImageSummary, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	service := NewImageService(mockConnManager)
+	got, err := service.List(context.Background(), "user", "machine", entities.ImageListOptions{})
 
-	assert.NotNil(t, service)
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "failed to list images", "engine failures must be wrapped consistently")
 }
 
-// TestImageService_List_InvocationShape tests that List follows the correct
-// invocation shape: gets a connection, creates an ImageEngine, and calls List.
-// With the mock connection manager (no real podman backend), the engine call
-// fails — but we can verify the error is from the list step, not the connection step.
-func TestImageService_List_InvocationShape(t *testing.T) {
-	ctx := context.Background()
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewImageService(mockConnManager)
+func TestImageService_Delete_ClassifiesPodmanRefusals(t *testing.T) {
+	t.Run("not found maps to 404", func(t *testing.T) {
+		engine := &fakeImageEngine{
+			removeFn: func(string, bool) (*entities.ImageRemoveReport, []error) {
+				return nil, []error{&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such image"}}
+			},
+		}
+		service := NewImageService(fakeEngineProvider{engine: engine})
 
-	result, err := service.List(ctx, "test-user", "test-machine", entities.ImageListOptions{})
+		err := service.Delete(context.Background(), "user", "machine", "image-123", false)
 
-	// The mock connection succeeds but the engine call fails because there is
-	// no real podman backend behind the mock connection context.
-	assert.Error(t, err, "Should return error from engine call with mock connection")
-	assert.Nil(t, result, "Should return nil result when engine call fails")
-	assert.NotErrorIs(t, err, appErrors.ErrConnectionFailed,
-		"Error should not be a connection error — connection should have succeeded")
+		require.ErrorIs(t, err, appErrors.ErrImageNotFound)
+	})
+
+	t.Run("used by containers maps to 409", func(t *testing.T) {
+		engine := &fakeImageEngine{
+			removeFn: func(string, bool) (*entities.ImageRemoveReport, []error) {
+				return nil, []error{&errorhandling.ErrorModel{ResponseCode: http.StatusConflict, Message: "image is in use"}}
+			},
+		}
+		service := NewImageService(fakeEngineProvider{engine: engine})
+
+		err := service.Delete(context.Background(), "user", "machine", "image-123", false)
+
+		require.ErrorIs(t, err, appErrors.ErrImageUsedByContainers)
+	})
+
+	t.Run("other refusals stay wrapped", func(t *testing.T) {
+		engine := &fakeImageEngine{
+			removeFn: func(string, bool) (*entities.ImageRemoveReport, []error) {
+				return nil, []error{errors.New("boom")}
+			},
+		}
+		service := NewImageService(fakeEngineProvider{engine: engine})
+
+		err := service.Delete(context.Background(), "user", "machine", "image-123", false)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to remove image")
+	})
+
+	t.Run("missing report is an error", func(t *testing.T) {
+		engine := &fakeImageEngine{
+			removeFn: func(string, bool) (*entities.ImageRemoveReport, []error) {
+				return nil, nil
+			},
+		}
+		service := NewImageService(fakeEngineProvider{engine: engine})
+
+		err := service.Delete(context.Background(), "user", "machine", "image-123", false)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no remove report returned for image: image-123")
+	})
 }
 
-// TestImageService_Delete_MissingParameters tests that Delete validates input parameters
-func TestImageService_Delete_MissingParameters(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	imageID := "image-123"
+func TestImageService_Pull_ReturnsEngineReport(t *testing.T) {
+	report := &entities.ImagePullReport{ID: "nginx:latest"}
+	engine := &fakeImageEngine{
+		pullFn: func(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {
+			assert.Equal(t, "nginx:latest", rawImage)
+			return report, nil
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	mockConnManager := testutils.NewMockConnectionManager()
-	service := NewImageService(mockConnManager)
+	got, err := service.Pull(context.Background(), "user", "machine", "nginx:latest", entities.ImagePullOptions{})
 
-	t.Run("empty userID", func(t *testing.T) {
-		err := service.Delete(ctx, "", machineID, imageID, false)
-		assert.Error(t, err, "Should return error when userID is empty")
-	})
-
-	t.Run("empty machineID", func(t *testing.T) {
-		err := service.Delete(ctx, userID, "", imageID, false)
-		assert.Error(t, err, "Should return error when machineID is empty")
-	})
-
-	t.Run("empty imageID", func(t *testing.T) {
-		err := service.Delete(ctx, userID, machineID, "", false)
-		assert.Error(t, err, "Should return error when imageID is empty")
-	})
+	require.NoError(t, err)
+	assert.Same(t, report, got)
 }
 
-// TestImageService_Delete_Success tests successful image deletion (integration style)
-func TestImageService_Delete_Success(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	imageID := "image-123"
+func TestImageService_Pull_MapsFailureToPullFailed(t *testing.T) {
+	engine := &fakeImageEngine{
+		pullFn: func(string, entities.ImagePullOptions) (*entities.ImagePullReport, error) {
+			return nil, errors.New("registry unreachable")
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	mockConnManager := testutils.NewMockConnectionManager()
-	service := NewImageService(mockConnManager)
+	got, err := service.Pull(context.Background(), "user", "machine", "nginx:latest", entities.ImagePullOptions{})
 
-	err := service.Delete(ctx, userID, machineID, imageID, false)
-	// This will error due to mock limitations, but validates the structure
-	assert.Error(t, err, "Expected error due to mock limitations")
+	require.ErrorIs(t, err, appErrors.ErrImagePullFailed)
+	assert.Nil(t, got)
 }
 
-// TestImageService_Delete_ForceParameter tests that the force parameter is accepted
-func TestImageService_Delete_ForceParameter(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	imageID := "image-123"
+func TestImageService_Pull_MapsCancellationToOperationCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	engine := &fakeImageEngine{
+		pullFn: func(string, entities.ImagePullOptions) (*entities.ImagePullReport, error) {
+			return nil, context.Canceled
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	t.Run("force=true", func(t *testing.T) {
-		mockConnManager := testutils.NewMockConnectionManager()
-		service := NewImageService(mockConnManager)
+	got, err := service.Pull(ctx, "user", "machine", "nginx:latest", entities.ImagePullOptions{})
 
-		err := service.Delete(ctx, userID, machineID, imageID, true)
-		// Error expected due to mock limitations
-		assert.Error(t, err, "Expected error due to mock limitations")
-	})
+	require.ErrorIs(t, err, appErrors.ErrOperationCancelled, "a cancelled pull must not masquerade as a pull failure")
+	assert.Nil(t, got)
+}
 
-	t.Run("force=false", func(t *testing.T) {
-		mockConnManager := testutils.NewMockConnectionManager()
-		service := NewImageService(mockConnManager)
+func TestImageService_Prune_ReturnsEngineReports(t *testing.T) {
+	prunes := []*reports.PruneReport{{Id: "sha256:abc", Size: 4096}}
+	engine := &fakeImageEngine{
+		pruneFn: func() ([]*reports.PruneReport, error) {
+			return prunes, nil
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
 
-		err := service.Delete(ctx, userID, machineID, imageID, false)
-		// Error expected due to mock limitations
-		assert.Error(t, err, "Expected error due to mock limitations")
-	})
+	got, err := service.Prune(context.Background(), "user", "machine")
+
+	require.NoError(t, err)
+	assert.Equal(t, prunes, got)
+}
+
+func TestImageService_Prune_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeImageEngine{
+		pruneFn: func() ([]*reports.PruneReport, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Prune(context.Background(), "user", "machine")
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "failed to prune images")
+}
+
+// TestImageService_AcquireFailureIsThe502Sentinel pins the service-side
+// half of the connection-failure contract: the provider's sentinel crosses
+// untouched — the service never wraps, maps, or swallows it (the 502
+// mapping itself is pinned in the connections package).
+func TestImageService_AcquireFailureIsThe502Sentinel(t *testing.T) {
+	service := NewImageService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
+
+	got, err := service.List(context.Background(), "user", "machine", entities.ImageListOptions{})
+
+	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
+	assert.Nil(t, got)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusBadGateway, appErr.Status)
 }
 
 // TestImageService_ParsePlatform tests that ParsePlatform correctly splits platform strings
@@ -160,51 +232,4 @@ func TestImageService_ParsePlatform(t *testing.T) {
 		assert.Equal(t, "amd64", arch)
 		assert.Equal(t, "10.0.17763.1234", variant)
 	})
-}
-
-// TestImageService_Pull_MissingRawImage tests that Pull validates input parameters
-func TestImageService_Pull_MissingRawImage(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-
-	mockConnManager := testutils.NewMockConnectionManager()
-	service := NewImageService(mockConnManager)
-
-	t.Run("empty userID", func(t *testing.T) {
-		result, err := service.Pull(ctx, "", machineID, "nginx:latest", entities.ImagePullOptions{})
-		assert.Error(t, err, "Should return error when userID is empty")
-		assert.Nil(t, result, "Should return nil result when userID is empty")
-	})
-
-	t.Run("empty machineID", func(t *testing.T) {
-		result, err := service.Pull(ctx, userID, "", "nginx:latest", entities.ImagePullOptions{})
-		assert.Error(t, err, "Should return error when machineID is empty")
-		assert.Nil(t, result, "Should return nil result when machineID is empty")
-	})
-
-	t.Run("empty rawImage", func(t *testing.T) {
-		result, err := service.Pull(ctx, userID, machineID, "", entities.ImagePullOptions{})
-		assert.Error(t, err, "Should return error when rawImage is empty")
-		assert.Nil(t, result, "Should return nil result when rawImage is empty")
-	})
-}
-
-// TestImageService_Pull_EngineFailure tests that Pull properly maps
-// engine pull failures to ErrImagePullFailed.
-func TestImageService_Pull_EngineFailure(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewImageService(mockConnManager)
-
-	result, err := service.Pull(ctx, userID, machineID, "nginx:latest", entities.ImagePullOptions{})
-
-	// The mock connection succeeds but the engine call fails because there is
-	// no real podman backend behind the mock connection context.
-	assert.Error(t, err, "Should return error when engine pull fails")
-	assert.Equal(t, appErrors.ErrImagePullFailed, err, "Should return ErrImagePullFailed")
-	assert.Nil(t, result, "Should return nil result when engine pull fails")
 }
