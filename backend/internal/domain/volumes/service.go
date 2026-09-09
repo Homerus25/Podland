@@ -5,13 +5,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
-	bindingsVolumes "go.podman.io/podman/v6/pkg/bindings/volumes"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
-	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
 // VolumeServiceInterface defines the interface for volume services
@@ -26,27 +23,25 @@ type VolumeServiceInterface interface {
 	Import(ctx context.Context, userID, machineID, volumeName string, r io.Reader) error
 }
 
-// VolumeService provides business logic for volumes
+// VolumeService provides business logic for volumes. Every machine-scoped
+// podman call crosses the VolumeEngineProvider (the connection seam); the
+// service itself owns only domain mapping and composition.
 type VolumeService struct {
-	conn connections.Manager
+	engines VolumeEngineProvider
 }
 
 // NewVolumeService creates a new VolumeService
-func NewVolumeService(conn connections.Manager) *VolumeService {
+func NewVolumeService(engines VolumeEngineProvider) *VolumeService {
 	return &VolumeService{
-		conn: conn,
+		engines: engines,
 	}
 }
 
 // List returns every volume on the specified machine, named and anonymous
 func (s *VolumeService) List(ctx context.Context, userID, machineID string, opts entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
 	var volumes []*entities.VolumeListReport
-	err := s.conn.WithConnection(ctx, userID, machineID, "volumes.List", func(connCtx context.Context) error {
-		volumeEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		v, err := volumeEngine.VolumeList(ctx, opts)
+	err := s.engines.WithEngine(ctx, userID, machineID, "volumes.List", func(e VolumeEngine) error {
+		v, err := e.List(opts)
 		if err != nil {
 			return fmt.Errorf("failed to list volumes: %w", err)
 		}
@@ -59,12 +54,8 @@ func (s *VolumeService) List(ctx context.Context, userID, machineID string, opts
 // Get returns the full configuration of a single volume by exact name
 func (s *VolumeService) Get(ctx context.Context, userID, machineID, volumeName string) (*entities.VolumeInspectReport, error) {
 	var report *entities.VolumeInspectReport
-	err := s.conn.WithConnection(ctx, userID, machineID, "volumes.Get", func(connCtx context.Context) error {
-		volumeEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		r, err := s.inspectVolume(ctx, volumeEngine, volumeName)
+	err := s.engines.WithEngine(ctx, userID, machineID, "volumes.Get", func(e VolumeEngine) error {
+		r, err := s.inspectVolume(e, volumeName)
 		if err != nil {
 			return err
 		}
@@ -74,25 +65,20 @@ func (s *VolumeService) Get(ctx context.Context, userID, machineID, volumeName s
 	return report, err
 }
 
-// inspectVolume resolves a single volume by exact name through the
-// tunnel engine, mapping a missing volume to the clean 404 sentinel.
-func (s *VolumeService) inspectVolume(ctx context.Context, volumeEngine *tunnel.ContainerEngine, volumeName string) (*entities.VolumeInspectReport, error) {
-	reports, errs, err := volumeEngine.VolumeInspect(ctx, []string{volumeName}, entities.InspectOptions{})
+// inspectVolume resolves a single volume by exact name through the engine,
+// mapping a missing volume to the clean 404 sentinel.
+func (s *VolumeService) inspectVolume(e VolumeEngine, volumeName string) (*entities.VolumeInspectReport, error) {
+	report, err := e.Inspect(volumeName)
 	if err != nil {
+		if podmanerr.IsNotFound(err) {
+			return nil, appErrors.ErrVolumeNotFound
+		}
 		return nil, fmt.Errorf("failed to inspect volume: %w", err)
 	}
-	for _, itemErr := range errs {
-		if itemErr != nil {
-			if podmanerr.IsNotFound(itemErr) {
-				return nil, appErrors.ErrVolumeNotFound
-			}
-			return nil, fmt.Errorf("failed to inspect volume: %w", itemErr)
-		}
-	}
-	if len(reports) == 0 || reports[0] == nil {
+	if report == nil {
 		return nil, appErrors.ErrVolumeNotFound
 	}
-	return reports[0], nil
+	return report, nil
 }
 
 // Create makes a volume on the machine and returns its full config.
@@ -102,12 +88,8 @@ func (s *VolumeService) inspectVolume(ctx context.Context, volumeEngine *tunnel.
 // INVALID_REQUEST carrying podman's message, not 5xx.
 func (s *VolumeService) Create(ctx context.Context, userID, machineID string, req VolumeCreateRequest) (*entities.VolumeInspectReport, error) {
 	var report *entities.VolumeInspectReport
-	err := s.conn.WithConnection(ctx, userID, machineID, "volumes.Create", func(connCtx context.Context) error {
-		volumeEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		created, err := volumeEngine.VolumeCreate(ctx, ToPodmanVolumeCreateOptions(req))
+	err := s.engines.WithEngine(ctx, userID, machineID, "volumes.Create", func(e VolumeEngine) error {
+		created, err := e.Create(ToPodmanVolumeCreateOptions(req))
 		if err != nil {
 			if appErr := mapCreateError(err); appErr != nil {
 				return appErr
@@ -117,7 +99,7 @@ func (s *VolumeService) Create(ctx context.Context, userID, machineID string, re
 
 		// Create only reports the name; the contract is the full config, so
 		// inspect the freshly created volume by its (possibly generated) name.
-		inspect, err := s.inspectVolume(ctx, volumeEngine, created.IDOrName)
+		inspect, err := s.inspectVolume(e, created.IDOrName)
 		if err != nil {
 			return err
 		}
@@ -133,16 +115,12 @@ func (s *VolumeService) Create(ctx context.Context, userID, machineID string, re
 // dependent containers first (its own semantics) and removes the volume.
 // Unknown names surface as the same clean 404 as inspect.
 func (s *VolumeService) Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error {
-	return s.conn.WithConnection(ctx, userID, machineID, "volumes.Delete", func(connCtx context.Context) error {
-		volumeEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		reports, err := volumeEngine.VolumeRm(ctx, []string{volumeName}, entities.VolumeRmOptions{Force: force})
+	return s.engines.WithEngine(ctx, userID, machineID, "volumes.Delete", func(e VolumeEngine) error {
+		removed, err := e.Remove(volumeName, force)
 		if err != nil {
 			return fmt.Errorf("failed to remove volume: %w", err)
 		}
-		for _, report := range reports {
+		for _, report := range removed {
 			if report == nil || report.Err == nil {
 				continue
 			}
@@ -195,12 +173,8 @@ func mapCreateError(err error) *appErrors.AppError {
 // mitigation for this endpoint.
 func (s *VolumeService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
 	var prunes []*reports.PruneReport
-	err := s.conn.WithConnection(ctx, userID, machineID, "volumes.Prune", func(connCtx context.Context) error {
-		volumeEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
-		p, err := volumeEngine.VolumePrune(ctx, entities.VolumePruneOptions{})
+	err := s.engines.WithEngine(ctx, userID, machineID, "volumes.Prune", func(e VolumeEngine) error {
+		p, err := e.Prune()
 		if err != nil {
 			return fmt.Errorf("failed to prune volumes: %w", err)
 		}
@@ -216,17 +190,13 @@ func (s *VolumeService) Prune(ctx context.Context, userID, machineID string) ([]
 // responses when this returns an AppError. Bytes flow straight from the
 // remote podman into w with no server-side buffering.
 func (s *VolumeService) Export(ctx context.Context, userID, machineID, volumeName string, w io.Writer) error {
-	return s.conn.WithConnection(ctx, userID, machineID, "volumes.Export", func(connCtx context.Context) error {
-		volumeEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
+	return s.engines.WithEngine(ctx, userID, machineID, "volumes.Export", func(e VolumeEngine) error {
 		// Existence gate: fail before writing anything to w.
-		if _, err := s.inspectVolume(ctx, volumeEngine, volumeName); err != nil {
+		if _, err := s.inspectVolume(e, volumeName); err != nil {
 			return err
 		}
 
-		return bindingsVolumes.Export(connCtx, volumeName, w)
+		return e.Export(volumeName, w)
 	})
 }
 
@@ -236,16 +206,12 @@ func (s *VolumeService) Export(ctx context.Context, userID, machineID, volumeNam
 // volume's existence is resolved first, so a missing name fails with
 // the clean 404 before the archive is consumed.
 func (s *VolumeService) Import(ctx context.Context, userID, machineID, volumeName string, r io.Reader) error {
-	return s.conn.WithConnection(ctx, userID, machineID, "volumes.Import", func(connCtx context.Context) error {
-		volumeEngine := &tunnel.ContainerEngine{
-			ClientCtx: connCtx,
-		}
-
+	return s.engines.WithEngine(ctx, userID, machineID, "volumes.Import", func(e VolumeEngine) error {
 		// Existence gate: fail before consuming the archive.
-		if _, err := s.inspectVolume(ctx, volumeEngine, volumeName); err != nil {
+		if _, err := s.inspectVolume(e, volumeName); err != nil {
 			return err
 		}
 
-		return bindingsVolumes.Import(connCtx, volumeName, r)
+		return e.Import(volumeName, r)
 	})
 }

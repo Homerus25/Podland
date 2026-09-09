@@ -1,79 +1,309 @@
 package volumes
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/connections"
-	"github.com/Homerus25/podland/backend/internal/testutils"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// Connection-failure mapping (502 CONNECTION_FAILED) is owned by the
-// connections.Manager seam and pinned once in the connections package
-// tests — not re-pinned per service method here.
+// Service behaviour tests run the real VolumeService against the fake
+// engine, so the mapping/composition rules below are pinned as behaviour,
+// not invocation shape. Connection acquisition (and its 502 mapping) is the
+// provider seam: the connections package owns that contract and pins it in
+// its own tests.
 
-// TestVolumeService_List_ContextCancelled pins the cancelled-context path.
-func TestVolumeService_List_ContextCancelled(t *testing.T) {
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewVolumeService(mockConnManager)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	result, err := service.List(ctx, "test-user", "test-machine", entities.VolumeListOptions{})
-
-	assert.Error(t, err, "should return error when context is cancelled")
-	assert.Nil(t, result, "should return nil result on context cancellation")
+// notFoundErr builds the 404 ErrorModel shape podman's tunnel layer
+// produces for a missing resource.
+func notFoundErr() error {
+	return &errorhandling.ErrorModel{
+		ResponseCode: http.StatusNotFound,
+		Message:      "no such volume",
+	}
 }
 
-// TestVolumeService_List_EngineError pins that an engine failure surfaces
-// wrapped as "failed to list volumes". The mock connection carries no real
-// podman client, so the tunnel call errors; the happy path is covered by
-// the integration suite.
-func TestVolumeService_List_EngineError(t *testing.T) {
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewVolumeService(mockConnManager)
+func inspectFixture(name string) *entities.VolumeInspectReport {
+	fixture := namedVolumeFixture("2026-08-30T10:00:00Z")
+	fixture.Name = name
+	return &entities.VolumeInspectReport{VolumeConfigResponse: &fixture}
+}
 
-	result, err := service.List(context.Background(), "test-user", "test-machine", entities.VolumeListOptions{})
+func TestVolumeService_List_ReturnsEngineVolumes(t *testing.T) {
+	volumes := []*entities.VolumeListReport{
+		{VolumeConfigResponse: namedVolumeFixture("2026-08-30T10:00:00Z")},
+		{VolumeConfigResponse: anonymousVolumeFixture()},
+	}
+	engine := &fakeVolumeEngine{
+		listFn: func(entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
+			return volumes, nil
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	assert.Error(t, err, "engine call without a real podman client must fail")
+	got, err := service.List(context.Background(), "user", "machine", entities.VolumeListOptions{})
+
+	require.NoError(t, err)
+	assert.Equal(t, volumes, got)
+}
+
+func TestVolumeService_List_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		listFn: func(entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	got, err := service.List(context.Background(), "user", "machine", entities.VolumeListOptions{})
+
+	require.Error(t, err)
+	assert.Nil(t, got)
 	assert.Contains(t, err.Error(), "failed to list volumes", "engine failures must be wrapped consistently")
-	assert.Nil(t, result)
 }
 
-// TestVolumeService_Get_EngineError pins that an engine failure surfaces
-// wrapped as "failed to inspect volume". The mock connection carries no real
-// podman client, so the tunnel call errors; happy path and not-found mapping
-// are covered by the integration suite.
-func TestVolumeService_Get_EngineError(t *testing.T) {
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewVolumeService(mockConnManager)
+func TestVolumeService_Get_MapsMissingVolumeTo404(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return nil, notFoundErr()
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	result, err := service.Get(context.Background(), "test-user", "test-machine", "my-volume")
+	got, err := service.Get(context.Background(), "user", "machine", "my-volume")
 
-	assert.Error(t, err, "engine call without a real podman client must fail")
+	require.ErrorIs(t, err, appErrors.ErrVolumeNotFound)
+	assert.Nil(t, got)
+}
+
+func TestVolumeService_Get_MapsEmptyInspectTo404(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return nil, nil
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Get(context.Background(), "user", "machine", "my-volume")
+
+	require.ErrorIs(t, err, appErrors.ErrVolumeNotFound)
+	assert.Nil(t, got)
+}
+
+func TestVolumeService_Get_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Get(context.Background(), "user", "machine", "my-volume")
+
+	require.Error(t, err)
+	assert.Nil(t, got)
 	assert.Contains(t, err.Error(), "failed to inspect volume", "engine failures must be wrapped consistently")
-	assert.Nil(t, result)
 }
 
-// TestVolumeService_Create_EngineError pins that an engine failure surfaces
-// wrapped as "failed to create volume". The mock connection carries no real
-// podman client, so the tunnel call errors; happy paths are covered by the
-// integration suite.
-func TestVolumeService_Create_EngineError(t *testing.T) {
-	var mockConnManager connections.Manager = testutils.NewMockConnectionManager()
-	service := NewVolumeService(mockConnManager)
+func TestVolumeService_Create_InspectsFreshlyCreatedVolume(t *testing.T) {
+	var inspectedName string
+	engine := &fakeVolumeEngine{
+		createFn: func(entities.VolumeCreateOptions) (*entities.IDOrNameResponse, error) {
+			return &entities.IDOrNameResponse{IDOrName: "generated-name"}, nil
+		},
+		inspectFn: func(name string) (*entities.VolumeInspectReport, error) {
+			inspectedName = name
+			return inspectFixture(name), nil
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	result, err := service.Create(context.Background(), "test-user", "test-machine", VolumeCreateRequest{})
+	got, err := service.Create(context.Background(), "user", "machine", VolumeCreateRequest{})
 
-	assert.Error(t, err, "engine call without a real podman client must fail")
-	assert.Contains(t, err.Error(), "failed to create volume", "engine failures must be wrapped consistently")
-	assert.Nil(t, result)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "generated-name", inspectedName, "the created volume's (possibly generated) name must be inspected")
+	assert.Equal(t, "generated-name", got.Name)
+}
+
+func TestVolumeService_Create_MapsClientErrorsToInvalidRequest(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		createFn: func(entities.VolumeCreateOptions) (*entities.IDOrNameResponse, error) {
+			return nil, &errorhandling.ErrorModel{
+				ResponseCode: http.StatusBadRequest,
+				Message:      "volume name invalid",
+			}
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Create(context.Background(), "user", "machine", VolumeCreateRequest{Name: "bad"})
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Equal(t, "INVALID_REQUEST", appErr.Code)
+}
+
+func TestVolumeService_Delete_MapsMissingVolumeTo404(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		removeFn: func(string, bool) ([]*entities.VolumeRmReport, error) {
+			return []*entities.VolumeRmReport{{Err: notFoundErr()}}, nil
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	err := service.Delete(context.Background(), "user", "machine", "my-volume", false)
+
+	require.ErrorIs(t, err, appErrors.ErrVolumeNotFound)
+}
+
+func TestVolumeService_Delete_MapsInUseTo409(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		removeFn: func(string, bool) ([]*entities.VolumeRmReport, error) {
+			return []*entities.VolumeRmReport{{
+				Err: &errorhandling.ErrorModel{
+					ResponseCode: http.StatusConflict,
+					Message:      "volume is in use by a container",
+				},
+			}}, nil
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	err := service.Delete(context.Background(), "user", "machine", "my-volume", false)
+
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusConflict, appErr.Status)
+	assert.Equal(t, "VOLUME_IN_USE", appErr.Code)
+	assert.Contains(t, appErr.Message, "volume is in use by a container", "podman's refusal text must reach the frontend")
+}
+
+func TestVolumeService_Delete_PropagatesEngineFailure(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		removeFn: func(string, bool) ([]*entities.VolumeRmReport, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	err := service.Delete(context.Background(), "user", "machine", "my-volume", false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to remove volume")
+}
+
+func TestVolumeService_Prune_ReturnsEngineReports(t *testing.T) {
+	prunes := []*reports.PruneReport{{Id: "stale", Size: 4096}}
+	engine := &fakeVolumeEngine{
+		pruneFn: func() ([]*reports.PruneReport, error) {
+			return prunes, nil
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Prune(context.Background(), "user", "machine")
+
+	require.NoError(t, err)
+	assert.Equal(t, prunes, got)
+}
+
+func TestVolumeService_Export_GatesOnExistence(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return nil, notFoundErr()
+		},
+		// exportFn stays unarmed: it must never be reached for a
+		// missing volume.
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+	var sink bytes.Buffer
+
+	err := service.Export(context.Background(), "user", "machine", "my-volume", &sink)
+
+	require.ErrorIs(t, err, appErrors.ErrVolumeNotFound)
+	assert.Zero(t, sink.Len(), "no byte may be written for a missing volume")
+}
+
+func TestVolumeService_Export_StreamsEngineBytesUnchanged(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return inspectFixture("my-volume"), nil
+		},
+		exportFn: func(_ string, w io.Writer) error {
+			_, err := w.Write([]byte("tar-bytes"))
+			return err
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+	var sink bytes.Buffer
+
+	err := service.Export(context.Background(), "user", "machine", "my-volume", &sink)
+
+	require.NoError(t, err)
+	assert.Equal(t, "tar-bytes", sink.String())
+}
+
+func TestVolumeService_Import_GatesOnExistence(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return nil, notFoundErr()
+		},
+		// importFn stays unarmed: the archive must not be consumed for
+		// a missing volume.
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	err := service.Import(context.Background(), "user", "machine", "my-volume", strings.NewReader("tar"))
+
+	require.ErrorIs(t, err, appErrors.ErrVolumeNotFound)
+}
+
+func TestVolumeService_Import_FeedsArchiveToEngine(t *testing.T) {
+	var consumed string
+	engine := &fakeVolumeEngine{
+		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
+			return inspectFixture("my-volume"), nil
+		},
+		importFn: func(_ string, r io.Reader) error {
+			data, err := io.ReadAll(r)
+			consumed = string(data)
+			return err
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	err := service.Import(context.Background(), "user", "machine", "my-volume", strings.NewReader("tar"))
+
+	require.NoError(t, err)
+	assert.Equal(t, "tar", consumed)
+}
+
+// TestVolumeService_AcquireFailureIsThe502Sentinel pins the service-side
+// half of the connection-failure contract: the provider's sentinel crosses
+// untouched — the service never wraps, maps, or swallows it (the 502
+// mapping itself is pinned in the connections package).
+func TestVolumeService_AcquireFailureIsThe502Sentinel(t *testing.T) {
+	service := NewVolumeService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
+
+	_, err := service.List(context.Background(), "user", "machine", entities.VolumeListOptions{})
+
+	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusBadGateway, appErr.Status)
 }
 
 // TestMapCreateError pins the client-error mapping for create: podman 4xx

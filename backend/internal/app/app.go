@@ -137,7 +137,7 @@ func New(cfg *config.Config) (*App, error) {
 	imageService := images.NewImageService(connectionManager)
 	quadletService := quadlets.NewQuadletService(connectionManager, sshExecService)
 	secretService := secrets.NewSecretService(connectionManager, accessRepo)
-	volumeService := volumes.NewVolumeService(connectionManager)
+	volumeService := volumes.NewVolumeService(volumes.NewVolumeEngineProvider(connectionManager))
 
 	// Initialize handlers
 	authHandler := auth.NewAuthHandler(authService, userRepo)
