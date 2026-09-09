@@ -71,13 +71,27 @@ closest sibling that already exists. Rulings so far:
   podman call crosses `connections.Manager`
   (`internal/connections/manager.go`); the volumes service is the
   reference for the shape (`internal/domain/volumes/service.go`, `List`):
-  hold the result in a closure variable, call
-  `s.conn.WithConnection(ctx, userID, machineID, "domain.Op", func(connCtx)
-  error)` with an op tag, build the tunnel engine from `connCtx` inside,
-  return its error untouched. Domains depend on `connections.Manager`
-  only — the interface does not live in the machines domain anymore.
-  Registration (`TestConnection`) and the status probe (`ProbeMachine`)
-  are the manager's other two entry points.
+  hold the result in a closure variable, call the domain's engine
+  provider (`s.engines.WithEngine(ctx, userID, machineID, "domain.Op",
+  func(e VolumeEngine) error)`) with an op tag, use the handed engine
+  inside, return its error untouched. Each domain declares its own
+  caller-width engine interface (no context parameter, single names,
+  plain flags — the volumes engine in
+  `internal/domain/volumes/engine.go` is the reference) plus a
+  one-method `WithEngine` provider that delegates to
+  `Manager.WithConnection`. The production adapter lives in one
+  `engine.go` per domain package — the only file in the package
+  importing the podman tunnel/bindings packages — and constructs the
+  tunnel engine (and the package-function wrappers, e.g. quadlet
+  install tar framing, volume export/import) inside the connection
+  lease. Services keep their own request context for logging and
+  disconnect detection; the engine never carries one. Service tests
+  exercise real behaviour through a function-field fake engine
+  (colocated in the domain's tests); an acquire failure is simulated by
+  the fake provider returning `ErrConnectionFailed`. The machines
+  domain keeps calling `connections.Manager` directly — ProbeMachine
+  and TestConnection are the manager's own entry points, and
+  registration (`TestConnection`) is the third.
 
 ## Duplication across domains
 
@@ -111,8 +125,10 @@ is incomplete.
 ## Testing expectations
 
 - Unit tests per domain package: handler contract tests against a
-  testify mock (`Mock*Service`), plus service tests against the mock
-  connection manager (`internal/testutils`).
+  testify mock (`Mock*Service`), plus service behaviour tests against a
+  per-domain function-field fake engine (`engine_fake_test.go`;
+  `internal/testutils` keeps `MockConnectionManager` for the machines
+  domain, which still crosses the manager directly).
 - Integration tests live in `test/integration/` behind the
   `integration` build tag, follow the run-scoped-tag isolation model
   (see the header comment of `test/integration/images_test.go`), and

@@ -36,6 +36,8 @@ A full-stack web application for managing Podman on remote machines. This docume
 ### 4. Concurrency & Performance
 - **One connection per machine**: Each machine has at most one active SSH connection, cached and reused
 - **Per-machine in-flight dial dedup**: concurrent cold acquisitions for the same machine share a single dial; dials to different machines never serialize behind a lock
+- **Connection lifetime is the connection's, not the request's**: the cached connection context is detached from the request that dialed it, so an HTTP handler returning never kills the connection for later cache hits
+- **Engine handover at the connection seam**: each domain (volumes, secrets, containers, images, quadlets) declares a caller-width engine interface and a one-method provider that wraps `connections.Manager.WithConnection`; the production adapter constructs the podman engine inside the connection lease, so no domain service builds one inline
 - **Global limit**: Maximum cached machine connections = 100 (configurable, `MAX_CONCURRENT_MACHINES`)
 - **LRU eviction**: When the cache is full, the least recently used idle connection is closed
 - **Real teardown**: LRU eviction, the idle-timeout cleanup (15 minutes), and machine removal genuinely close the SSH session; removal is graceful (in-flight calls finish first)
@@ -292,4 +294,4 @@ Podland/
 ---
 
 *Generated from comprehensive grilling sessions*
-*Last updated: 2026-06-30*
+*Last updated: 2026-09-09*
