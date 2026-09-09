@@ -88,7 +88,7 @@ func newTestManager(maxSize int, dial dialFunc, idleTimeout, cleanupInterval tim
 
 // --- WithConnection: the seam every machine-scoped podman call crosses ---
 
-func TestWithConnection_RunsFnWithDialContextAndReleasesOnReturn(t *testing.T) {
+func TestWithConnection_RunsFnWithDialValuesAndReleasesOnReturn(t *testing.T) {
 	type ctxKey struct{}
 	marker := context.WithValue(context.Background(), ctxKey{}, "live-connection")
 	closes := atomic.Int32{}
@@ -103,7 +103,8 @@ func TestWithConnection_RunsFnWithDialContextAndReleasesOnReturn(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, marker, got, "fn must receive the live connection context from the dial")
+	assert.Equal(t, "live-connection", got.Value(ctxKey{}),
+		"fn must receive the dial's connection values (the served context is detached from the dialing request, but keeps values)")
 
 	// The release is the manager's job: once fn returns the entry is
 	// idle, so the idle-cleanup loop must close the SSH handle without
@@ -182,6 +183,73 @@ func TestWithConnection_CanceledWaitIsNotA502(t *testing.T) {
 
 	assert.ErrorIs(t, err, context.Canceled, "the caller's own cancellation crosses as-is")
 	assert.NotErrorIs(t, err, appErrors.ErrConnectionFailed, "a canceled wait is not a machine-side connection failure")
+}
+
+// --- the cached context must outlive the dialing request ---
+
+func TestWithConnection_CachedContextOutlivesDialingRequest(t *testing.T) {
+	type connKey struct{}
+	callerCtx, cancelCaller := context.WithCancel(context.Background())
+	var coldCtx, dialedWith context.Context
+	mgr := newTestManager(10, func(ctx context.Context, _ string) (context.Context, bindings.CloseFunc, error) {
+		dialedWith = ctx
+		// Mirrors bindings.NewConnectionWithHandle: the connection
+		// context handed back is a value-child of the ctx the dial
+		// was handed.
+		return context.WithValue(ctx, connKey{}, "podman-client"), func() {}, nil
+	}, time.Minute, 0)
+	require.NoError(t, mgr.WithConnection(callerCtx, "user-1", "machine-1", "test.op", func(connCtx context.Context) error {
+		coldCtx = connCtx
+		return nil
+	}))
+
+	// The dialing request's handler returned: net/http cancels its
+	// context. The dial was handed that ctx, so the dial itself is
+	// dead; the connection that got cached must not be.
+	cancelCaller()
+	require.ErrorIs(t, dialedWith.Err(), context.Canceled,
+		"the dial received the caller's context: a canceled caller cancels the dial itself")
+	require.NoError(t, coldCtx.Err(),
+		"even the cold call's served context is detached: its lifetime is the connection's, not the request's")
+
+	var warmCtx context.Context
+	require.NoError(t, mgr.WithConnection(context.Background(), "user-1", "machine-1", "test.op", func(connCtx context.Context) error {
+		warmCtx = connCtx
+		return nil
+	}))
+
+	require.NoError(t, warmCtx.Err(),
+		"a cache hit after the dialing request died must still hand out a usable context")
+	assert.Equal(t, "podman-client", warmCtx.Value(connKey{}),
+		"the bindings' client/version values must survive the detach")
+}
+
+func TestWithConnection_CanceledCallerAbortsSlowDial(t *testing.T) {
+	dialStarted := make(chan struct{})
+	callerCtx, cancelCaller := context.WithCancel(context.Background())
+	mgr := newTestManager(10, func(ctx context.Context, _ string) (context.Context, bindings.CloseFunc, error) {
+		close(dialStarted)
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	}, time.Minute, 0)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- mgr.WithConnection(callerCtx, "user-1", "machine-1", "test.op", func(context.Context) error {
+			return errors.New("must not run")
+		})
+	}()
+	<-dialStarted
+	cancelCaller()
+
+	select {
+	case err := <-errCh:
+		assert.ErrorIs(t, err, context.Canceled, "a canceled caller cancels the slow dial and the wait")
+		assert.NotErrorIs(t, err, appErrors.ErrConnectionFailed,
+			"the caller's own cancellation is not a machine-side connection failure")
+	case <-time.After(2 * time.Second):
+		t.Fatal("canceling the caller did not abort the slow dial")
+	}
 }
 
 // --- dial dedup replaces queuing ---

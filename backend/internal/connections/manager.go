@@ -268,12 +268,20 @@ func (m *ConnectionManager) acquire(ctx context.Context, machineID, userID strin
 		e.close = closeFn
 	}
 	if err == nil && !e.dead {
-		e.connCtx = connCtx
+		// The dial honored the caller's context; what gets cached must
+		// not. A request-scoped ctx dies with its HTTP handler, which
+		// would kill the connection for every later cache hit — the
+		// stored context must live as long as the connection itself,
+		// governed by release/refcount, eviction, idle cleanup, and
+		// RemoveMachine. WithoutCancel drops cancellation and deadline
+		// but keeps values, so the bindings' client/version keys the
+		// podman calls rely on survive.
+		e.connCtx = context.WithoutCancel(connCtx)
 		e.ready = true
 		e.refCount = 1
 		m.mu.Unlock()
 		close(e.done)
-		return connCtx, m.releaseFunc(e), nil
+		return e.connCtx, m.releaseFunc(e), nil
 	}
 	delete(m.entries, machineID)
 	if err != nil {
