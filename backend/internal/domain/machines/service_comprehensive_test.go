@@ -388,121 +388,9 @@ func TestMachineService_GetMachineByID(t *testing.T) {
 // List Methods Tests
 // =============================================================================
 
-// TestMachineService_ListMethods tests the various list methods
-func TestMachineService_ListMethods(t *testing.T) {
+// TestMachineService_ListAllMachines tests the service's list method
+func TestMachineService_ListAllMachines(t *testing.T) {
 	userID := "test-user-123"
-
-	t.Run("ListOwnedMachines", func(t *testing.T) {
-		// Setup mocks
-		mockMachineRepo := testutils.NewMockMachineRepository()
-		mockAccessRepo := testutils.NewMockMachineAccessRepository()
-		mockConnManager := testutils.NewMockConnectionManager()
-		mockEncryption := testutils.NewMockEncryptionService()
-
-		// Add some machines for our user
-		machine1 := &models.Machine{
-			ID:        "machine-1",
-			Name:      "my-machine-1",
-			OwnerID:   userID,
-			Hostname:  "host1.example.com",
-			Port:      22,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-		machine2 := &models.Machine{
-			ID:        "machine-2",
-			Name:      "my-machine-2",
-			OwnerID:   userID,
-			Hostname:  "host2.example.com",
-			Port:      22,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-		machine3 := &models.Machine{
-			ID:        "machine-3",
-			Name:      "other-machine",
-			OwnerID:   "other-user",
-			Hostname:  "host3.example.com",
-			Port:      22,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-
-		mockMachineRepo.AddMachine(machine1)
-		mockMachineRepo.AddMachine(machine2)
-		mockMachineRepo.AddMachine(machine3)
-
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
-
-		// Call ListOwnedMachines
-		machines, err := service.ListOwnedMachines(userID)
-
-		// Verify results
-		require.NoError(t, err)
-		require.NotNil(t, machines)
-		assert.Equal(t, 2, len(machines), "Should return 2 machines owned by user")
-
-		// Verify machine IDs
-		var machineIDs []string
-		for _, machine := range machines {
-			machineIDs = append(machineIDs, machine.ID)
-		}
-		assert.Contains(t, machineIDs, "machine-1")
-		assert.Contains(t, machineIDs, "machine-2")
-		assert.NotContains(t, machineIDs, "machine-3")
-	})
-
-	t.Run("ListAccessibleMachines", func(t *testing.T) {
-		// Setup mocks
-		mockMachineRepo := testutils.NewMockMachineRepository()
-		mockAccessRepo := testutils.NewMockMachineAccessRepository()
-		mockConnManager := testutils.NewMockConnectionManager()
-		mockEncryption := testutils.NewMockEncryptionService()
-
-		// Add some machines
-		machine1 := &models.Machine{
-			ID:        "machine-1",
-			Name:      "my-machine",
-			OwnerID:   userID,
-			Hostname:  "host1.example.com",
-			Port:      22,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-		machine2 := &models.Machine{
-			ID:        "machine-2",
-			Name:      "shared-machine",
-			OwnerID:   "other-user",
-			Hostname:  "host2.example.com",
-			Port:      22,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-
-		mockMachineRepo.AddMachine(machine1)
-		mockMachineRepo.AddMachine(machine2)
-
-		// Grant access to the shared machine
-		mockAccessRepo.AddAccess("machine-2", userID, models.PermissionRead, time.Now())
-
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
-
-		// Call ListAccessibleMachines
-		machines, err := service.ListAccessibleMachines(userID)
-
-		// Verify results
-		require.NoError(t, err)
-		require.NotNil(t, machines)
-		// Should include owned machines + machines with access
-		assert.True(t, len(machines) >= 1, "Should return at least the owned machine")
-
-		// Check that we have the owned machine
-		var machineIDs []string
-		for _, machine := range machines {
-			machineIDs = append(machineIDs, machine.ID)
-		}
-		assert.Contains(t, machineIDs, "machine-1")
-	})
 
 	t.Run("ListAllMachines", func(t *testing.T) {
 		// Setup mocks
@@ -533,14 +421,17 @@ func TestMachineService_ListMethods(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, machines)
 		assert.True(t, len(machines) >= 1, "Should return at least one machine")
+
+		// Each entry carries the caller's permission
+		assert.Equal(t, models.PermissionAdmin, machines[0].Permission)
 	})
 }
 
 // =============================================================================
-// UserHasAccess and NameExistsForUser Tests
+// UserHasAccess Tests
 // =============================================================================
 
-// TestMachineService_AccessControl tests the UserHasAccess and NameExistsForUser methods
+// TestMachineService_AccessControl tests the UserHasAccess method
 func TestMachineService_AccessControl(t *testing.T) {
 	userID := "test-user-123"
 	machineID := "test-machine-123"
@@ -578,63 +469,6 @@ func TestMachineService_AccessControl(t *testing.T) {
 		hasAccess, err := service.UserHasAccess(userID, machineID)
 		require.NoError(t, err)
 		assert.False(t, hasAccess, "User should not have access to the machine")
-	})
-
-	t.Run("NameExistsForUser - name exists", func(t *testing.T) {
-		// Setup mocks
-		mockMachineRepo := testutils.NewMockMachineRepository()
-		mockAccessRepo := testutils.NewMockMachineAccessRepository()
-		mockConnManager := testutils.NewMockConnectionManager()
-		mockEncryption := testutils.NewMockEncryptionService()
-
-		// Add a machine with the name
-		testMachine := &models.Machine{
-			ID:        machineID,
-			Name:      "test-machine",
-			OwnerID:   userID,
-			Hostname:  "example.com",
-			Port:      22,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-		mockMachineRepo.AddMachine(testMachine)
-
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
-
-		// Test NameExistsForUser
-		exists, err := service.NameExistsForUser(userID, "test-machine")
-		require.NoError(t, err)
-		assert.True(t, exists, "Name should exist for user")
-	})
-
-	t.Run("NameExistsForUser - name does not exist", func(t *testing.T) {
-		// Setup mocks
-		mockMachineRepo := testutils.NewMockMachineRepository()
-		mockAccessRepo := testutils.NewMockMachineAccessRepository()
-		mockConnManager := testutils.NewMockConnectionManager()
-		mockEncryption := testutils.NewMockEncryptionService()
-
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
-
-		// Test NameExistsForUser
-		exists, err := service.NameExistsForUser(userID, "non-existent-name")
-		require.NoError(t, err)
-		assert.False(t, exists, "Name should not exist for user")
-	})
-
-	t.Run("NameExistsForUser - normal case", func(t *testing.T) {
-		// Setup mocks
-		mockMachineRepo := testutils.NewMockMachineRepository()
-		mockAccessRepo := testutils.NewMockMachineAccessRepository()
-		mockConnManager := testutils.NewMockConnectionManager()
-		mockEncryption := testutils.NewMockEncryptionService()
-
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
-
-		// Test NameExistsForUser with no machines - should return false, nil
-		exists, err := service.NameExistsForUser(userID, "any-name")
-		assert.NoError(t, err)
-		assert.False(t, exists)
 	})
 }
 

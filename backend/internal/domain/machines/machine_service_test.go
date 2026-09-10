@@ -144,22 +144,10 @@ func TestMachineCreation_Validation(t *testing.T) {
 			})
 		}
 	})
-
-	t.Run("name uniqueness validation logic", func(t *testing.T) {
-		// This tests the logic, not the actual database call
-		// We can't test the actual NameExistsForUser without a proper setup
-
-		// Test the logic pattern
-		// In the real Create method, it would call:
-		// nameExists, err := s.machineRepo.NameExistsForUser(userID, req.Name)
-		// For this test, we just verify the logic is sound
-
-		assert.True(t, true, "Name uniqueness validation logic is present in Create method")
-	})
 }
 
 // =============================================================================
-// Machine Service Helper Tests - These test functions that don't require complex dependencies
+// Machine Service Helper Tests
 // =============================================================================
 
 // TestMachineService_ListFunctions tests list functions with mock repositories

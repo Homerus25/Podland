@@ -219,11 +219,6 @@ func (s *MachineService) UserHasAccess(userID, machineID string) (bool, error) {
 	return s.accessRepo.HasAccess(machineID, userID)
 }
 
-// NameExistsForUser checks if a machine name already exists for a user
-func (s *MachineService) NameExistsForUser(userID, name string) (bool, error) {
-	return s.machineRepo.NameExistsForUser(userID, name)
-}
-
 // GetMachineByID retrieves a machine by ID if the user has access
 func (s *MachineService) GetMachineByID(userID, machineID string) (*models.Machine, error) {
 	machine, err := s.machineRepo.GetByID(machineID)
@@ -280,19 +275,9 @@ func (s *MachineService) GetMachineStatus(ctx context.Context, userID, machineID
 	return StatusOnline, checkedAt, nil
 }
 
-// ListAccessibleMachines retrieves all machines a user has access to,
-// each paired with the caller's permission
-func (s *MachineService) ListAccessibleMachines(userID string) ([]models.AccessibleMachine, error) {
-	return s.machineRepo.ListAccessible(userID)
-}
-
-// ListOwnedMachines retrieves all machines owned by a user
-func (s *MachineService) ListOwnedMachines(userID string) ([]*models.Machine, error) {
-	return s.machineRepo.ListByOwner(userID)
-}
-
 // ListAllMachines retrieves all machines accessible to a user (owned + shared),
-// each paired with the caller's permission
+// each paired with the caller's permission. It is the list endpoint's one
+// list method.
 func (s *MachineService) ListAllMachines(userID string) ([]models.AccessibleMachine, error) {
 	return s.machineRepo.ListAccessible(userID)
 }
