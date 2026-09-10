@@ -292,6 +292,63 @@ func (s *MachineService) ListAllMachines(userID string) ([]models.AccessibleMach
 	return s.machineRepo.ListAccessible(userID)
 }
 
+// Update applies a partial machine update (empty request fields keep the
+// stored value). Only the owner may update; any other caller — including
+// read- or write-level grantees — is denied.
+func (s *MachineService) Update(ctx context.Context, userID, machineID string, req *CreateMachineRequest) (*models.Machine, error) {
+	machine, err := s.machineRepo.GetByID(machineID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get machine: %w", err)
+	}
+	if machine == nil {
+		return nil, errors.ErrMachineNotFound
+	}
+
+	// Update is owner-only: an access row alone (read or write) must not
+	// allow rewriting connection details or credentials.
+	if machine.OwnerID != userID {
+		return nil, errors.ErrAccessDenied
+	}
+
+	if req.SSHPrivateKey != "" && !IsValidPEM(req.SSHPrivateKey) {
+		return nil, errors.ErrInvalidSSHKey
+	}
+
+	if req.Name != "" {
+		machine.Name = req.Name
+	}
+	if req.Description != "" {
+		machine.Description = req.Description
+	}
+	if req.Hostname != "" {
+		machine.Hostname = req.Hostname
+	}
+	if req.Port != 0 {
+		machine.Port = req.Port
+	}
+	if req.SSHUsername != "" {
+		machine.SSHUsername = req.SSHUsername
+	}
+	if req.SSHPrivateKey != "" {
+		encryptedKey, fingerprint, err := s.encryption.EncryptSSHKey(req.SSHPrivateKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encrypt SSH key: %w", err)
+		}
+		machine.SSHKeyEncrypted = encryptedKey
+		machine.SSHKeyFingerprint = fingerprint
+	}
+	if req.PodmanSocketPath != "" {
+		machine.PodmanSocketPath = req.PodmanSocketPath
+	}
+	machine.UpdatedAt = time.Now().UTC()
+
+	if err := s.machineRepo.Update(machine); err != nil {
+		return nil, fmt.Errorf("failed to update machine: %w", err)
+	}
+
+	return machine, nil
+}
+
 // Delete deletes a machine by ID after verifying ownership
 func (s *MachineService) Delete(ctx context.Context, userID, machineID string) error {
 	// Get machine to verify it exists and user is owner

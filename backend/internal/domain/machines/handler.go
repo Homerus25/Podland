@@ -127,7 +127,9 @@ func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(responses)
 }
 
-// Update handles updating a machine
+// Update handles updating a machine. The update rules — owner-only
+// permission, partial merge, PEM validation, key encryption, the write —
+// live in the service; the handler decodes the body and maps the response.
 func (h *MachineHandler) Update(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (MachineResponse, error) {
 		var req CreateMachineRequest
@@ -135,49 +137,10 @@ func (h *MachineHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return MachineResponse{}, errors.NewAppError("INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		}
 
-		// Get existing machine
-		machine, err := h.service.GetMachineByID(userID, machineID)
+		machine, err := h.service.Update(ctx, userID, machineID, &req)
 		if err != nil {
 			return MachineResponse{}, err
 		}
-
-		// Update machine fields
-		if req.Name != "" {
-			machine.Name = req.Name
-		}
-		if req.Description != "" {
-			machine.Description = req.Description
-		}
-		if req.Hostname != "" {
-			machine.Hostname = req.Hostname
-		}
-		if req.Port != 0 {
-			machine.Port = req.Port
-		}
-		if req.SSHUsername != "" {
-			machine.SSHUsername = req.SSHUsername
-		}
-		if req.SSHPrivateKey != "" {
-			if !IsValidPEM(req.SSHPrivateKey) {
-				return MachineResponse{}, errors.ErrInvalidSSHKey
-			}
-			// Encrypt new SSH key
-			encryptedKey, fingerprint, err := h.service.encryption.EncryptSSHKey(req.SSHPrivateKey)
-			if err != nil {
-				return MachineResponse{}, err
-			}
-			machine.SSHKeyEncrypted = encryptedKey
-			machine.SSHKeyFingerprint = fingerprint
-		}
-		if req.PodmanSocketPath != "" {
-			machine.PodmanSocketPath = req.PodmanSocketPath
-		}
-		machine.UpdatedAt = time.Now().UTC()
-
-		if err := h.service.machineRepo.Update(machine); err != nil {
-			return MachineResponse{}, err
-		}
-
 		return FromModel(machine), nil
 	})
 }

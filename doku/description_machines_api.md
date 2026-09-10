@@ -155,7 +155,7 @@ Perform a live status check of a machine. The machine is online when the SSH con
 
 Update an existing machine's connection details.
 
-**Authentication:** Required
+**Authentication:** Required (owner only)
 
 **Request:**
 ```json
@@ -170,13 +170,13 @@ Update an existing machine's connection details.
 }
 ```
 
-**Note:** If `sshPrivateKey` is provided, the backend will test the new connection.
+Only the owner may update a machine; any other user with an access row (read or write) receives 403 `ACCESS_DENIED`.
 
 **Response (Success - 200):**
 - Same as GET /api/machines/{id}
 
 **Response (Error):**
-- 400: `VALIDATION_FAILED`, `INVALID_SSH_KEY`, `CONNECTION_FAILED`, `CONNECTION_TEST_TIMEOUT`
+- 400: `VALIDATION_FAILED`, `INVALID_SSH_KEY`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
 - 404: `MACHINE_NOT_FOUND`
