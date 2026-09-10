@@ -28,7 +28,7 @@ func TestMachineService_Create(t *testing.T) {
 		mockConnManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Create request with valid data
 		req := &CreateMachineRequest{
@@ -84,7 +84,7 @@ func TestMachineService_Create(t *testing.T) {
 		mockConnManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Create request with missing optional fields (should use defaults)
 		req := &CreateMachineRequest{
@@ -114,7 +114,7 @@ func TestMachineService_Create(t *testing.T) {
 		mockConnManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Test missing name
 		req := &CreateMachineRequest{
@@ -170,7 +170,7 @@ func TestMachineService_Create(t *testing.T) {
 		mockConnManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		req := &CreateMachineRequest{
 			Name:          "test-machine",
@@ -204,7 +204,7 @@ func TestMachineService_Create(t *testing.T) {
 		}
 		mockMachineRepo.AddMachine(existingMachine)
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		req := &CreateMachineRequest{
 			Name:          "test-machine", // Duplicate name
@@ -226,7 +226,7 @@ func TestMachineService_Create(t *testing.T) {
 		mockConnManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionServiceWithErrors(errors.New("encryption failed"), nil)
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		req := &CreateMachineRequest{
 			Name:          "test-machine",
@@ -249,7 +249,7 @@ func TestMachineService_Create(t *testing.T) {
 		mockConnManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		req := &CreateMachineRequest{
 			Name:          "test-machine",
@@ -272,7 +272,7 @@ func TestMachineService_Create(t *testing.T) {
 		mockConnManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		req := &CreateMachineRequest{
 			Name:          "test-machine",
@@ -321,7 +321,7 @@ func TestMachineService_GetMachineByID(t *testing.T) {
 		mockMachineRepo.AddMachine(testMachine)
 		mockAccessRepo.AddAccess(machineID, userID, models.PermissionAdmin, time.Now())
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Call GetMachineByID
 		machine, err := service.GetMachineByID(userID, machineID)
@@ -341,7 +341,7 @@ func TestMachineService_GetMachineByID(t *testing.T) {
 		mockConnManager := testutils.NewMockConnectionManager()
 		mockEncryption := testutils.NewMockEncryptionService()
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Call GetMachineByID for non-existent machine
 		machine, err := service.GetMachineByID(userID, "non-existent-machine")
@@ -372,7 +372,7 @@ func TestMachineService_GetMachineByID(t *testing.T) {
 		mockMachineRepo.AddMachine(testMachine)
 		// No access granted for our user
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Call GetMachineByID
 		machine, err := service.GetMachineByID(userID, machineID)
@@ -412,7 +412,7 @@ func TestMachineService_ListAllMachines(t *testing.T) {
 
 		mockMachineRepo.AddMachine(machine1)
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Call ListAllMachines
 		machines, err := service.ListAllMachines(userID)
@@ -446,7 +446,7 @@ func TestMachineService_AccessControl(t *testing.T) {
 		// Grant access
 		mockAccessRepo.AddAccess(machineID, userID, models.PermissionAdmin, time.Now())
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Test UserHasAccess
 		hasAccess, err := service.UserHasAccess(userID, machineID)
@@ -463,7 +463,7 @@ func TestMachineService_AccessControl(t *testing.T) {
 
 		// No access granted
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Test UserHasAccess
 		hasAccess, err := service.UserHasAccess(userID, machineID)

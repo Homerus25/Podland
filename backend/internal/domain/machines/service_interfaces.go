@@ -9,6 +9,17 @@ type EncryptionServiceInterface interface {
 	DecryptSSHKey(encryptedKey []byte) (string, error)
 }
 
+// sshInvalidator is the machines module's narrow consumer-side seam onto
+// the SSH-exec pool: machine deletion must tear down the machine's pooled
+// SSH client the same way it tears down the cached podman connection, but
+// none of the pool's other capability is this module's business. The real
+// sshexec.Service satisfies it with its public RemoveMachine (wired in
+// internal/app); the shared sshexec.SSHExecInterface is deliberately not
+// widened.
+type sshInvalidator interface {
+	RemoveMachine(machineID string)
+}
+
 // The connection seam is connections.Manager (internal/connections): every
 // domain, machines included, depends on that interface. SSH-exec capability
 // lives in internal/sshexec, not here: the existing machines tests already

@@ -19,7 +19,7 @@ import (
 func newUpdateTestService(callerID, permission string) (*MachineService, *testutils.MockMachineRepository, *testutils.MockMachineAccessRepository) {
 	machineRepo := testutils.NewMockMachineRepository()
 	accessRepo := testutils.NewMockMachineAccessRepository()
-	service := NewMachineService(machineRepo, accessRepo, testutils.NewMockConnectionManager(), testutils.NewMockEncryptionService())
+	service := NewMachineService(machineRepo, accessRepo, testutils.NewMockConnectionManager(), testutils.NewMockEncryptionService(), newFakeSSHInvalidator())
 	machineRepo.AddMachine(&models.Machine{
 		ID:                "machine-1",
 		Name:              "old-name",

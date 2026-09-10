@@ -22,20 +22,25 @@ type MachineService struct {
 	accessRepo  models.MachineAccessRepositoryInterface
 	conn        connections.Manager
 	encryption  EncryptionServiceInterface
+	sshPool     sshInvalidator
 }
 
-// NewMachineService creates a new MachineService
+// NewMachineService creates a new MachineService. sshPool is the SSH-exec
+// pool behind the sshInvalidator seam; production passes the real
+// sshexec.Service so machine deletion can invalidate its cached clients.
 func NewMachineService(
 	machineRepo MachineRepositoryInterface,
 	accessRepo models.MachineAccessRepositoryInterface,
 	conn connections.Manager,
 	encryption EncryptionServiceInterface,
+	sshPool sshInvalidator,
 ) *MachineService {
 	return &MachineService{
 		machineRepo: machineRepo,
 		accessRepo:  accessRepo,
 		conn:        conn,
 		encryption:  encryption,
+		sshPool:     sshPool,
 	}
 }
 
@@ -425,7 +430,16 @@ func (s *MachineService) ListAccess(callerID, machineID string) ([]*models.Machi
 	return s.accessRepo.ListByMachine(machineID)
 }
 
-// Delete deletes a machine by ID after verifying ownership
+// Delete deletes a machine by ID after verifying ownership, then tears
+// the machine out of the runtime caches in order: the connection cache's
+// RemoveMachine first (graceful: in-flight calls finish, and an
+// acquisition between the row delete and the eviction fails the machine
+// lookup with 502 CONNECTION_FAILED — the reverse race is the cache's
+// removed-during-acquisition error), then the SSH-exec pool's
+// invalidation. Teardown runs only after a successful DB delete, so a
+// failed delete never evicts a live machine's connection. Access rows are
+// not cleaned explicitly: machine_access cascades on machine deletion
+// (ON DELETE CASCADE, foreign keys on).
 func (s *MachineService) Delete(ctx context.Context, userID, machineID string) error {
 	// Get machine to verify it exists and user is owner
 	machine, err := s.machineRepo.GetByID(machineID)
@@ -445,6 +459,11 @@ func (s *MachineService) Delete(ctx context.Context, userID, machineID string) e
 	if err := s.machineRepo.Delete(machineID); err != nil {
 		return fmt.Errorf("failed to delete machine: %w", err)
 	}
+
+	// The row is gone: nothing may serve a fresh connection for this
+	// machine, and nothing pooled may outlive it.
+	s.conn.RemoveMachine(machineID)
+	s.sshPool.RemoveMachine(machineID)
 
 	return nil
 }

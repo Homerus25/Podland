@@ -167,6 +167,7 @@ type MockConnectionManager struct {
 	testConnectionCalls []MockTestConnectionCall
 	probeErr            error
 	probeCalls          []MockProbeCall
+	removeMachineCalls  []string
 }
 
 // The mock satisfies the full connections.Manager seam so services can
@@ -228,9 +229,19 @@ func (m *MockConnectionManager) WithConnection(ctx context.Context, userID, mach
 	return fn(mockConnectionContext())
 }
 
-// RemoveMachine mirrors the production seam: invalidating a machine's
-// cached connection is meaningless for a stateless mock, so it is a no-op.
+// RemoveMachine records the invalidation. MachineService.Delete must call
+// it after a successful DB delete; the recording lets service tests pin
+// the teardown ordering and the failed-delete-evicts-nothing rule.
 func (m *MockConnectionManager) RemoveMachine(machineID string) {
+	m.removeMachineCalls = append(m.removeMachineCalls, machineID)
+}
+
+// RemoveMachineCalls returns a snapshot of every RemoveMachine invocation,
+// in call order.
+func (m *MockConnectionManager) RemoveMachineCalls() []string {
+	out := make([]string, len(m.removeMachineCalls))
+	copy(out, m.removeMachineCalls)
+	return out
 }
 
 // Stop mirrors the production seam: the mock owns no background workers,

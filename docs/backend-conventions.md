@@ -16,7 +16,9 @@ closest sibling that already exists. Rulings so far:
   one `web.Handle` closure; identity/machine guards and error envelopes
   belong to the envelope and the subtree middleware, never to handlers.
   Every domain has migrated (volumes, containers, quadlets, secrets,
-  images, machines subtree). Exceptions that keep their own shape:
+  images, machines subtree): the subtree handlers are envelope closures
+  across the board, machines update/delete/status/access included.
+  Exceptions that keep their own shape:
   machines Create/List (outside the subtree, no machine ID).
 - **NDJSON streaming endpoints (the streaming envelope)** —
   `streaming.Begin` + `streaming.Run` (`internal/streaming/`) are the
@@ -96,9 +98,18 @@ closest sibling that already exists. Rulings so far:
   exercise real behaviour through a function-field fake engine
   (colocated in the domain's tests); an acquire failure is simulated by
   the fake provider returning `ErrConnectionFailed`. The machines
-  domain keeps calling `connections.Manager` directly — ProbeMachine,
-  TestConnection, and RemoveMachine are the manager's other entry
-  points.
+  domain keeps calling `connections.Manager` directly — ProbeMachine and
+  TestConnection are the manager's other entry points. Machine deletion
+  owns full teardown, wired in one place (`MachineService.Delete`):
+  DB row removal first, then the manager's `RemoveMachine` (graceful,
+  refcounted eviction of the cached podman connection), then the SSH-exec
+  pool through the machines-local `sshInvalidator` seam (a single
+  `RemoveMachine(machineID string)` method; the shared
+  `sshexec.SSHExecInterface` is not widened, and `internal/app` passes
+  the real sshexec service). Teardown runs only after a successful DB
+  delete — a failed delete evicts nothing — and access rows ride the
+  schema's `ON DELETE CASCADE`, so the delete path cleans them up only
+  implicitly.
 
 ## Duplication across domains
 
@@ -136,8 +147,10 @@ is incomplete.
   (`engine_fake_test.go`), plus service behaviour tests against the
   same fake engine — the handler-test pattern is the engine-seam shape
   and there is no per-domain service mock (see the handler contract
-  tests ruling above). `internal/testutils` keeps `MockConnectionManager`
-  for the machines domain, which still crosses the manager directly, and
+  tests ruling above). `internal/testutils` keeps
+  `MockConnectionManager` for the machines domain, which still crosses
+  the manager directly (its `RemoveMachine` records calls so service
+  tests can pin deletion teardown), and
   `MockSSHExec` for the quadlets lifecycle's systemctl-over-SSH seam.
 - Integration tests live in `test/integration/` behind the
   `integration` build tag, follow the run-scoped-tag isolation model

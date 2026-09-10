@@ -370,7 +370,7 @@ func TestMachineService_Delete(t *testing.T) {
 		mockMachineRepo.AddMachine(machine)
 
 		// Create service
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Execute
 		err := service.Delete(ctx, ownerID, machine.ID)
@@ -391,7 +391,7 @@ func TestMachineService_Delete(t *testing.T) {
 		mockEncryption := testutils.NewMockEncryptionService()
 
 		// Create service
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Execute
 		err := service.Delete(ctx, "user-123", "non-existent-machine-id")
@@ -415,7 +415,7 @@ func TestMachineService_Delete(t *testing.T) {
 		mockMachineRepo.AddMachine(machine)
 
 		// Create service
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Execute - try to delete as non-owner
 		err := service.Delete(ctx, nonOwnerID, machine.ID)
@@ -444,7 +444,7 @@ func TestMachineService_Delete(t *testing.T) {
 		mockMachineRepo.AddMachine(machine)
 
 		// Create service
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnectionManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Execute
 		err := service.Delete(ctx, ownerID, machine.ID)

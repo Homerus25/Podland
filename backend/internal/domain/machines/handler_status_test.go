@@ -50,7 +50,7 @@ func newStatusTestService(t *testing.T, machineID, ownerID, callerID string, pro
 	} else {
 		connManager = testutils.NewMockConnectionManager()
 	}
-	service := NewMachineService(machineRepo, accessRepo, connManager, testutils.NewMockEncryptionService())
+	service := NewMachineService(machineRepo, accessRepo, connManager, testutils.NewMockEncryptionService(), newFakeSSHInvalidator())
 	if machineID != "" {
 		machineRepo.AddMachine(&models.Machine{ID: machineID, Name: "m", OwnerID: ownerID})
 		accessRepo.AddAccess(machineID, callerID, models.PermissionRead, time.Now())

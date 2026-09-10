@@ -31,7 +31,7 @@ func TestMachineService_Status_ProbeSuccessIsOnline(t *testing.T) {
 
 	seedStatusMachine(t, machineRepo, accessRepo, "machine-1", "owner-1", "owner-1")
 
-	service := NewMachineService(machineRepo, accessRepo, connManager, encryption)
+	service := NewMachineService(machineRepo, accessRepo, connManager, encryption, newFakeSSHInvalidator())
 
 	status, checkedAt, err := service.GetMachineStatus(context.Background(), "owner-1", "machine-1")
 
@@ -48,7 +48,7 @@ func TestMachineService_Status_ProbeErrorIsOffline(t *testing.T) {
 
 	seedStatusMachine(t, machineRepo, accessRepo, "machine-1", "owner-1", "owner-1")
 
-	service := NewMachineService(machineRepo, accessRepo, connManager, encryption)
+	service := NewMachineService(machineRepo, accessRepo, connManager, encryption, newFakeSSHInvalidator())
 
 	status, checkedAt, err := service.GetMachineStatus(context.Background(), "owner-1", "machine-1")
 
@@ -65,7 +65,7 @@ func TestMachineService_Status_ProbeTimeoutIsOffline(t *testing.T) {
 
 	seedStatusMachine(t, machineRepo, accessRepo, "machine-1", "owner-1", "owner-1")
 
-	service := NewMachineService(machineRepo, accessRepo, connManager, encryption)
+	service := NewMachineService(machineRepo, accessRepo, connManager, encryption, newFakeSSHInvalidator())
 
 	status, _, err := service.GetMachineStatus(context.Background(), "owner-1", "machine-1")
 
@@ -79,7 +79,7 @@ func TestMachineService_Status_UnknownMachineIsNotFound(t *testing.T) {
 	connManager := testutils.NewMockConnectionManagerWithProbeError(errors.New("probe must not run"))
 	encryption := testutils.NewMockEncryptionService()
 
-	service := NewMachineService(machineRepo, accessRepo, connManager, encryption)
+	service := NewMachineService(machineRepo, accessRepo, connManager, encryption, newFakeSSHInvalidator())
 
 	_, _, err := service.GetMachineStatus(context.Background(), "owner-1", "missing")
 
@@ -95,7 +95,7 @@ func TestMachineService_Status_MissingAccessIsDenied(t *testing.T) {
 
 	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "m", OwnerID: "owner-1"})
 
-	service := NewMachineService(machineRepo, accessRepo, connManager, encryption)
+	service := NewMachineService(machineRepo, accessRepo, connManager, encryption, newFakeSSHInvalidator())
 
 	_, _, err := service.GetMachineStatus(context.Background(), "stranger-1", "machine-1")
 
@@ -111,7 +111,7 @@ func TestMachineService_Status_ProbeReceivesMachineAndUserIDs(t *testing.T) {
 
 	seedStatusMachine(t, machineRepo, accessRepo, "machine-1", "owner-1", "owner-1")
 
-	service := NewMachineService(machineRepo, accessRepo, connManager, encryption)
+	service := NewMachineService(machineRepo, accessRepo, connManager, encryption, newFakeSSHInvalidator())
 
 	_, _, err := service.GetMachineStatus(context.Background(), "owner-1", "machine-1")
 	require.NoError(t, err)

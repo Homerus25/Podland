@@ -19,7 +19,7 @@ func grantRequest(t *testing.T, body string) *httptest.ResponseRecorder {
 
 	machineRepo := testutils.NewMockMachineRepository()
 	accessRepo := testutils.NewMockMachineAccessRepository()
-	service := NewMachineHandler(NewMachineService(machineRepo, accessRepo, testutils.NewMockConnectionManager(), testutils.NewMockEncryptionService()))
+	service := NewMachineHandler(NewMachineService(machineRepo, accessRepo, testutils.NewMockConnectionManager(), testutils.NewMockEncryptionService(), newFakeSSHInvalidator()))
 	machineRepo.AddMachine(&models.Machine{
 		ID:        "machine-1",
 		Name:      "shared-machine",
@@ -64,7 +64,7 @@ func TestMachineHandler_GrantAccess(t *testing.T) {
 func TestMachineHandler_RevokeAccess_MissingUserID(t *testing.T) {
 	machineRepo := testutils.NewMockMachineRepository()
 	accessRepo := testutils.NewMockMachineAccessRepository()
-	service := NewMachineHandler(NewMachineService(machineRepo, accessRepo, testutils.NewMockConnectionManager(), testutils.NewMockEncryptionService()))
+	service := NewMachineHandler(NewMachineService(machineRepo, accessRepo, testutils.NewMockConnectionManager(), testutils.NewMockEncryptionService(), newFakeSSHInvalidator()))
 	machineRepo.AddMachine(&models.Machine{
 		ID:        "machine-1",
 		Name:      "shared-machine",

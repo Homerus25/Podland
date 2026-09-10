@@ -48,7 +48,7 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 			errors.New("dial tcp: connection refused"))
 		mockEncryption := testutils.NewMockEncryptionService()
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		machine, err := service.Create(ctx, userID, newReq())
 
@@ -82,7 +82,7 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 		mockConnManager := testutils.NewMockConnectionManagerWithTestError(context.DeadlineExceeded)
 		mockEncryption := testutils.NewMockEncryptionService()
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		machine, err := service.Create(ctx, userID, newReq())
 
@@ -113,7 +113,7 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 		req.Port = 0              // expect default 22 in the probe
 		req.PodmanSocketPath = "" // expect default /run/podman/podman.sock
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 		machine, err := service.Create(ctx, userID, req)
 		require.NoError(t, err)
 		require.NotNil(t, machine)
@@ -144,7 +144,7 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 		mockEncryption := testutils.NewMockEncryptionService()
 
 		req := newReq() // port 22, explicit socket
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		machine, err := service.Create(ctx, userID, req)
 		require.NoError(t, err)
@@ -186,7 +186,7 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 			OwnerID: userID,
 		})
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 		machine, err := service.Create(ctx, userID, newReq())
 
 		require.Error(t, err)
@@ -219,7 +219,7 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 			nil,
 		)
 
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 		_, err := service.Create(ctx, userID, newReq())
 		require.Error(t, err)
 

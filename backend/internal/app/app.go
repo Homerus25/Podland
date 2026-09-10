@@ -131,8 +131,10 @@ func New(cfg *config.Config) (*App, error) {
 		Encryption:  encryptionService,
 	})
 
-	// Initialize services
-	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService)
+	// Initialize services. sshExecService is handed to the machine service
+	// too: it satisfies the machines package's narrow sshInvalidator seam,
+	// so machine deletion can invalidate the machine's pooled SSH clients.
+	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService, sshExecService)
 	containerService := containers.NewContainerService(containers.NewContainerEngineProvider(connectionManager))
 	imageService := images.NewImageService(images.NewImageEngineProvider(connectionManager))
 	quadletService := quadlets.NewQuadletService(quadlets.NewQuadletEngineProvider(connectionManager), sshExecService)
