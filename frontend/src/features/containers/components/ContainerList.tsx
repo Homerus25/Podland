@@ -1,16 +1,4 @@
-import {
-	Box,
-	Button,
-	HStack,
-	Table,
-	TableContainer,
-	Tbody,
-	Td,
-	Text,
-	Th,
-	Thead,
-	Tr,
-} from "@chakra-ui/react";
+import { Box, Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
 import { CreateContainerForm } from "@features/containers/components/CreateContainerForm";
 import {
 	useContainers,
@@ -22,6 +10,7 @@ import {
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
 import { shortImageId } from "@shared/utils/format";
@@ -179,6 +168,10 @@ function ContainerRow({
 	);
 }
 
+// The Containers tab body. Containers have no permission concept: every
+// user sees the toolbar in every list state and no hint ever renders. The
+// toolbar/triad/table machinery and the derived testids are ResourceList's;
+// this adapter owns only the columns, the row, and the create/delete modals.
 export function ContainerList({ machineId }: { machineId: string }) {
 	const { data: containers, isPending, error } = useContainers(machineId);
 	const deleteContainer = useDeleteContainer(machineId);
@@ -189,62 +182,46 @@ export function ContainerList({ machineId }: { machineId: string }) {
 	const openLogs = useOpenContainerLogs(machineId);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 
-	if (isPending) {
-		return <Text data-testid="containers-loading">Loading containers…</Text>;
-	}
-
-	// The create action stays reachable even on an empty or errored list —
-	// creating the first container on a fresh machine is the primary flow.
 	return (
 		<>
-			<HStack justify="flex-end" mb={2}>
-				<Button
-					size="sm"
-					colorScheme="blue"
-					onClick={() => {
-						createContainer.reset();
-						setIsCreateOpen(true);
-					}}
-					data-testid="create-container-button"
-				>
-					Create container
-				</Button>
-			</HStack>
-			{error ? (
-				<ErrorDisplay error={getApiError(error)} />
-			) : !containers || containers.length === 0 ? (
-				<Text color="gray.500" data-testid="containers-empty">
-					No containers on this machine yet.
-				</Text>
-			) : (
-				<TableContainer>
-					<Table data-testid="containers-table" variant="simple">
-						<Thead>
-							<Tr>
-								<Th>Name</Th>
-								<Th>Image</Th>
-								<Th>State</Th>
-								<Th />
-								<Th />
-							</Tr>
-						</Thead>
-						<Tbody>
-							{containers.map((container) => (
-								<ContainerRow
-									key={container.id}
-									machineId={machineId}
-									container={container}
-									onDelete={(target) => {
-										deleteContainer.reset();
-										setPendingDelete(target);
-									}}
-									onShowLogs={openLogs}
-								/>
-							))}
-						</Tbody>
-					</Table>
-				</TableContainer>
-			)}
+			<ResourceList
+				resource="container"
+				isPending={isPending}
+				error={error}
+				items={containers}
+				columns={[
+					{ label: "Name" },
+					{ label: "Image" },
+					{ label: "State" },
+					{},
+					{},
+				]}
+				renderRow={(container) => (
+					<ContainerRow
+						key={container.id}
+						machineId={machineId}
+						container={container}
+						onDelete={(target) => {
+							deleteContainer.reset();
+							setPendingDelete(target);
+						}}
+						onShowLogs={openLogs}
+					/>
+				)}
+				toolbar={
+					<Button
+						size="sm"
+						colorScheme="blue"
+						onClick={() => {
+							createContainer.reset();
+							setIsCreateOpen(true);
+						}}
+						data-testid="create-container-button"
+					>
+						Create container
+					</Button>
+				}
+			/>
 			{pendingDelete ? (
 				<DeleteContainerModal
 					container={pendingDelete}

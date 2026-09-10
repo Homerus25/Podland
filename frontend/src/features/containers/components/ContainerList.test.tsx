@@ -119,32 +119,4 @@ describe("ContainerList", () => {
 
 		expect(screen.getByTestId("containers-loading")).toBeInTheDocument();
 	});
-
-	it("shows an explanatory empty state when the machine has no containers", async () => {
-		mockContainers([]);
-		renderContainerList();
-
-		const empty = await screen.findByTestId("containers-empty");
-		expect(empty.textContent).toMatch(/no containers/i);
-		expect(screen.queryByTestId("container-row")).not.toBeInTheDocument();
-	});
-
-	it("renders the backend error envelope with code and message", async () => {
-		server.use(
-			http.get("*/api/machines/m-1/containers", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-11",
-						error: { message: "Machine not found", code: "MACHINE_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
-			),
-		);
-		renderContainerList();
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("MACHINE_NOT_FOUND")).toBeInTheDocument();
-		expect(screen.getByText("Machine not found")).toBeInTheDocument();
-	});
 });
