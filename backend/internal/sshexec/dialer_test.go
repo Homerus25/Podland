@@ -162,6 +162,111 @@ func TestSSHDialer_Invalidate_DropsEntryAndClosesClient(t *testing.T) {
 	assert.Len(t, d.clients, 0)
 }
 
+// --- RemoveMachine: graceful invalidation (mirrors connections.Manager) ---
+
+// newRecordingDialer builds an sshDialer whose fake dialSSH hands out one
+// fakeSSHClient per machineID, recording them for close-count assertions.
+func newRecordingDialer(maxSize int) (*sshDialer, map[string]*fakeSSHClient) {
+	clients := make(map[string]*fakeSSHClient)
+	d := newTestDialer(maxSize)
+	d.dialSSH = func(_ context.Context, machineID string) (sshClient, error) {
+		c := &fakeSSHClient{}
+		clients[machineID] = c
+		return c, nil
+	}
+	return d, clients
+}
+
+func TestSSHDialer_RemoveMachine_WaitsForInFlightRunnersBeforeClosing(t *testing.T) {
+	// The graceful-removal contract (CONTEXT.md §4): in-flight execs run to
+	// completion; the client closes when the LAST in-flight exec releases.
+	d, clients := newRecordingDialer(10)
+	ctx := context.Background()
+
+	r1, err := d.Dial(ctx, "m1") // in-flight exec #1
+	assert.NoError(t, err)
+	r2, err := d.Dial(ctx, "m1") // in-flight exec #2 (same cached client)
+	assert.NoError(t, err)
+
+	d.RemoveMachine("m1")
+
+	assert.NotContains(t, d.clients, "m1", "removal must drop the entry immediately")
+	assert.Equal(t, int32(0), clients["m1"].closes.Load(),
+		"in-flight execs must keep the client open after removal")
+
+	r1.Close()
+	assert.Equal(t, int32(0), clients["m1"].closes.Load(),
+		"client must stay open while another exec is still in flight")
+
+	r2.Close()
+	assert.Equal(t, int32(1), clients["m1"].closes.Load(),
+		"client must close exactly when the last in-flight exec releases")
+}
+
+func TestSSHDialer_RemoveMachine_ClosesIdleClientImmediately(t *testing.T) {
+	d, clients := newRecordingDialer(10)
+
+	r, err := d.Dial(context.Background(), "m1")
+	assert.NoError(t, err)
+	r.Close() // exec finished before removal: the entry is idle
+
+	d.RemoveMachine("m1")
+
+	assert.NotContains(t, d.clients, "m1")
+	assert.Equal(t, int32(1), clients["m1"].closes.Load(),
+		"an idle entry's client must close immediately on removal")
+}
+
+func TestSSHDialer_RemoveMachine_UnknownMachineIsNoOp(t *testing.T) {
+	d, _ := newRecordingDialer(10)
+
+	assert.NotPanics(t, func() { d.RemoveMachine("no-such-machine") })
+	assert.Empty(t, d.clients)
+}
+
+func TestSSHDialer_RemoveMachine_LaterExecDialsAFreshClient(t *testing.T) {
+	// No tombstone: after removal, the next exec for the machine dials
+	// again (it fails on the gone machine row — that pinning belongs to
+	// slice 300-5). The fresh entry must be live, not dead.
+	d, clients := newRecordingDialer(10)
+
+	r, err := d.Dial(context.Background(), "m1")
+	assert.NoError(t, err)
+	r.Close()
+
+	d.RemoveMachine("m1")
+
+	r2, err := d.Dial(context.Background(), "m1")
+	assert.NoError(t, err)
+	assert.Equal(t, 2, d.dialCount, "post-removal Dial must dial again")
+	assert.Contains(t, d.clients, "m1")
+
+	e := d.clients["m1"]
+	assert.False(t, e.dead, "the fresh entry must be live (no tombstone)")
+	assert.Equal(t, 1, e.refCount)
+	assert.Same(t, clients["m1"], e.client.(*fakeSSHClient),
+		"the fresh dial's client must be cached, not the removed one")
+
+	r2.Close()
+	assert.Equal(t, int32(0), clients["m1"].closes.Load(),
+		"releasing the fresh runner must not close a removed machine's old client")
+}
+
+func TestSSHDialer_RemoveMachine_IsIdempotent(t *testing.T) {
+	d, clients := newRecordingDialer(10)
+
+	r, err := d.Dial(context.Background(), "m1")
+	assert.NoError(t, err)
+	r.Close()
+
+	d.RemoveMachine("m1")
+	d.RemoveMachine("m1")
+
+	assert.Equal(t, int32(1), clients["m1"].closes.Load(),
+		"repeat removal must not close the client twice")
+	assert.NotContains(t, d.clients, "m1")
+}
+
 func TestSSHDialer_Cleanup_DropsIdleEntriesBeyondIdleTimeout(t *testing.T) {
 	d := newTestDialer(10)
 	var inserted *fakeSSHClient

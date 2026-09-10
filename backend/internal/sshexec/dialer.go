@@ -21,8 +21,16 @@ type dialer interface {
 	Dial(ctx context.Context, machineID string) (sessionRunner, error)
 	// Invalidate drops the cached sshClient for the given machine so the
 	// next Dial re-dials. Called by the Service after a real session
-	// failure (the cached client is likely stale).
+	// failure (the cached client is likely stale). Fail-fast: the client
+	// closes even if a call is mid-flight (short-lived execs; the affected
+	// call surfaces the close as a session failure).
 	Invalidate(machineID string)
+	// RemoveMachine invalidates a machine's cached sshClient gracefully
+	// (mirrors connections.Manager.RemoveMachine): the entry leaves the
+	// cache immediately, in-flight execs finish on the client they already
+	// hold, and the client closes when the last of them releases. Used at
+	// machine-deletion time so no live SSH session outlives the machine.
+	RemoveMachine(machineID string)
 	// Close stops any background goroutines owned by the dialer (the
 	// cleanup loop) and releases cached clients. It must be safe to call
 	// multiple times. Used by Service.Close so internal/app.App.Close can
@@ -44,8 +52,9 @@ type sessionRunner interface {
 	// output line as it arrives (tagged with its stream) while still
 	// capturing the full result. Same error semantics as Run.
 	RunStream(ctx context.Context, cmd string, onLine func(OutputLine)) (ExecResult, error)
-	// Close releases any per-call resources (the underlying sshClient is
-	// managed by the dialer cache and is NOT closed here).
+	// Close releases this exec's hold on the cached client (the reference
+	// taken by Dial). For a machine removed via RemoveMachine, the last
+	// release closes the client — the graceful teardown.
 	Close() error
 }
 
@@ -100,6 +109,13 @@ type sshDialer struct {
 type sshClientEntry struct {
 	client   sshClient
 	lastUsed time.Time
+	// refCount counts the sessionRunners handed out for this client that
+	// have not released yet (one per in-flight Exec/ExecStream).
+	refCount int
+	// dead marks an entry removed by RemoveMachine: it serves no new
+	// users (it already left the map) and closes its client as soon as
+	// the last in-flight exec releases — the graceful teardown.
+	dead bool
 }
 
 // sshDialerConfig configures an sshDialer.
@@ -134,13 +150,16 @@ func newSSHDialer(cfg sshDialerConfig) *sshDialer {
 // Dial returns a sessionRunner for machineID. On a cache miss it dials a new
 // sshClient (and may evict the LRU entry first if the cache is full).
 // On a cache hit the existing client is reused and lastUsed is bumped.
+// Each Dial takes one reference on the entry, released by the returned
+// runner's Close — that is what lets RemoveMachine wait out in-flight execs.
 func (d *sshDialer) Dial(ctx context.Context, machineID string) (sessionRunner, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if entry, ok := d.clients[machineID]; ok {
 		entry.lastUsed = time.Now()
-		return &sshSessionRunner{client: entry.client}, nil
+		entry.refCount++
+		return d.runnerFor(entry), nil
 	}
 
 	if len(d.clients) >= d.maxSize {
@@ -152,8 +171,16 @@ func (d *sshDialer) Dial(ctx context.Context, machineID string) (sessionRunner, 
 		return nil, err
 	}
 	d.dialCount++
-	d.clients[machineID] = &sshClientEntry{client: client, lastUsed: time.Now()}
-	return &sshSessionRunner{client: client}, nil
+	entry := &sshClientEntry{client: client, lastUsed: time.Now(), refCount: 1}
+	d.clients[machineID] = entry
+	return d.runnerFor(entry), nil
+}
+
+// runnerFor wraps an entry's client in a sessionRunner bound back to this
+// dialer, so the runner's Close releases the exec's hold on the entry (and
+// closes a removed machine's client once the last hold is gone).
+func (d *sshDialer) runnerFor(e *sshClientEntry) *sshSessionRunner {
+	return &sshSessionRunner{dialer: d, entry: e, client: e.client}
 }
 
 // Invalidate closes and drops the cached sshClient for machineID. Safe to
@@ -165,6 +192,27 @@ func (d *sshDialer) Invalidate(machineID string) {
 		_ = entry.client.Close()
 		delete(d.clients, machineID)
 	}
+}
+
+// RemoveMachine invalidates a machine's cached sshClient gracefully: the
+// entry leaves the cache immediately (a later exec simply dials again), and
+// the client closes as soon as the last in-flight exec releases — an exec
+// already running on the machine finishes untouched. Unknown machines are a
+// no-op. Mirrors connections.Manager.RemoveMachine.
+func (d *sshDialer) RemoveMachine(machineID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	entry, ok := d.clients[machineID]
+	if !ok {
+		return
+	}
+	delete(d.clients, machineID)
+	entry.dead = true
+	if entry.refCount <= 0 {
+		_ = entry.client.Close()
+	}
+	// In-flight execs hold their runners: the client closes when the last
+	// of them releases (sshSessionRunner.Close).
 }
 
 // Close stops the cleanup goroutine (blocking until it has exited) and
@@ -299,9 +347,11 @@ func (d *sshDialer) dialSSHProd(ctx context.Context, machineID string) (sshClien
 	return ssh.NewClient(sshConn, chans, reqs), nil
 }
 
-// sshSessionRunner is the production sessionRunner. It wraps a single
-// sshClient; each Run opens a fresh *ssh.Session.
+// sshSessionRunner is the production sessionRunner. It wraps one cached
+// sshClient on behalf of a single exec; each Run opens a fresh *ssh.Session.
 type sshSessionRunner struct {
+	dialer *sshDialer
+	entry  *sshClientEntry
 	client sshClient
 }
 
@@ -377,7 +427,15 @@ func (r *sshSessionRunner) RunStream(ctx context.Context, cmd string, onLine fun
 }
 
 func (r *sshSessionRunner) Close() error {
-	// The sshClient is owned by the dialer cache; nothing to free here.
+	// Release this exec's hold on the cached entry. A removed machine's
+	// (dead) entry closes its client here when the last in-flight exec
+	// lets go — that is RemoveMachine's graceful teardown.
+	r.dialer.mu.Lock()
+	defer r.dialer.mu.Unlock()
+	r.entry.refCount--
+	if r.entry.refCount <= 0 && r.entry.dead {
+		_ = r.entry.client.Close()
+	}
 	return nil
 }
 

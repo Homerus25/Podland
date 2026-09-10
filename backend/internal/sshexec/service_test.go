@@ -61,6 +61,7 @@ type fakeDialer struct {
 	dialErr    error
 
 	invalidated []string
+	removed     []string
 
 	// dialCount lets tests assert how many real dials happened (cache
 	// hit/miss behaviour at the Service level).
@@ -83,6 +84,12 @@ func (d *fakeDialer) Invalidate(machineID string) {
 	d.invalidated = append(d.invalidated, machineID)
 }
 
+func (d *fakeDialer) RemoveMachine(machineID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.removed = append(d.removed, machineID)
+}
+
 // Close satisfies the dialer interface. The fake never starts a cleanup
 // goroutine, so this is a no-op that must be safe to call repeatedly —
 // internal/app.App.Close may call it more than once.
@@ -94,6 +101,15 @@ func (d *fakeDialer) Invalidated() []string {
 	defer d.mu.Unlock()
 	out := make([]string, len(d.invalidated))
 	copy(out, d.invalidated)
+	return out
+}
+
+// Removed returns a snapshot of the machine IDs passed to RemoveMachine.
+func (d *fakeDialer) Removed() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]string, len(d.removed))
+	copy(out, d.removed)
 	return out
 }
 
@@ -270,6 +286,21 @@ func TestService_Exec_ContextCancellationDuringRun(t *testing.T) {
 	<-runner.started
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Equal(t, ExecResult{}, res)
+}
+
+// --- Service.RemoveMachine ---
+
+func TestService_RemoveMachine_DelegatesToDialer(t *testing.T) {
+	// The machines domain tears machines down through this public method
+	// (slice 300-5); it must reach the pool's graceful removal, not the
+	// fail-fast Invalidate.
+	d := &fakeDialer{}
+	svc := newServiceWithDialer(d)
+
+	svc.RemoveMachine("machine-1")
+
+	assert.Equal(t, []string{"machine-1"}, d.Removed())
+	assert.Empty(t, d.Invalidated())
 }
 
 // --- Service.Close ---

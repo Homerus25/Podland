@@ -179,5 +179,15 @@ func shellQuote(command string, args []string) string {
 	return b.String()
 }
 
+// RemoveMachine tears a machine out of the SSH-exec pool gracefully
+// (mirrors connections.Manager.RemoveMachine's vocabulary and contract):
+// the cached SSH client for machineID closes as soon as the last in-flight
+// exec releases it, and a later exec for the machine simply dials again.
+// Unknown machines are a no-op. Called by the machines module at deletion
+// time so no live SSH session outlives the machine row.
+func (s *Service) RemoveMachine(machineID string) {
+	s.dialer.RemoveMachine(machineID)
+}
+
 // (the real sshDialer / sessionRunner types live in dialer.go; the dialer
 // interface is declared there to keep this file focused on the Service.)
