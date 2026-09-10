@@ -75,14 +75,16 @@ async function openPruneModal(
 describe("ImageList prune", () => {
 	beforeEach(resetCounters);
 
-	it("hides the prune action from read-level users", async () => {
+	it("hides the pull form and the prune action from read-level users", async () => {
 		installHandlers();
 		renderImageList("read");
 
 		await screen.findByText("docker.io/library/nginx:1.27");
 
 		expect(screen.queryByTestId("prune-images-button")).not.toBeInTheDocument();
-		expect(screen.getByTestId("images-permission-hint")).toBeInTheDocument();
+		expect(screen.queryByTestId("pull-image-form")).not.toBeInTheDocument();
+		const hint = screen.getByTestId("images-permission-hint");
+		expect(hint).toHaveAttribute("data-permission", "read");
 		expect(pruneRequests.count).toBe(0);
 	});
 

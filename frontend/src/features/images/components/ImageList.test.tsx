@@ -89,7 +89,7 @@ describe("ImageList", () => {
 		expect(await screen.findByText("3 days ago")).toBeInTheDocument();
 	});
 
-	it("shows a loading state before images arrive", async () => {
+	it("shows a loading state before images arrive, with the toolbar still above it", async () => {
 		server.use(
 			http.get("*/api/machines/m-1/images", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
@@ -99,6 +99,8 @@ describe("ImageList", () => {
 		renderImageList();
 
 		expect(screen.getByTestId("images-loading")).toBeInTheDocument();
+		expect(screen.getByTestId("pull-image-form")).toBeInTheDocument();
+		expect(screen.getByTestId("prune-images-button")).toBeInTheDocument();
 	});
 
 	it("shows an explanatory empty state when the machine has no images", async () => {
@@ -109,49 +111,9 @@ describe("ImageList", () => {
 
 		const empty = await screen.findByTestId("images-empty");
 		expect(empty.textContent).toMatch(/no images/i);
+		expect(empty.textContent).toMatch(/pull one to get started/i);
+		expect(screen.getByTestId("pull-image-form")).toBeInTheDocument();
 		expect(screen.queryByTestId("image-row")).not.toBeInTheDocument();
-	});
-
-	it("renders the backend error envelope with code and message", async () => {
-		server.use(
-			http.get("*/api/machines/m-1/images", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-9",
-						error: {
-							message: "SSH connection failed",
-							code: "MACHINE_UNREACHABLE",
-						},
-					},
-					{ status: 502 },
-				),
-			),
-		);
-		renderImageList();
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(
-			screen.getByText("An unexpected error occurred"),
-		).toBeInTheDocument();
-	});
-
-	it("shows the machine-scoped error message for client errors", async () => {
-		server.use(
-			http.get("*/api/machines/m-1/images", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-10",
-						error: { message: "Machine not found", code: "MACHINE_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
-			),
-		);
-		renderImageList();
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("MACHINE_NOT_FOUND")).toBeInTheDocument();
-		expect(screen.getByText("Machine not found")).toBeInTheDocument();
 	});
 });
 

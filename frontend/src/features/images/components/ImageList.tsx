@@ -1,7 +1,6 @@
 import {
 	Box,
 	Button,
-	Flex,
 	Table,
 	TableContainer,
 	Tbody,
@@ -27,6 +26,7 @@ import {
 } from "@features/machines/permissions";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { ResourceList } from "@shared/components/ResourceList";
 import { getApiError } from "@shared/utils/api";
 import {
 	formatBytes,
@@ -210,6 +210,12 @@ function PruneImagesModal({
 	);
 }
 
+// The Images tab body. The toolbar/triad/table machinery, the plural testids,
+// and the hint swap are ResourceList's; this adapter owns only the columns,
+// the row, and the pull/prune/delete feature code. The pull form is a write,
+// so it rides the gated toolbar: a flex box first keeps it left-aligned with
+// the prune button right-aligned, and below manage level the module swaps the
+// whole toolbar for the canonical read hint.
 export function ImageList({
 	machineId,
 	permission,
@@ -224,31 +230,54 @@ export function ImageList({
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const canManage = canManageImages(permission);
 
-	if (isPending) {
-		return <Text data-testid="images-loading">Loading images…</Text>;
-	}
-	if (error) {
-		return <ErrorDisplay error={getApiError(error)} />;
-	}
-	if (!images || images.length === 0) {
-		return (
-			<Text color="gray.500" data-testid="images-empty">
-				No images on this machine yet. Pull one to get started.
-			</Text>
-		);
-	}
-
 	return (
 		<>
-			<Flex gap={2} align="flex-start">
-				<Box flex={1}>
-					<PullImageForm machineId={machineId} />
-				</Box>
-				{canManage ? (
+			<ResourceList
+				resource="image"
+				isPending={isPending}
+				error={error}
+				items={images}
+				columns={[
+					{ label: "Tag" },
+					{ label: "Image ID" },
+					{ label: "Size", isNumeric: true },
+					{ label: "Created" },
+					{},
+				]}
+				renderRow={(image) => (
+					<Tr key={image.id} data-testid="image-row">
+						<Td fontFamily="mono">{displayTags(image)}</Td>
+						<Td fontFamily="mono" color="gray.500">
+							{shortImageId(image.id)}
+						</Td>
+						<Td isNumeric>{formatBytes(image.size)}</Td>
+						<Td>{formatRelativeDate(image.createdAt)}</Td>
+						<Td>
+							<Button
+								size="xs"
+								colorScheme="red"
+								variant="outline"
+								aria-label={`Delete ${displayTags(image)}`}
+								onClick={() => {
+									deleteImage.reset();
+									setPendingDelete(image);
+								}}
+							>
+								Delete
+							</Button>
+						</Td>
+					</Tr>
+				)}
+				toolbar={[
+					<Box key="pull-image-form" flex={1}>
+						<PullImageForm machineId={machineId} />
+					</Box>,
 					<Button
+						key="prune-images-button"
 						size="sm"
 						colorScheme="red"
 						variant="outline"
+						alignSelf="flex-start"
 						onClick={() => {
 							pruneImages.reset();
 							setIsPruneOpen(true);
@@ -256,57 +285,11 @@ export function ImageList({
 						data-testid="prune-images-button"
 					>
 						Delete unused images
-					</Button>
-				) : (
-					<Text
-						color="gray.500"
-						alignSelf="center"
-						data-testid="images-permission-hint"
-					>
-						You have read-only access to this machine. Ask an owner or admin for
-						write access to delete its unused images.
-					</Text>
-				)}
-			</Flex>
-			<TableContainer>
-				<Table data-testid="images-table" variant="simple">
-					<Thead>
-						<Tr>
-							<Th>Tag</Th>
-							<Th>Image ID</Th>
-							<Th isNumeric>Size</Th>
-							<Th>Created</Th>
-							<Th />
-						</Tr>
-					</Thead>
-					<Tbody>
-						{images.map((image) => (
-							<Tr key={image.id} data-testid="image-row">
-								<Td fontFamily="mono">{displayTags(image)}</Td>
-								<Td fontFamily="mono" color="gray.500">
-									{shortImageId(image.id)}
-								</Td>
-								<Td isNumeric>{formatBytes(image.size)}</Td>
-								<Td>{formatRelativeDate(image.createdAt)}</Td>
-								<Td>
-									<Button
-										size="xs"
-										colorScheme="red"
-										variant="outline"
-										aria-label={`Delete ${displayTags(image)}`}
-										onClick={() => {
-											deleteImage.reset();
-											setPendingDelete(image);
-										}}
-									>
-										Delete
-									</Button>
-								</Td>
-							</Tr>
-						))}
-					</Tbody>
-				</Table>
-			</TableContainer>
+					</Button>,
+				]}
+				canManage={canManage}
+				emptyMessage="No images on this machine yet. Pull one to get started."
+			/>
 			{isPruneOpen ? (
 				<PruneImagesModal
 					onClose={() => {

@@ -42,14 +42,14 @@ function renderForm() {
 	);
 }
 
-// The pull form lives inside the Images tab next to the list it refreshes.
+// The pull form lives inside the Images tab's toolbar in every list state,
+// next to the list it refreshes.
 function renderTab() {
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
 	render(
 		<QueryClientProvider client={queryClient}>
-			<PullImageForm machineId="m-1" />
 			<ImageList machineId="m-1" permission="admin" />
 		</QueryClientProvider>,
 	);
