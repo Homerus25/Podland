@@ -558,22 +558,9 @@ func TestMachineService_AccessControl(t *testing.T) {
 		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
 
 		// Test UserHasAccess
-		hasAccess := service.UserHasAccess(userID, machineID)
+		hasAccess, err := service.UserHasAccess(userID, machineID)
+		require.NoError(t, err)
 		assert.True(t, hasAccess, "User should have access to the machine")
-	})
-
-	t.Run("UserHasAccess - user does not have access", func(t *testing.T) {
-		// Setup mocks
-		mockMachineRepo := testutils.NewMockMachineRepository()
-		mockAccessRepo := testutils.NewMockMachineAccessRepositoryWithErrors(nil, nil, nil, nil, nil, nil, errors.New("hasAccess error"))
-		mockConnManager := testutils.NewMockConnectionManager()
-		mockEncryption := testutils.NewMockEncryptionService()
-
-		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
-
-		// Test UserHasAccess with error - should return false
-		hasAccess := service.UserHasAccess(userID, machineID)
-		assert.False(t, hasAccess, "User should not have access when there's an error")
 	})
 
 	t.Run("UserHasAccess - user has no access records", func(t *testing.T) {
@@ -588,7 +575,8 @@ func TestMachineService_AccessControl(t *testing.T) {
 		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption)
 
 		// Test UserHasAccess
-		hasAccess := service.UserHasAccess(userID, machineID)
+		hasAccess, err := service.UserHasAccess(userID, machineID)
+		require.NoError(t, err)
 		assert.False(t, hasAccess, "User should not have access to the machine")
 	})
 

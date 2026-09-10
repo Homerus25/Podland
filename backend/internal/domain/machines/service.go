@@ -5,6 +5,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -210,13 +211,12 @@ func IsValidPEM(key string) bool {
 	return false
 }
 
-// UserHasAccess checks if a user has access to a machine
-func (s *MachineService) UserHasAccess(userID, machineID string) bool {
-	hasAccess, err := s.accessRepo.HasAccess(machineID, userID)
-	if err != nil {
-		return false
-	}
-	return hasAccess
+// UserHasAccess reports whether the user has an access row on the
+// machine. A failing access lookup surfaces as an error — callers map it
+// to 500 INTERNAL_ERROR — never as "no access": a broken database must
+// not silently answer a 403 authorization decision.
+func (s *MachineService) UserHasAccess(userID, machineID string) (bool, error) {
+	return s.accessRepo.HasAccess(machineID, userID)
 }
 
 // NameExistsForUser checks if a machine name already exists for a user
@@ -234,8 +234,13 @@ func (s *MachineService) GetMachineByID(userID, machineID string) (*models.Machi
 		return nil, errors.ErrMachineNotFound
 	}
 
-	// Check if user has access to the machine
-	if !s.UserHasAccess(userID, machineID) {
+	// Check if user has access to the machine. A failing lookup is a
+	// storage error (500), not a denial.
+	hasAccess, err := s.UserHasAccess(userID, machineID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check machine access: %w", err)
+	}
+	if !hasAccess {
 		return nil, errors.ErrAccessDenied
 	}
 
@@ -347,6 +352,92 @@ func (s *MachineService) Update(ctx context.Context, userID, machineID string, r
 	}
 
 	return machine, nil
+}
+
+// GrantAccessRequest represents a request to grant access to a machine
+type GrantAccessRequest struct {
+	UserID     string `json:"userId"`
+	Permission string `json:"permission"`
+}
+
+// GrantAccess grants a user access to a machine. Only the owner may
+// grant; the permission must be read, write, or admin; an existing
+// access row for the target user is a client error. DB failures from
+// the lookups and the write propagate to the envelope's 500 fallback.
+func (s *MachineService) GrantAccess(grantorID, machineID string, req *GrantAccessRequest) (*models.MachineAccess, error) {
+	if req.Permission != models.PermissionRead && req.Permission != models.PermissionWrite && req.Permission != models.PermissionAdmin {
+		return nil, errors.NewAppError("INVALID_PERMISSION", "Permission must be read, write, or admin", http.StatusBadRequest)
+	}
+
+	machine, err := s.machineRepo.GetByID(machineID)
+	if err != nil {
+		return nil, err
+	}
+	if machine == nil {
+		return nil, errors.ErrMachineNotFound
+	}
+
+	if machine.OwnerID != grantorID {
+		return nil, errors.ErrAccessDenied
+	}
+
+	existingAccess, err := s.accessRepo.GetByMachineAndUser(machineID, req.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if existingAccess != nil {
+		return nil, errors.ErrAccessAlreadyGranted
+	}
+
+	access := &models.MachineAccess{
+		MachineID:  machineID,
+		UserID:     req.UserID,
+		Permission: req.Permission,
+		GrantedAt:  time.Now().UTC(),
+	}
+
+	if err := s.accessRepo.Create(access); err != nil {
+		return nil, err
+	}
+
+	return access, nil
+}
+
+// RevokeAccess revokes a user's access to a machine. Only the owner may
+// revoke, and the owner's own access cannot be revoked. DB failures
+// propagate to the envelope's 500 fallback.
+func (s *MachineService) RevokeAccess(revokerID, machineID, targetUserID string) error {
+	machine, err := s.machineRepo.GetByID(machineID)
+	if err != nil {
+		return err
+	}
+	if machine == nil {
+		return errors.ErrMachineNotFound
+	}
+
+	if machine.OwnerID != revokerID {
+		return errors.ErrAccessDenied
+	}
+	if targetUserID == revokerID {
+		return errors.ErrCannotRevokeOwner
+	}
+
+	return s.accessRepo.Delete(machineID, targetUserID)
+}
+
+// ListAccess lists a machine's access rows after re-checking the
+// caller's own access (read level suffices). DB failures from the
+// re-check and the listing propagate to the envelope's 500 fallback.
+func (s *MachineService) ListAccess(callerID, machineID string) ([]*models.MachineAccess, error) {
+	hasAccess, err := s.UserHasAccess(callerID, machineID)
+	if err != nil {
+		return nil, err
+	}
+	if !hasAccess {
+		return nil, errors.ErrAccessDenied
+	}
+
+	return s.accessRepo.ListByMachine(machineID)
 }
 
 // Delete deletes a machine by ID after verifying ownership

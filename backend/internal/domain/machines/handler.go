@@ -8,7 +8,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"github.com/go-chi/chi/v5"
 )
@@ -163,11 +162,7 @@ type AccessResponse struct {
 // gate, the service re-checks the caller's access row.
 func (h *MachineHandler) ListAccess(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]AccessResponse, error) {
-		if !h.service.UserHasAccess(userID, machineID) {
-			return nil, errors.ErrAccessDenied
-		}
-
-		accesses, err := h.service.accessRepo.ListByMachine(machineID)
+		accesses, err := h.service.ListAccess(userID, machineID)
 		if err != nil {
 			return nil, err
 		}
@@ -184,14 +179,9 @@ func (h *MachineHandler) ListAccess(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GrantAccessRequest represents a request to grant access to a machine
-type GrantAccessRequest struct {
-	UserID     string `json:"userId"`
-	Permission string `json:"permission"`
-}
-
-// GrantAccess handles granting access to a user. Only the owner may
-// grant, and an existing access row is a client error.
+// GrantAccess handles granting access to a user. The grant rules —
+// owner-only, valid permission, no duplicates — live in the service; the
+// handler decodes the body and maps the response.
 func (h *MachineHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, grantorID, machineID string) (AccessResponse, error) {
 		var req GrantAccessRequest
@@ -199,38 +189,8 @@ func (h *MachineHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 			return AccessResponse{}, errors.NewAppError("INVALID_REQUEST", err.Error(), http.StatusBadRequest)
 		}
 
-		if req.Permission != models.PermissionRead && req.Permission != models.PermissionWrite && req.Permission != models.PermissionAdmin {
-			return AccessResponse{}, errors.NewAppError("INVALID_PERMISSION", "Permission must be read, write, or admin", http.StatusBadRequest)
-		}
-
-		machine, err := h.service.machineRepo.GetByID(machineID)
+		access, err := h.service.GrantAccess(grantorID, machineID, &req)
 		if err != nil {
-			return AccessResponse{}, err
-		}
-		if machine == nil {
-			return AccessResponse{}, errors.ErrMachineNotFound
-		}
-
-		if machine.OwnerID != grantorID {
-			return AccessResponse{}, errors.ErrAccessDenied
-		}
-
-		existingAccess, err := h.service.accessRepo.GetByMachineAndUser(machineID, req.UserID)
-		if err != nil {
-			return AccessResponse{}, err
-		}
-		if existingAccess != nil {
-			return AccessResponse{}, errors.ErrAccessAlreadyGranted
-		}
-
-		access := &models.MachineAccess{
-			MachineID:  machineID,
-			UserID:     req.UserID,
-			Permission: req.Permission,
-			GrantedAt:  time.Now().UTC(),
-		}
-
-		if err := h.service.accessRepo.Create(access); err != nil {
 			return AccessResponse{}, err
 		}
 
@@ -242,8 +202,9 @@ func (h *MachineHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// RevokeAccess handles revoking access from a user. Only the owner may
-// revoke, and the owner's own access cannot be revoked.
+// RevokeAccess handles revoking access from a user. The revoke rules —
+// owner-only, no self-revoke — live in the service; the handler reads
+// the URL param and crosses the envelope.
 func (h *MachineHandler) RevokeAccess(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, revokerID, machineID string) (struct{}, error) {
 		targetUserID := chi.URLParam(r, "userId")
@@ -251,21 +212,6 @@ func (h *MachineHandler) RevokeAccess(w http.ResponseWriter, r *http.Request) {
 			return struct{}{}, errors.NewAppError("MISSING_USER_ID", "User ID is required", http.StatusBadRequest)
 		}
 
-		machine, err := h.service.machineRepo.GetByID(machineID)
-		if err != nil {
-			return struct{}{}, err
-		}
-		if machine == nil {
-			return struct{}{}, errors.ErrMachineNotFound
-		}
-
-		if machine.OwnerID != revokerID {
-			return struct{}{}, errors.ErrAccessDenied
-		}
-		if targetUserID == revokerID {
-			return struct{}{}, errors.ErrCannotRevokeOwner
-		}
-
-		return struct{}{}, h.service.accessRepo.Delete(machineID, targetUserID)
+		return struct{}{}, h.service.RevokeAccess(revokerID, machineID, targetUserID)
 	})
 }
