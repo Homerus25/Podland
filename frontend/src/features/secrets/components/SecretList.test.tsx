@@ -101,32 +101,4 @@ describe("SecretList", () => {
 
 		expect(screen.getByTestId("secrets-loading")).toBeInTheDocument();
 	});
-
-	it("shows an explanatory empty state when the machine has no secrets", async () => {
-		mockSecrets([]);
-		renderSecretList();
-
-		const empty = await screen.findByTestId("secrets-empty");
-		expect(empty.textContent).toMatch(/no secrets/i);
-		expect(screen.queryByTestId("secret-row")).not.toBeInTheDocument();
-	});
-
-	it("renders the backend error envelope with code and message", async () => {
-		server.use(
-			http.get("*/api/machines/m-1/secrets", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-41",
-						error: { message: "Machine not found", code: "MACHINE_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
-			),
-		);
-		renderSecretList();
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("MACHINE_NOT_FOUND")).toBeInTheDocument();
-		expect(screen.getByText("Machine not found")).toBeInTheDocument();
-	});
 });

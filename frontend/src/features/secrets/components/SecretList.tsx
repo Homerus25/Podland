@@ -1,16 +1,4 @@
-import {
-	Box,
-	Button,
-	HStack,
-	Table,
-	TableContainer,
-	Tbody,
-	Td,
-	Text,
-	Th,
-	Thead,
-	Tr,
-} from "@chakra-ui/react";
+import { Box, Button, Td, Text, Tr } from "@chakra-ui/react";
 import {
 	canManageSecrets,
 	type EffectivePermission,
@@ -25,6 +13,7 @@ import {
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { ResourceList } from "@shared/components/ResourceList";
 import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { mutationToPromise } from "@shared/utils/mutationPromise";
@@ -151,9 +140,10 @@ function SecretRow({
 
 // The Secrets tab body. Metadata is visible to any grantee (the backend's
 // read level); write affordances are gated on `permission`, which the page
-// derives from the machine (effectivePermission) and passes down. Below
-// write, an explanatory hint replaces the controls (the SettingsTab
-// hide-and-hint pattern — never bait users with disabled buttons).
+// derives from the machine (effectivePermission) and passes down. The
+// toolbar/triad/table machinery and the hint swap are ResourceList's; this
+// adapter owns only the columns, the row, and the create modal (below write,
+// the hint replaces the controls — never bait users with disabled buttons).
 export function SecretList({
 	machineId,
 	permission,
@@ -164,15 +154,31 @@ export function SecretList({
 	const { data: secrets, isPending, error } = useSecrets(machineId);
 	const createSecret = useCreateSecret(machineId);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
-
-	if (isPending) {
-		return <Text data-testid="secrets-loading">Loading secrets…</Text>;
-	}
+	const canManage = canManageSecrets(permission);
 
 	return (
 		<>
-			{canManageSecrets(permission) ? (
-				<HStack justify="flex-end" mb={2}>
+			<ResourceList
+				resource="secret"
+				isPending={isPending}
+				error={error}
+				items={secrets}
+				columns={[
+					{ label: "Name" },
+					{ label: "Driver" },
+					{ label: "Created" },
+					...(canManage ? [{}] : []),
+				]}
+				renderRow={(secret) => (
+					<SecretRow
+						key={secret.id}
+						machineId={machineId}
+						secret={secret}
+						permission={permission}
+						canDelete={canManage}
+					/>
+				)}
+				toolbar={
 					<Button
 						size="sm"
 						colorScheme="blue"
@@ -184,49 +190,9 @@ export function SecretList({
 					>
 						Create secret
 					</Button>
-				</HStack>
-			) : (
-				<Text
-					color="gray.500"
-					mb={2}
-					data-testid="secrets-permission-hint"
-					data-permission="read"
-				>
-					You have read-only access to this machine. Ask an owner or admin for
-					write access to manage its secrets.
-				</Text>
-			)}
-			{error ? (
-				<ErrorDisplay error={getApiError(error)} />
-			) : !secrets || secrets.length === 0 ? (
-				<Text color="gray.500" data-testid="secrets-empty">
-					No secrets on this machine yet.
-				</Text>
-			) : (
-				<TableContainer>
-					<Table data-testid="secrets-table" variant="simple">
-						<Thead>
-							<Tr>
-								<Th>Name</Th>
-								<Th>Driver</Th>
-								<Th>Created</Th>
-								{canManageSecrets(permission) ? <Th /> : null}
-							</Tr>
-						</Thead>
-						<Tbody>
-							{secrets.map((secret) => (
-								<SecretRow
-									key={secret.id}
-									machineId={machineId}
-									secret={secret}
-									permission={permission}
-									canDelete={canManageSecrets(permission)}
-								/>
-							))}
-						</Tbody>
-					</Table>
-				</TableContainer>
-			)}
+				}
+				canManage={canManage}
+			/>
 			{isCreateOpen ? (
 				<Modal
 					isOpen
