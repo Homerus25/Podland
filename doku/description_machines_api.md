@@ -172,11 +172,13 @@ Update an existing machine's connection details.
 
 Only the owner may update a machine; any other user with an access row (read or write) receives 403 `ACCESS_DENIED`.
 
+**Note:** If `sshPrivateKey` is provided, the backend will test the new connection before persisting: the probe targets the resulting merged connection configuration (request fields override stored ones), a failure answers 400 `CONNECTION_FAILED`, and a probe timeout answers 400 `CONNECTION_TEST_TIMEOUT`. Updates that do not change the key skip the probe.
+
 **Response (Success - 200):**
 - Same as GET /api/machines/{id}
 
 **Response (Error):**
-- 400: `VALIDATION_FAILED`, `INVALID_SSH_KEY`
+- 400: `VALIDATION_FAILED`, `INVALID_SSH_KEY`, `CONNECTION_FAILED`, `CONNECTION_TEST_TIMEOUT`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
 - 404: `MACHINE_NOT_FOUND`

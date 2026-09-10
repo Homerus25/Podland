@@ -324,6 +324,30 @@ func (s *MachineService) Update(ctx context.Context, userID, machineID string, r
 	if req.SSHUsername != "" {
 		machine.SSHUsername = req.SSHUsername
 	}
+	if req.PodmanSocketPath != "" {
+		machine.PodmanSocketPath = req.PodmanSocketPath
+	}
+
+	// Probe parity with registration: a new SSH private key must earn its
+	// place on the machine before anything is persisted. The probe runs
+	// against the merged machine — the request fields above already
+	// overrode the stored ones — with the plaintext key, before encryption
+	// and before the write, so a failed probe leaves the stored row
+	// untouched. Updates without a key change skip the probe entirely.
+	if req.SSHPrivateKey != "" {
+		if err := s.conn.TestConnection(ctx, machine.Hostname, machine.Port, machine.SSHUsername, req.SSHPrivateKey, machine.PodmanSocketPath); err != nil {
+			// A deadline (the probe's own timeout, or the caller's
+			// context expiring) maps to CONNECTION_TEST_TIMEOUT; any
+			// other failure (bad host / credentials / socket) maps to
+			// CONNECTION_FAILED. Both are 400 — the target the owner
+			// described is not usable.
+			if stderrors.Is(err, context.DeadlineExceeded) {
+				return nil, errors.ErrConnectionTestTimeout
+			}
+			return nil, errors.ErrConnectionTestFailed
+		}
+	}
+
 	if req.SSHPrivateKey != "" {
 		encryptedKey, fingerprint, err := s.encryption.EncryptSSHKey(req.SSHPrivateKey)
 		if err != nil {
@@ -331,9 +355,6 @@ func (s *MachineService) Update(ctx context.Context, userID, machineID string, r
 		}
 		machine.SSHKeyEncrypted = encryptedKey
 		machine.SSHKeyFingerprint = fingerprint
-	}
-	if req.PodmanSocketPath != "" {
-		machine.PodmanSocketPath = req.PodmanSocketPath
 	}
 	machine.UpdatedAt = time.Now().UTC()
 

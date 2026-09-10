@@ -2,6 +2,7 @@ package machines
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 	"time"
 
@@ -17,9 +18,16 @@ import (
 // the caller an access row at that level; empty permission leaves the
 // caller without any access row.
 func newUpdateTestService(callerID, permission string) (*MachineService, *testutils.MockMachineRepository, *testutils.MockMachineAccessRepository) {
+	return newUpdateTestServiceWithConn(testutils.NewMockConnectionManager(), callerID, permission)
+}
+
+// newUpdateTestServiceWithConn builds the same one-machine world over a
+// caller-supplied connection manager, so probe tests can inject probe
+// failures and inspect the recorded probe calls.
+func newUpdateTestServiceWithConn(conn *testutils.MockConnectionManager, callerID, permission string) (*MachineService, *testutils.MockMachineRepository, *testutils.MockMachineAccessRepository) {
 	machineRepo := testutils.NewMockMachineRepository()
 	accessRepo := testutils.NewMockMachineAccessRepository()
-	service := NewMachineService(machineRepo, accessRepo, testutils.NewMockConnectionManager(), testutils.NewMockEncryptionService(), newFakeSSHInvalidator())
+	service := NewMachineService(machineRepo, accessRepo, conn, testutils.NewMockEncryptionService(), newFakeSSHInvalidator())
 	machineRepo.AddMachine(&models.Machine{
 		ID:                "machine-1",
 		Name:              "old-name",
@@ -157,5 +165,146 @@ func TestMachineService_Update(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []byte("ssh-encrypted:"+newKey), persisted.SSHKeyEncrypted)
 		assert.Equal(t, machine.SSHKeyFingerprint, persisted.SSHKeyFingerprint)
+	})
+}
+
+// TestMachineService_Update_ConnectionProbe covers the registration-style
+// connection probe on key change: an owner providing a new SSH private key
+// must have the merged connection configuration probed BEFORE anything is
+// persisted — a broken target is rejected (400) instead of silently saving
+// credentials that only fail at first use. Updates without a key change
+// skip the probe entirely.
+func TestMachineService_Update_ConnectionProbe(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("new key probes the merged configuration and the update persists", func(t *testing.T) {
+		connManager := testutils.NewMockConnectionManager()
+		service, machineRepo, _ := newUpdateTestServiceWithConn(connManager, "owner-1", models.PermissionAdmin)
+		newKey := testutils.GenerateValidPEMKey()
+
+		machine, err := service.Update(ctx, "owner-1", "machine-1", &CreateMachineRequest{
+			Name:             "renamed",
+			Hostname:         "new.example.com",
+			Port:             2222,
+			SSHUsername:      "new-user",
+			SSHPrivateKey:    newKey,
+			PodmanSocketPath: "/custom/podman.sock",
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, machine)
+
+		calls := connManager.TestConnectionCalls()
+		require.Len(t, calls, 1, "a key change must invoke the probe exactly once")
+		assert.Equal(t, "new.example.com", calls[0].Hostname)
+		assert.Equal(t, 2222, calls[0].Port)
+		assert.Equal(t, "new-user", calls[0].SSHUsername)
+		assert.Equal(t, newKey, calls[0].SSHPrivateKey,
+			"probe must receive the plaintext new key (registration style: probe before encryption)")
+		assert.Equal(t, "/custom/podman.sock", calls[0].PodmanSocketPath)
+
+		persisted, err := machineRepo.GetByID("machine-1")
+		require.NoError(t, err)
+		assert.Equal(t, []byte("ssh-encrypted:"+newKey), persisted.SSHKeyEncrypted,
+			"a passing probe lets the update persist the new key")
+	})
+
+	t.Run("new key with only stored connection fields probes the merged target", func(t *testing.T) {
+		connManager := testutils.NewMockConnectionManager()
+		service, _, _ := newUpdateTestServiceWithConn(connManager, "owner-1", models.PermissionAdmin)
+
+		_, err := service.Update(ctx, "owner-1", "machine-1", &CreateMachineRequest{
+			SSHPrivateKey: testutils.GenerateValidPEMKey(),
+		})
+		require.NoError(t, err)
+
+		calls := connManager.TestConnectionCalls()
+		require.Len(t, calls, 1)
+		assert.Equal(t, "old.example.com", calls[0].Hostname, "untouched fields must come from the stored machine")
+		assert.Equal(t, 22, calls[0].Port)
+		assert.Equal(t, "old-user", calls[0].SSHUsername)
+		assert.Equal(t, "/run/podman/podman.sock", calls[0].PodmanSocketPath)
+	})
+
+	t.Run("failed probe answers CONNECTION_FAILED and persists nothing", func(t *testing.T) {
+		connManager := testutils.NewMockConnectionManagerWithTestError(
+			stderrors.New("dial tcp: connection refused"))
+		service, machineRepo, _ := newUpdateTestServiceWithConn(connManager, "owner-1", models.PermissionAdmin)
+
+		machine, err := service.Update(ctx, "owner-1", "machine-1", &CreateMachineRequest{
+			Name:          "renamed-anyway",
+			Hostname:      "new.example.com",
+			SSHPrivateKey: testutils.GenerateValidPEMKey(),
+		})
+
+		require.Error(t, err)
+		assert.Nil(t, machine)
+		assert.Equal(t, errors.ErrConnectionTestFailed, err,
+			"probe failure must map to ErrConnectionTestFailed (400 CONNECTION_FAILED)")
+
+		// Nothing persisted: the repository write never happened, and the
+		// stored credentials (written only after a passing probe) are
+		// untouched.
+		assert.Empty(t, machineRepo.UpdateCalls(),
+			"a failed probe must persist nothing — no repository write at all")
+		calls := connManager.TestConnectionCalls()
+		require.Len(t, calls, 1)
+		assert.Equal(t, "new.example.com", calls[0].Hostname,
+			"the failing probe still targeted the merged configuration")
+		persisted, err := machineRepo.GetByID("machine-1")
+		require.NoError(t, err)
+		require.NotNil(t, persisted)
+		assert.Equal(t, "old-fingerprint", persisted.SSHKeyFingerprint,
+			"failed probe must not touch stored credentials")
+		assert.Equal(t, "old-encrypted", string(persisted.SSHKeyEncrypted))
+	})
+
+	t.Run("probe deadline answers CONNECTION_TEST_TIMEOUT and persists nothing", func(t *testing.T) {
+		connManager := testutils.NewMockConnectionManagerWithTestError(context.DeadlineExceeded)
+		service, machineRepo, _ := newUpdateTestServiceWithConn(connManager, "owner-1", models.PermissionAdmin)
+
+		machine, err := service.Update(ctx, "owner-1", "machine-1", &CreateMachineRequest{
+			SSHPrivateKey: testutils.GenerateValidPEMKey(),
+		})
+
+		require.Error(t, err)
+		assert.Nil(t, machine)
+		assert.Equal(t, errors.ErrConnectionTestTimeout, err,
+			"probe timeout must map to ErrConnectionTestTimeout (400), distinct from CONNECTION_FAILED")
+
+		assert.Empty(t, machineRepo.UpdateCalls(),
+			"a timed-out probe must persist nothing — no repository write at all")
+		persisted, err := machineRepo.GetByID("machine-1")
+		require.NoError(t, err)
+		assert.Equal(t, "old-fingerprint", persisted.SSHKeyFingerprint,
+			"timed-out probe must not persist the new key")
+	})
+
+	t.Run("update without a key change skips the probe entirely", func(t *testing.T) {
+		// The manager is poisoned with a probe error: if the update ran
+		// the probe despite no key change, the update itself would fail
+		// — so NoError plus zero recorded calls proves the skip.
+		connManager := testutils.NewMockConnectionManagerWithTestError(
+			stderrors.New("probe must not run without a key change"))
+		service, machineRepo, _ := newUpdateTestServiceWithConn(connManager, "owner-1", models.PermissionAdmin)
+
+		machine, err := service.Update(ctx, "owner-1", "machine-1", &CreateMachineRequest{
+			Name:     "renamed",
+			Hostname: "new.example.com",
+			Port:     2222,
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, machine)
+		assert.Empty(t, connManager.TestConnectionCalls(),
+			"no key change: the probe must not run at all")
+
+		persisted, err := machineRepo.GetByID("machine-1")
+		require.NoError(t, err)
+		assert.Equal(t, "renamed", persisted.Name, "non-key updates still persist")
+		assert.Equal(t, "new.example.com", persisted.Hostname)
+		assert.Equal(t, "old-fingerprint", persisted.SSHKeyFingerprint)
+		assert.Equal(t, []string{"machine-1"}, machineRepo.UpdateCalls(),
+			"the non-key update still writes the machine once")
 	})
 }

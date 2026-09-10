@@ -102,12 +102,13 @@ func (m *MockUserRepository) UsernameExists(username string) (bool, error) {
 
 // MockMachineRepository implements a mock machine repository for testing
 type MockMachineRepository struct {
-	machines  map[string]*models.Machine
-	listErr   error
-	getErr    error
-	createErr error
-	updateErr error
-	deleteErr error
+	machines    map[string]*models.Machine
+	listErr     error
+	getErr      error
+	createErr   error
+	updateErr   error
+	deleteErr   error
+	updateCalls []string
 }
 
 func NewMockMachineRepository() *MockMachineRepository {
@@ -156,8 +157,18 @@ func (m *MockMachineRepository) Update(machine *models.Machine) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
+	m.updateCalls = append(m.updateCalls, machine.ID)
 	m.machines[machine.ID] = machine
 	return nil
+}
+
+// UpdateCalls returns a snapshot of every successful Update invocation's
+// machine IDs, in call order, so service tests can pin that a failed
+// operation (e.g. a failed update probe) wrote nothing.
+func (m *MockMachineRepository) UpdateCalls() []string {
+	out := make([]string, len(m.updateCalls))
+	copy(out, m.updateCalls)
+	return out
 }
 
 func (m *MockMachineRepository) Delete(id string) error {
