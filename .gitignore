@@ -5,3 +5,4 @@ jwt-private.pem
 jwt-public.pem
 node_modules
 resonance/
+.scratch/.obsidian/

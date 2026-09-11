@@ -131,10 +131,17 @@ async function clickUpdateAllThroughConfirm() {
 }
 
 describe("QuadletList auto-update", () => {
-	it("hides both toolbar buttons from read-only users", async () => {
+	it("swaps the whole toolbar for the read hint, hiding create with auto-update", async () => {
 		renderQuadletList("read");
 
-		expect(await screen.findByTestId("quadlets-table")).toBeInTheDocument();
+		const hint = await screen.findByTestId("quadlets-permission-hint");
+		expect(hint).toHaveAttribute("data-permission", "read");
+		expect(hint).toHaveTextContent(
+			"You have read-only access to this machine. Ask an owner or admin for write access to manage its quadlets.",
+		);
+		expect(
+			screen.queryByTestId("create-quadlet-button"),
+		).not.toBeInTheDocument();
 		expect(
 			screen.queryByTestId("check-updates-button"),
 		).not.toBeInTheDocument();

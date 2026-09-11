@@ -71,7 +71,7 @@ function renderQuadletList() {
 				<Routes>
 					<Route
 						path="/machines/:machineId"
-						element={<QuadletList machineId="m-1" />}
+						element={<QuadletList machineId="m-1" permission="admin" />}
 					/>
 					<Route
 						path="/machines/:machineId/logs/:kind/:targetId"

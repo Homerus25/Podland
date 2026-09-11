@@ -58,7 +58,7 @@ function renderQuadletList() {
 	render(
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter>
-				<QuadletList machineId="m-1" />
+				<QuadletList machineId="m-1" permission="admin" />
 			</MemoryRouter>
 		</QueryClientProvider>,
 	);
