@@ -1,4 +1,4 @@
-import { Box, Button, Td, Text, Tr } from "@chakra-ui/react";
+import { Button, Td, Text, Tr } from "@chakra-ui/react";
 import {
 	canManageSecrets,
 	type EffectivePermission,
@@ -11,63 +11,20 @@ import {
 	useSecrets,
 } from "@features/secrets/hooks/useSecrets";
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
-import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { mutationToPromise } from "@shared/utils/mutationPromise";
 import { useState } from "react";
 
-// No delete request leaves the browser until the user explicitly confirms.
-// There are no options in v1: the backend exposes no force parameter.
-function DeleteSecretModal({
-	secret,
-	deleteSecret,
-	onClose,
-}: {
-	secret: SecretSummary;
-	deleteSecret: ReturnType<typeof useDeleteSecret>;
-	onClose: () => void;
-}) {
-	const confirmDelete = () => {
-		deleteSecret.mutate(secret.name, { onSuccess: onClose });
-	};
-
-	return (
-		<Modal
-			isOpen
-			onClose={onClose}
-			title="Delete secret"
-			footer={
-				<>
-					<Button variant="ghost" onClick={onClose}>
-						Cancel
-					</Button>
-					<Button
-						colorScheme="red"
-						onClick={confirmDelete}
-						isLoading={deleteSecret.isPending}
-						data-testid="confirm-delete-button"
-					>
-						Delete secret
-					</Button>
-				</>
-			}
-		>
-			<Text>Delete “{secret.name}”? This cannot be undone.</Text>
-			{deleteSecret.error ? (
-				<Box mt={2}>
-					<ErrorDisplay error={getApiError(deleteSecret.error)} />
-				</Box>
-			) : null}
-		</Modal>
-	);
-}
-
 // Each row owns its delete mutation instance, so pending state and errors
-// (e.g. 409 SECRET_IN_USE) stay scoped to this secret's modal and other
-// rows stay usable.
+// stay scoped to this secret's modal and other rows stay usable. The shell,
+// reset lifecycle, danger footer, close-on-success, and error region are
+// ConfirmDialog's; the failure envelopes (409 SECRET_IN_USE, 404) surface
+// through the default error region as plain envelopes, with no code-specific
+// hint. There are no delete options in v1: the backend exposes no force
+// parameter.
 function SecretRow({
 	machineId,
 	secret,
@@ -105,10 +62,7 @@ function SecretRow({
 							colorScheme="red"
 							variant="outline"
 							aria-label={`Delete ${secret.name}`}
-							onClick={() => {
-								deleteSecret.reset();
-								setIsDeleteOpen(true);
-							}}
+							onClick={() => setIsDeleteOpen(true)}
 							data-testid="delete-secret-button"
 						>
 							Delete
@@ -125,13 +79,13 @@ function SecretRow({
 				/>
 			) : null}
 			{isDeleteOpen ? (
-				<DeleteSecretModal
-					secret={secret}
-					deleteSecret={deleteSecret}
-					onClose={() => {
-						deleteSecret.reset();
-						setIsDeleteOpen(false);
-					}}
+				<ConfirmDialog
+					mutation={deleteSecret}
+					title="Delete secret"
+					confirmLabel="Delete secret"
+					confirm={() => secret.name}
+					onClose={() => setIsDeleteOpen(false)}
+					body={<Text>Delete “{secret.name}”? This cannot be undone.</Text>}
 				/>
 			) : null}
 		</>

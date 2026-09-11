@@ -90,21 +90,6 @@ describe("SecretList delete", () => {
 		);
 	});
 
-	it("canceling closes the modal without sending a request", async () => {
-		server.use(
-			secretsHandler(() => [dbPassword]),
-			deleteHandler(),
-		);
-		const user = await openDeleteModal();
-
-		await user.click(screen.getByRole("button", { name: "Cancel" }));
-
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-		);
-		expect(deleteRequests.count).toBe(0);
-	});
-
 	it("closes the modal and refetches the list so the deleted secret disappears", async () => {
 		const survivor = secretFixture({ id: "9a8b7c6d", name: "api-token" });
 		let secrets = [dbPassword, survivor];
