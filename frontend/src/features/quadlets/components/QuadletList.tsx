@@ -6,13 +6,8 @@ import {
 	FormLabel,
 	HStack,
 	Input,
-	Table,
-	TableContainer,
-	Tbody,
 	Td,
 	Text,
-	Th,
-	Thead,
 	Tr,
 	VStack,
 } from "@chakra-ui/react";
@@ -34,6 +29,7 @@ import {
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
 import { mutationToPromise } from "@shared/utils/mutationPromise";
@@ -402,19 +398,25 @@ function DeleteQuadletModal({
 	);
 }
 
+// The toolbar/triad/table machinery, the plural testids, and the hint swap
+// are ResourceList's; this adapter owns the busiest toolbar of the five
+// (create plus the two auto-update buttons), the row with its lifecycle
+// sub-rows, and the edit/delete/logs/auto-update feature code. Create is a
+// write like every other toolbar action, so below manage level the module
+// swaps the whole toolbar for the canonical read hint.
 export function QuadletList({
 	machineId,
 	permission,
 }: {
 	machineId: string;
-	permission?: EffectivePermission;
+	permission: EffectivePermission;
 }) {
 	const { data: quadlets, isPending, error } = useQuadlets(machineId);
 	const createQuadlet = useCreateQuadlet(machineId);
 	const updateQuadlet = useUpdateQuadlet(machineId);
 	const deleteQuadlet = useDeleteQuadlet(machineId);
 	const autoUpdate = useQuadletAutoUpdate(machineId);
-	const canAutoUpdate = canEditMachine(permission ?? "read");
+	const canManage = canEditMachine(permission);
 	const [isConfirmUpdateOpen, setIsConfirmUpdateOpen] = useState(false);
 	const [isAutoUpdateOpen, setIsAutoUpdateOpen] = useState(false);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -422,28 +424,47 @@ export function QuadletList({
 	const [deleteTarget, setDeleteTarget] = useState<QuadletSummary | null>(null);
 	const openLogs = useOpenQuadletLogs(machineId);
 
-	if (isPending) {
-		return <Text data-testid="quadlets-loading">Loading quadlets…</Text>;
-	}
-
-	// The create action stays reachable even on an empty or errored list —
-	// creating the first quadlet on a fresh machine is the primary flow.
 	return (
 		<>
-			<HStack justify="flex-end" mb={2}>
-				<Button
-					size="sm"
-					colorScheme="blue"
-					onClick={() => {
-						createQuadlet.reset();
-						setIsCreateOpen(true);
-					}}
-					data-testid="create-quadlet-button"
-				>
-					Create quadlet
-				</Button>
-				{canAutoUpdate ? (
+			<ResourceList
+				resource="quadlet"
+				isPending={isPending}
+				error={error}
+				items={quadlets}
+				columns={[
+					{ label: "Name" },
+					{ label: "Resource" },
+					{ label: "State" },
+					{},
+					{},
+					{},
+				]}
+				renderRow={(row) => (
+					<QuadletRow
+						key={row.id}
+						machineId={machineId}
+						quadlet={row}
+						onEdit={setEditTarget}
+						onDelete={(target) => {
+							deleteQuadlet.reset();
+							setDeleteTarget(target);
+						}}
+						onShowLogs={openLogs}
+					/>
+				)}
+				toolbar={
 					<>
+						<Button
+							size="sm"
+							colorScheme="blue"
+							onClick={() => {
+								createQuadlet.reset();
+								setIsCreateOpen(true);
+							}}
+							data-testid="create-quadlet-button"
+						>
+							Create quadlet
+						</Button>
 						<Button
 							size="sm"
 							colorScheme="purple"
@@ -464,45 +485,9 @@ export function QuadletList({
 							Update all
 						</Button>
 					</>
-				) : null}
-			</HStack>
-			{error ? (
-				<ErrorDisplay error={getApiError(error)} />
-			) : !quadlets || quadlets.length === 0 ? (
-				<Text color="gray.500" data-testid="quadlets-empty">
-					No quadlets on this machine yet.
-				</Text>
-			) : (
-				<TableContainer>
-					<Table data-testid="quadlets-table" variant="simple">
-						<Thead>
-							<Tr>
-								<Th>Name</Th>
-								<Th>Resource</Th>
-								<Th>State</Th>
-								<Th />
-								<Th />
-								<Th />
-							</Tr>
-						</Thead>
-						<Tbody>
-							{quadlets.map((quadlet) => (
-								<QuadletRow
-									key={quadlet.id}
-									machineId={machineId}
-									quadlet={quadlet}
-									onEdit={setEditTarget}
-									onDelete={(target) => {
-										deleteQuadlet.reset();
-										setDeleteTarget(target);
-									}}
-									onShowLogs={openLogs}
-								/>
-							))}
-						</Tbody>
-					</Table>
-				</TableContainer>
-			)}
+				}
+				canManage={canManage}
+			/>
 			{editTarget ? (
 				<EditQuadletModal
 					machineId={machineId}

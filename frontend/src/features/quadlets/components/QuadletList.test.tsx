@@ -22,7 +22,7 @@ function renderQuadletList() {
 	const view = render(
 		<QueryClientProvider client={queryClient}>
 			<MemoryRouter>
-				<QuadletList machineId="m-1" />
+				<QuadletList machineId="m-1" permission="admin" />
 			</MemoryRouter>
 		</QueryClientProvider>,
 	);
@@ -116,7 +116,7 @@ describe("QuadletList", () => {
 		},
 	);
 
-	it("shows a loading state before quadlets arrive", async () => {
+	it("shows a loading state before quadlets arrive, with the toolbar still above it", async () => {
 		server.use(
 			http.get("*/api/machines/m-1/quadlets", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
@@ -126,33 +126,6 @@ describe("QuadletList", () => {
 		renderQuadletList();
 
 		expect(screen.getByTestId("quadlets-loading")).toBeInTheDocument();
-	});
-
-	it("shows an explanatory empty state when the machine has no quadlets", async () => {
-		mockQuadlets([]);
-		renderQuadletList();
-
-		const empty = await screen.findByTestId("quadlets-empty");
-		expect(empty.textContent).toMatch(/no quadlets/i);
-		expect(screen.queryByTestId("quadlet-row")).not.toBeInTheDocument();
-	});
-
-	it("renders the backend error envelope with code and message", async () => {
-		server.use(
-			http.get("*/api/machines/m-1/quadlets", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-21",
-						error: { message: "Machine not found", code: "MACHINE_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
-			),
-		);
-		renderQuadletList();
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("MACHINE_NOT_FOUND")).toBeInTheDocument();
-		expect(screen.getByText("Machine not found")).toBeInTheDocument();
+		expect(screen.getByTestId("create-quadlet-button")).toBeInTheDocument();
 	});
 });
