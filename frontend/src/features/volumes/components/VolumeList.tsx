@@ -5,7 +5,6 @@ import {
 	Checkbox,
 	FormControl,
 	FormLabel,
-	HStack,
 	Table,
 	TableContainer,
 	Tbody,
@@ -35,6 +34,7 @@ import {
 } from "@features/volumes/services/volumesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { ResourceList } from "@shared/components/ResourceList";
 import { getApiError } from "@shared/utils/api";
 import { downloadFile } from "@shared/utils/download";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
@@ -432,6 +432,10 @@ function PopulateVolumeModal({
 	);
 }
 
+// The Volumes tab body. The toolbar/triad/table machinery, the plural
+// testids, and the hint swap are ResourceList's; this adapter owns only the
+// columns, the clickable row with its inspect drawer, and the create,
+// export, populate, delete, and prune feature code.
 export function VolumeList({
 	machineId,
 	permission,
@@ -477,85 +481,62 @@ export function VolumeList({
 
 	const canManage = canManageVolumes(permission);
 
-	if (isPending) {
-		return <Text data-testid="volumes-loading">Loading volumes…</Text>;
-	}
-
 	return (
 		<>
-			{canManage ? (
-				<HStack justify="flex-end" mb={2}>
-					<Button
-						size="sm"
-						colorScheme="blue"
-						onClick={() => {
-							createVolume.reset();
-							setIsCreateOpen(true);
-						}}
-						data-testid="create-volume-button"
-					>
-						Create volume
-					</Button>
-					<Button
-						size="sm"
-						colorScheme="red"
-						variant="outline"
-						onClick={() => {
-							pruneVolumes.reset();
-							setIsPruneOpen(true);
-						}}
-						data-testid="prune-volumes-button"
-					>
-						Prune
-					</Button>
-				</HStack>
-			) : (
-				<Text
-					color="gray.500"
-					mb={2}
-					data-testid="volumes-permission-hint"
-					data-permission="read"
-				>
-					You have read-only access to this machine. Ask an owner or admin for
-					write access to manage its volumes.
-				</Text>
-			)}
-			{error ? (
-				<ErrorDisplay error={getApiError(error)} data-testid="volumes-error" />
-			) : !volumes || volumes.length === 0 ? (
-				<Text color="gray.500" data-testid="volumes-empty">
-					No volumes on this machine yet.
-				</Text>
-			) : (
-				<TableContainer>
-					<Table data-testid="volumes-table" variant="simple">
-						<Thead>
-							<Tr>
-								<Th>Name</Th>
-								<Th>Type</Th>
-								<Th>Driver</Th>
-								<Th>Created</Th>
-								<Th isNumeric>Size</Th>
-								<Th />
-							</Tr>
-						</Thead>
-						<Tbody>
-							{volumes.map((volume) => (
-								<VolumeRow
-									key={volume.name}
-									volume={volume}
-									onSelect={setSelectedVolume}
-									canManage={canManage}
-									onDelete={setPendingDelete}
-									isExporting={exportingName === volume.name}
-									onExport={handleExport}
-									onPopulate={setPopulateTarget}
-								/>
-							))}
-						</Tbody>
-					</Table>
-				</TableContainer>
-			)}
+			<ResourceList
+				resource="volume"
+				isPending={isPending}
+				error={error}
+				items={volumes}
+				columns={[
+					{ label: "Name" },
+					{ label: "Type" },
+					{ label: "Driver" },
+					{ label: "Created" },
+					{ label: "Size", isNumeric: true },
+					{},
+				]}
+				renderRow={(volume) => (
+					<VolumeRow
+						key={volume.name}
+						volume={volume}
+						onSelect={setSelectedVolume}
+						canManage={canManage}
+						onDelete={setPendingDelete}
+						isExporting={exportingName === volume.name}
+						onExport={handleExport}
+						onPopulate={setPopulateTarget}
+					/>
+				)}
+				toolbar={
+					<>
+						<Button
+							size="sm"
+							colorScheme="blue"
+							onClick={() => {
+								createVolume.reset();
+								setIsCreateOpen(true);
+							}}
+							data-testid="create-volume-button"
+						>
+							Create volume
+						</Button>
+						<Button
+							size="sm"
+							colorScheme="red"
+							variant="outline"
+							onClick={() => {
+								pruneVolumes.reset();
+								setIsPruneOpen(true);
+							}}
+							data-testid="prune-volumes-button"
+						>
+							Prune
+						</Button>
+					</>
+				}
+				canManage={canManage}
+			/>
 			<VolumeInspectDrawer
 				machineId={machineId}
 				volumeName={selectedVolume}

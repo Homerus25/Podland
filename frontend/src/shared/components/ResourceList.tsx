@@ -22,8 +22,11 @@ export type ResourceListColumn = {
 // chrome, and the plural testids. Props-based on purpose: the module never
 // touches react-query; features keep their hooks and hand over resolved
 // state, their columns as data, and their own row elements (rows carry the
-// singular testid and their own key). With `canManage` undefined the list is
-// ungated: toolbar always, no hint ever.
+// singular testid and their own key). Rows own their interactions: a row
+// that is itself clickable keeps its onClick in the feature's row, and the
+// action buttons inside such a row are responsible for stopPropagation so a
+// button click does not also fire the row action. With `canManage` undefined
+// the list is ungated: toolbar always, no hint ever.
 export function ResourceList<T>({
 	resource,
 	isPending,

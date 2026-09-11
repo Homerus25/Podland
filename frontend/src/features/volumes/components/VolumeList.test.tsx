@@ -64,41 +64,18 @@ describe("VolumeList", () => {
 		expect(within(row).getByText("—")).toBeInTheDocument();
 	});
 
-	it("shows a distinct loading state while fetching", () => {
-		mockVolumes([]);
+	it("shows a loading state before volumes arrive, with the toolbar still above it", async () => {
+		server.use(
+			http.get("*/api/machines/m-1/volumes", async () => {
+				await new Promise((resolve) => setTimeout(resolve, 50));
+				return HttpResponse.json([volumeFixture()]);
+			}),
+		);
 		renderVolumeList();
 
 		expect(screen.getByTestId("volumes-loading")).toBeInTheDocument();
-		expect(screen.queryByTestId("volumes-empty")).not.toBeInTheDocument();
-	});
-
-	it("shows a distinct error state when the request fails", async () => {
-		server.use(
-			http.get("*/api/machines/m-1/volumes", () =>
-				HttpResponse.json(
-					{
-						requestId: "r-1",
-						error: { code: "INTERNAL_ERROR", message: "ssh failed" },
-					},
-					{ status: 500 },
-				),
-			),
-		);
-		renderVolumeList();
-
-		await waitFor(() =>
-			expect(screen.getByTestId("volumes-error")).toBeInTheDocument(),
-		);
-		expect(screen.queryByTestId("volumes-loading")).not.toBeInTheDocument();
-		expect(screen.queryByTestId("volumes-empty")).not.toBeInTheDocument();
-	});
-
-	it("shows a distinct empty state when the machine has no volumes", async () => {
-		mockVolumes([]);
-		renderVolumeList();
-
-		expect(await screen.findByTestId("volumes-empty")).toBeInTheDocument();
-		expect(screen.queryByTestId("volumes-loading")).not.toBeInTheDocument();
+		expect(screen.getByTestId("create-volume-button")).toBeInTheDocument();
+		expect(screen.getByTestId("prune-volumes-button")).toBeInTheDocument();
 	});
 
 	it("opens the inspect drawer when a row is clicked", async () => {
