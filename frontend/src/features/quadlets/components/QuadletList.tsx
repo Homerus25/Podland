@@ -29,6 +29,7 @@ import {
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
@@ -329,9 +330,11 @@ function useOpenQuadletLogs(machineId: string) {
 }
 
 // No delete request leaves the browser until the user explicitly confirms.
-// Stop-first defaults to on and force to off, matching the backend
-// contract's defaults, so confirming without touching anything behaves like
-// the API's own defaults.
+// The danger footer, pending wiring, close-on-success, reset lifecycle, and
+// error region are ConfirmDialog's; this adapter owns the domain body (the
+// two option checkboxes) and the variables: stop-first defaults to on and
+// force to off, matching the backend contract's defaults, so confirming
+// without touching anything behaves like the API's own defaults.
 function DeleteQuadletModal({
 	quadlet,
 	deleteQuadlet,
@@ -344,57 +347,35 @@ function DeleteQuadletModal({
 	const [stopFirst, setStopFirst] = useState(true);
 	const [force, setForce] = useState(false);
 
-	const confirmDelete = () => {
-		deleteQuadlet.mutate(
-			{ quadletId: quadlet.id, stop: stopFirst, force },
-			{ onSuccess: onClose },
-		);
-	};
-
 	return (
-		<Modal
-			isOpen
-			onClose={onClose}
+		<ConfirmDialog
+			mutation={deleteQuadlet}
 			title="Delete quadlet"
-			footer={
+			confirmLabel="Delete quadlet"
+			confirm={() => ({ quadletId: quadlet.id, stop: stopFirst, force })}
+			onClose={onClose}
+			body={
 				<>
-					<Button variant="ghost" onClick={onClose}>
-						Cancel
-					</Button>
-					<Button
-						colorScheme="red"
-						onClick={confirmDelete}
-						isLoading={deleteQuadlet.isPending}
-						data-testid="confirm-delete-button"
-					>
-						Delete quadlet
-					</Button>
+					<Text>Delete “{quadlet.name}”? This cannot be undone.</Text>
+					<VStack align="flex-start" mt={3} spacing={2}>
+						<Checkbox
+							isChecked={stopFirst}
+							onChange={(event) => setStopFirst(event.target.checked)}
+							data-testid="stop-first-option"
+						>
+							Stop the unit before deleting
+						</Checkbox>
+						<Checkbox
+							isChecked={force}
+							onChange={(event) => setForce(event.target.checked)}
+							data-testid="force-option"
+						>
+							Force
+						</Checkbox>
+					</VStack>
 				</>
 			}
-		>
-			<Text>Delete “{quadlet.name}”? This cannot be undone.</Text>
-			<VStack align="flex-start" mt={3} spacing={2}>
-				<Checkbox
-					isChecked={stopFirst}
-					onChange={(event) => setStopFirst(event.target.checked)}
-					data-testid="stop-first-option"
-				>
-					Stop the unit before deleting
-				</Checkbox>
-				<Checkbox
-					isChecked={force}
-					onChange={(event) => setForce(event.target.checked)}
-					data-testid="force-option"
-				>
-					Force
-				</Checkbox>
-			</VStack>
-			{deleteQuadlet.error ? (
-				<Box mt={2}>
-					<ErrorDisplay error={getApiError(deleteQuadlet.error)} />
-				</Box>
-			) : null}
-		</Modal>
+		/>
 	);
 }
 
@@ -445,10 +426,7 @@ export function QuadletList({
 						machineId={machineId}
 						quadlet={row}
 						onEdit={setEditTarget}
-						onDelete={(target) => {
-							deleteQuadlet.reset();
-							setDeleteTarget(target);
-						}}
+						onDelete={setDeleteTarget}
 						onShowLogs={openLogs}
 					/>
 				)}
@@ -503,10 +481,7 @@ export function QuadletList({
 				<DeleteQuadletModal
 					quadlet={deleteTarget}
 					deleteQuadlet={deleteQuadlet}
-					onClose={() => {
-						deleteQuadlet.reset();
-						setDeleteTarget(null);
-					}}
+					onClose={() => setDeleteTarget(null)}
 				/>
 			) : null}
 			{isConfirmUpdateOpen ? (

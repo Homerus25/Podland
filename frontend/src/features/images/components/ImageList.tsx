@@ -26,6 +26,7 @@ import {
 } from "@features/machines/permissions";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { getApiError } from "@shared/utils/api";
 import {
@@ -50,6 +51,14 @@ function isUsedByContainers(error: unknown): boolean {
 	return getApiError(error).code === USED_BY_CONTAINERS_CODE;
 }
 
+// The delete adapter over ConfirmDialog. This is where both replacement
+// seams prove out: on the IMAGE_USED_BY_CONTAINERS error the footer's
+// confirm button swaps to the outline force button (renderConfirm), and the
+// in-use hint replaces the whole error region (renderError); any other
+// error renders through the shared ErrorDisplay inside the same seam. The
+// force flag keys off the current error code exactly as before: the first
+// confirm requests a plain delete, and only after the in-use rejection does
+// the force request carry force=true.
 function DeleteImageModal({
 	image,
 	onClose,
@@ -59,62 +68,54 @@ function DeleteImageModal({
 	onClose: () => void;
 	deleteImage: ReturnType<typeof useDeleteImage>;
 }) {
-	const tags = displayTags(image);
 	const inUse = isUsedByContainers(deleteImage.error);
 
-	const requestDelete = (force: boolean) => {
-		deleteImage.mutate({ imageId: image.id, force }, { onSuccess: onClose });
-	};
-
 	return (
-		<Modal
-			isOpen
-			onClose={onClose}
+		<ConfirmDialog
+			mutation={deleteImage}
 			title="Delete image"
-			footer={
-				<>
-					<Button variant="ghost" onClick={onClose}>
-						Cancel
-					</Button>
-					{inUse ? null : (
-						<Button
-							colorScheme="red"
-							onClick={() => requestDelete(false)}
-							isLoading={deleteImage.isPending}
-							data-testid="confirm-delete-button"
-						>
-							Delete image
-						</Button>
-					)}
-					{inUse ? (
-						<Button
-							colorScheme="red"
-							variant="outline"
-							onClick={() => requestDelete(true)}
-							isLoading={deleteImage.isPending}
-							data-testid="force-delete-button"
-						>
-							Force delete
-						</Button>
-					) : null}
-				</>
-			}
-		>
-			<Text>
-				Delete {tags} ({shortImageId(image.id)}) from this machine? This cannot
-				be undone.
-			</Text>
-			{inUse ? (
-				<Text mt={2} color="orange.500" data-testid="image-in-use-warning">
-					One or more containers use this image, so it cannot be deleted
-					normally. Force delete removes the image even though containers still
-					use it; those containers may stop working.
+			confirm={() => ({ imageId: image.id, force: inUse })}
+			onClose={onClose}
+			body={
+				<Text>
+					Delete {displayTags(image)} ({shortImageId(image.id)}) from this
+					machine? This cannot be undone.
 				</Text>
-			) : null}
-			{deleteImage.error && !inUse ? (
-				<ErrorDisplay error={getApiError(deleteImage.error)} />
-			) : null}
-		</Modal>
+			}
+			renderError={(apiError) =>
+				apiError.code === USED_BY_CONTAINERS_CODE ? (
+					<Text mt={2} color="orange.500" data-testid="image-in-use-warning">
+						One or more containers use this image, so it cannot be deleted
+						normally. Force delete removes the image even though containers
+						still use it; those containers may stop working.
+					</Text>
+				) : (
+					<ErrorDisplay error={apiError} />
+				)
+			}
+			renderConfirm={({ error, isPending, onConfirm }) =>
+				isUsedByContainers(error) ? (
+					<Button
+						colorScheme="red"
+						variant="outline"
+						onClick={onConfirm}
+						isLoading={isPending}
+						data-testid="force-delete-button"
+					>
+						Force delete
+					</Button>
+				) : (
+					<Button
+						colorScheme="red"
+						onClick={onConfirm}
+						isLoading={isPending}
+						data-testid="confirm-delete-button"
+					>
+						Delete image
+					</Button>
+				)
+			}
+		/>
 	);
 }
 
@@ -258,10 +259,7 @@ export function ImageList({
 								colorScheme="red"
 								variant="outline"
 								aria-label={`Delete ${displayTags(image)}`}
-								onClick={() => {
-									deleteImage.reset();
-									setPendingDelete(image);
-								}}
+								onClick={() => setPendingDelete(image)}
 							>
 								Delete
 							</Button>
@@ -302,10 +300,7 @@ export function ImageList({
 			{pendingDelete ? (
 				<DeleteImageModal
 					image={pendingDelete}
-					onClose={() => {
-						deleteImage.reset();
-						setPendingDelete(null);
-					}}
+					onClose={() => setPendingDelete(null)}
 					deleteImage={deleteImage}
 				/>
 			) : null}

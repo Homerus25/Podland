@@ -88,23 +88,6 @@ describe("ContainerList delete", () => {
 		expect(deleteRequests.count).toBe(0);
 	});
 
-	it("cancelling the modal sends no request and leaves the list untouched", async () => {
-		resetCounters();
-		server.use(
-			containersHandler(() => [first]),
-			deleteHandler(),
-		);
-		const user = await openDeleteModal();
-
-		await user.click(screen.getByRole("button", { name: /cancel/i }));
-
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-		);
-		expect(deleteRequests.count).toBe(0);
-		expect(screen.getByText("victim")).toBeInTheDocument();
-	});
-
 	it("confirming deletes the targeted container with the right request", async () => {
 		resetCounters();
 		let remaining = [first, second];
@@ -126,26 +109,6 @@ describe("ContainerList delete", () => {
 		await waitFor(() =>
 			expect(screen.queryByText("victim")).not.toBeInTheDocument(),
 		);
-	});
-
-	it("shows pending state on the confirm action while the delete runs", async () => {
-		resetCounters();
-		server.use(
-			containersHandler(() => [first]),
-			http.delete("*/api/machines/m-1/containers/*", async () => {
-				await new Promise((resolve) => setTimeout(resolve, 100));
-				return new HttpResponse(null, { status: 204 });
-			}),
-		);
-		const user = await openDeleteModal();
-
-		const confirm = screen.getByTestId("confirm-delete-button");
-		await user.click(confirm);
-
-		await waitFor(() => {
-			expect(confirm).toBeDisabled();
-			expect(confirm).toHaveAttribute("data-loading");
-		});
 	});
 
 	it("shows the error envelope and keeps the row when the delete fails", async () => {

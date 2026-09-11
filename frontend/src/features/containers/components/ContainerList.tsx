@@ -1,4 +1,4 @@
-import { Box, Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
+import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
 import { CreateContainerForm } from "@features/containers/components/CreateContainerForm";
 import {
 	useContainers,
@@ -10,6 +10,7 @@ import {
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
@@ -26,6 +27,11 @@ function displayName(container: ContainerSummary): string {
 }
 
 // No delete request leaves the browser until the user explicitly confirms.
+// The shell, reset lifecycle, danger footer, pending wiring, close-on-success,
+// and error region are ConfirmDialog's; this adapter owns only the domain
+// body and the variables (the container id). A failure (e.g. the 409
+// CONTAINER_RUNNING envelope) keeps the modal open through the module's
+// default error region.
 function DeleteContainerModal({
 	container,
 	deleteContainer,
@@ -35,41 +41,20 @@ function DeleteContainerModal({
 	deleteContainer: ReturnType<typeof useDeleteContainer>;
 	onClose: () => void;
 }) {
-	const name = displayName(container);
-	const confirmDelete = () => {
-		deleteContainer.mutate(container.id, { onSuccess: onClose });
-	};
-
 	return (
-		<Modal
-			isOpen
-			onClose={onClose}
+		<ConfirmDialog
+			mutation={deleteContainer}
 			title="Delete container"
-			footer={
-				<>
-					<Button variant="ghost" onClick={onClose}>
-						Cancel
-					</Button>
-					<Button
-						colorScheme="red"
-						onClick={confirmDelete}
-						isLoading={deleteContainer.isPending}
-						data-testid="confirm-delete-button"
-					>
-						Delete container
-					</Button>
-				</>
+			confirmLabel="Delete container"
+			confirm={() => container.id}
+			onClose={onClose}
+			body={
+				<Text>
+					Delete “{displayName(container)}” ({container.image})? This cannot be
+					undone.
+				</Text>
 			}
-		>
-			<Text>
-				Delete “{name}” ({container.image})? This cannot be undone.
-			</Text>
-			{deleteContainer.error ? (
-				<Box mt={2}>
-					<ErrorDisplay error={getApiError(deleteContainer.error)} />
-				</Box>
-			) : null}
-		</Modal>
+		/>
 	);
 }
 
@@ -201,10 +186,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
 						key={container.id}
 						machineId={machineId}
 						container={container}
-						onDelete={(target) => {
-							deleteContainer.reset();
-							setPendingDelete(target);
-						}}
+						onDelete={setPendingDelete}
 						onShowLogs={openLogs}
 					/>
 				)}
@@ -226,10 +208,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
 				<DeleteContainerModal
 					container={pendingDelete}
 					deleteContainer={deleteContainer}
-					onClose={() => {
-						deleteContainer.reset();
-						setPendingDelete(null);
-					}}
+					onClose={() => setPendingDelete(null)}
 				/>
 			) : null}
 			{isCreateOpen ? (

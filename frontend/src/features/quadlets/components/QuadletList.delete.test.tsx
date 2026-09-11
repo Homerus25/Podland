@@ -111,21 +111,6 @@ describe("QuadletList delete", () => {
 		expect(deleteRequests.url?.searchParams.get("force")).toBe("true");
 	});
 
-	it("canceling closes the modal without sending a request", async () => {
-		server.use(
-			quadletsHandler(() => [web]),
-			deleteHandler(),
-		);
-		const user = await openDeleteModal();
-
-		await user.click(screen.getByRole("button", { name: "Cancel" }));
-
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-		);
-		expect(deleteRequests.count).toBe(0);
-	});
-
 	it("closes the modal and refetches the list so the deleted quadlet disappears", async () => {
 		const survivor = quadletFixture({
 			id: "db",
@@ -170,7 +155,6 @@ describe("QuadletList delete", () => {
 		expect(screen.getByText("Quadlet not found")).toBeInTheDocument();
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 		expect(screen.getByTestId("confirm-delete-button")).toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 	});
 
 	it("surfaces a running resource with its envelope code and message", async () => {

@@ -34,6 +34,7 @@ import {
 } from "@features/volumes/services/volumesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { getApiError } from "@shared/utils/api";
 import { downloadFile } from "@shared/utils/download";
@@ -127,10 +128,13 @@ function VolumeRow({
 const VOLUME_IN_USE_CODE = "VOLUME_IN_USE";
 const UPLOAD_TOO_LARGE_CODE = "VOLUME_UPLOAD_TOO_LARGE";
 
-function isInUse(error: unknown): boolean {
-	return getApiError(error).code === VOLUME_IN_USE_CODE;
-}
-
+// The delete adapter over ConfirmDialog. The module owns the danger footer,
+// pending wiring, close-on-success, and the reset lifecycle (on open and on
+// close); this adapter keeps the domain body (the force checkbox) and the
+// toasts, expressed through the onSuccess/onError seams. The error region is
+// composed in renderError: the shared ErrorDisplay always, plus the in-use
+// hint when the failure is VOLUME_IN_USE - the seam replaces the region, it
+// does not append to it.
 function DeleteVolumeModal({
 	volume,
 	onClose,
@@ -142,77 +146,56 @@ function DeleteVolumeModal({
 }) {
 	const [force, setForce] = useState(false);
 	const toast = useToast();
-	const inUse = isInUse(deleteVolume.error);
 
 	return (
-		<Modal
-			isOpen
-			onClose={onClose}
+		<ConfirmDialog
+			mutation={deleteVolume}
 			title="Delete volume"
-			footer={
+			confirmLabel="Delete volume"
+			confirm={() => ({ volumeName: volume.name, force })}
+			onClose={onClose}
+			onSuccess={() =>
+				toast({
+					title: `Volume deleted: ${volume.name}`,
+					status: "success",
+					isClosable: true,
+				})
+			}
+			onError={() =>
+				toast({
+					title: `Failed to delete volume: ${volume.name}`,
+					status: "error",
+					isClosable: true,
+				})
+			}
+			body={
 				<>
-					<Button variant="ghost" onClick={onClose}>
-						Cancel
-					</Button>
-					<Button
-						colorScheme="red"
-						onClick={() =>
-							deleteVolume.mutate(
-								{ volumeName: volume.name, force },
-								{
-									onSuccess: () => {
-										toast({
-											title: `Volume deleted: ${volume.name}`,
-											status: "success",
-											isClosable: true,
-										});
-										onClose();
-									},
-									onError: () => {
-										toast({
-											title: `Failed to delete volume: ${volume.name}`,
-											status: "error",
-											isClosable: true,
-										});
-									},
-								},
-							)
-						}
-						isLoading={deleteVolume.isPending}
-						data-testid="confirm-delete-button"
+					<Text>
+						Delete volume {volume.name} from this machine? This cannot be
+						undone.
+					</Text>
+					<Checkbox
+						mt={3}
+						isChecked={force}
+						onChange={(event) => setForce(event.target.checked)}
+						data-testid="force-delete-checkbox"
 					>
-						Delete volume
-					</Button>
+						Force delete (stops containers using this volume before removal)
+					</Checkbox>
 				</>
 			}
-		>
-			<Text>
-				Delete volume {volume.name} from this machine? This cannot be undone.
-			</Text>
-			<Checkbox
-				mt={3}
-				isChecked={force}
-				onChange={(event) => setForce(event.target.checked)}
-				data-testid="force-delete-checkbox"
-			>
-				Force delete (stops containers using this volume before removal)
-			</Checkbox>
-			{inUse ? (
+			renderError={(apiError) => (
 				<>
-					<Box mt={2}>
-						<ErrorDisplay error={getApiError(deleteVolume.error)} />
-					</Box>
-					<Text mt={2} color="orange.500" data-testid="volume-in-use-warning">
-						Force is required to delete a volume that containers are using. Tick
-						force delete and confirm to stop them and remove the volume.
-					</Text>
+					<ErrorDisplay error={apiError} />
+					{apiError.code === VOLUME_IN_USE_CODE ? (
+						<Text mt={2} color="orange.500" data-testid="volume-in-use-warning">
+							Force is required to delete a volume that containers are using.
+							Tick force delete and confirm to stop them and remove the volume.
+						</Text>
+					) : null}
 				</>
-			) : deleteVolume.error ? (
-				<Box mt={2}>
-					<ErrorDisplay error={getApiError(deleteVolume.error)} />
-				</Box>
-			) : null}
-		</Modal>
+			)}
+		/>
 	);
 }
 
@@ -565,10 +548,7 @@ export function VolumeList({
 			{pendingDelete ? (
 				<DeleteVolumeModal
 					volume={pendingDelete}
-					onClose={() => {
-						deleteVolume.reset();
-						setPendingDelete(null);
-					}}
+					onClose={() => setPendingDelete(null)}
 					deleteVolume={deleteVolume}
 				/>
 			) : null}

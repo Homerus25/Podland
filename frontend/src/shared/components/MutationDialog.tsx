@@ -128,17 +128,17 @@ export function ConfirmDialog<TVariables>({
 			onError={onError}
 			renderError={renderError}
 			footer={
-				renderConfirm ? (
-					renderConfirm({
-						error: mutation.error,
-						isPending: mutation.isPending,
-						onConfirm,
-					})
-				) : (
-					<>
-						<Button variant="ghost" onClick={onClose}>
-							Cancel
-						</Button>
+				<>
+					<Button variant="ghost" onClick={onClose}>
+						Cancel
+					</Button>
+					{renderConfirm ? (
+						renderConfirm({
+							error: mutation.error,
+							isPending: mutation.isPending,
+							onConfirm,
+						})
+					) : (
 						<Button
 							colorScheme="red"
 							onClick={onConfirm}
@@ -147,8 +147,8 @@ export function ConfirmDialog<TVariables>({
 						>
 							{confirmLabel}
 						</Button>
-					</>
-				)
+					)}
+				</>
 			}
 		/>
 	);

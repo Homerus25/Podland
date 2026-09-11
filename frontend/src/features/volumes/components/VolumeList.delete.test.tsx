@@ -98,17 +98,13 @@ describe("VolumeList delete", () => {
 		expect(deleteRequests.count).toBe(0);
 	});
 
-	it("opens a confirmation dialog naming the volume with a force checkbox", async () => {
+	it("opens a confirmation dialog naming the volume with an unchecked force checkbox", async () => {
 		installHandlers();
-		const user = await openDeleteModal();
+		await openDeleteModal();
 
 		expect(screen.getAllByText(/victim/).length).toBeGreaterThan(0);
 		const checkbox = screen.getByTestId("force-delete-checkbox");
 		expect(checkbox).not.toBeChecked();
-		expect(deleteRequests.count).toBe(0);
-
-		await user.click(screen.getByRole("button", { name: /cancel/i }));
-		expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
 		expect(deleteRequests.count).toBe(0);
 	});
 

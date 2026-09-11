@@ -351,6 +351,7 @@ describe("ConfirmDialog danger footer", () => {
 		expect(
 			screen.queryByTestId("confirm-delete-button"),
 		).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
 		await user.click(screen.getByTestId("custom-confirm"));
 
 		expect(confirm).toHaveBeenCalledTimes(1);
