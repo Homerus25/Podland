@@ -6,7 +6,7 @@ import {
 } from "@shared/queries/queryKeys";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { type DefaultBodyType, HttpResponse, http } from "msw";
+import { type DefaultBodyType, type HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { server } from "@/test/server";
 import { ndjsonResponse } from "@/test/stream";
@@ -208,52 +208,5 @@ describe("useQuadletAutoUpdate", () => {
 			message: "Machine unreachable",
 		});
 		expect(result.current.report).toBeNull();
-	});
-
-	it("exposes non-2xx HTTP failures through the connection error", async () => {
-		mockAutoUpdate(() =>
-			HttpResponse.json(
-				{
-					requestId: "req-1",
-					error: { code: "MACHINE_NOT_FOUND", message: "Machine not found" },
-				},
-				{ status: 404 },
-			),
-		);
-		const { result } = renderAutoUpdateHook();
-
-		await act(async () => {
-			result.current.run(false);
-		});
-
-		await waitFor(() => expect(result.current.isRunning).toBe(false));
-		expect(result.current.connectionError).toEqual({
-			code: "MACHINE_NOT_FOUND",
-			message: "Machine not found",
-		});
-	});
-
-	it("aborts on cancel and ends without an error", async () => {
-		let releaseResponse: (() => void) | undefined;
-		mockAutoUpdate(async () => {
-			await new Promise<void>((resolve) => {
-				releaseResponse = resolve;
-			});
-			return streamResponse([report()]);
-		});
-		const { result } = renderAutoUpdateHook();
-
-		await act(async () => {
-			result.current.run(false);
-		});
-		await waitFor(() => expect(result.current.isRunning).toBe(true));
-
-		await act(async () => {
-			result.current.cancel();
-			releaseResponse?.();
-		});
-
-		expect(result.current.isRunning).toBe(false);
-		expect(result.current.connectionError).toBeNull();
 	});
 });

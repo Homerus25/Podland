@@ -78,19 +78,3 @@ export async function consumeNdjsonValues(
 		reader.releaseLock();
 	}
 }
-
-export async function consumeNdjsonStream(
-	stream: ReadableStream<Uint8Array>,
-	onEvent: (event: StreamEvent) => void,
-): Promise<void> {
-	await consumeNdjsonValues(stream, (value) => {
-		if (isStreamEvent(value)) {
-			onEvent(value);
-		} else {
-			console.warn(
-				"Skipping malformed stream event (unexpected shape):",
-				value,
-			);
-		}
-	});
-}

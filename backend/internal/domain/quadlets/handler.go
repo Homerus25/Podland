@@ -20,9 +20,8 @@ import (
 
 // QuadletHandler handles quadlet requests
 //
-// JSON endpoints cross the endpoint envelope (internal/web). GetLogs
-// and AutoUpdate keep their own shape — they stream NDJSON rather than
-// encoding one DTO.
+// JSON endpoints cross the endpoint envelope (internal/web). AutoUpdate
+// keeps its own shape — it streams NDJSON rather than encoding one DTO.
 type QuadletHandler struct {
 	service *QuadletService
 }
@@ -186,85 +185,32 @@ func parseLifecycleOptions(r *http.Request) LifecycleOptions {
 	return opts
 }
 
-// GetLogs handles getting quadlet logs
+// GetLogs handles getting quadlet logs. The query is parsed once: only
+// a clean follow request crosses the streaming envelope, while query
+// errors ride the JSON envelope even when follow=true was requested, so
+// no code path here writes an error response by hand.
 func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Get quadlet logs")
+	since, tail, queryErr := streaming.ParseLogWindow(r)
+	if queryErr != nil {
+		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+			return struct{}{}, queryErr
+		})
+		return
+	}
 
 	quadletID := chi.URLParam(r, "quadletId")
-	if quadletID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_QUADLET_ID", "Quadlet ID is required", contextutils.GetRequestID(r.Context()))
+
+	if streaming.ParseFollow(r) && quadletID != "" {
+		h.streamLogs(w, r, quadletID, since, tail)
 		return
 	}
 
-	// Parse query parameters
-	// follow defaults to false
-	follow := false
-	if followParam := r.URL.Query().Get("follow"); followParam != "" {
-		if parsed, err := strconv.ParseBool(followParam); err == nil {
-			follow = parsed
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletLogsResponse, error) {
+		if quadletID == "" {
+			return nil, errors.NewAppError("MISSING_QUADLET_ID", "Quadlet ID is required", http.StatusBadRequest)
 		}
-	}
-
-	// Parse since parameter (ISO8601 timestamp)
-	since := time.Time{}
-	if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
-		parsedSince, err := time.Parse(time.RFC3339, sinceParam)
-		if err != nil {
-			errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_SINCE_PARAM", "Invalid since parameter format (use RFC3339)", contextutils.GetRequestID(r.Context()))
-			slog.ErrorContext(r.Context(), "Invalid since parameter", slog.Any("error", err), slog.String("since", sinceParam))
-			return
-		}
-		since = parsedSince
-	}
-
-	// Parse tail parameter (number of lines, -1 for all)
-	tail := int64(-1)
-	if tailParam := r.URL.Query().Get("tail"); tailParam != "" {
-		if parsed, err := strconv.ParseInt(tailParam, 10, 64); err == nil {
-			tail = parsed
-		}
-	}
-
-	// Non-streaming mode
-	if !follow {
-		h.bufferedLogs(w, r, quadletID, since, tail)
-		return
-	}
-
-	h.streamLogs(w, r, quadletID, since, tail)
-}
-
-// bufferedLogs serves follow=false: one JSON document with the logs
-// collected so far. Identity checks stay here (the streaming branch gets
-// them from the streaming envelope instead).
-func (h *QuadletHandler) bufferedLogs(w http.ResponseWriter, r *http.Request, quadletID string, since time.Time, tail int64) {
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	logs, err := h.service.GetLogs(r.Context(), userID, machineID, quadletID, since, tail)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
-		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "get logs", slog.Any("error", err), slog.String("userID", userID), slog.String("machineID", machineID), slog.String("quadletId", quadletID))
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(logs)
+		return h.service.GetLogs(ctx, userID, machineID, quadletID, since, tail)
+	})
 }
 
 // streamLogs serves follow=true through the streaming envelope: Begin owns

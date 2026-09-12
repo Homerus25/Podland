@@ -1,7 +1,5 @@
 import { followLogStream, type LogEvent } from "@shared/streaming/logStream";
-import { api } from "@shared/utils/api";
-
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "/api";
+import { api, apiBaseUrl } from "@shared/utils/api";
 
 // Quadlet as returned by GET /api/machines/{id}/quadlets
 // (backend/internal/domain/quadlets/dto.go QuadletListResponse; raw is omitted

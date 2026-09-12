@@ -252,7 +252,7 @@ Get logs for a quadlet-managed resource.
 
 **Query Parameters:**
 - `follow` (boolean, optional): Follow log output
-- `since` (string, optional): Show logs since timestamp (ISO8601)
+- `since` (string, optional): Show logs since timestamp (RFC3339)
 - `tail` (integer, optional): Number of lines to show from the end
 
 **Response (Success - 200):**
@@ -288,7 +288,7 @@ The stream terminates with exactly one terminal event:
   `OPERATION_CANCELLED` event (to the already-closed connection).
 
 **Response (Error):**
-- 400: `INVALID_SINCE_PARAM`, `MISSING_QUADLET_ID` (buffered mode also answers `MISSING_MACHINE_ID`)
+- 400: `INVALID_SINCE_PARAM` / `INVALID_TAIL_PARAM` (malformed `since`/`tail`, message says "use RFC3339"; answered through the JSON envelope even when `follow=true`), `MISSING_QUADLET_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
 - 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
