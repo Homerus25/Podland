@@ -22,3 +22,5 @@ lsp add go --command gopls \
 	--options '{"buildFlags": ["-tags=integration"]}'
 lsp add gopls --command gopls \
 	--options '{"buildFlags": ["-tags=integration"]}'
+
+option attribution-generated-with false

@@ -13,8 +13,6 @@ import {
 	VStack,
 } from "@chakra-ui/react";
 import type { VolumeCreateInput } from "@features/volumes/services/volumesApi";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { getApiError } from "@shared/utils/api";
 import { useState } from "react";
 import {
 	type UseFieldArrayReturn,
@@ -35,8 +33,9 @@ interface VolumeFormValues {
 }
 
 interface VolumeFormProps {
-	onSubmit: (input: VolumeCreateInput) => Promise<void>;
-	submitError: unknown;
+	// Fire-and-forget: the host dialog's MutationDialog closes on success and
+	// renders the failure, so the form only forwards the payload.
+	onSubmit: (input: VolumeCreateInput) => void;
 	isSubmitting: boolean;
 }
 
@@ -55,11 +54,7 @@ function entriesToRecord(
 // for an anonymous volume) and a labels editor up front; driver and driver
 // options sit behind a collapsed "Advanced" section because they are only
 // relevant for specialized storage backends.
-export function VolumeForm({
-	onSubmit,
-	submitError,
-	isSubmitting,
-}: VolumeFormProps) {
+export function VolumeForm({ onSubmit, isSubmitting }: VolumeFormProps) {
 	const [advancedOpen, setAdvancedOpen] = useState(false);
 	const {
 		register,
@@ -82,8 +77,8 @@ export function VolumeForm({
 		return (rows[index]?.value ?? "").trim() !== "";
 	};
 
-	const submit = handleSubmit(async (values) => {
-		await onSubmit({
+	const submit = handleSubmit((values) => {
+		onSubmit({
 			name: values.name.trim(),
 			labels: entriesToRecord(values.labels),
 			driver: values.driver.trim() || undefined,
@@ -149,7 +144,6 @@ export function VolumeForm({
 	return (
 		<form onSubmit={submit} noValidate>
 			<VStack spacing={4} align="stretch">
-				{submitError ? <ErrorDisplay error={getApiError(submitError)} /> : null}
 				<FormControl isInvalid={!!errors.name}>
 					<FormLabel htmlFor="volume-name">Name (optional)</FormLabel>
 					<Input

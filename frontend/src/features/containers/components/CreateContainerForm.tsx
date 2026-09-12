@@ -7,8 +7,6 @@ import {
 	VStack,
 } from "@chakra-ui/react";
 import type { CreateContainerInput } from "@features/containers/services/containersApi";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { getApiError } from "@shared/utils/api";
 import { useForm } from "react-hook-form";
 
 interface ContainerFormValues {
@@ -25,14 +23,14 @@ function parseCommand(text: string): string[] | undefined {
 }
 
 interface CreateContainerFormProps {
-	onSubmit: (input: CreateContainerInput) => Promise<void>;
-	submitError: unknown;
+	// Fire-and-forget: the host dialog's MutationDialog closes on success and
+	// renders the failure, so the form only forwards the payload.
+	onSubmit: (input: CreateContainerInput) => void;
 	isSubmitting: boolean;
 }
 
 export function CreateContainerForm({
 	onSubmit,
-	submitError,
 	isSubmitting,
 }: CreateContainerFormProps) {
 	const {
@@ -43,9 +41,9 @@ export function CreateContainerForm({
 		defaultValues: { image: "", name: "", command: "" },
 	});
 
-	const submit = handleSubmit(async (values) => {
+	const submit = handleSubmit((values) => {
 		const command = parseCommand(values.command);
-		await onSubmit({
+		onSubmit({
 			image: values.image.trim(),
 			...(values.name.trim() ? { name: values.name.trim() } : {}),
 			...(command ? { command } : {}),
@@ -55,7 +53,6 @@ export function CreateContainerForm({
 	return (
 		<form onSubmit={submit} noValidate>
 			<VStack spacing={4} align="stretch">
-				{submitError ? <ErrorDisplay error={getApiError(submitError)} /> : null}
 				<FormControl isInvalid={!!errors.image} isRequired>
 					<FormLabel htmlFor="container-image">Image</FormLabel>
 					<Input

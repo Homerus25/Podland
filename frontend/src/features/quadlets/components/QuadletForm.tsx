@@ -13,8 +13,6 @@ import {
 	QUADLET_RESOURCES,
 	type UpdateQuadletInput,
 } from "@features/quadlets/services/quadletsApi";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { getApiError } from "@shared/utils/api";
 import { useForm } from "react-hook-form";
 
 interface QuadletFormValues {
@@ -30,8 +28,9 @@ export interface QuadletFormSeed {
 	content: string;
 }
 
+// Fire-and-forget: the host dialog's MutationDialog closes on success and
+// renders the failure, so the form only forwards the payload.
 interface QuadletFormSharedProps {
-	submitError: unknown;
 	isSubmitting: boolean;
 }
 
@@ -39,7 +38,7 @@ interface QuadletFormSharedProps {
 // three are submitted.
 interface QuadletCreateProps extends QuadletFormSharedProps {
 	mode?: "create";
-	onSubmit: (input: CreateQuadletInput) => Promise<void>;
+	onSubmit: (input: CreateQuadletInput) => void;
 }
 
 // Edit mode: the backend derives the name from the URL and the resource type
@@ -48,7 +47,7 @@ interface QuadletCreateProps extends QuadletFormSharedProps {
 interface QuadletEditProps extends QuadletFormSharedProps {
 	mode: "edit";
 	seed: QuadletFormSeed;
-	onSubmit: (input: UpdateQuadletInput) => Promise<void>;
+	onSubmit: (input: UpdateQuadletInput) => void;
 }
 
 export type QuadletFormProps = QuadletCreateProps | QuadletEditProps;
@@ -57,8 +56,8 @@ export type QuadletFormProps = QuadletCreateProps | QuadletEditProps;
 // plain monospace textarea. The edit flow reuses this component rather than
 // duplicating the layout.
 export function QuadletForm(props: QuadletFormProps) {
-	const { submitError, isSubmitting } = props;
 	const isEdit = props.mode === "edit";
+	const { isSubmitting } = props;
 	const {
 		register,
 		handleSubmit,
@@ -69,10 +68,9 @@ export function QuadletForm(props: QuadletFormProps) {
 			: { name: "", resource: "", content: "" },
 	});
 
-	const submit = handleSubmit(async (values) => {
+	const submit = handleSubmit((values) => {
 		if (props.mode === "edit") {
-			await props.onSubmit({ content: values.content });
-			return;
+			return props.onSubmit({ content: values.content });
 		}
 		// The select only offers QUADLET_RESOURCES; narrow the form string back
 		// to the typed payload field.
@@ -80,7 +78,7 @@ export function QuadletForm(props: QuadletFormProps) {
 			(candidate) => candidate === values.resource,
 		);
 		if (!resource) return;
-		await props.onSubmit({
+		return props.onSubmit({
 			name: values.name.trim(),
 			resource,
 			content: values.content,
@@ -90,7 +88,6 @@ export function QuadletForm(props: QuadletFormProps) {
 	return (
 		<form onSubmit={submit} noValidate>
 			<VStack spacing={4} align="stretch">
-				{submitError ? <ErrorDisplay error={getApiError(submitError)} /> : null}
 				{isEdit ? (
 					<FormControl>
 						<FormLabel htmlFor="quadlet-name">Name</FormLabel>

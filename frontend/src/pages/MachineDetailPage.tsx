@@ -30,7 +30,7 @@ import { QuadletList } from "@features/quadlets/components/QuadletList";
 import { SecretList } from "@features/secrets/components/SecretList";
 import { VolumeList } from "@features/volumes/components/VolumeList";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { Modal } from "@shared/components/Modal";
+import { ConfirmDialog } from "@shared/components/MutationDialog";
 import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { mutationToPromise } from "@shared/utils/mutationPromise";
@@ -43,56 +43,35 @@ function DeleteMachineSection({ machine }: { machine: Machine }) {
 	const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
 	// Deleting the machine destroys the page's subject, so success always
-	// navigates back to the machines list.
-	const confirmDelete = () => {
-		deleteMachine.mutate(machine.id, {
-			onSuccess: () => navigate("/machines"),
-			onSettled: () => setIsConfirmOpen(false),
-		});
-	};
-
+	// navigates back to the machines list. Failure stays put: the envelope
+	// renders inside the dialog, which stays open for another attempt.
 	return (
 		<>
 			<Button
 				colorScheme="red"
 				variant="outline"
-				onClick={() => {
-					deleteMachine.reset();
-					setIsConfirmOpen(true);
-				}}
+				onClick={() => setIsConfirmOpen(true)}
 				data-testid="delete-machine-button"
 			>
 				Delete machine
 			</Button>
-			{deleteMachine.error ? (
-				<ErrorDisplay error={getApiError(deleteMachine.error)} />
+			{isConfirmOpen ? (
+				<ConfirmDialog
+					mutation={deleteMachine}
+					title="Delete machine"
+					confirmLabel="Delete machine"
+					confirm={() => machine.id}
+					onClose={() => setIsConfirmOpen(false)}
+					onSuccess={() => navigate("/machines")}
+					body={
+						<Text>
+							Delete “{machine.name}” ({machine.hostname}:{machine.port})? This
+							removes the machine registration and all access grants. The remote
+							host is not touched.
+						</Text>
+					}
+				/>
 			) : null}
-			<Modal
-				isOpen={isConfirmOpen}
-				onClose={() => setIsConfirmOpen(false)}
-				title="Delete machine"
-				footer={
-					<>
-						<Button variant="ghost" onClick={() => setIsConfirmOpen(false)}>
-							Cancel
-						</Button>
-						<Button
-							colorScheme="red"
-							onClick={confirmDelete}
-							isLoading={deleteMachine.isPending}
-							data-testid="confirm-delete-button"
-						>
-							Delete machine
-						</Button>
-					</>
-				}
-			>
-				<Text>
-					Delete “{machine.name}” ({machine.hostname}:{machine.port})? This
-					removes the machine registration and all access grants. The remote
-					host is not touched.
-				</Text>
-			</Modal>
 		</>
 	);
 }

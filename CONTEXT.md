@@ -146,7 +146,8 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **TypeScript**: Strict mode with path aliases
 - **Feature folders**: each feature lives in `src/features/<name>/` with `services/` (API client), `hooks/` (React Query hooks), `components/`
 - **DTO types**: response types for an endpoint live in that feature's `services/<feature>Api.ts`, colocated with the fetch function; `src/shared/types/api.ts` is only for types shared across features (e.g. `Machine`, error envelope)
-- **Resource lists**: one shared `ResourceList` module owns the read side of every table-backed feature list (loading/error/empty/table triad, table chrome, plural testids, toolbar, hide-and-hint permission hint); features are adapters handing resolved state, columns as data, and their own rows. Dialog/mutation machinery stays feature code by design; known input for a future MutationDialog module (architecture-review candidate C6, 2026-09-09): VolumeList's row-triggered delete/populate dialogs reset on close only, no reset-on-open — that module must own reset-on-open.
+- **Resource lists**: one shared `ResourceList` module owns the read side of every table-backed feature list (loading/error/empty/table triad, table chrome, plural testids, toolbar, hide-and-hint permission hint); features are adapters handing resolved state, columns as data, and their own rows.
+- **Mutation dialogs**: one shared `MutationDialog`/`ConfirmDialog` module (`frontend/src/shared/components/MutationDialog.tsx`) owns the dialog skeleton (modal shell, reset-on-open/close invariant, pending wiring, close-on-success, error region); features are adapters supplying the body, the mutation result slice, and side effects through the `onSuccess`/`onError` seams. Settled 2026-09-11 (architecture-review candidate C6); non-modal mutation sites keep feature-local resets.
 
 ### Infrastructure
 - **Reverse Proxy**: Caddy

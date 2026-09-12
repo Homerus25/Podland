@@ -11,11 +11,12 @@ import {
 	useSecrets,
 } from "@features/secrets/hooks/useSecrets";
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
-import { Modal } from "@shared/components/Modal";
-import { ConfirmDialog } from "@shared/components/MutationDialog";
+import {
+	ConfirmDialog,
+	MutationDialog,
+} from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { formatRelativeDate } from "@shared/utils/format";
-import { mutationToPromise } from "@shared/utils/mutationPromise";
 import { useState } from "react";
 
 // Each row owns its delete mutation instance, so pending state and errors
@@ -136,10 +137,7 @@ export function SecretList({
 					<Button
 						size="sm"
 						colorScheme="blue"
-						onClick={() => {
-							createSecret.reset();
-							setIsCreateOpen(true);
-						}}
+						onClick={() => setIsCreateOpen(true)}
 						data-testid="create-secret-button"
 					>
 						Create secret
@@ -148,24 +146,17 @@ export function SecretList({
 				canManage={canManage}
 			/>
 			{isCreateOpen ? (
-				<Modal
-					isOpen
-					onClose={() => {
-						createSecret.reset();
-						setIsCreateOpen(false);
-					}}
+				<MutationDialog
+					mutation={createSecret}
 					title="Create secret"
-				>
-					<SecretForm
-						onSubmit={(input) =>
-							mutationToPromise(createSecret.mutate, input, {
-								onSuccess: () => setIsCreateOpen(false),
-							})
-						}
-						submitError={createSecret.error}
-						isSubmitting={createSecret.isPending}
-					/>
-				</Modal>
+					onClose={() => setIsCreateOpen(false)}
+					body={
+						<SecretForm
+							onSubmit={(input) => createSecret.mutate(input)}
+							isSubmitting={createSecret.isPending}
+						/>
+					}
+				/>
 			) : null}
 		</>
 	);

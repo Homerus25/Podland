@@ -29,11 +29,13 @@ import {
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
-import { ConfirmDialog } from "@shared/components/MutationDialog";
+import {
+	ConfirmDialog,
+	MutationDialog,
+} from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
-import { mutationToPromise } from "@shared/utils/mutationPromise";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -270,9 +272,13 @@ function QuadletRow({
 	);
 }
 
-// The editor seeds the shared quadlet form from the get endpoint. Loading
-// and error states cover the fetch: the quadlet may have disappeared or the
-// ssh connection may fail between listing and opening.
+// The edit adapter over the core. The mutation machinery - error region,
+// close-on-success, and the reset lifecycle - is MutationDialog's; the body
+// keeps the in-modal entity loading because the detail query's loading and
+// error states are the body's own (the core has no query knowledge). The
+// editor seeds the shared form from the get endpoint; that query drops its
+// cache on unmount (gcTime 0), so reopening after a save never serves the
+// pre-edit file.
 function EditQuadletModal({
 	machineId,
 	quadlet,
@@ -287,34 +293,34 @@ function EditQuadletModal({
 	const { data, isPending, error } = useQuadlet(machineId, quadlet.id);
 
 	return (
-		<Modal isOpen onClose={onClose} title={`Edit quadlet — ${quadlet.name}`}>
-			{isPending ? (
-				<Text data-testid="quadlet-edit-loading">Loading content…</Text>
-			) : error ? (
-				<ErrorDisplay error={getApiError(error)} />
-			) : data ? (
-				<QuadletForm
-					mode="edit"
-					seed={{
-						name: data.name,
-						resource: data.resource,
-						content: data.content,
-					}}
-					onSubmit={({ content }) =>
-						mutationToPromise(
-							updateQuadlet.mutate,
-							{
+		<MutationDialog
+			mutation={updateQuadlet}
+			title={`Edit quadlet — ${quadlet.name}`}
+			onClose={onClose}
+			body={
+				isPending ? (
+					<Text data-testid="quadlet-edit-loading">Loading content…</Text>
+				) : error ? (
+					<ErrorDisplay error={getApiError(error)} />
+				) : data ? (
+					<QuadletForm
+						mode="edit"
+						seed={{
+							name: data.name,
+							resource: data.resource,
+							content: data.content,
+						}}
+						onSubmit={({ content }) =>
+							updateQuadlet.mutate({
 								quadletId: quadlet.id,
 								content,
-							},
-							{ onSuccess: onClose },
-						)
-					}
-					submitError={updateQuadlet.error}
-					isSubmitting={updateQuadlet.isPending}
-				/>
-			) : null}
-		</Modal>
+							})
+						}
+						isSubmitting={updateQuadlet.isPending}
+					/>
+				) : null
+			}
+		/>
 	);
 }
 
@@ -435,10 +441,7 @@ export function QuadletList({
 						<Button
 							size="sm"
 							colorScheme="blue"
-							onClick={() => {
-								createQuadlet.reset();
-								setIsCreateOpen(true);
-							}}
+							onClick={() => setIsCreateOpen(true)}
 							data-testid="create-quadlet-button"
 						>
 							Create quadlet
@@ -471,10 +474,7 @@ export function QuadletList({
 					machineId={machineId}
 					quadlet={editTarget}
 					updateQuadlet={updateQuadlet}
-					onClose={() => {
-						updateQuadlet.reset();
-						setEditTarget(null);
-					}}
+					onClose={() => setEditTarget(null)}
 				/>
 			) : null}
 			{deleteTarget ? (
@@ -528,24 +528,17 @@ export function QuadletList({
 				/>
 			) : null}
 			{isCreateOpen ? (
-				<Modal
-					isOpen
-					onClose={() => {
-						createQuadlet.reset();
-						setIsCreateOpen(false);
-					}}
+				<MutationDialog
+					mutation={createQuadlet}
 					title="Create quadlet"
-				>
-					<QuadletForm
-						onSubmit={(input) =>
-							mutationToPromise(createQuadlet.mutate, input, {
-								onSuccess: () => setIsCreateOpen(false),
-							})
-						}
-						submitError={createQuadlet.error}
-						isSubmitting={createQuadlet.isPending}
-					/>
-				</Modal>
+					onClose={() => setIsCreateOpen(false)}
+					body={
+						<QuadletForm
+							onSubmit={(input) => createQuadlet.mutate(input)}
+							isSubmitting={createQuadlet.isPending}
+						/>
+					}
+				/>
 			) : null}
 		</>
 	);

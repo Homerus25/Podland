@@ -9,13 +9,14 @@ import {
 } from "@features/containers/hooks/useContainers";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { Modal } from "@shared/components/Modal";
-import { ConfirmDialog } from "@shared/components/MutationDialog";
+import {
+	ConfirmDialog,
+	MutationDialog,
+} from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
 import { shortImageId } from "@shared/utils/format";
-import { mutationToPromise } from "@shared/utils/mutationPromise";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -194,10 +195,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
 					<Button
 						size="sm"
 						colorScheme="blue"
-						onClick={() => {
-							createContainer.reset();
-							setIsCreateOpen(true);
-						}}
+						onClick={() => setIsCreateOpen(true)}
 						data-testid="create-container-button"
 					>
 						Create container
@@ -212,24 +210,17 @@ export function ContainerList({ machineId }: { machineId: string }) {
 				/>
 			) : null}
 			{isCreateOpen ? (
-				<Modal
-					isOpen
-					onClose={() => {
-						createContainer.reset();
-						setIsCreateOpen(false);
-					}}
+				<MutationDialog
+					mutation={createContainer}
 					title="Create container"
-				>
-					<CreateContainerForm
-						onSubmit={(input) =>
-							mutationToPromise(createContainer.mutate, input, {
-								onSuccess: () => setIsCreateOpen(false),
-							})
-						}
-						submitError={createContainer.error}
-						isSubmitting={createContainer.isPending}
-					/>
-				</Modal>
+					onClose={() => setIsCreateOpen(false)}
+					body={
+						<CreateContainerForm
+							onSubmit={(input) => createContainer.mutate(input)}
+							isSubmitting={createContainer.isPending}
+						/>
+					}
+				/>
 			) : null}
 		</>
 	);

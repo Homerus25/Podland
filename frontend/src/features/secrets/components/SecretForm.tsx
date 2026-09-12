@@ -10,8 +10,6 @@ import {
 	VStack,
 } from "@chakra-ui/react";
 import type { CreateSecretInput } from "@features/secrets/services/secretsApi";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { getApiError } from "@shared/utils/api";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 
@@ -28,8 +26,9 @@ const SECRET_NAME_MESSAGE =
 	"Name must start with a letter or digit and contain only letters, digits, underscores, dots, or dashes";
 
 interface SecretFormProps {
-	onSubmit: (input: CreateSecretInput) => Promise<void>;
-	submitError: unknown;
+	// Fire-and-forget: the host dialog's MutationDialog closes on success and
+	// renders the failure, so the form only forwards the payload.
+	onSubmit: (input: CreateSecretInput) => void;
 	isSubmitting: boolean;
 }
 
@@ -38,11 +37,7 @@ interface SecretFormProps {
 // before submit (the backend trims it too); the value is sent byte-identical
 // and never trimmed — only validation looks at its trimmed form, because a
 // masked input makes an accidental whitespace-only value undetectable.
-export function SecretForm({
-	onSubmit,
-	submitError,
-	isSubmitting,
-}: SecretFormProps) {
+export function SecretForm({ onSubmit, isSubmitting }: SecretFormProps) {
 	const [showValue, setShowValue] = useState(false);
 	const {
 		register,
@@ -55,14 +50,13 @@ export function SecretForm({
 		mode: "onChange",
 	});
 
-	const submit = handleSubmit(async (values) => {
-		await onSubmit({ name: values.name.trim(), value: values.value });
+	const submit = handleSubmit((values) => {
+		onSubmit({ name: values.name.trim(), value: values.value });
 	});
 
 	return (
 		<form onSubmit={submit} noValidate>
 			<VStack spacing={4} align="stretch">
-				{submitError ? <ErrorDisplay error={getApiError(submitError)} /> : null}
 				<FormControl isInvalid={!!errors.name} isRequired>
 					<FormLabel htmlFor="secret-name">Name</FormLabel>
 					<Input

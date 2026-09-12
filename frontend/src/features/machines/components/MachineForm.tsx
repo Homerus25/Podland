@@ -47,28 +47,35 @@ function readFile(file: File): Promise<string> {
 	});
 }
 
-interface MachineFormProps {
-	// Returns a promise that settles when the request finishes so the form's
-	// submit state spans the whole mutation, not just the file read.
-	onSubmit: (input: MachineFormPayload) => Promise<void>;
-	submitError: unknown;
+interface MachineFormSharedProps {
 	isSubmitting: boolean;
-	mode?: "create" | "edit";
 	machine?: Machine;
 }
+
+// Create mode: fire-and-forget — the host dialog's MutationDialog closes on
+// success and renders the failure, so the form only forwards the payload.
+interface MachineFormCreateProps extends MachineFormSharedProps {
+	mode?: "create";
+	onSubmit: (input: MachineFormPayload) => void;
+}
+
+// Edit mode: the settings tab owns its saved/error display and awaits the
+// mutation — there is no host dialog to own the seams for it.
+interface MachineFormEditProps extends MachineFormSharedProps {
+	mode: "edit";
+	onSubmit: (input: MachineFormPayload) => Promise<void>;
+	submitError: unknown;
+}
+
+export type MachineFormProps = MachineFormCreateProps | MachineFormEditProps;
 
 // MachineForm serves both create and edit mode. In create mode the SSH
 // private key file is required; in edit mode it is optional — omitting it
 // leaves the stored key untouched, uploading a new file re-sends it. The key
 // file is read client-side via the File API.
-export function MachineForm({
-	onSubmit,
-	submitError,
-	isSubmitting,
-	mode = "create",
-	machine,
-}: MachineFormProps) {
-	const isEdit = mode === "edit";
+export function MachineForm(props: MachineFormProps) {
+	const isEdit = props.mode === "edit";
+	const { isSubmitting, machine } = props;
 	const {
 		register,
 		handleSubmit,
@@ -105,7 +112,7 @@ export function MachineForm({
 			});
 			return;
 		}
-		await onSubmit({
+		const payload: MachineFormPayload = {
 			name: values.name,
 			description: values.description,
 			hostname: values.hostname,
@@ -113,13 +120,20 @@ export function MachineForm({
 			sshUsername: values.sshUsername,
 			...(sshPrivateKey !== undefined ? { sshPrivateKey } : {}),
 			podmanSocketPath: values.podmanSocketPath,
-		});
+		};
+		if (props.mode === "edit") {
+			await props.onSubmit(payload);
+			return;
+		}
+		props.onSubmit(payload);
 	});
 
 	return (
 		<form onSubmit={submit} noValidate>
 			<VStack spacing={4} align="stretch">
-				{submitError ? <ErrorDisplay error={getApiError(submitError)} /> : null}
+				{props.mode === "edit" && props.submitError ? (
+					<ErrorDisplay error={getApiError(props.submitError)} />
+				) : null}
 				<FormControl isInvalid={!!errors.name} isRequired>
 					<FormLabel htmlFor="machine-name">Name</FormLabel>
 					<Input

@@ -1,5 +1,5 @@
 import type { Machine } from "@shared/types/api";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -87,7 +87,7 @@ describe("MachineDetailPage Settings tab (delete machine)", () => {
 		expect(machinesListRequests).toBeGreaterThanOrEqual(1);
 	});
 
-	it("renders the error envelope and keeps the pending state when the delete fails", async () => {
+	it("renders the error envelope inside the modal, keeps it open, and navigates nowhere on failure", async () => {
 		server.use(deleteHandler(machineFixture(), 409, 50));
 		await renderSettingsTab();
 
@@ -97,9 +97,18 @@ describe("MachineDetailPage Settings tab (delete machine)", () => {
 		);
 
 		expect(screen.getByTestId("confirm-delete-button")).toBeDisabled();
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("DELETE_FAILED")).toBeInTheDocument();
-		expect(screen.getByText("Failed to delete machine")).toBeInTheDocument();
+		const modal = screen.getByTestId("modal");
+		expect(await within(modal).findByRole("alert")).toBeInTheDocument();
+		expect(within(modal).getByText("DELETE_FAILED")).toBeInTheDocument();
+		expect(
+			within(modal).getByText("Failed to delete machine"),
+		).toBeInTheDocument();
+		// Normalized failure: the modal stays open for another attempt (the
+		// confirm button re-enables) and the page behind is untouched.
+		await waitFor(() =>
+			expect(screen.getByTestId("confirm-delete-button")).toBeEnabled(),
+		);
+		expect(screen.getByTestId("modal")).toBeInTheDocument();
 		expect(screen.getByTestId("location")).toHaveTextContent("/machines/m-1");
 	});
 

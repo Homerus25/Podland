@@ -171,7 +171,7 @@ describe("Add Machine modal", () => {
 		});
 	});
 
-	it("renders the error envelope inside the form when creation fails", async () => {
+	it("renders the error envelope in the modal and keeps it open when creation fails", async () => {
 		server.use(
 			mockMachines([existingMachine]),
 			http.post("*/api/machines", () =>

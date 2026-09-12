@@ -34,12 +34,14 @@ import {
 } from "@features/volumes/services/volumesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
-import { ConfirmDialog } from "@shared/components/MutationDialog";
+import {
+	ConfirmDialog,
+	MutationDialog,
+} from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { getApiError } from "@shared/utils/api";
 import { downloadFile } from "@shared/utils/download";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
-import { mutationToPromise } from "@shared/utils/mutationPromise";
 import { useState } from "react";
 import { VolumeInspectDrawer } from "./VolumeInspectDrawer";
 
@@ -292,10 +294,13 @@ function PruneVolumesModal({
 	);
 }
 
-function isUploadTooLarge(error: unknown): boolean {
-	return getApiError(error).code === UPLOAD_TOO_LARGE_CODE;
-}
-
+// The populate adapter over the core. The body keeps its local state: the
+// files input or the tar archive with the shape-conflict guard, and the
+// payload building stays a pure function in the API module. The custom
+// footer expresses the confirm-populate-button with its progress text while
+// pending through the core's footer mechanism. The too-large failure maps
+// to its hint through renderError - the seam replaces the whole region, so
+// the adapter renders both branches itself; success toasts via onSuccess.
 function PopulateVolumeModal({
 	volume,
 	onClose,
@@ -314,7 +319,6 @@ function PopulateVolumeModal({
 	const hasArchive = archive !== null;
 	const shapeConflict = hasFiles && hasArchive;
 	const canSubmit = (hasFiles || hasArchive) && !shapeConflict;
-	const tooLarge = isUploadTooLarge(populateVolume.error);
 
 	const submit = () => {
 		if (!canSubmit) return;
@@ -323,30 +327,42 @@ function PopulateVolumeModal({
 			hasFiles ? Array.from(files!) : [],
 			hasArchive ? archive : undefined,
 		);
-		populateVolume.mutate(
-			{
-				volumeName: volume.name,
-				form,
-				onProgress: setProgress,
-			},
-			{
-				onSuccess: () => {
-					toast({
-						title: `Volume populated: ${volume.name}`,
-						status: "success",
-						isClosable: true,
-					});
-					onClose();
-				},
-			},
-		);
+		populateVolume.mutate({
+			volumeName: volume.name,
+			form,
+			onProgress: setProgress,
+		});
 	};
 
 	return (
-		<Modal
-			isOpen
-			onClose={onClose}
+		<MutationDialog
+			mutation={populateVolume}
 			title={`Populate ${volume.name}`}
+			onClose={onClose}
+			onSuccess={() =>
+				toast({
+					title: `Volume populated: ${volume.name}`,
+					status: "success",
+					isClosable: true,
+				})
+			}
+			renderError={(apiError) =>
+				apiError.code === UPLOAD_TOO_LARGE_CODE ? (
+					<>
+						<ErrorDisplay error={apiError} />
+						<Text
+							mt={2}
+							color="orange.500"
+							data-testid="populate-too-large-hint"
+						>
+							The upload exceeds the configured size limit. Split or shrink it
+							and try again.
+						</Text>
+					</>
+				) : (
+					<ErrorDisplay error={apiError} />
+				)
+			}
 			footer={
 				<>
 					<Button variant="ghost" onClick={onClose}>
@@ -364,54 +380,48 @@ function PopulateVolumeModal({
 					</Button>
 				</>
 			}
-		>
-			<Text>
-				Populate merges into the volume: uploaded paths overwrite same-named
-				files, everything already in the volume is kept.
-			</Text>
-			<FormControl mt={3}>
-				<FormLabel htmlFor="populate-files">Files</FormLabel>
-				<Box data-testid="populate-files-input">
-					<input
-						id="populate-files"
-						type="file"
-						multiple
-						onChange={(event) => setFiles(event.target.files)}
-					/>
-				</Box>
-			</FormControl>
-			<FormControl mt={3}>
-				<FormLabel htmlFor="populate-archive">Or a tar archive</FormLabel>
-				<Box data-testid="populate-archive-input">
-					<input
-						id="populate-archive"
-						type="file"
-						accept=".tar"
-						onChange={(event) => setArchive(event.target.files?.[0] ?? null)}
-					/>
-				</Box>
-			</FormControl>
-			{shapeConflict ? (
-				<Text color="orange.500" mt={2} data-testid="populate-shape-conflict">
-					Choose either files or a single tar archive, not both.
-				</Text>
-			) : null}
-			{tooLarge ? (
+			body={
 				<>
-					<Box mt={2}>
-						<ErrorDisplay error={getApiError(populateVolume.error)} />
-					</Box>
-					<Text mt={2} color="orange.500" data-testid="populate-too-large-hint">
-						The upload exceeds the configured size limit. Split or shrink it and
-						try again.
+					<Text>
+						Populate merges into the volume: uploaded paths overwrite same-named
+						files, everything already in the volume is kept.
 					</Text>
+					<FormControl mt={3}>
+						<FormLabel htmlFor="populate-files">Files</FormLabel>
+						<Box data-testid="populate-files-input">
+							<input
+								id="populate-files"
+								type="file"
+								multiple
+								onChange={(event) => setFiles(event.target.files)}
+							/>
+						</Box>
+					</FormControl>
+					<FormControl mt={3}>
+						<FormLabel htmlFor="populate-archive">Or a tar archive</FormLabel>
+						<Box data-testid="populate-archive-input">
+							<input
+								id="populate-archive"
+								type="file"
+								accept=".tar"
+								onChange={(event) =>
+									setArchive(event.target.files?.[0] ?? null)
+								}
+							/>
+						</Box>
+					</FormControl>
+					{shapeConflict ? (
+						<Text
+							color="orange.500"
+							mt={2}
+							data-testid="populate-shape-conflict"
+						>
+							Choose either files or a single tar archive, not both.
+						</Text>
+					) : null}
 				</>
-			) : populateVolume.error ? (
-				<Box mt={2}>
-					<ErrorDisplay error={getApiError(populateVolume.error)} />
-				</Box>
-			) : null}
-		</Modal>
+			}
+		/>
 	);
 }
 
@@ -496,10 +506,7 @@ export function VolumeList({
 						<Button
 							size="sm"
 							colorScheme="blue"
-							onClick={() => {
-								createVolume.reset();
-								setIsCreateOpen(true);
-							}}
+							onClick={() => setIsCreateOpen(true)}
 							data-testid="create-volume-button"
 						>
 							Create volume
@@ -529,10 +536,7 @@ export function VolumeList({
 			{populateTarget ? (
 				<PopulateVolumeModal
 					volume={populateTarget}
-					onClose={() => {
-						populateVolume.reset();
-						setPopulateTarget(null);
-					}}
+					onClose={() => setPopulateTarget(null)}
 					populateVolume={populateVolume}
 				/>
 			) : null}
@@ -553,33 +557,31 @@ export function VolumeList({
 				/>
 			) : null}
 			{isCreateOpen ? (
-				<Modal
-					isOpen
-					onClose={() => {
-						createVolume.reset();
-						setIsCreateOpen(false);
-					}}
+				<MutationDialog
+					mutation={createVolume}
 					title="Create volume"
-				>
-					<VolumeForm
-						onSubmit={(input) =>
-							mutationToPromise(createVolume.mutate, input, {
-								onSuccess: (created) => {
-									setIsCreateOpen(false);
-									toast({
-										title: created.anonymous
-											? `Anonymous volume created: ${created.name}`
-											: `Volume created: ${created.name}`,
-										status: "success",
-										isClosable: true,
-									});
-								},
-							})
+					onClose={() => setIsCreateOpen(false)}
+					// The created volume arrives through the live mutation result by
+					// the time the module's onSuccess seam fires.
+					onSuccess={() => {
+						const created = createVolume.data;
+						if (created) {
+							toast({
+								title: created.anonymous
+									? `Anonymous volume created: ${created.name}`
+									: `Volume created: ${created.name}`,
+								status: "success",
+								isClosable: true,
+							});
 						}
-						submitError={createVolume.error}
-						isSubmitting={createVolume.isPending}
-					/>
-				</Modal>
+					}}
+					body={
+						<VolumeForm
+							onSubmit={(input) => createVolume.mutate(input)}
+							isSubmitting={createVolume.isPending}
+						/>
+					}
+				/>
 			) : null}
 		</>
 	);

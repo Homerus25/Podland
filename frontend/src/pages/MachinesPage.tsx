@@ -14,9 +14,8 @@ import {
 } from "@features/machines/hooks/useMachines";
 import type { CreateMachineInput } from "@features/machines/services/machinesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { Modal } from "@shared/components/Modal";
+import { MutationDialog } from "@shared/components/MutationDialog";
 import { getApiError } from "@shared/utils/api";
-import { mutationToPromise } from "@shared/utils/mutationPromise";
 import { useState } from "react";
 
 export function MachinesPage() {
@@ -24,24 +23,13 @@ export function MachinesPage() {
 	const createMachine = useCreateMachine();
 	const [isAddOpen, setIsAddOpen] = useState(false);
 
-	// Clearing the mutation on open/close means a stale error from a previous
-	// attempt never bleeds into a fresh form.
-	const openAddModal = () => {
-		createMachine.reset();
-		setIsAddOpen(true);
-	};
-	const closeAddModal = () => {
-		createMachine.reset();
-		setIsAddOpen(false);
-	};
-
 	return (
 		<VStack spacing={4} align="stretch">
 			<HStack justify="space-between">
 				<Heading size="lg">Machines</Heading>
 				<Button
 					colorScheme="blue"
-					onClick={openAddModal}
+					onClick={() => setIsAddOpen(true)}
 					data-testid="add-machine-button"
 				>
 					Add Machine
@@ -65,19 +53,21 @@ export function MachinesPage() {
 						))}
 					</SimpleGrid>
 				))}
-			<Modal isOpen={isAddOpen} onClose={closeAddModal} title="Add Machine">
-				<MachineForm
-					onSubmit={(input) =>
-						mutationToPromise(
-							createMachine.mutate,
-							input as CreateMachineInput,
-							{ onSuccess: () => setIsAddOpen(false) },
-						)
+			{isAddOpen ? (
+				<MutationDialog
+					mutation={createMachine}
+					title="Add Machine"
+					onClose={() => setIsAddOpen(false)}
+					body={
+						<MachineForm
+							onSubmit={(input) =>
+								createMachine.mutate(input as CreateMachineInput)
+							}
+							isSubmitting={createMachine.isPending}
+						/>
 					}
-					submitError={createMachine.error}
-					isSubmitting={createMachine.isPending}
 				/>
-			</Modal>
+			) : null}
 		</VStack>
 	);
 }
