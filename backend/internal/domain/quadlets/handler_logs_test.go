@@ -116,40 +116,29 @@ func TestQuadletHandler_GetLogs_InvalidSinceParameter(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "INVALID_SINCE_PARAM", "Response should contain INVALID_SINCE_PARAM error code")
 }
 
-// TestQuadletHandler_GetLogs_InvalidTailParameter pins that a malformed
-// tail value is IGNORED (the request proceeds with the all-lines default),
-// matching this endpoint's documented behaviour.
+// TestQuadletHandler_GetLogs_InvalidTailParameter tests log retrieval with invalid tail parameter
 func TestQuadletHandler_GetLogs_InvalidTailParameter(t *testing.T) {
-	var gotOpts entities.ContainerLogsOptions
 	engine := &fakeQuadletEngine{}
-	handler := logsHandler(engine, func(containerName string, opts entities.ContainerLogsOptions) error {
-		gotOpts = opts
-		return nil
-	})
 
 	w := httptest.NewRecorder()
-	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?tail=not-a-number"))
+	newTestHandler(engine).GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?tail=not-a-number"))
 
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, int64(-1), gotOpts.Tail, "a malformed tail must fall back to the all-lines default")
+	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid tail parameter")
+	assert.Contains(t, w.Body.String(), "INVALID_TAIL_PARAM", "Response should contain INVALID_TAIL_PARAM error code")
 }
 
-// TestQuadletHandler_GetLogs_MissingMachineID tests that Logs validates machine ID
-func TestQuadletHandler_GetLogs_MissingMachineID(t *testing.T) {
+// TestQuadletHandler_GetLogs_QueryErrorWithFollowRidesJSONEnvelope tests
+// that a query error answers through the JSON envelope even when
+// follow=true was requested: 400 before any stream begins.
+func TestQuadletHandler_GetLogs_QueryErrorWithFollowRidesJSONEnvelope(t *testing.T) {
 	engine := &fakeQuadletEngine{}
 
-	req := httptest.NewRequest("GET", "/api/machines//quadlets/web.container/logs", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("quadletId", "web.container")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-	req = req.WithContext(ctx)
-
 	w := httptest.NewRecorder()
-	newTestHandler(engine).GetLogs(w, req)
+	newTestHandler(engine).GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?follow=true&since=invalid-date"))
 
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when machine ID is missing")
-	assert.Contains(t, w.Body.String(), "MISSING_MACHINE_ID", "Response should contain MISSING_MACHINE_ID error code")
+	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid since even with follow=true")
+	assert.Contains(t, w.Body.String(), "INVALID_SINCE_PARAM", "Response should contain INVALID_SINCE_PARAM error code")
+	assert.NotContains(t, w.Body.String(), "STREAM_ENDED", "No stream may begin for a query error")
 }
 
 // TestQuadletHandler_GetLogs_MissingQuadletID tests that Logs validates quadlet ID

@@ -114,11 +114,13 @@ func TestContainerHandler_Logs_InvalidTailParameter(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "INVALID_TAIL_PARAM", "Response should contain INVALID_TAIL_PARAM error code")
 }
 
-// TestContainerHandler_Logs_MissingMachineID tests that Logs validates machine ID
-func TestContainerHandler_Logs_MissingMachineID(t *testing.T) {
+// TestContainerHandler_Logs_QueryErrorWithFollowRidesJSONEnvelope tests
+// that a query error answers through the JSON envelope even when
+// follow=true was requested: 400 before any stream begins.
+func TestContainerHandler_Logs_QueryErrorWithFollowRidesJSONEnvelope(t *testing.T) {
 	engine := &fakeContainerEngine{}
 
-	req := httptest.NewRequest("GET", "/api/machines//containers/container-123/logs", nil).
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true&since=invalid-date", nil).
 		WithContext(authedContext())
 
 	w := httptest.NewRecorder()
@@ -126,8 +128,9 @@ func TestContainerHandler_Logs_MissingMachineID(t *testing.T) {
 	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
 	r.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when machine ID is missing")
-	assert.Contains(t, w.Body.String(), "MISSING_MACHINE_ID", "Response should contain MISSING_MACHINE_ID error code")
+	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid since even with follow=true")
+	assert.Contains(t, w.Body.String(), "INVALID_SINCE_PARAM", "Response should contain INVALID_SINCE_PARAM error code")
+	assert.NotContains(t, w.Body.String(), "STREAM_ENDED", "No stream may begin for a query error")
 }
 
 // TestContainerHandler_Logs_MissingContainerID tests that Logs validates container ID
