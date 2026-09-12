@@ -5,13 +5,8 @@ import {
 	Checkbox,
 	FormControl,
 	FormLabel,
-	Table,
-	TableContainer,
-	Tbody,
 	Td,
 	Text,
-	Th,
-	Thead,
 	Tr,
 	useToast,
 } from "@chakra-ui/react";
@@ -29,15 +24,14 @@ import {
 } from "@features/volumes/hooks/useVolumes";
 import {
 	buildPopulateForm,
-	type VolumePruneReport,
 	type VolumeSummary,
 } from "@features/volumes/services/volumesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { Modal } from "@shared/components/Modal";
 import {
 	ConfirmDialog,
 	MutationDialog,
 } from "@shared/components/MutationDialog";
+import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { getApiError } from "@shared/utils/api";
 import { downloadFile } from "@shared/utils/download";
@@ -201,40 +195,9 @@ function DeleteVolumeModal({
 	);
 }
 
-function PruneReportList({ report }: { report: VolumePruneReport[] }) {
-	if (report.length === 0) {
-		return (
-			<Text data-testid="prune-report-empty">
-				Nothing to prune: no unused volumes on this machine.
-			</Text>
-		);
-	}
-	return (
-		<TableContainer>
-			<Table data-testid="prune-report" size="sm">
-				<Thead>
-					<Tr>
-						<Th>Removed volume</Th>
-						<Th isNumeric>Reclaimed</Th>
-					</Tr>
-				</Thead>
-				<Tbody>
-					{report.map((entry) => (
-						<Tr key={entry.name} data-testid="prune-report-row">
-							<Td fontFamily="mono">{entry.name}</Td>
-							{entry.error ? (
-								<Td color="red.500">{entry.error}</Td>
-							) : (
-								<Td isNumeric>{formatBytes(entry.size)}</Td>
-							)}
-						</Tr>
-					))}
-				</Tbody>
-			</Table>
-		</TableContainer>
-	);
-}
-
+// The prune adapter over PruneReportDialog, the twin of the images one:
+// the module owns the machinery, this adapter hands over the noun and the
+// two entry accessors that make a volume entry a report row.
 function PruneVolumesModal({
 	onClose,
 	pruneVolumes,
@@ -242,55 +205,14 @@ function PruneVolumesModal({
 	onClose: () => void;
 	pruneVolumes: ReturnType<typeof usePruneVolumes>;
 }) {
-	const report = pruneVolumes.data;
-
 	return (
-		<Modal
-			isOpen
+		<PruneReportDialog
+			mutation={pruneVolumes}
+			resource="volume"
+			entryKey={(entry) => entry.name}
+			renderLabel={(entry) => entry.name}
 			onClose={onClose}
-			title={report ? "Prune report" : "Prune unused volumes"}
-			footer={
-				report ? (
-					<Button onClick={onClose} data-testid="close-prune-report-button">
-						Close
-					</Button>
-				) : (
-					<>
-						<Button variant="ghost" onClick={onClose}>
-							Cancel
-						</Button>
-						<Button
-							colorScheme="red"
-							onClick={() => pruneVolumes.mutate()}
-							isLoading={pruneVolumes.isPending}
-							data-testid="confirm-prune-button"
-						>
-							Prune volumes
-						</Button>
-					</>
-				)
-			}
-		>
-			{report ? (
-				<PruneReportList report={report} />
-			) : (
-				<>
-					<Text>
-						All unused volumes on this machine will be removed. This cannot be
-						undone.
-					</Text>
-					<Text mt={2} color="gray.500">
-						Volumes that are in use by containers are safe and will not be
-						touched.
-					</Text>
-					{pruneVolumes.error ? (
-						<Box mt={2}>
-							<ErrorDisplay error={getApiError(pruneVolumes.error)} />
-						</Box>
-					) : null}
-				</>
-			)}
-		</Modal>
+		/>
 	);
 }
 
@@ -515,10 +437,7 @@ export function VolumeList({
 							size="sm"
 							colorScheme="red"
 							variant="outline"
-							onClick={() => {
-								pruneVolumes.reset();
-								setIsPruneOpen(true);
-							}}
+							onClick={() => setIsPruneOpen(true)}
 							data-testid="prune-volumes-button"
 						>
 							Prune
@@ -542,10 +461,7 @@ export function VolumeList({
 			) : null}
 			{isPruneOpen ? (
 				<PruneVolumesModal
-					onClose={() => {
-						pruneVolumes.reset();
-						setIsPruneOpen(false);
-					}}
+					onClose={() => setIsPruneOpen(false)}
 					pruneVolumes={pruneVolumes}
 				/>
 			) : null}
