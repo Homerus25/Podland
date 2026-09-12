@@ -1,5 +1,24 @@
 package machines
 
+import (
+	"github.com/Homerus25/podland/backend/internal/models"
+)
+
+// MachineRepository handles database operations for machines
+type MachineRepositoryInterface interface {
+	Create(machine *models.Machine) error
+	GetByID(id string) (*models.Machine, error)
+	Update(machine *models.Machine) error
+	Delete(id string) error
+	ListByOwner(ownerID string) ([]*models.Machine, error)
+	ListAccessible(userID string) ([]models.AccessibleMachine, error)
+	NameExistsForUser(userID, name string) (bool, error)
+}
+
+// The production persistence implementation satisfies the seam by
+// construction, not by the silence of app.go's wiring.
+var _ MachineRepositoryInterface = (*models.MachineRepository)(nil)
+
 // EncryptionServiceInterface defines the interface for encryption services
 // This allows mocking the EncryptionService in tests
 type EncryptionServiceInterface interface {

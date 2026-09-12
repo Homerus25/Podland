@@ -85,23 +85,6 @@ func (r *MachineRepository) GetByID(id string) (*Machine, error) {
 	return machine, nil
 }
 
-// GetByNameAndOwner retrieves a machine by name and owner ID
-func (r *MachineRepository) GetByNameAndOwner(name, ownerID string) (*Machine, error) {
-	query := `SELECT id, name, owner_id, description, hostname, port, ssh_username, ssh_key_encrypted, ssh_key_fingerprint, podman_socket_path, created_at, updated_at FROM machines WHERE name = ? AND owner_id = ?`
-	machine := &Machine{}
-	err := r.db.QueryRow(query, name, ownerID).Scan(
-		&machine.ID, &machine.Name, &machine.OwnerID, &machine.Description,
-		&machine.Hostname, &machine.Port, &machine.SSHUsername, &machine.SSHKeyEncrypted,
-		&machine.SSHKeyFingerprint, &machine.PodmanSocketPath, &machine.CreatedAt, &machine.UpdatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return machine, nil
-}
-
 // ListByOwner retrieves all machines owned by a user
 func (r *MachineRepository) ListByOwner(ownerID string) ([]*Machine, error) {
 	query := `SELECT id, name, owner_id, description, hostname, port, ssh_username, ssh_key_encrypted, ssh_key_fingerprint, podman_socket_path, created_at, updated_at FROM machines WHERE owner_id = ?`
