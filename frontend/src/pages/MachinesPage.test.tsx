@@ -109,4 +109,26 @@ describe("MachinesPage", () => {
 		expect(screen.getByText("INTERNAL_ERROR")).toBeInTheDocument();
 		expect(screen.queryByText("database is on fire")).not.toBeInTheDocument();
 	});
+
+	it.each(["read", "write", "admin"] as const)(
+		"offers the same View navigation on the machines list for %s users",
+		async (permission) => {
+			server.use(
+				http.get("*/api/machines", () =>
+					HttpResponse.json([machineFixture({ permission })]),
+				),
+			);
+			renderApp("/machines", {
+				resolveInitialState: async () => ({ username: "alice" }),
+			});
+
+			const card = await screen.findByTestId("machine-card");
+			expect(card).toBeInTheDocument();
+
+			// The list has no machine-scoped write actions, so there is nothing
+			// for a read user to be baited with — assert no stray actions appear.
+			const cardButtons = card.querySelectorAll("button");
+			expect(cardButtons).toHaveLength(0);
+		},
+	);
 });

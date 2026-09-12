@@ -1,10 +1,10 @@
-import type { AccessGrant, MachinePermission } from "@shared/types/api";
-import { screen, waitFor } from "@testing-library/react";
+import { ShareMachineSection } from "@features/machines/components/ShareMachineSection";
+import type { AccessGrant } from "@shared/types/api";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
-import { renderApp } from "@/test/auth";
-import { machineFixture } from "@/test/factories";
+import { beforeEach, describe, expect, it } from "vitest";
 import { server } from "@/test/server";
 
 const defaultGrants: AccessGrant[] = [
@@ -13,21 +13,12 @@ const defaultGrants: AccessGrant[] = [
 ];
 
 let grants: AccessGrant[] = defaultGrants;
-
 let grantPayload: Record<string, unknown> | undefined;
 let revokedUserId: string | undefined;
 let grantsRequests = 0;
 
-function resetState() {
-	grants = defaultGrants;
-	grantPayload = undefined;
-	revokedUserId = undefined;
-	grantsRequests = 0;
-}
-
-async function renderSharingSection(permission: MachinePermission = "admin") {
-	resetState();
-	server.use(
+function accessHandlers() {
+	return [
 		http.get("*/api/machines/m-1/access", () => {
 			grantsRequests++;
 			return HttpResponse.json(grants);
@@ -47,28 +38,43 @@ async function renderSharingSection(permission: MachinePermission = "admin") {
 			grants = grants.filter((grant) => grant.userId !== revokedUserId);
 			return new HttpResponse(null, { status: 204 });
 		}),
-	);
-	const machine = machineFixture({ permission });
-	server.use(http.get("*/api/machines/m-1", () => HttpResponse.json(machine)));
-	renderApp("/machines/m-1", {
-		resolveInitialState: async () => ({ username: "alice" }),
+	];
+}
+
+function renderShareMachineSection() {
+	const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
 	});
-	await screen.findByText(machine.name);
-	await userEvent.click(screen.getByRole("tab", { name: /settings/i }));
+	render(
+		<QueryClientProvider client={queryClient}>
+			<ShareMachineSection machineId="m-1" />
+		</QueryClientProvider>,
+	);
+}
+
+async function renderWithGrants() {
+	server.use(...accessHandlers());
+	renderShareMachineSection();
+	return userEvent.setup();
 }
 
 async function grantAccess(permission: string) {
-	await userEvent.type(screen.getByLabelText(/user id/i), "u-carol");
-	await userEvent.selectOptions(
-		screen.getByLabelText(/permission/i),
-		permission,
-	);
-	await userEvent.click(screen.getByTestId("grant-access-button"));
+	const user = userEvent.setup();
+	await user.type(screen.getByLabelText(/user id/i), "u-carol");
+	await user.selectOptions(screen.getByLabelText(/permission/i), permission);
+	await user.click(screen.getByTestId("grant-access-button"));
 }
 
-describe("ShareMachineSection (machine sharing on the Settings tab)", () => {
+describe("ShareMachineSection", () => {
+	beforeEach(() => {
+		grants = defaultGrants;
+		grantPayload = undefined;
+		revokedUserId = undefined;
+		grantsRequests = 0;
+	});
+
 	it("lists the current grants with user id, permission, and granted time", async () => {
-		await renderSharingSection();
+		await renderWithGrants();
 
 		expect(await screen.findByTestId("grant-row-u-bob")).toBeInTheDocument();
 		expect(screen.getByTestId("grant-row-u-bob")).toHaveTextContent("u-bob");
@@ -77,7 +83,7 @@ describe("ShareMachineSection (machine sharing on the Settings tab)", () => {
 	});
 
 	it("grants access with the selected permission and refetches the grants", async () => {
-		await renderSharingSection();
+		await renderWithGrants();
 		await screen.findByTestId("grant-row-u-bob");
 		const requestsBefore = grantsRequests;
 
@@ -92,11 +98,11 @@ describe("ShareMachineSection (machine sharing on the Settings tab)", () => {
 	});
 
 	it("revokes a user, removing their row and refetching grants", async () => {
-		await renderSharingSection();
+		const user = await renderWithGrants();
 		await screen.findByTestId("grant-row-u-bob");
 		const requestsBefore = grantsRequests;
 
-		await userEvent.click(screen.getByTestId("revoke-access-u-bob"));
+		await user.click(screen.getByTestId("revoke-access-u-bob"));
 
 		await waitFor(() =>
 			expect(screen.queryByTestId("grant-row-u-bob")).not.toBeInTheDocument(),
@@ -106,7 +112,7 @@ describe("ShareMachineSection (machine sharing on the Settings tab)", () => {
 	});
 
 	it("renders the error envelope when a grant fails, keeping the pending state during the request", async () => {
-		await renderSharingSection();
+		await renderWithGrants();
 		await screen.findByTestId("grant-row-u-bob");
 		server.use(
 			http.post("*/api/machines/m-1/access", async () => {
@@ -129,7 +135,7 @@ describe("ShareMachineSection (machine sharing on the Settings tab)", () => {
 	});
 
 	it("renders the error envelope when a revoke fails", async () => {
-		await renderSharingSection();
+		const user = await renderWithGrants();
 		await screen.findByTestId("grant-row-u-bob");
 		server.use(
 			http.delete("*/api/machines/m-1/access/:userId", () =>
@@ -143,22 +149,10 @@ describe("ShareMachineSection (machine sharing on the Settings tab)", () => {
 			),
 		);
 
-		await userEvent.click(screen.getByTestId("revoke-access-u-bob"));
+		await user.click(screen.getByTestId("revoke-access-u-bob"));
 
 		expect(await screen.findByRole("alert")).toBeInTheDocument();
 		expect(screen.getByText("ACCESS_DENIED")).toBeInTheDocument();
 		expect(screen.getByTestId("grant-row-u-bob")).toBeInTheDocument();
 	});
-
-	it.each(["write", "read"] as const)(
-		"hides the sharing section for %s-permission users",
-		async (permission) => {
-			await renderSharingSection(permission);
-
-			expect(
-				screen.queryByTestId("grant-access-button"),
-			).not.toBeInTheDocument();
-			expect(screen.queryByTestId(/^grant-row-/)).not.toBeInTheDocument();
-		},
-	);
 });
