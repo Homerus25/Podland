@@ -1,8 +1,10 @@
 import type { ApiError, ApiErrorEnvelope } from "@shared/types/api";
 import axios from "axios";
 
+export const apiBaseUrl: string = import.meta.env.VITE_API_BASE_URL || "/api";
+
 export const api = axios.create({
-	baseURL: import.meta.env.VITE_API_BASE_URL || "/api",
+	baseURL: apiBaseUrl,
 });
 
 // The access token is held only in this module variable for the lifetime of

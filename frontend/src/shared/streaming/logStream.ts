@@ -1,10 +1,5 @@
-import { consumeNdjsonValues } from "@shared/streaming/ndjsonStream";
+import { streamNdjson } from "@shared/streaming/streamTransport";
 import type { ApiError } from "@shared/types/api";
-import {
-	genericError,
-	getApiErrorFromResponse,
-	getBearerToken,
-} from "@shared/utils/api";
 
 // A single log line as streamed by the backend's log endpoints in follow mode
 // (e.g. backend/internal/domain/containers/dto.go ContainerLogEvent).
@@ -40,37 +35,17 @@ export function parseLogErrorEvent(event: LogEvent): ApiError | null {
 	return { code, message: event.message.slice(separator + 2) };
 }
 
-// Streams a URL as an NDJSON log event stream with plain fetch (axios would
-// buffer the whole response). Emits LogEvent-shaped values; other values are
-// warned and skipped. Resolves when the stream ends, rejects with an ApiError
-// on transport failure or a non-ok response, and tears down the connection on
-// abort via the signal.
+// Streams a URL as an NDJSON log event stream on the shared transport
+// function (auth, error envelopes, abort handling are streamNdjson's).
+// Emits LogEvent-shaped values; other values are warned and skipped. Resolves
+// when the stream ends, rejects with an ApiError on transport failure or a
+// non-ok response, and tears down the connection on abort via the signal.
 export async function followLogStream(
 	url: string,
 	onEvent: (event: LogEvent) => void,
 	signal: AbortSignal,
 ): Promise<void> {
-	const token = getBearerToken();
-	let response: Response;
-	try {
-		response = await fetch(url, {
-			headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-			signal,
-		});
-	} catch (fetchError) {
-		if (signal.aborted) throw fetchError;
-		throw { ...genericError };
-	}
-
-	if (!response.ok) {
-		throw await getApiErrorFromResponse(response);
-	}
-
-	if (!response.body) {
-		throw { ...genericError };
-	}
-
-	await consumeNdjsonValues(response.body, (value) => {
+	await streamNdjson(url, { signal }, (value) => {
 		if (isLogEvent(value)) {
 			onEvent(value);
 		} else {
