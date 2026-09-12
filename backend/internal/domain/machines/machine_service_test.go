@@ -158,57 +158,6 @@ func TestMachineService_ListFunctions(t *testing.T) {
 
 	userID := "test-user-123"
 
-	t.Run("ListByOwner with mock repository", func(t *testing.T) {
-		// Add machines for different owners
-		machine1 := &models.Machine{
-			ID:        "machine-1",
-			Name:      "my-machine-1",
-			OwnerID:   userID,
-			Hostname:  "host1.example.com",
-			Port:      22,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-
-		machine2 := &models.Machine{
-			ID:        "machine-2",
-			Name:      "my-machine-2",
-			OwnerID:   userID,
-			Hostname:  "host2.example.com",
-			Port:      22,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-
-		machine3 := &models.Machine{
-			ID:        "machine-3",
-			Name:      "other-machine",
-			OwnerID:   "other-user",
-			Hostname:  "host3.example.com",
-			Port:      22,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-
-		mockMachineRepo.AddMachine(machine1)
-		mockMachineRepo.AddMachine(machine2)
-		mockMachineRepo.AddMachine(machine3)
-
-		// Test ListByOwner
-		machines, err := mockMachineRepo.ListByOwner(userID)
-		require.NoError(t, err)
-		assert.Equal(t, 2, len(machines), "Should return 2 machines for owner %s", userID)
-
-		// Verify machine IDs
-		var machineIDs []string
-		for _, machine := range machines {
-			machineIDs = append(machineIDs, machine.ID)
-		}
-		assert.Contains(t, machineIDs, "machine-1")
-		assert.Contains(t, machineIDs, "machine-2")
-		assert.NotContains(t, machineIDs, "machine-3")
-	})
-
 	t.Run("ListAccessible with mock repository", func(t *testing.T) {
 		// Add machines
 		machine1 := &models.Machine{

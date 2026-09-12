@@ -61,9 +61,9 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 
 		// "Not persisted" is observable through the repository's public
 		// API: no machine row for this owner, and no access grant.
-		owned, err := mockMachineRepo.ListByOwner(userID)
+		machines, err := mockMachineRepo.ListAccessible(userID)
 		require.NoError(t, err)
-		assert.Empty(t, owned, "machine must NOT be persisted when the probe fails")
+		assert.Empty(t, machines, "machine must NOT be persisted when the probe fails")
 		access, err := mockAccessRepo.GetByMachineAndUser("anything", userID)
 		require.NoError(t, err)
 		assert.Nil(t, access, "owner access must NOT be granted when the probe fails")
@@ -90,9 +90,9 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 		assert.Nil(t, machine)
 		assert.Equal(t, appErrors.ErrConnectionTestTimeout, err,
 			"probe timeout must map to ErrConnectionTestTimeout (400)")
-		owned, err := mockMachineRepo.ListByOwner(userID)
+		machines, err := mockMachineRepo.ListAccessible(userID)
 		require.NoError(t, err)
-		assert.Empty(t, owned, "machine must NOT be persisted when the probe times out")
+		assert.Empty(t, machines, "machine must NOT be persisted when the probe times out")
 	})
 
 	// --- AC: probe receives the defaulted port and socket ------------
@@ -211,12 +211,10 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 
 		encryptCalled := false
 		mockEncryption := testutils.NewMockEncryptionServiceWithCustomFunctions(
-			nil, nil,
 			func(string) ([]byte, string, error) {
 				encryptCalled = true
 				return []byte("x"), "fp", nil
 			},
-			nil,
 		)
 
 		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
