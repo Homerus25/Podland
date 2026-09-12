@@ -179,19 +179,6 @@ func (m *MockMachineRepository) Delete(id string) error {
 	return nil
 }
 
-func (m *MockMachineRepository) ListByOwner(ownerID string) ([]*models.Machine, error) {
-	if m.listErr != nil {
-		return nil, m.listErr
-	}
-	var result []*models.Machine
-	for _, machine := range m.machines {
-		if machine.OwnerID == ownerID {
-			result = append(result, machine)
-		}
-	}
-	return result, nil
-}
-
 func (m *MockMachineRepository) ListAccessible(userID string) ([]models.AccessibleMachine, error) {
 	if m.listErr != nil {
 		return nil, m.listErr

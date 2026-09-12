@@ -141,7 +141,7 @@ func TestMockMachineRepository(t *testing.T) {
 		assert.Nil(t, deletedMachine)
 	})
 
-	t.Run("ListByOwner and ListAccessible", func(t *testing.T) {
+	t.Run("ListAccessible", func(t *testing.T) {
 		repo := NewMockMachineRepository()
 
 		// Create multiple machines for different owners
@@ -154,12 +154,6 @@ func TestMockMachineRepository(t *testing.T) {
 		repo.Create(machine2)
 		repo.Create(machine3)
 
-		// Test ListByOwner
-		machines, err := repo.ListByOwner(machine1.OwnerID)
-		assert.NoError(t, err)
-		assert.Len(t, machines, 2)
-
-		// Test ListAccessible
 		accessible, err := repo.ListAccessible(machine1.OwnerID)
 		assert.NoError(t, err)
 		assert.Len(t, accessible, 2)
@@ -197,9 +191,6 @@ func TestMockMachineRepository(t *testing.T) {
 		_, err = repo.GetByID(machine.ID)
 		assert.Error(t, err)
 
-		_, err = repo.ListByOwner("owner-id")
-		assert.Error(t, err)
-
 		err = repo.Delete(machine.ID)
 		assert.Error(t, err)
 	})
@@ -220,98 +211,36 @@ func TestMockMachineRepository(t *testing.T) {
 
 // TestMockEncryptionService tests the mock encryption service functionality
 func TestMockEncryptionService(t *testing.T) {
-	t.Run("basic encryption/decryption", func(t *testing.T) {
-		service := NewMockEncryptionService()
-
-		// Test encryption
-		originalData := "secret-data"
-		encrypted, err := service.Encrypt(originalData)
-		assert.NoError(t, err)
-		assert.NotNil(t, encrypted)
-		assert.True(t, len(encrypted) > 0)
-
-		// Test decryption
-		decrypted, err := service.Decrypt(encrypted)
-		assert.NoError(t, err)
-		assert.Equal(t, originalData, decrypted)
-	})
-
 	t.Run("SSH key encryption", func(t *testing.T) {
 		service := NewMockEncryptionService()
 
-		// Test SSH key encryption
 		sshPrivateKey := "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ..."
 		encrypted, fingerprint, err := service.EncryptSSHKey(sshPrivateKey)
 		assert.NoError(t, err)
 		assert.NotNil(t, encrypted)
 		assert.NotEmpty(t, fingerprint)
-
-		// Test SSH key decryption
-		decrypted, err := service.DecryptSSHKey(encrypted)
-		assert.NoError(t, err)
-		assert.Equal(t, sshPrivateKey, decrypted)
 	})
 
 	t.Run("error injection", func(t *testing.T) {
 		expectedErr := errors.New("encryption error")
-		service := NewMockEncryptionServiceWithErrors(expectedErr, expectedErr)
+		service := NewMockEncryptionServiceWithErrors(expectedErr)
 
-		_, err := service.Encrypt("data")
+		_, _, err := service.EncryptSSHKey("ssh-key")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "encryption error")
-
-		_, err = service.Decrypt([]byte("encrypted"))
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "encryption error")
-
-		_, _, err = service.EncryptSSHKey("ssh-key")
-		assert.Error(t, err)
-
-		_, err = service.DecryptSSHKey([]byte("encrypted"))
-		assert.Error(t, err)
 	})
 
 	t.Run("custom functions", func(t *testing.T) {
-		customEncrypt := func(data string) ([]byte, error) {
-			return []byte("custom-encrypted-" + data), nil
-		}
-
-		customDecrypt := func(data []byte) (string, error) {
-			dataStr := string(data)
-			if len(dataStr) > len("custom-encrypted-") && dataStr[:len("custom-encrypted-")] == "custom-encrypted-" {
-				return dataStr[len("custom-encrypted-"):], nil
-			}
-			return dataStr, nil
-		}
-
 		customEncryptSSH := func(privateKey string) ([]byte, string, error) {
 			return []byte("ssh-custom-" + privateKey), "custom-fingerprint", nil
 		}
 
-		customDecryptSSH := func(encryptedKey []byte) (string, error) {
-			dataStr := string(encryptedKey)
-			if len(dataStr) > len("ssh-custom-") && dataStr[:len("ssh-custom-")] == "ssh-custom-" {
-				return dataStr[len("ssh-custom-"):], nil
-			}
-			return dataStr, nil
-		}
+		service := NewMockEncryptionServiceWithCustomFunctions(customEncryptSSH)
 
-		service := NewMockEncryptionServiceWithCustomFunctions(
-			customEncrypt,
-			customDecrypt,
-			customEncryptSSH,
-			customDecryptSSH,
-		)
-
-		// Test custom encryption
-		encrypted, err := service.Encrypt("test-data")
+		encrypted, fingerprint, err := service.EncryptSSHKey("test-key")
 		assert.NoError(t, err)
-		assert.Equal(t, "custom-encrypted-test-data", string(encrypted))
-
-		// Test custom decryption
-		decrypted, err := service.Decrypt(encrypted)
-		assert.NoError(t, err)
-		assert.Equal(t, "test-data", decrypted)
+		assert.Equal(t, "ssh-custom-test-key", string(encrypted))
+		assert.Equal(t, "custom-fingerprint", fingerprint)
 	})
 }
 

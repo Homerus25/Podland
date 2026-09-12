@@ -21,7 +21,7 @@ type MachineService struct {
 	machineRepo MachineRepositoryInterface
 	accessRepo  models.MachineAccessRepositoryInterface
 	conn        connections.Manager
-	encryption  EncryptionServiceInterface
+	encryption  sshKeyEncryptor
 	sshPool     sshInvalidator
 }
 
@@ -32,7 +32,7 @@ func NewMachineService(
 	machineRepo MachineRepositoryInterface,
 	accessRepo models.MachineAccessRepositoryInterface,
 	conn connections.Manager,
-	encryption EncryptionServiceInterface,
+	encryption sshKeyEncryptor,
 	sshPool sshInvalidator,
 ) *MachineService {
 	return &MachineService{
@@ -124,43 +124,29 @@ func (s *MachineService) Create(ctx context.Context, userID string, req *CreateM
 		req.PodmanSocketPath = "/run/podman/podman.sock"
 	}
 
-	// Synchronous connection probe (step 5). Per the documented flow the
-	// probe runs against the plaintext key, before encryption, and before
-	// any DB write — so a failed probe leaves nothing behind. The probe
-	// is bounded by MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS inside the
-	// connection manager.
-	if err := s.conn.TestConnection(ctx, req.Hostname, req.Port, req.SSHUsername, req.SSHPrivateKey, req.PodmanSocketPath); err != nil {
-		// A deadline (the probe's own timeout, or the caller's context
-		// expiring) maps to CONNECTION_TEST_TIMEOUT; any other failure
-		// (bad host / credentials / socket) maps to CONNECTION_FAILED.
-		// Both are 400 — the target the client described is not usable.
-		if stderrors.Is(err, context.DeadlineExceeded) {
-			return nil, errors.ErrConnectionTestTimeout
-		}
-		return nil, errors.ErrConnectionTestFailed
-	}
-
-	// Encrypt SSH private key
-	encryptedKey, fingerprint, err := s.encryption.EncryptSSHKey(req.SSHPrivateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt SSH key: %w", err)
-	}
-
-	// Create machine model
+	// Build the machine model before verification: verifyKey probes the
+	// machine's own (already defaulted) connection fields, so the probe
+	// dials the real port and socket the machine will use, then fills in
+	// the encrypted key and fingerprint. Nothing is persisted until the
+	// probe has passed.
 	now := time.Now().UTC()
 	machine := &models.Machine{
-		ID:                uuid.New().String(),
-		Name:              req.Name,
-		OwnerID:           userID,
-		Description:       req.Description,
-		Hostname:          req.Hostname,
-		Port:              req.Port,
-		SSHUsername:       req.SSHUsername,
-		SSHKeyEncrypted:   encryptedKey,
-		SSHKeyFingerprint: fingerprint,
-		PodmanSocketPath:  req.PodmanSocketPath,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		ID:               uuid.New().String(),
+		Name:             req.Name,
+		OwnerID:          userID,
+		Description:      req.Description,
+		Hostname:         req.Hostname,
+		Port:             req.Port,
+		SSHUsername:      req.SSHUsername,
+		PodmanSocketPath: req.PodmanSocketPath,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+
+	// A registration always carries a key (validated above): the new key
+	// must earn its place on the machine row before anything is persisted.
+	if err := s.verifyKey(ctx, machine, req.SSHPrivateKey); err != nil {
+		return nil, err
 	}
 
 	// Create machine in database
@@ -329,32 +315,15 @@ func (s *MachineService) Update(ctx context.Context, userID, machineID string, r
 	}
 
 	// Probe parity with registration: a new SSH private key must earn its
-	// place on the machine before anything is persisted. The probe runs
-	// against the merged machine — the request fields above already
-	// overrode the stored ones — with the plaintext key, before encryption
-	// and before the write, so a failed probe leaves the stored row
+	// place on the machine before anything is persisted. verifyKey probes
+	// the merged machine — the request fields above already overrode the
+	// stored ones — with the plaintext key, then encrypts and assigns in
+	// place, all before the write, so a failed probe leaves the stored row
 	// untouched. Updates without a key change skip the probe entirely.
 	if req.SSHPrivateKey != "" {
-		if err := s.conn.TestConnection(ctx, machine.Hostname, machine.Port, machine.SSHUsername, req.SSHPrivateKey, machine.PodmanSocketPath); err != nil {
-			// A deadline (the probe's own timeout, or the caller's
-			// context expiring) maps to CONNECTION_TEST_TIMEOUT; any
-			// other failure (bad host / credentials / socket) maps to
-			// CONNECTION_FAILED. Both are 400 — the target the owner
-			// described is not usable.
-			if stderrors.Is(err, context.DeadlineExceeded) {
-				return nil, errors.ErrConnectionTestTimeout
-			}
-			return nil, errors.ErrConnectionTestFailed
+		if err := s.verifyKey(ctx, machine, req.SSHPrivateKey); err != nil {
+			return nil, err
 		}
-	}
-
-	if req.SSHPrivateKey != "" {
-		encryptedKey, fingerprint, err := s.encryption.EncryptSSHKey(req.SSHPrivateKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to encrypt SSH key: %w", err)
-		}
-		machine.SSHKeyEncrypted = encryptedKey
-		machine.SSHKeyFingerprint = fingerprint
 	}
 	machine.UpdatedAt = time.Now().UTC()
 
@@ -363,6 +332,35 @@ func (s *MachineService) Update(ctx context.Context, userID, machineID string, r
 	}
 
 	return machine, nil
+}
+
+// verifyKey earns a plaintext SSH key its place on the machine row. It
+// probes the target over SSH + podman with the machine's final (defaulted
+// for a new registration, merged for an update) connection fields and the
+// plaintext key; on a passed probe it encrypts the key and assigns
+// ciphertext and fingerprint on the machine. The probe runs against the
+// plaintext key, before encryption, and callers persist only after this
+// returns nil — so a failed probe leaves nothing behind. The probe is
+// bounded by MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS inside the connection
+// manager: a deadline (the probe's own timeout, or the caller's context
+// expiring) maps to CONNECTION_TEST_TIMEOUT; any other failure (bad host /
+// credentials / socket) maps to CONNECTION_FAILED. Both are 400 — the
+// target the client described is not usable.
+func (s *MachineService) verifyKey(ctx context.Context, machine *models.Machine, plaintextKey string) error {
+	if err := s.conn.TestConnection(ctx, machine.Hostname, machine.Port, machine.SSHUsername, plaintextKey, machine.PodmanSocketPath); err != nil {
+		if stderrors.Is(err, context.DeadlineExceeded) {
+			return errors.ErrConnectionTestTimeout
+		}
+		return errors.ErrConnectionTestFailed
+	}
+
+	encryptedKey, fingerprint, err := s.encryption.EncryptSSHKey(plaintextKey)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt SSH key: %w", err)
+	}
+	machine.SSHKeyEncrypted = encryptedKey
+	machine.SSHKeyFingerprint = fingerprint
+	return nil
 }
 
 // GrantAccessRequest represents a request to grant access to a machine

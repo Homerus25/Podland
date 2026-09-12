@@ -224,7 +224,7 @@ func TestMachineService_Create(t *testing.T) {
 		mockMachineRepo := testutils.NewMockMachineRepository()
 		mockAccessRepo := testutils.NewMockMachineAccessRepository()
 		mockConnManager := testutils.NewMockConnectionManager()
-		mockEncryption := testutils.NewMockEncryptionServiceWithErrors(errors.New("encryption failed"), nil)
+		mockEncryption := testutils.NewMockEncryptionServiceWithErrors(errors.New("encryption failed"))
 
 		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
@@ -287,7 +287,7 @@ func TestMachineService_Create(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to grant owner access")
 
 		// Verify machine was rolled back (deleted)
-		machines, _ := mockMachineRepo.ListByOwner(userID)
+		machines, _ := mockMachineRepo.ListAccessible(userID)
 		assert.Equal(t, 0, len(machines), "Machine should have been rolled back and deleted")
 	})
 }
