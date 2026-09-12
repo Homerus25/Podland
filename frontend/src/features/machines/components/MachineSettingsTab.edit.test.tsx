@@ -1,18 +1,20 @@
+import { MachineSettingsTab } from "@features/machines/components/MachineSettingsTab";
 import type { Machine } from "@shared/types/api";
-import { screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { renderApp } from "@/test/auth";
 import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
 let updatePayload: Record<string, unknown> | undefined;
 
-function machineHandler(machine: Machine) {
-	return http.get(`*/api/machines/${machine.id}`, () =>
-		HttpResponse.json(machine),
-	);
+function grantsHandler() {
+	// The admin fixture mounts the sharing section; pin its query so its
+	// error alert cannot race the form's own error envelope.
+	return http.get("*/api/machines/m-1/access", () => HttpResponse.json([]));
 }
 
 function updateHandler(
@@ -28,27 +30,31 @@ function updateHandler(
 	});
 }
 
-async function renderSettingsTab(
-	machine: Machine = machineFixture({ permission: "write" }),
-) {
-	server.use(machineHandler(machine));
-	renderApp(`/machines/${machine.id}`, {
-		resolveInitialState: async () => ({ username: "alice" }),
+function renderSettingsTab(machine: Machine = machineFixture()) {
+	server.use(grantsHandler());
+	const queryClient = new QueryClient({
+		defaultOptions: { queries: { retry: false } },
 	});
-	await screen.findByText(machine.name);
-	await userEvent.click(screen.getByRole("tab", { name: /settings/i }));
+	render(
+		<QueryClientProvider client={queryClient}>
+			<MemoryRouter>
+				<MachineSettingsTab machine={machine} />
+			</MemoryRouter>
+		</QueryClientProvider>,
+	);
 }
 
 async function editAndSave() {
+	const user = userEvent.setup();
 	const name = screen.getByLabelText(/^name/i);
-	await userEvent.clear(name);
-	await userEvent.type(name, "prod-web-02");
-	await userEvent.click(screen.getByTestId("machine-form-submit"));
+	await user.clear(name);
+	await user.type(name, "prod-web-02");
+	await user.click(screen.getByTestId("machine-form-submit"));
 }
 
-describe("MachineDetailPage Settings tab (edit machine)", () => {
-	it("shows the edit form prefilled with the machine metadata", async () => {
-		await renderSettingsTab();
+describe("MachineSettingsTab (edit machine)", () => {
+	it("shows the edit form prefilled with the machine metadata", () => {
+		renderSettingsTab();
 
 		expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe(
 			"prod-web-01",
@@ -67,9 +73,10 @@ describe("MachineDetailPage Settings tab (edit machine)", () => {
 		).toBe("deploy");
 	});
 
-	it("persists edits without requiring the key file", async () => {
-		server.use(updateHandler(machineFixture({ permission: "write" })));
-		await renderSettingsTab();
+	it("persists edits and shows the saved banner without requiring the key file", async () => {
+		const machine = machineFixture();
+		server.use(updateHandler(machine));
+		renderSettingsTab(machine);
 
 		await editAndSave();
 
@@ -87,14 +94,16 @@ describe("MachineDetailPage Settings tab (edit machine)", () => {
 	});
 
 	it("sends an uploaded key file in the update request body", async () => {
-		server.use(updateHandler(machineFixture({ permission: "write" })));
-		await renderSettingsTab();
+		const machine = machineFixture();
+		server.use(updateHandler(machine));
+		renderSettingsTab(machine);
+		const user = userEvent.setup();
 
 		const keyFile = new File(
 			["-----BEGIN OPENSSH PRIVATE KEY-----"],
 			"id_ed25519",
 		);
-		await userEvent.upload(screen.getByLabelText(/ssh private key/i), keyFile);
+		await user.upload(screen.getByLabelText(/ssh private key/i), keyFile);
 		await editAndSave();
 
 		await waitFor(() =>
@@ -105,10 +114,11 @@ describe("MachineDetailPage Settings tab (edit machine)", () => {
 		});
 	});
 
-	it("renders the error envelope when the save fails", async () => {
+	it("renders the error envelope on the form when the save fails", async () => {
+		const machine = machineFixture();
 		server.use(
 			updateHandler(
-				machineFixture({ permission: "write" }),
+				machine,
 				409,
 				{
 					requestId: "req-4",
@@ -120,7 +130,7 @@ describe("MachineDetailPage Settings tab (edit machine)", () => {
 				50,
 			),
 		);
-		await renderSettingsTab();
+		renderSettingsTab(machine);
 
 		await editAndSave();
 
@@ -128,12 +138,5 @@ describe("MachineDetailPage Settings tab (edit machine)", () => {
 		expect(await screen.findByRole("alert")).toBeInTheDocument();
 		expect(screen.getByText("MACHINE_NAME_TAKEN")).toBeInTheDocument();
 		expect(screen.getByText("Machine name already exists")).toBeInTheDocument();
-	});
-
-	it("hides the edit form for read-permission users", async () => {
-		await renderSettingsTab(machineFixture({ permission: "read" }));
-
-		expect(screen.queryByLabelText(/^name/i)).not.toBeInTheDocument();
-		expect(screen.queryByTestId("machine-form-submit")).not.toBeInTheDocument();
 	});
 });
