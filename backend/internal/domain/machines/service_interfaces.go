@@ -10,7 +10,6 @@ type MachineRepositoryInterface interface {
 	GetByID(id string) (*models.Machine, error)
 	Update(machine *models.Machine) error
 	Delete(id string) error
-	ListByOwner(ownerID string) ([]*models.Machine, error)
 	ListAccessible(userID string) ([]models.AccessibleMachine, error)
 	NameExistsForUser(userID, name string) (bool, error)
 }
@@ -19,13 +18,15 @@ type MachineRepositoryInterface interface {
 // construction, not by the silence of app.go's wiring.
 var _ MachineRepositoryInterface = (*models.MachineRepository)(nil)
 
-// EncryptionServiceInterface defines the interface for encryption services
-// This allows mocking the EncryptionService in tests
-type EncryptionServiceInterface interface {
-	Encrypt(data string) ([]byte, error)
-	Decrypt(data []byte) (string, error)
+// sshKeyEncryptor is the machines module's narrow consumer-side seam onto
+// the encryption service: machine registration must turn the request's
+// plaintext SSH key into ciphertext plus fingerprint, but none of the
+// service's other capability (general-purpose encrypt/decrypt, SSH-key
+// decryption) is this module's business. The real encryption.Service
+// satisfies it (wired in internal/app); connections and sshexec consume
+// the full service directly, not this seam.
+type sshKeyEncryptor interface {
 	EncryptSSHKey(privateKey string) ([]byte, string, error)
-	DecryptSSHKey(encryptedKey []byte) (string, error)
 }
 
 // sshInvalidator is the machines module's narrow consumer-side seam onto

@@ -21,7 +21,7 @@ type MachineService struct {
 	machineRepo MachineRepositoryInterface
 	accessRepo  models.MachineAccessRepositoryInterface
 	conn        connections.Manager
-	encryption  EncryptionServiceInterface
+	encryption  sshKeyEncryptor
 	sshPool     sshInvalidator
 }
 
@@ -32,7 +32,7 @@ func NewMachineService(
 	machineRepo MachineRepositoryInterface,
 	accessRepo models.MachineAccessRepositoryInterface,
 	conn connections.Manager,
-	encryption EncryptionServiceInterface,
+	encryption sshKeyEncryptor,
 	sshPool sshInvalidator,
 ) *MachineService {
 	return &MachineService{
