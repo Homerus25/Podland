@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
@@ -187,94 +186,32 @@ func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Logs handles retrieving logs for a container
+// Logs handles retrieving logs for a container. The query is parsed once:
+// only a clean follow request crosses the streaming envelope, while query
+// errors ride the JSON envelope even when follow=true was requested, so
+// no code path here writes an error response by hand.
 func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Logs")
-
-	containerID := chi.URLParam(r, "containerId")
-	if containerID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_CONTAINER_ID", "Container ID is required", contextutils.GetRequestID(r.Context()))
+	since, tail, queryErr := streaming.ParseLogWindow(r)
+	if queryErr != nil {
+		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+			return struct{}{}, queryErr
+		})
 		return
 	}
 
-	// Parse query parameters
-	var since time.Time
-	var tail int64 = -1
+	containerID := chi.URLParam(r, "containerId")
 
-	// Parse 'since' parameter (ISO8601 timestamp)
-	if sinceParam := r.URL.Query().Get("since"); sinceParam != "" {
-		parsedSince, err := time.Parse(time.RFC3339, sinceParam)
-		if err != nil {
-			errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_SINCE_PARAM", "Invalid 'since' parameter format, use ISO8601", contextutils.GetRequestID(r.Context()))
-			slog.ErrorContext(r.Context(), "Invalid since parameter", slog.Any("error", err))
-			return
-		}
-		since = parsedSince
-	}
-
-	// Parse 'tail' parameter (number of lines)
-	if tailParam := r.URL.Query().Get("tail"); tailParam != "" {
-		parsedTail, err := strconv.ParseInt(tailParam, 10, 64)
-		if err != nil {
-			errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_TAIL_PARAM", "Invalid 'tail' parameter, must be an integer", contextutils.GetRequestID(r.Context()))
-			slog.ErrorContext(r.Context(), "Invalid tail parameter", slog.Any("error", err))
-			return
-		}
-		tail = parsedTail
-	}
-
-	// Parse 'follow' parameter (streaming mode)
-	follow := false
-	if followParam := r.URL.Query().Get("follow"); followParam != "" {
-		if parsed, err := strconv.ParseBool(followParam); err == nil {
-			follow = parsed
-		}
-	}
-
-	slog.InfoContext(r.Context(), "logs", slog.String("containerID", containerID), slog.Time("since", since), slog.Int64("tail", tail), slog.Bool("follow", follow))
-
-	// Streaming mode when follow=true
-	if follow {
+	if streaming.ParseFollow(r) && containerID != "" {
 		h.streamLogs(w, r, containerID, since, tail)
 		return
 	}
 
-	h.bufferedLogs(w, r, containerID, since, tail)
-}
-
-// bufferedLogs serves follow=false: one JSON document with the logs
-// collected so far. Identity checks stay here (the streaming branch gets
-// them from the streaming envelope instead).
-func (h *ContainerHandler) bufferedLogs(w http.ResponseWriter, r *http.Request, containerID string, since time.Time, tail int64) {
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	response, err := h.service.GetLogs(r.Context(), userID, machineID, containerID, since, tail)
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerLogsResponse, error) {
+		if containerID == "" {
+			return nil, errors.NewAppError("MISSING_CONTAINER_ID", "Container ID is required", http.StatusBadRequest)
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "logs", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("containerID", containerID))
-		return
-	}
-
-	slog.InfoContext(r.Context(), "logs", slog.String("containerID", containerID), slog.Time("since", since), slog.Int64("tail", tail), slog.String("responseID", response.ID))
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+		return h.service.GetLogs(ctx, userID, machineID, containerID, since, tail)
+	})
 }
 
 // streamLogs serves follow=true through the streaming envelope: Begin owns
