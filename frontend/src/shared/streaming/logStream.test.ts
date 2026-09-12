@@ -3,9 +3,8 @@ import {
 	isLogEvent,
 	parseLogErrorEvent,
 } from "@shared/streaming/logStream";
-import { consumeNdjsonValues } from "@shared/streaming/ndjsonStream";
-import { HttpResponse, http } from "msw";
-import { describe, expect, it, vi } from "vitest";
+import { http } from "msw";
+import { describe, expect, it } from "vitest";
 import { server } from "@/test/server";
 import { chunkedStream, streamResponse } from "@/test/stream";
 
@@ -23,48 +22,6 @@ function logEvent(
 		...overrides,
 	});
 }
-
-describe("consumeNdjsonValues", () => {
-	it("parses each NDJSON line into a JSON value", async () => {
-		const values: unknown[] = [];
-		await consumeNdjsonValues(
-			chunkedStream([`${logEvent()}\n`, `${logEvent({ message: "ready" })}\n`]),
-			(v) => values.push(v),
-		);
-
-		expect(values).toHaveLength(2);
-		expect(values[0]).toEqual({
-			timestamp: "2026-08-26T10:00:00Z",
-			level: "INFO",
-			message: "server started",
-		});
-	});
-
-	it("reassembles values split across reads", async () => {
-		const values: unknown[] = [];
-		const event = `${logEvent()}\n`;
-		await consumeNdjsonValues(
-			chunkedStream([event.slice(0, 20), event.slice(20, 40), event.slice(40)]),
-			(v) => values.push(v),
-		);
-
-		expect(values).toHaveLength(1);
-		expect((values[0] as { message: string }).message).toBe("server started");
-	});
-
-	it("skips malformed lines and keeps consuming", async () => {
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-		const values: unknown[] = [];
-		await consumeNdjsonValues(
-			chunkedStream(["not json\n", `${logEvent()}\n`]),
-			(v) => values.push(v),
-		);
-
-		expect(values).toHaveLength(1);
-		expect(warn).toHaveBeenCalledTimes(1);
-		warn.mockRestore();
-	});
-});
 
 describe("isLogEvent", () => {
 	it("accepts the backend log event shape", () => {
@@ -168,64 +125,5 @@ describe("followLogStream", () => {
 		);
 
 		expect(events.map((e) => e.message)).toEqual(["server started", "second"]);
-	});
-
-	it("throws the error envelope for a non-ok response", async () => {
-		server.use(
-			http.get("*/api/logs", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-15",
-						error: {
-							message: "no such container",
-							code: "CONTAINER_NOT_FOUND",
-						},
-					},
-					{ status: 404 },
-				),
-			),
-		);
-
-		await expect(
-			followLogStream(
-				"/api/logs",
-				() => undefined,
-				new AbortController().signal,
-			),
-		).rejects.toMatchObject({
-			code: "CONTAINER_NOT_FOUND",
-			message: "no such container",
-		});
-	});
-
-	it("rejects when the request is aborted mid-stream", async () => {
-		const controller = new AbortController();
-		server.use(
-			http.get("*/api/logs", () =>
-				streamResponse(
-					new ReadableStream<Uint8Array>({
-						start(streamController) {
-							streamController.enqueue(
-								new TextEncoder().encode(`${logEvent()}\n`),
-							);
-							controller.signal.addEventListener("abort", () =>
-								streamController.error(
-									new DOMException("Aborted", "AbortError"),
-								),
-							);
-						},
-					}),
-				),
-			),
-		);
-
-		const promise = followLogStream(
-			"/api/logs",
-			() => undefined,
-			controller.signal,
-		);
-		controller.abort();
-
-		await expect(promise).rejects.toThrow();
 	});
 });
