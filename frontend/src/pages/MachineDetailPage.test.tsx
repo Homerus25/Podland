@@ -243,3 +243,29 @@ describe("MachineDetailPage", () => {
 		expect(screen.getByText("Machine not found")).toBeInTheDocument();
 	});
 });
+
+describe("page-level permission gating on the machine detail page", () => {
+	it("derives write access from the machines list when the detail response omits permission", async () => {
+		// The backend only populates `permission` on GET /api/machines; the
+		// detail response omits it, so the page must merge the list's level in.
+		server.use(
+			http.get("*/api/machines", () => HttpResponse.json([machineFixture()])),
+			http.get("*/api/machines/m-1", () => {
+				const { permission: _permission, ...detail } = machineFixture();
+				return HttpResponse.json(detail);
+			}),
+			http.get("*/api/machines/m-1/secrets", () => HttpResponse.json([])),
+		);
+		renderApp("/machines/m-1", {
+			resolveInitialState: async () => ({ username: "alice" }),
+		});
+		await screen.findByText(machineFixture().name);
+		await userEvent.click(screen.getByRole("tab", { name: /secrets/i }));
+
+		await screen.findByTestId("create-secret-button");
+		expect(
+			screen.queryByTestId("secrets-permission-hint"),
+		).not.toBeInTheDocument();
+		expect(screen.getByTestId("machine-permission")).toHaveTextContent("admin");
+	});
+});
