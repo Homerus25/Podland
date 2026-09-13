@@ -153,8 +153,21 @@ is incomplete.
   tests can pin deletion teardown), and
   `MockSSHExec` for the quadlets lifecycle's systemctl-over-SSH seam.
 - Integration tests live in `test/integration/` behind the
-  `integration` build tag, follow the run-scoped-tag isolation model
-  (see the header comment of `test/integration/images_test.go`), and
-  run against a real podman machine.
+  `integration` build tag and follow the run-scoped-tag isolation
+  model (see the header comment of `test/integration/images_test.go`).
+  The suite runs against the **container test host**: a privileged,
+  systemd-booted Fedora container (image built by the `testhost-build`
+  prerequisite of `make test-integration`; run contract owned by
+  `test/integration/testhost.go`) that the harness boots and tears
+  down per run, registering it through the same public API as any
+  machine. Runs are serialized per host — fixed container name, fixed
+  published port (127.0.0.1:24422), and cache volumes shared across
+  runs — so a second concurrent run fails fast with "another
+  integration run is active on this host"; that error is the
+  serialization contract, not a broken environment. To target an
+  externally managed host instead (e.g. a manually started podman
+  machine on macOS), set the `PODLAND_TEST_SSH_*` overrides documented
+  in the Makefile's `test-integration` header — the container
+  lifecycle is skipped entirely.
 - `go fmt ./...` skips build-tagged files; format them with
   `gofmt -w test/integration` when touched.

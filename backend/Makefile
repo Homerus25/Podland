@@ -62,7 +62,8 @@ test:
 #
 # Override the registered `podman system connection` name with
 # PODLAND_TEST_CONNECTION_NAME (default "podland-it"). To target an
-# externally managed host instead of the container, set ALL of
+# externally managed host instead of the container (e.g. a manually
+# started podman machine on macOS), set ALL of
 # PODLAND_TEST_SSH_{HOST,PORT,USER,SOCKET,KEY_PATH} — the container
 # lifecycle is skipped entirely.
 test-integration: testhost-build

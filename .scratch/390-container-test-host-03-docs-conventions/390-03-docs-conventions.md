@@ -2,9 +2,9 @@
 title: Docs and conventions
 parent: 390-container-test-host
 date: 2026-09-13
-status: ready-for-agent
+status: completed
 labels:
-  - ready-for-agent
+  - completed
   - testing
   - backend
   - integration-tests
@@ -26,10 +26,10 @@ Make the written record match the new reality after the harness swap, so nobody 
 
 ## Acceptance criteria
 
-- [ ] Makefile header documents `PODLAND_TEST_CONNECTION_NAME` and the `PODLAND_TEST_SSH_*` escape hatch accurately
-- [ ] `docs/backend-conventions.md` describes the container test host and the serialized-runs model; no podman-machine claims remain for the integration suite
-- [ ] No stale references to `PODLAND_TEST_MACHINE_NAME` or machine start/stop in the docs tree
-- [ ] `doku/` API endpoint docs untouched — the backend contract is unchanged, which is the point
+- [x] Makefile header documents `PODLAND_TEST_CONNECTION_NAME` and the `PODLAND_TEST_SSH_*` escape hatch accurately
+- [x] `docs/backend-conventions.md` describes the container test host and the serialized-runs model; no podman-machine claims remain for the integration suite
+- [x] No stale references to `PODLAND_TEST_MACHINE_NAME` or machine start/stop in the docs tree
+- [x] `doku/` API endpoint docs untouched — the backend contract is unchanged, which is the point
 
 ## Blocked by
 

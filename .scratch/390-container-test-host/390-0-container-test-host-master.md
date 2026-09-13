@@ -68,7 +68,7 @@ Motivation: provisioning a podman machine inside a CI build image is impractical
 **Issue**: 390-03-docs-conventions
 - Makefile header env docs, `docs/backend-conventions.md` wording, escape-hatch documentation; no stale machine references.
 
-**Status**: ready-for-agent
+**Status**: completed (2026-09-13)
 **Blocked by**: 390-01
 
 ## Technical Context
@@ -85,7 +85,7 @@ Motivation: provisioning a podman machine inside a CI build image is impractical
 - [ ] `PODLAND_TEST_CONNECTION_NAME` replaces `PODLAND_TEST_MACHINE_NAME`; `PODLAND_TEST_SSH_*` remains the escape hatch to externally managed hosts (390-01)
 - [ ] Teardown is signal-aware; container and connection are removed, volumes retained; serialized-runs violations fail with a clear error (390-01)
 - [x] The entire suite — quadlets included — is green on the container host; re-runs skip re-pulling images and never hit a host-key mismatch (390-02)
-- [ ] Docs and conventions describe the container test host with no stale machine claims (390-03)
+- [x] Docs and conventions describe the container test host with no stale machine claims (390-03)
 
 ## Blocked by
 
