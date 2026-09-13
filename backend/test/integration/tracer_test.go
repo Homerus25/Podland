@@ -23,7 +23,7 @@ import (
 //
 //	HTTP → middleware JWT validation → machine access check
 //	     → connection-manager acquire → connection-factory decrypt SSH key
-//	     → SSH tunnel to the podman machine → podman socket
+//	     → SSH tunnel to the podman test host → podman socket
 //	     → ContainerList → JSON encode → HTTP response
 //
 // If anything in that chain is broken (auth misconfigured, SSH key

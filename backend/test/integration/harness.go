@@ -34,12 +34,13 @@ type Suite struct {
 	// it from a test — that would break every other test in the suite.
 	MachineID string
 
-	// MachineName is the podman system-connection name (resolved from
-	// PODLAND_TEST_MACHINE_NAME, default "podman-machine-default") that
-	// the backend's registered machine points at. Downstream slices use
-	// it for the isolation/cleanup CLI scaffolding (tag, rmi, sweep) so
-	// they hit the same host the backend does — instead of re-reading
-	// the env var (and risking drift if the var name changes).
+	// MachineName is the registered `podman system connection` name
+	// (resolved from PODLAND_TEST_CONNECTION_NAME, default "podland-it")
+	// that TestMain adds for the test host and that the registered
+	// machine points at. Downstream slices use it for the
+	// isolation/cleanup CLI scaffolding (tag, rmi, sweep) so they hit
+	// the same host the backend does — instead of re-reading the env
+	// var (and risking drift if the var name changes).
 	//
 	// The readiness probe in TestMain guarantees `podman --connection
 	// <MachineName>` is reachable before any test runs, so CLI helpers
@@ -93,6 +94,13 @@ type Suite struct {
 	// held so suite methods can expose narrow seams (e.g. SeedUserWithRole)
 	// without handing every test the whole App.
 	application *app.App
+
+	// tempRoot is the run-scoped temp dir TestMain creates (JWT PEMs,
+	// SQLite DB, per-run SSH identity). Suite.teardown removes it even
+	// when setup aborted before the "remove temp dirs" cleanup step
+	// was registered; on the normal path the stack already removed it
+	// and the sweep is a no-op.
+	tempRoot string
 
 	// skipReason is the reason TestMain decided the suite cannot run
 	// (e.g. podman binary missing, machine unavailable). When non-empty,
@@ -220,7 +228,7 @@ func (s *Suite) RunTag() string {
 //
 // Errors from a cleanup step are logged but do not halt the sweep —
 // best-effort cleanup is the goal, so a failing container-delete should
-// not block image-delete or machine stop.
+// not block image-delete or test-host removal.
 //
 // Registration order matters: callers must register in REVERSE of the
 // intended execution order (e.g. for an ordered teardown A → B → C,
@@ -258,11 +266,12 @@ func newRunID() string {
 }
 
 // reachableTarget is the SSH/podman coordinate set for a host the suite
-// has already proven reachable (the discovered podman machine). The
-// suite stores the good machine's target here so
-// RegisterReachableMachine can register additional throwaway machines
-// against the same host — needed because 080-05 made registration probe
-// the target, so a throwaway must point at a host that answers.
+// has already proven reachable (the container test host or an
+// SSH-override external host). The suite stores the good machine's
+// target here so RegisterReachableMachine can register additional
+// throwaway machines against the same host — needed because 080-05
+// made registration probe the target, so a throwaway must point at a
+// host that answers.
 //
 // Defined here (not as machineRegistration, which lives in a _test.go
 // file) so the non-test harness.go can reference it without breaking

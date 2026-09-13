@@ -1,6 +1,6 @@
 # Makefile for Podland Backend
 
-.PHONY: all build run clean deps lint test test-integration migrate generate-keys init-db
+.PHONY: all build run clean deps lint test test-integration testhost-build migrate generate-keys init-db
 
 # Go parameters
 GOCMD=go
@@ -50,18 +50,57 @@ tidy:
 test:
 	$(GOCMD) test -v ./...
 
-# Integration tests — boots a real podman machine, brings the backend
-# up in-process via internal/app.App + httptest.NewServer, and runs the
-# end-to-end suite in backend/test/integration/. Gated behind a build
-# tag so `make test` / `go test ./...` never accidentally boot a VM or
-# depend on podman being installed.
+# Integration tests — boots the containerized podman test host (see the
+# testhost-build target below), brings the backend up in-process via
+# internal/app.App + httptest.NewServer, and runs the end-to-end suite
+# in backend/test/integration/. Gated behind a build tag so `make test`
+# / `go test ./...` never boot a container or depend on podman.
 #
-# Override the target machine/connection with PODLAND_TEST_MACHINE_NAME
-# (defaults to podman-machine-default); individual SSH fields can be
-# overridden via PODLAND_TEST_SSH_{HOST,PORT,USER,SOCKET,KEY_PATH} to
-# target an external host.
-test-integration:
+# Runs are serialized per host: the test host uses a fixed container
+# name and a fixed published port (127.0.0.1:24422), so a second
+# concurrent run fails fast instead of racing over shared volumes.
+#
+# Override the registered `podman system connection` name with
+# PODLAND_TEST_CONNECTION_NAME (default "podland-it"). To target an
+# externally managed host instead of the container, set ALL of
+# PODLAND_TEST_SSH_{HOST,PORT,USER,SOCKET,KEY_PATH} — the container
+# lifecycle is skipped entirely.
+test-integration: testhost-build
 	$(GOCMD) test -v -tags=integration ./test/integration/...
+
+# Container test host image — a podman machine stand-in built from
+# test/integration/testhost/Dockerfile (pinned Fedora + podman,
+# fuse-overlayfs, openssh-server, systemd; lingering `core` user with
+# rootless podman behind /run/user/1000/podman/podman.sock). Layer
+# caching makes repeat builds a no-op.
+#
+# TESTHOST_IMAGE must match testhostImage in test/integration/testhost.go
+# (the harness fails fast naming this target when the image is missing).
+TESTHOST_IMAGE := podland-testhost
+
+# Manual smoke run — the run contract test/integration/testhost.go
+# automates (systemd is PID 1; sshd reachable on 127.0.0.1:24422; as
+# core: user manager up, /run/user/1000/podman/podman.sock listening,
+# `podman run busybox` working over fuse-overlayfs):
+#
+#   podman run --detach --name podland-it-testhost \
+#     --privileged --systemd=always --security-opt label=disable \
+#     --device /dev/fuse -p 127.0.0.1:24422:22 \
+#     -v podland-it-testhost-store:/home/core/.local/share/containers \
+#     -v podland-it-testhost-ssh:/etc/ssh \
+#     podland-testhost /sbin/init
+#
+# The two volumes are persistent by design: the store caches images for
+# fast re-runs and the /etc/ssh volume keeps the host key stable so the
+# bindings' known_hosts auto-append happens exactly once. On hosts
+# without podman the build is skipped so `make test-integration` still
+# reaches the suite, which skips cleanly.
+testhost-build:
+	@if ! command -v podman >/dev/null 2>&1; then \
+		echo "podman not found — skipping test-host image build (integration suite will skip)"; \
+	else \
+		podman build -t $(TESTHOST_IMAGE) test/integration/testhost; \
+	fi
 
 # Run migrations
 migrate:
@@ -110,7 +149,8 @@ help:
 	@echo "  make debug     - Run in debug mode"
 	@echo "  make clean     - Clean build artifacts"
 	@echo "  make test      - Run tests"
-	@echo "  make test-integration - Run integration tests against a real podman machine"
+	@echo "  make test-integration - Run integration tests against the containerized podman test host"
+	@echo "  make testhost-build - Build the container test host image"
 	@echo "  make migrate   - Run database migrations"
 	@echo "  make keys      - Generate JWT keys"
 	@echo "  make podman-build - Build Docker image"

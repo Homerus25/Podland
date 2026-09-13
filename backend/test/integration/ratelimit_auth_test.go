@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/app"
@@ -21,11 +20,11 @@ import (
 // (real DB, real handlers, real middleware) without poisoning the shared
 // suite server, whose limits are raised out of the way. Tear-down mirrors
 // the suite's own LIFO order: server close → app.Close → remove temp
-// files.
+// files (t.TempDir's cleanup fires last).
 func bootAuthLimitedApp(t *testing.T, authLimit int) (*app.App, string) {
 	t.Helper()
 
-	cfg, tempDirs, err := buildTestConfig()
+	cfg, err := buildTestConfig(t.TempDir())
 	require.NoError(t, err, "Should build the second app's config")
 	cfg.RateLimit.AuthRequestsPerMinute = authLimit
 
@@ -33,11 +32,6 @@ func bootAuthLimitedApp(t *testing.T, authLimit int) (*app.App, string) {
 	require.NoError(t, err, "Should boot the app with auth limit %d", authLimit)
 
 	srv := httptest.NewServer(application.Handler())
-	t.Cleanup(func() {
-		for _, d := range tempDirs {
-			_ = os.RemoveAll(d)
-		}
-	})
 	t.Cleanup(func() { _ = application.Close() })
 	t.Cleanup(srv.Close)
 	return application, srv.URL
