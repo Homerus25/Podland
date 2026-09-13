@@ -59,10 +59,14 @@ RUN mkdir -p /etc/systemd/user/sockets.target.wants \
     && ln -s /usr/lib/systemd/user/podman.socket \
         /etc/systemd/user/sockets.target.wants/podman.socket
 
-# Rootless podman config for core: force fuse-overlayfs, and log events
-# to a file rather than depending on the in-container journald path.
+# Rootless podman config for core: force fuse-overlayfs. Events go to
+# journald — the same backend a podman machine's Fedora defaults pick —
+# because `podman logs --follow` refuses to run with the journald
+# log-driver over a non-journald events backend, and journald works
+# here (systemd is PID 1; rootless container-root maps to core's uid,
+# so the entries are readable without extra group membership).
 RUN mkdir -p /home/core/.config/containers \
-    && printf '[storage]\ndriver = "overlay"\nmount_program = "/usr/bin/fuse-overlayfs"\n\n[engine]\nevents_logger = "file"\n' \
+    && printf '[storage]\ndriver = "overlay"\nmount_program = "/usr/bin/fuse-overlayfs"\n\n[engine]\nevents_logger = "journald"\n' \
         > /home/core/.config/containers/containers.conf \
     && chown -R core:core /home/core/.config
 

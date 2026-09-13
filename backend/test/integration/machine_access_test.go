@@ -53,6 +53,7 @@ import (
 var (
 	noAccessOnce   sync.Once
 	noAccessClient *http.Client
+	noAccessUserID string
 	noAccessErr    error
 )
 
@@ -66,10 +67,12 @@ func noAccessUserClient(t *testing.T) *http.Client {
 	noAccessOnce.Do(func() {
 		username := "it-" + suite.RunID + "-noaccess"
 		password := "it-" + suite.RunID + "-noaccess-pw-" + uuid.New().String()[:8]
-		if _, err := suite.SeedUserWithRole(username, password, models.RoleUser); err != nil {
+		userID, err := suite.SeedUserWithRole(username, password, models.RoleUser)
+		if err != nil {
 			noAccessErr = fmt.Errorf("seed no-access user: %w", err)
 			return
 		}
+		noAccessUserID = userID
 		token, err := realLogin(suite.ServerURL, username, password)
 		if err != nil {
 			noAccessErr = fmt.Errorf("login as no-access user: %w", err)
@@ -213,14 +216,23 @@ func Test_Integration_MachineAccess_MachinesEndpointsRejectNoAccessUser(t *testi
 	})
 
 	// The rejections must have been decisions, not side effects: the
-	// owner still sees the machine and still holds the sole admin
-	// grant after the no-access user's attempts.
+	// owner still sees the machine, still holds the admin grant, and —
+	// the point of this tripwire — the no-access user's attempts wrote
+	// no grant for themselves. The owner's is NOT the sole grant on the
+	// shared machine: the binary-wide read/write level fixtures
+	// (machine_permission_test.go) hold legitimately granted access.
 	t.Run("OwnerFixtureIntactAfterRejections", func(t *testing.T) {
 		assert.True(t, machineListed(t, suite.MachineID),
 			"owner must still see the shared machine after no-access rejections")
 		access := listAccess(t, suite.MachineID)
-		assert.Len(t, access, 1,
-			"owner must still hold the sole access grant. got: %+v", access)
+		ownerGrant := findAccess(access, suite.OwnerUserID)
+		if assert.NotNil(t, ownerGrant,
+			"owner must still hold an access grant. got: %+v", access) {
+			assert.Equal(t, "admin", ownerGrant.Permission,
+				"owner grant must still be admin after no-access rejections. got: %+v", access)
+		}
+		assert.Nil(t, findAccess(access, noAccessUserID),
+			"the no-access user must hold no grant after its rejected attempts. got: %+v", access)
 	})
 }
 
