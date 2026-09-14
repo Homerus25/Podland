@@ -102,9 +102,18 @@ func Run[Event, Result any](ctx context.Context, w *NDJSONWriter, cfg StreamConf
 
 	go func() {
 		result, err := cfg.Operation(runCtx, func(event Event) {
+			// Prefer enqueueing: a buffered send must not race the done
+			// branch, or an event emitted just before cancellation can be
+			// dropped even though Run's exit paths still flush it. The
+			// blocking fallback keeps the escape hatch for a full buffer
+			// after the consumer has stopped reading.
 			select {
 			case progress <- event:
-			case <-runCtx.Done():
+			default:
+				select {
+				case progress <- event:
+				case <-runCtx.Done():
+				}
 			}
 		})
 		if err != nil {
@@ -139,6 +148,16 @@ func Run[Event, Result any](ctx context.Context, w *NDJSONWriter, cfg StreamConf
 		case <-disconnect:
 			slog.InfoContext(ctx, "Client disconnected, cancelling operation")
 			cancel()
+			// Wait for the operation to observe the cancellation before
+			// flushing: a terminal event must never overtake progress the
+			// operation delivered, and with a pre-cancelled context the
+			// goroutine may not have emitted yet when disconnect fires.
+			// Bounded in practice by the contract that the operation
+			// honours ctx cancellation.
+			select {
+			case <-errorChan:
+			case <-resultChan:
+			}
 			if flushProgress(ctx, progress, cfg.OnEvent) {
 				code, message, cancelled := cfg.terminalError(ctx, context.Canceled, true)
 				w.Write(cfg.ErrorEvent(code, message, cancelled))
