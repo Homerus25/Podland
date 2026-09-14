@@ -201,7 +201,14 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	quadletID := chi.URLParam(r, "quadletId")
 
 	if streaming.ParseFollow(r) && quadletID != "" {
-		h.streamLogs(w, r, quadletID, since, tail)
+		slog.InfoContext(r.Context(), "streamLogs", slog.String("quadletID", quadletID), slog.Bool("follow", true))
+		streaming.RunLogStream(w, r, streaming.LogStreamOp{
+			Since: since,
+			Tail:  tail,
+			Stream: func(ctx context.Context, userID, machineID string, onEvent func(streaming.LogEvent)) error {
+				return h.service.GetLogsWithStream(ctx, userID, machineID, quadletID, since, tail, onEvent)
+			},
+		})
 		return
 	}
 
@@ -211,54 +218,6 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		return h.service.GetLogs(ctx, userID, machineID, quadletID, since, tail)
 	})
-}
-
-// streamLogs serves follow=true through the streaming envelope: Begin owns
-// headers, writer, and identity; Run owns the loop, disconnect
-// cancellation, and the error mapping. There is no callback writer and no
-// wait-for-goroutine-exit: event writes happen only inside Run's loop,
-// never from the service goroutine, so write-after-return is impossible by
-// construction.
-func (h *QuadletHandler) streamLogs(w http.ResponseWriter, r *http.Request, quadletID string, since time.Time, tail int64) {
-	stream := streaming.Begin(w, r)
-	if stream == nil {
-		return
-	}
-
-	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[QuadletLogEvent, struct{}]{
-		Operation: func(ctx context.Context, onProgress func(QuadletLogEvent)) (struct{}, error) {
-			return struct{}{}, h.service.GetLogsWithStream(ctx, stream.UserID, stream.MachineID, quadletID, since, tail, onProgress)
-		},
-		OnEvent: func(event QuadletLogEvent) error {
-			return stream.Writer.Write(event)
-		},
-		CompleteEvent: func(struct{}) any {
-			return QuadletLogEvent{
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-				Level:     streaming.StreamEndedLevel,
-				Message:   streaming.StreamEndedMessage,
-			}
-		},
-		ErrorDefault: errors.ErrConnectionFailed,
-		ErrorEvent:   logStreamTerminalEvent,
-	})
-}
-
-// logStreamTerminalEvent stamps the module-mapped (code, message,
-// cancelled) into the shared log-event vocabulary: "CODE: human message"
-// at ERROR level, WARN when the stream was cancelled. The shape matches
-// the containers log stream, so the frontend parser surfaces these as
-// real ApiErrors.
-func logStreamTerminalEvent(code, message string, cancelled bool) any {
-	level := "ERROR"
-	if cancelled {
-		level = "WARN"
-	}
-	return QuadletLogEvent{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Level:     level,
-		Message:   code + ": " + message,
-	}
 }
 
 // Generate handles generating a quadlet from an existing container or pod

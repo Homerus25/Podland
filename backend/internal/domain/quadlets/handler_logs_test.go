@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/go-chi/chi/v5"
@@ -67,64 +66,6 @@ func TestQuadletHandler_GetLogs_Success(t *testing.T) {
 		"a container quadlet logs under the systemd-spawned container name derived from the quadlet name")
 	assert.Contains(t, w.Body.String(), `"id":"web.container"`, "Response should contain quadlet ID")
 	assert.Contains(t, w.Body.String(), `"logs":"quadlet log line"`, "Response should contain logs")
-}
-
-// TestQuadletHandler_GetLogs_WithSinceParameter tests that the since query
-// parameter is parsed and reaches the machine's log call.
-func TestQuadletHandler_GetLogs_WithSinceParameter(t *testing.T) {
-	var gotOpts entities.ContainerLogsOptions
-	engine := &fakeQuadletEngine{}
-	handler := logsHandler(engine, func(containerName string, opts entities.ContainerLogsOptions) error {
-		gotOpts = opts
-		return nil
-	})
-
-	sinceTime := "2024-01-01T00:00:00Z"
-	w := httptest.NewRecorder()
-	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?since="+sinceTime))
-
-	require.Equal(t, http.StatusOK, w.Code)
-	parsedSince, _ := time.Parse(time.RFC3339, sinceTime)
-	assert.Equal(t, parsedSince, gotOpts.Since, "the parsed since value must reach the machine")
-}
-
-// TestQuadletHandler_GetLogs_WithTailParameter tests that the tail query
-// parameter is parsed and reaches the machine's log call.
-func TestQuadletHandler_GetLogs_WithTailParameter(t *testing.T) {
-	var gotOpts entities.ContainerLogsOptions
-	engine := &fakeQuadletEngine{}
-	handler := logsHandler(engine, func(containerName string, opts entities.ContainerLogsOptions) error {
-		gotOpts = opts
-		return nil
-	})
-
-	w := httptest.NewRecorder()
-	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?tail=100"))
-
-	require.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, int64(100), gotOpts.Tail, "the parsed tail value must reach the machine")
-}
-
-// TestQuadletHandler_GetLogs_InvalidSinceParameter tests log retrieval with invalid since parameter
-func TestQuadletHandler_GetLogs_InvalidSinceParameter(t *testing.T) {
-	engine := &fakeQuadletEngine{}
-
-	w := httptest.NewRecorder()
-	newTestHandler(engine).GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?since=invalid-date"))
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid since parameter")
-	assert.Contains(t, w.Body.String(), "INVALID_SINCE_PARAM", "Response should contain INVALID_SINCE_PARAM error code")
-}
-
-// TestQuadletHandler_GetLogs_InvalidTailParameter tests log retrieval with invalid tail parameter
-func TestQuadletHandler_GetLogs_InvalidTailParameter(t *testing.T) {
-	engine := &fakeQuadletEngine{}
-
-	w := httptest.NewRecorder()
-	newTestHandler(engine).GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?tail=not-a-number"))
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid tail parameter")
-	assert.Contains(t, w.Body.String(), "INVALID_TAIL_PARAM", "Response should contain INVALID_TAIL_PARAM error code")
 }
 
 // TestQuadletHandler_GetLogs_QueryErrorWithFollowRidesJSONEnvelope tests

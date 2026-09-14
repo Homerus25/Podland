@@ -228,16 +228,6 @@ type QuadletLogsResponse struct {
 	Logs string `json:"logs"`
 }
 
-// QuadletLogEvent represents a single log line in streaming mode
-type QuadletLogEvent struct {
-	// ISO8601 timestamp
-	Timestamp string `json:"timestamp"`
-	// Log level (INFO, WARN, ERROR, etc.)
-	Level string `json:"level"`
-	// Log message content
-	Message string `json:"message"`
-}
-
 // resolveManagedContainerName resolves the managed container name for a quadlet.
 // For container-type quadlets, the managed container is the systemd-spawned
 // container, which podman names `systemd-<basename>` — the quadlet file name

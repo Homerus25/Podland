@@ -7,6 +7,7 @@ import (
 	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -135,43 +136,6 @@ func TestQuadletService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-// TestQuadletService_GetLogsWithStream_EmitsEventsPerLine pins the follow
-// mode: each line arrives as an event through the writers the service hands
-// the engine, stdout at INFO and stderr at ERROR, with podman's line
-// timestamps parsed out.
-func TestQuadletService_GetLogsWithStream_EmitsEventsPerLine(t *testing.T) {
-	var events []QuadletLogEvent
-	engine := &fakeQuadletEngine{
-		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
-			return []*entities.ListQuadlet{{Name: "web.container"}}, nil
-		},
-		printFn: func(string) (string, error) {
-			return "[Container]\n", nil
-		},
-		logsFn: func(_ string, opts entities.ContainerLogsOptions) error {
-			if opts.StdoutWriter != nil {
-				_, _ = opts.StdoutWriter.Write([]byte("2026-09-01T10:00:00.000000000Z hello\n"))
-			}
-			if opts.StderrWriter != nil {
-				_, _ = opts.StderrWriter.Write([]byte("2026-09-01T10:00:01.000000000Z broke\n"))
-			}
-			return nil
-		},
-	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
-
-	err := service.GetLogsWithStream(context.Background(), "user", "machine", "web.container", time.Time{}, 0,
-		func(event QuadletLogEvent) { events = append(events, event) })
-
-	require.NoError(t, err)
-	require.Len(t, events, 2)
-	assert.Equal(t, "INFO", events[0].Level)
-	assert.Equal(t, "hello", events[0].Message, "the podman timestamp must be parsed out of the message")
-	assert.Equal(t, "2026-09-01T10:00:00Z", events[0].Timestamp)
-	assert.Equal(t, "ERROR", events[1].Level)
-	assert.Equal(t, "broke", events[1].Message)
-}
-
 func TestQuadletService_GetLogsWithStream_MapsCancellationToOperationCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -189,7 +153,7 @@ func TestQuadletService_GetLogsWithStream_MapsCancellationToOperationCancelled(t
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
 
 	err := service.GetLogsWithStream(ctx, "user", "machine", "web.container", time.Time{}, 0,
-		func(QuadletLogEvent) {})
+		func(streaming.LogEvent) {})
 
 	require.ErrorIs(t, err, appErrors.ErrOperationCancelled)
 }
@@ -258,102 +222,5 @@ Exec=echo ContainerName=not-a-key
 	t.Run("empty value returns empty", func(t *testing.T) {
 		content := "[Container]\nContainerName=\n"
 		assert.Equal(t, "", explicitContainerNameFromQuadletContent(content))
-	})
-}
-
-// TestQuadletLogEventWriter tests the log event writer
-func TestQuadletLogEventWriter(t *testing.T) {
-	t.Run("basic write with timestamp", func(t *testing.T) {
-		var capturedEvent QuadletLogEvent
-		writer := &quadletLogEventWriter{
-			callback:   func(event QuadletLogEvent) { capturedEvent = event },
-			level:      "INFO",
-			timestamps: true,
-		}
-
-		testData := []byte("2024-01-01T00:00:00.000000000Z Test log message\n")
-		n, err := writer.Write(testData)
-
-		require.NoError(t, err, "Write should not return error")
-		assert.Equal(t, len(testData), n, "Write should return correct byte count")
-		assert.Contains(t, capturedEvent.Timestamp, "2024-01-01", "Should parse timestamp date correctly")
-		assert.Equal(t, "INFO", capturedEvent.Level, "Should use provided level")
-		assert.Equal(t, "Test log message", capturedEvent.Message, "Should extract message correctly")
-	})
-
-	t.Run("write without timestamp", func(t *testing.T) {
-		var capturedEvent QuadletLogEvent
-		writer := &quadletLogEventWriter{
-			callback:   func(event QuadletLogEvent) { capturedEvent = event },
-			level:      "ERROR",
-			timestamps: false,
-		}
-
-		testData := []byte("Test log message without timestamp\n")
-		n, err := writer.Write(testData)
-
-		require.NoError(t, err, "Write should not return error")
-		assert.Equal(t, len(testData), n, "Write should return correct byte count")
-		assert.NotEmpty(t, capturedEvent.Timestamp, "Should generate timestamp when not parsing")
-		assert.Equal(t, "ERROR", capturedEvent.Level, "Should use provided level")
-		assert.Equal(t, "Test log message without timestamp", capturedEvent.Message, "Should use full message as message")
-	})
-
-	t.Run("empty line", func(t *testing.T) {
-		var capturedEvent QuadletLogEvent
-		writer := &quadletLogEventWriter{
-			callback:   func(event QuadletLogEvent) { capturedEvent = event },
-			level:      "INFO",
-			timestamps: true,
-		}
-
-		testData := []byte("\n")
-		n, err := writer.Write(testData)
-
-		require.NoError(t, err, "Write should not return error")
-		assert.Equal(t, len(testData), n, "Write should return correct byte count")
-		assert.Empty(t, capturedEvent.Message, "Should not emit event for empty line")
-	})
-
-	t.Run("invalid timestamp format", func(t *testing.T) {
-		var capturedEvent QuadletLogEvent
-		writer := &quadletLogEventWriter{
-			callback:   func(event QuadletLogEvent) { capturedEvent = event },
-			level:      "WARN",
-			timestamps: true,
-		}
-
-		testData := []byte("invalid-timestamp Test log message\n")
-		n, err := writer.Write(testData)
-
-		require.NoError(t, err, "Write should not return error")
-		assert.Equal(t, len(testData), n, "Write should return correct byte count")
-		assert.NotEmpty(t, capturedEvent.Timestamp, "Should generate timestamp when parsing fails")
-		assert.Equal(t, "WARN", capturedEvent.Level, "Should use provided level")
-		assert.Equal(t, "invalid-timestamp Test log message", capturedEvent.Message, "Should use full message as message when parsing fails")
-	})
-
-	t.Run("multiple events", func(t *testing.T) {
-		var capturedEvents []QuadletLogEvent
-		writer := &quadletLogEventWriter{
-			callback: func(event QuadletLogEvent) {
-				capturedEvents = append(capturedEvents, event)
-			},
-			level:      "INFO",
-			timestamps: true,
-		}
-
-		testData1 := []byte("2024-01-01T00:00:00.000000000Z First message\n")
-		testData2 := []byte("2024-01-01T00:00:01.000000000Z Second message\n")
-
-		_, err := writer.Write(testData1)
-		require.NoError(t, err)
-
-		_, err = writer.Write(testData2)
-		require.NoError(t, err)
-
-		assert.Len(t, capturedEvents, 2, "Should capture two events")
-		assert.Equal(t, "First message", capturedEvents[0].Message, "First event should have first message")
-		assert.Equal(t, "Second message", capturedEvents[1].Message, "Second event should have second message")
 	})
 }

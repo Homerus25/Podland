@@ -10,6 +10,7 @@ import (
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
+	"github.com/Homerus25/podland/backend/internal/streaming"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -440,15 +441,10 @@ func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadlet
 
 // GetLogsWithStream retrieves logs for the managed container of a quadlet
 // with streaming callback. When follow=true, this method streams log lines
-// one at a time via the logCallback function. Mirrors the 060-04 image-pull
-// NDJSON pattern.
-//
-// The flow mirrors GetLogs but uses Follow=true and a callback writer that
-// converts each log line to a QuadletLogEvent. Client-disconnect is detected
-// via context cancellation and mapped to OPERATION_CANCELLED.
-//
-// Supports `since` and `tail` query params. Emits NDJSON events via callback.
-func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event QuadletLogEvent)) error {
+// one at a time via the logCallback function.
+// The kit's LogEventWriter converts each podman log line to a LogEvent:
+// stdout at INFO, stderr at ERROR.
+func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event streaming.LogEvent)) error {
 	return s.engines.WithEngine(ctx, userID, machineID, "quadlets.GetLogsWithStream", func(e QuadletEngine) error {
 		containerName, err := s.resolveForLogs(e, quadletName)
 		if err != nil {
@@ -462,19 +458,8 @@ func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineI
 			Timestamps: true,
 		}
 
-		stdoutWriter := &quadletLogEventWriter{
-			callback:   logCallback,
-			level:      "INFO",
-			timestamps: true,
-		}
-		stderrWriter := &quadletLogEventWriter{
-			callback:   logCallback,
-			level:      "ERROR",
-			timestamps: true,
-		}
-
-		logsOpts.StdoutWriter = stdoutWriter
-		logsOpts.StderrWriter = stderrWriter
+		logsOpts.StdoutWriter = streaming.NewLogEventWriter("INFO", logCallback)
+		logsOpts.StderrWriter = streaming.NewLogEventWriter("ERROR", logCallback)
 
 		err = e.Logs(containerName, logsOpts)
 		if err != nil {
@@ -508,49 +493,6 @@ func (s *QuadletService) resolveForLogs(e QuadletEngine, quadletName string) (st
 	}
 
 	return resolveManagedContainerName(target, quadletName), nil
-}
-
-// quadletLogEventWriter wraps podman's log writers and converts each line to a QuadletLogEvent
-type quadletLogEventWriter struct {
-	callback   func(event QuadletLogEvent)
-	level      string
-	timestamps bool
-}
-
-// Write implements io.Writer to capture log lines from podman
-func (w *quadletLogEventWriter) Write(data []byte) (int, error) {
-	line := string(data)
-	line = strings.TrimSuffix(line, "\n")
-	if line == "" {
-		return len(data), nil
-	}
-
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	message := line
-
-	// Parse podman timestamp if enabled
-	if w.timestamps {
-		// Try to parse the timestamp if it looks like it's at the start
-		if strings.Contains(line, " ") {
-			parts := strings.SplitN(line, " ", 2)
-			if len(parts) == 2 {
-				parsedTime, err := time.Parse(time.RFC3339Nano, parts[0])
-				if err == nil {
-					timestamp = parsedTime.UTC().Format(time.RFC3339)
-					message = parts[1]
-				}
-			}
-		}
-	}
-
-	// Emit log event via callback
-	w.callback(QuadletLogEvent{
-		Timestamp: timestamp,
-		Level:     w.level,
-		Message:   message,
-	})
-
-	return len(data), nil
 }
 
 // resourceType represents a resource type that can be converted to a quadlet.
