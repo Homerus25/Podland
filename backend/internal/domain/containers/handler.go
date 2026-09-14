@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
@@ -202,7 +201,14 @@ func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
 	containerID := chi.URLParam(r, "containerId")
 
 	if streaming.ParseFollow(r) && containerID != "" {
-		h.streamLogs(w, r, containerID, since, tail)
+		slog.InfoContext(r.Context(), "streamLogs", slog.String("containerID", containerID), slog.Bool("follow", true))
+		streaming.RunLogStream(w, r, streaming.LogStreamOp{
+			Since: since,
+			Tail:  tail,
+			Stream: func(ctx context.Context, userID, machineID string, onEvent func(streaming.LogEvent)) error {
+				return h.service.GetLogsWithStream(ctx, userID, machineID, containerID, since, tail, onEvent)
+			},
+		})
 		return
 	}
 
@@ -212,51 +218,4 @@ func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
 		}
 		return h.service.GetLogs(ctx, userID, machineID, containerID, since, tail)
 	})
-}
-
-// streamLogs serves follow=true through the streaming envelope: Begin owns
-// headers, writer, and identity; Run owns the select loop, disconnect
-// cancellation, and the error mapping. The handler is config plus event
-// vocabulary — writes happen only inside Run's loop, never from the
-// service goroutine, so write-after-return is impossible by construction.
-func (h *ContainerHandler) streamLogs(w http.ResponseWriter, r *http.Request, containerID string, since time.Time, tail int64) {
-	slog.InfoContext(r.Context(), "streamLogs", slog.String("containerID", containerID), slog.Bool("follow", true))
-
-	stream := streaming.Begin(w, r)
-	if stream == nil {
-		return
-	}
-
-	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[ContainerLogEvent, struct{}]{
-		Operation: func(ctx context.Context, onProgress func(ContainerLogEvent)) (struct{}, error) {
-			return struct{}{}, h.service.GetLogsWithStream(ctx, stream.UserID, stream.MachineID, containerID, since, tail, onProgress)
-		},
-		OnEvent: func(event ContainerLogEvent) error {
-			return stream.Writer.Write(event)
-		},
-		CompleteEvent: func(struct{}) any {
-			return ContainerLogEvent{
-				Timestamp: time.Now().UTC().Format(time.RFC3339),
-				Level:     streaming.StreamEndedLevel,
-				Message:   streaming.StreamEndedMessage,
-			}
-		},
-		ErrorDefault: errors.ErrConnectionFailed,
-		ErrorEvent:   logStreamTerminalEvent,
-	})
-}
-
-// logStreamTerminalEvent stamps the module-mapped (code, message,
-// cancelled) into the log-event vocabulary: "CODE: human message" at ERROR
-// level, WARN when the stream was cancelled.
-func logStreamTerminalEvent(code, message string, cancelled bool) any {
-	level := "ERROR"
-	if cancelled {
-		level = "WARN"
-	}
-	return ContainerLogEvent{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		Level:     level,
-		Message:   code + ": " + message,
-	}
 }

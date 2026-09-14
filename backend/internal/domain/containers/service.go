@@ -10,6 +10,7 @@ import (
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/streaming"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/specgen"
 )
@@ -296,8 +297,10 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 }
 
 // GetLogsWithStream retrieves logs for a specific container with streaming callback
-// When follow=true, this method streams log lines one at a time via the logCallback function
-func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64, logCallback func(event ContainerLogEvent)) error {
+// When follow=true, this method streams log lines one at a time via the logCallback function.
+// The kit's LogEventWriter converts each podman log line to a LogEvent:
+// stdout at INFO, stderr at ERROR.
+func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64, logCallback func(event streaming.LogEvent)) error {
 	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
 		return err
 	}
@@ -311,21 +314,9 @@ func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machin
 			Timestamps: true,
 		}
 
-		// Create callback writers that convert each log line to an event
-		stdoutWriter := &logEventWriter{
-			callback:   logCallback,
-			level:      "INFO",
-			timestamps: true,
-		}
-		stderrWriter := &logEventWriter{
-			callback:   logCallback,
-			level:      "ERROR",
-			timestamps: true,
-		}
-
 		// Set writers to capture streaming output
-		logsOpts.StdoutWriter = stdoutWriter
-		logsOpts.StderrWriter = stderrWriter
+		logsOpts.StdoutWriter = streaming.NewLogEventWriter("INFO", logCallback)
+		logsOpts.StderrWriter = streaming.NewLogEventWriter("ERROR", logCallback)
 
 		// Fetch logs from container (this will block until follow ends or context is cancelled)
 		err := e.Logs(containerID, logsOpts)
@@ -341,44 +332,4 @@ func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machin
 
 		return nil
 	})
-}
-
-// logEventWriter wraps podman's log writers and converts each line to a ContainerLogEvent
-type logEventWriter struct {
-	callback   func(event ContainerLogEvent)
-	level      string
-	timestamps bool
-}
-
-// Write implements io.Writer to capture log lines from podman
-func (w *logEventWriter) Write(data []byte) (int, error) {
-	line := string(data)
-	line = strings.TrimSuffix(line, "\n")
-	if line == "" {
-		return len(data), nil
-	}
-
-	timestamp := time.Now().UTC().Format(time.RFC3339)
-	message := line
-
-	// Parse podman timestamp if enabled
-	if w.timestamps {
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) == 2 {
-			parsedTime, err := time.Parse("2006-01-02T15:04:05.999999999Z", parts[0])
-			if err == nil {
-				timestamp = parsedTime.UTC().Format(time.RFC3339)
-				message = parts[1]
-			}
-		}
-	}
-
-	// Emit log event via callback
-	w.callback(ContainerLogEvent{
-		Timestamp: timestamp,
-		Level:     w.level,
-		Message:   message,
-	})
-
-	return len(data), nil
 }

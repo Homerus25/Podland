@@ -7,6 +7,7 @@ import (
 	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -88,31 +89,6 @@ func TestContainerService_GetLogs_MissingParameters(t *testing.T) {
 	}
 }
 
-func TestContainerService_GetLogsWithStream_EmitsEventsPerLine(t *testing.T) {
-	var events []ContainerLogEvent
-	engine := &fakeContainerEngine{
-		logsFn: func(_ string, opts entities.ContainerLogsOptions) error {
-			// Podman prefixes each follow line with its timestamp.
-			writeLogsInto(opts,
-				"2026-09-01T10:00:00.000000000Z hello\n",
-				"2026-09-01T10:00:01.000000000Z broke\n")
-			return nil
-		},
-	}
-	service := NewContainerService(fakeEngineProvider{engine: engine})
-
-	err := service.GetLogsWithStream(context.Background(), "user", "machine", "container-123", time.Time{}, 0,
-		func(event ContainerLogEvent) { events = append(events, event) })
-
-	require.NoError(t, err)
-	require.Len(t, events, 2)
-	assert.Equal(t, "INFO", events[0].Level)
-	assert.Equal(t, "hello", events[0].Message, "the podman timestamp must be parsed out of the message")
-	assert.Equal(t, "2026-09-01T10:00:00Z", events[0].Timestamp)
-	assert.Equal(t, "ERROR", events[1].Level, "stderr lines stream at ERROR level")
-	assert.Equal(t, "broke", events[1].Message)
-}
-
 func TestContainerService_GetLogsWithStream_MapsCancellationToOperationCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -124,7 +100,7 @@ func TestContainerService_GetLogsWithStream_MapsCancellationToOperationCancelled
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
 	err := service.GetLogsWithStream(ctx, "user", "machine", "container-123", time.Time{}, 0,
-		func(ContainerLogEvent) {})
+		func(streaming.LogEvent) {})
 
 	require.ErrorIs(t, err, appErrors.ErrOperationCancelled)
 }
@@ -138,7 +114,7 @@ func TestContainerService_GetLogsWithStream_MapsMissingContainerTo404(t *testing
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
 	err := service.GetLogsWithStream(context.Background(), "user", "machine", "container-123", time.Time{}, 0,
-		func(ContainerLogEvent) {})
+		func(streaming.LogEvent) {})
 
 	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 }

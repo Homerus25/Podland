@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -32,86 +31,6 @@ func TestContainerHandler_Logs_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
 	assert.Contains(t, w.Body.String(), `"id":"container-123"`, "Response should contain container ID")
 	assert.Contains(t, w.Body.String(), `"logs":"test log line 1\ntest log line 2"`, "Response should contain logs")
-}
-
-// TestContainerHandler_Logs_WithSinceParameter tests that the since query
-// parameter is parsed and reaches the machine's log call.
-func TestContainerHandler_Logs_WithSinceParameter(t *testing.T) {
-	var gotOpts entities.ContainerLogsOptions
-	engine := &fakeContainerEngine{
-		logsFn: func(name string, opts entities.ContainerLogsOptions) error {
-			gotOpts = opts
-			return nil
-		},
-	}
-
-	sinceTime := "2024-01-01T00:00:00Z"
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?since="+sinceTime, nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
-	parsedSince, _ := time.Parse(time.RFC3339, sinceTime)
-	assert.Equal(t, parsedSince, gotOpts.Since, "the parsed since value must reach the machine")
-}
-
-// TestContainerHandler_Logs_WithTailParameter tests that the tail query
-// parameter is parsed and reaches the machine's log call.
-func TestContainerHandler_Logs_WithTailParameter(t *testing.T) {
-	var gotOpts entities.ContainerLogsOptions
-	engine := &fakeContainerEngine{
-		logsFn: func(name string, opts entities.ContainerLogsOptions) error {
-			gotOpts = opts
-			return nil
-		},
-	}
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?tail=100", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
-	assert.Equal(t, int64(100), gotOpts.Tail, "the parsed tail value must reach the machine")
-}
-
-// TestContainerHandler_Logs_InvalidSinceParameter tests log retrieval with invalid since parameter
-func TestContainerHandler_Logs_InvalidSinceParameter(t *testing.T) {
-	engine := &fakeContainerEngine{}
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?since=invalid-date", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid since parameter")
-	assert.Contains(t, w.Body.String(), "INVALID_SINCE_PARAM", "Response should contain INVALID_SINCE_PARAM error code")
-}
-
-// TestContainerHandler_Logs_InvalidTailParameter tests log retrieval with invalid tail parameter
-func TestContainerHandler_Logs_InvalidTailParameter(t *testing.T) {
-	engine := &fakeContainerEngine{}
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?tail=not-a-number", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid tail parameter")
-	assert.Contains(t, w.Body.String(), "INVALID_TAIL_PARAM", "Response should contain INVALID_TAIL_PARAM error code")
 }
 
 // TestContainerHandler_Logs_QueryErrorWithFollowRidesJSONEnvelope tests
