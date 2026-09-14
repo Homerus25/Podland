@@ -133,6 +133,7 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **Validation**: `go-playground/validator`
 - **SSH**: `golang.org/x/crypto/ssh` via forked Podman's connection.go
 - **Containerization**: Podman (for integration tests and deployment)
+- **Log-stream kit**: one kit (`backend/internal/streaming/logs.go`) owns the follow-mode log ritual end to end: `RunLogStream` wires the streaming envelope (`Begin` + `Run`), the terminal `INFO` `STREAM_ENDED` event, `"CODE: message"` error events (`ERROR` level, `WARN` on cancellation), and the baked-in `ErrConnectionFailed` error default, alongside the shared `LogEvent` DTO and the `LogEventWriter` that converts podman log lines to events (RFC3339Nano parse, RFC3339 UTC re-emit, spaceless-line guard). Log domains stay thin adapters: query parse with the JSON-envelope fallback (issue 340's dispatch ruling), route-ID extraction, and two closures — the buffered `web.Handle` service call and the `Stream` closure resolving their target inside the service. Extracted after the two domain copies drifted, superseding issue 340's below-threshold scoping. Settled 2026-09-13 (architecture-review candidate C7).
 - **Dependencies**: Go 1.21+
 
 ### Frontend (React)

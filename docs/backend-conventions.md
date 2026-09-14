@@ -39,8 +39,14 @@ closest sibling that already exists. Rulings so far:
   causes are logged once by the module, never surfaced on the wire. Log
   streams use `Result = struct{}` and speak the shared terminal
   contract: `"CODE: message"` log events (`ERROR` level; `WARN` when
-  cancelled). The images pull handler is the reference for progress
-  streams; the containers logs handler (`streamLogs`) for log streams.
+  cancelled). For log streams the kit owns the follow ritual:
+  `streaming.RunLogStream` (`internal/streaming/logs.go`) is the
+  reference, owning the terminal events (`INFO` `STREAM_ENDED` on a
+  clean end, `"CODE: message"` errors) and the `ErrConnectionFailed`
+  error default; a log handler is query parse + follow dispatch + two
+  closures (the `LogStreamOp.Stream` callback and the buffered
+  `web.Handle` service call). The images pull handler remains the
+  reference for progress streams.
 - **Handler contract tests** — `testutils.Perform` builds the
   request (identity, chi URL params, body) the way the router would;
   per-domain `recordXRequest` chi scaffolding is retired. Handler tests
@@ -117,7 +123,12 @@ A new endpoint that copies an established sibling pattern (error
 envelope, `userID`/`machineID` extraction, JSON encode, test helper
 like `recordPruneRequest`) is **correct**, not a smell. Extract shared
 helpers only when a **third** domain copies the same shape. That
-threshold has been crossed three times and all three extractions are
+threshold exists to catch drift, not to count copies: when copies have
+already diverged, extraction triggers even below the third copy — the
+log-stream kit (`.scratch/380-log-stream-kit`) is the precedent, where
+two timestamp parsers that disagreed on a spaceless podman line made
+the streaming path un-changeable in one place. The threshold has been
+crossed three times and all three extractions are
 now the reference: the endpoint ritual became `internal/web.Handle`,
 the handler-test scaffolding became `testutils.Perform`, and podman
 error classification became `internal/podmanerr` — one leaf adapter

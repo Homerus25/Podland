@@ -31,6 +31,8 @@ only at two copies — below the third-copy threshold — so the bypass is the
 friction, not the copy count; this epic closes the bypass without touching the
 streaming path.
 
+> Update 2026-09-13: the streaming path this epic deliberately left was extracted by `.scratch/380-log-stream-kit` (architecture review C7), which supersedes the below-threshold scoping above.
+
 ## Decisions (from the design review — do not relitigate)
 
 1. **Parser home**: the shared log-query parser lives in `internal/streaming`.
