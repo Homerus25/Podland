@@ -70,25 +70,6 @@ describe("MachinesPage", () => {
 		expect(screen.queryByTestId("machine-card")).not.toBeInTheDocument();
 	});
 
-	it("renders the backend error envelope with code and message", async () => {
-		server.use(
-			http.get("*/api/machines", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-2",
-						error: { message: "Token has expired", code: "TOKEN_EXPIRED" },
-					},
-					{ status: 401 },
-				),
-			),
-		);
-		renderMachinesPage();
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("TOKEN_EXPIRED")).toBeInTheDocument();
-		expect(screen.getByText("Token has expired")).toBeInTheDocument();
-	});
-
 	it("shows generic text for internal error codes, hiding leaked details", async () => {
 		server.use(
 			http.get("*/api/machines", () =>

@@ -1,5 +1,6 @@
 import { ChakraProvider, ColorModeScript } from "@chakra-ui/react";
 import { AuthProvider } from "@shared/context/AuthContext";
+import { shouldRetryQuery } from "@shared/queries/shouldRetryQuery";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { createRoot } from "react-dom/client";
@@ -11,7 +12,7 @@ const queryClient = new QueryClient({
 	defaultOptions: {
 		queries: {
 			refetchOnWindowFocus: false,
-			retry: 1,
+			retry: shouldRetryQuery,
 			staleTime: 5 * 60 * 1000, // 5 minutes
 		},
 		mutations: {

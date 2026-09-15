@@ -3,12 +3,19 @@ import {
 	apiBaseUrl,
 	bareApi,
 	getApiError,
+	handleUnauthorized,
 	setBearerToken,
+	setSessionExpiredHandler,
 } from "@shared/utils/api";
 import { AxiosError, type AxiosResponse } from "axios";
 import { HttpResponse, http } from "msw";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { server } from "@/test/server";
+
+const tokenExpiredEnvelope = (requestId: string) => ({
+	requestId,
+	error: { code: "TOKEN_EXPIRED", message: "Token has expired" },
+});
 
 function responseOf(status: number, data: unknown): AxiosResponse {
 	return {
@@ -150,5 +157,233 @@ describe("getApiError", () => {
 			code: "INTERNAL_ERROR",
 			message: "An unexpected error occurred",
 		});
+	});
+});
+
+describe("401 policy", () => {
+	let refreshCalls: number;
+	let seamCalls: number;
+
+	beforeEach(() => {
+		refreshCalls = 0;
+		seamCalls = 0;
+	});
+
+	afterEach(() => {
+		setBearerToken(null);
+		setSessionExpiredHandler(null);
+	});
+
+	function refreshHandler(token = "fresh-access-token", delayMs = 0) {
+		return http.post("*/api/auth/refresh", async () => {
+			refreshCalls++;
+			if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+			return HttpResponse.json({ token, username: "alice" });
+		});
+	}
+
+	function rejectedRefreshHandler() {
+		return http.post("*/api/auth/refresh", () => {
+			refreshCalls++;
+			return HttpResponse.json(
+				{
+					requestId: "req-refresh",
+					error: {
+						code: "AUTH_REFRESH_INVALID",
+						message: "Refresh token invalid",
+					},
+				},
+				{ status: 401 },
+			);
+		});
+	}
+
+	function machinesHandler(respond: (call: number) => Response) {
+		let calls = 0;
+		return http.get("*/api/machines", () => respond(++calls));
+	}
+
+	function unauthorized(call: number) {
+		return HttpResponse.json(tokenExpiredEnvelope(`req-${call}`), {
+			status: 401,
+		});
+	}
+
+	it("resolves true only when a fresh token was installed", async () => {
+		server.use(refreshHandler());
+		setBearerToken("expired-access-token");
+
+		await expect(handleUnauthorized()).resolves.toBe(true);
+		expect(refreshCalls).toBe(1);
+
+		server.use(rejectedRefreshHandler());
+		await expect(handleUnauthorized()).resolves.toBe(false);
+	});
+
+	it("refreshes once and replays the 401ing request so it resolves normally", async () => {
+		let machineCalls = 0;
+		let replayAuthorization: string | null = null;
+		server.use(
+			refreshHandler(),
+			http.get("*/api/machines", ({ request }) => {
+				machineCalls++;
+				if (machineCalls === 1) return unauthorized(machineCalls);
+				replayAuthorization = request.headers.get("authorization");
+				return HttpResponse.json([]);
+			}),
+		);
+		setBearerToken("expired-access-token");
+
+		const response = await api.get("/machines");
+
+		expect(response.status).toBe(200);
+		expect(refreshCalls).toBe(1);
+		expect(machineCalls).toBe(2);
+		expect(replayAuthorization).toBe("Bearer fresh-access-token");
+	});
+
+	it("shares one refresh across concurrent 401s and replays every queued caller", async () => {
+		server.use(
+			refreshHandler("fresh-access-token", 20),
+			machinesHandler((call) =>
+				call <= 2 ? unauthorized(call) : HttpResponse.json([]),
+			),
+		);
+		setBearerToken("expired-access-token");
+
+		const [first, second] = await Promise.all([
+			api.get("/machines"),
+			api.get("/machines"),
+		]);
+
+		expect(first.status).toBe(200);
+		expect(second.status).toBe(200);
+		expect(refreshCalls).toBe(1);
+	});
+
+	it("fires the seam exactly once and rejects with the original 401 when refresh is rejected", async () => {
+		server.use(
+			rejectedRefreshHandler(),
+			machinesHandler(() => unauthorized(1)),
+		);
+		setBearerToken("expired-access-token");
+		setSessionExpiredHandler(() => {
+			seamCalls++;
+		});
+
+		let caught: AxiosError | undefined;
+		try {
+			await api.get("/machines");
+		} catch (error) {
+			caught = error as AxiosError;
+		}
+
+		expect(caught?.response?.status).toBe(401);
+		expect(caught?.response?.data).toEqual(tokenExpiredEnvelope("req-1"));
+		expect(seamCalls).toBe(1);
+		expect(refreshCalls).toBe(1);
+	});
+
+	it("treats a network failure of the refresh call as session death too", async () => {
+		server.use(
+			http.post("*/api/auth/refresh", () => {
+				refreshCalls++;
+				return HttpResponse.error();
+			}),
+			machinesHandler(() => unauthorized(1)),
+		);
+		setBearerToken("expired-access-token");
+		setSessionExpiredHandler(() => {
+			seamCalls++;
+		});
+
+		await expect(api.get("/machines")).rejects.toMatchObject({
+			response: { status: 401 },
+		});
+		expect(seamCalls).toBe(1);
+	});
+
+	it("goes straight to session death when the replayed request 401s again", async () => {
+		server.use(
+			refreshHandler(),
+			machinesHandler((call) => unauthorized(call)),
+		);
+		setBearerToken("expired-access-token");
+		setSessionExpiredHandler(() => {
+			seamCalls++;
+		});
+
+		let caught: AxiosError | undefined;
+		try {
+			await api.get("/machines");
+		} catch (error) {
+			caught = error as AxiosError;
+		}
+
+		expect(caught?.response?.data).toEqual(tokenExpiredEnvelope("req-2"));
+		expect(seamCalls).toBe(1);
+		expect(refreshCalls).toBe(1);
+	});
+
+	it("does not refresh or fire the seam when a login on the bare transport is rejected", async () => {
+		server.use(
+			http.post("*/api/auth/login", () =>
+				HttpResponse.json(
+					{
+						requestId: "req-1",
+						error: {
+							code: "INVALID_CREDENTIALS",
+							message: "Invalid username or password",
+						},
+					},
+					{ status: 401 },
+				),
+			),
+			refreshHandler(),
+		);
+		setSessionExpiredHandler(() => {
+			seamCalls++;
+		});
+
+		await expect(
+			bareApi.post("/auth/login", { username: "alice", password: "wrong" }),
+		).rejects.toMatchObject({ response: { status: 401 } });
+
+		expect(refreshCalls).toBe(0);
+		expect(seamCalls).toBe(0);
+	});
+
+	it("treats seam firing with no handler registered as a no-op", async () => {
+		server.use(
+			rejectedRefreshHandler(),
+			machinesHandler(() => unauthorized(1)),
+		);
+		setBearerToken("expired-access-token");
+
+		await expect(api.get("/machines")).rejects.toMatchObject({
+			response: { status: 401 },
+		});
+	});
+
+	it("re-arms the seam once a new token is installed after session death", async () => {
+		server.use(
+			rejectedRefreshHandler(),
+			machinesHandler(() => unauthorized(1)),
+		);
+		setSessionExpiredHandler(() => {
+			seamCalls++;
+		});
+
+		setBearerToken("first-session-token");
+		await expect(api.get("/machines")).rejects.toMatchObject({
+			response: { status: 401 },
+		});
+		expect(seamCalls).toBe(1);
+
+		setBearerToken("second-session-token");
+		await expect(api.get("/machines")).rejects.toMatchObject({
+			response: { status: 401 },
+		});
+		expect(seamCalls).toBe(2);
 	});
 });
