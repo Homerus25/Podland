@@ -1,4 +1,4 @@
-import { api } from "@shared/utils/api";
+import { api, machineApiPath } from "@shared/utils/api";
 
 // Secret as returned by GET /api/machines/{id}/secrets
 // (backend/internal/domain/secrets/dto.go SecretListResponse). The backend
@@ -18,7 +18,7 @@ export interface SecretSummary {
 
 export async function listSecrets(machineId: string): Promise<SecretSummary[]> {
 	const response = await api.get<SecretSummary[]>(
-		`/machines/${machineId}/secrets`,
+		machineApiPath(machineId, "secrets"),
 	);
 	return response.data;
 }
@@ -38,7 +38,7 @@ export async function getSecret(
 	reveal = false,
 ): Promise<SecretInspect> {
 	const response = await api.get<SecretInspect>(
-		`/machines/${machineId}/secrets/${encodeURIComponent(secretId)}`,
+		machineApiPath(machineId, "secrets", secretId),
 		{ params: reveal ? { reveal: "true" } : undefined },
 	);
 	return response.data;
@@ -64,7 +64,7 @@ export async function createSecret(
 	input: CreateSecretInput,
 ): Promise<SecretCreated> {
 	const response = await api.post<SecretCreated>(
-		`/machines/${machineId}/secrets`,
+		machineApiPath(machineId, "secrets"),
 		input,
 	);
 	return response.data;
@@ -77,7 +77,5 @@ export async function deleteSecret(
 	machineId: string,
 	secretId: string,
 ): Promise<void> {
-	await api.delete(
-		`/machines/${machineId}/secrets/${encodeURIComponent(secretId)}`,
-	);
+	await api.delete(machineApiPath(machineId, "secrets", secretId));
 }

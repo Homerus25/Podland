@@ -3,7 +3,7 @@ import type {
 	Machine,
 	MachinePermission,
 } from "@shared/types/api";
-import { api } from "@shared/utils/api";
+import { api, machineApiPath } from "@shared/utils/api";
 
 // CreateMachineRequest (backend/internal/domain/machines/service.go):
 // the SSH private key contents are read client-side via the File API and
@@ -37,7 +37,7 @@ export interface UpdateMachineInput {
 }
 
 export async function getMachine(id: string): Promise<Machine> {
-	const response = await api.get<Machine>(`/machines/${id}`);
+	const response = await api.get<Machine>(machineApiPath(id));
 	return response.data;
 }
 
@@ -45,19 +45,19 @@ export async function updateMachine(
 	id: string,
 	input: UpdateMachineInput,
 ): Promise<Machine> {
-	const response = await api.put<Machine>(`/machines/${id}`, input);
+	const response = await api.put<Machine>(machineApiPath(id), input);
 	return response.data;
 }
 
 export async function deleteMachine(id: string): Promise<void> {
-	await api.delete(`/machines/${id}`);
+	await api.delete(machineApiPath(id));
 }
 
 export async function listMachineAccess(
 	machineId: string,
 ): Promise<AccessGrant[]> {
 	const response = await api.get<AccessGrant[]>(
-		`/machines/${machineId}/access`,
+		machineApiPath(machineId, "access"),
 	);
 	return response.data;
 }
@@ -68,7 +68,7 @@ export async function grantMachineAccess(
 	permission: MachinePermission,
 ): Promise<AccessGrant> {
 	const response = await api.post<AccessGrant>(
-		`/machines/${machineId}/access`,
+		machineApiPath(machineId, "access"),
 		{
 			userId,
 			permission,
@@ -81,7 +81,7 @@ export async function revokeMachineAccess(
 	machineId: string,
 	userId: string,
 ): Promise<void> {
-	await api.delete(`/machines/${machineId}/access/${userId}`);
+	await api.delete(machineApiPath(machineId, "access", userId));
 }
 
 // MachineStatus mirrors GET /api/machines/{id}/status
@@ -95,7 +95,7 @@ export async function getMachineStatus(
 	machineId: string,
 ): Promise<MachineStatus> {
 	const response = await api.get<MachineStatus>(
-		`/machines/${machineId}/status`,
+		machineApiPath(machineId, "status"),
 	);
 	return response.data;
 }

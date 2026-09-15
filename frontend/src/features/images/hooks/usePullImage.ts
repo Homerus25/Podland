@@ -1,3 +1,4 @@
+import { pullStreamUrl } from "@features/images/services/imagesApi";
 import { invalidateMachineResources } from "@shared/queries/useListInvalidatingMutation";
 import {
 	isStreamEvent,
@@ -5,7 +6,6 @@ import {
 } from "@shared/streaming/ndjsonStream";
 import { useNdjsonOperation } from "@shared/streaming/streamTransport";
 import type { ApiError } from "@shared/types/api";
-import { apiBaseUrl } from "@shared/utils/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
@@ -34,7 +34,7 @@ export function usePullImage(machineId: string): UsePullImageResult {
 		(image: string) => {
 			setProgress(null);
 			start({
-				url: `${apiBaseUrl}/machines/${machineId}/images/pull`,
+				url: pullStreamUrl(machineId),
 				init: { method: "POST", body: JSON.stringify({ image }) },
 				onEvent: (value) => {
 					if (!isStreamEvent(value)) {

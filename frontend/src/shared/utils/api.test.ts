@@ -1,6 +1,14 @@
-import { api, getApiError } from "@shared/utils/api";
+import {
+	api,
+	getApiError,
+	machineApiPath,
+	machineApiUrl,
+} from "@shared/utils/api";
+import { downloadFile } from "@shared/utils/download";
 import { AxiosError, type AxiosResponse } from "axios";
-import { describe, expect, it } from "vitest";
+import { HttpResponse, http } from "msw";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { server } from "@/test/server";
 
 function responseOf(status: number, data: unknown): AxiosResponse {
 	return {
@@ -18,6 +26,90 @@ describe("api client", () => {
 
 		expect(response.status).toBe(200);
 		expect(response.data).toBe("OK");
+	});
+});
+
+describe("machineApiPath", () => {
+	it("encodes every segment, machineId first", () => {
+		expect(machineApiPath("m 1", "containers", "c/1")).toBe(
+			"/machines/m%201/containers/c%2F1",
+		);
+	});
+
+	it("emits the bare machine path with no extra segments", () => {
+		expect(machineApiPath("m-1")).toBe("/machines/m-1");
+	});
+});
+
+describe("machineApiUrl", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		vi.resetModules();
+	});
+
+	it("prefixes the default base onto the encoded path", () => {
+		expect(machineApiUrl("m 1", "images", "pull")).toBe(
+			"/api/machines/m%201/images/pull",
+		);
+	});
+
+	it("strips a trailing slash from a configured base", async () => {
+		vi.stubEnv("VITE_API_BASE_URL", "https://backend.example/api/");
+		vi.resetModules();
+		const { machineApiUrl: withStubbedBase } = await import(
+			"@shared/utils/api"
+		);
+		expect(withStubbedBase("m-1", "volumes", "v", "export")).toBe(
+			"https://backend.example/api/machines/m-1/volumes/v/export",
+		);
+	});
+
+	it("lands a download fetch on a configured non-default base", async () => {
+		Object.defineProperty(URL, "createObjectURL", {
+			value: vi.fn(() => "blob:mock"),
+			configurable: true,
+			writable: true,
+		});
+		Object.defineProperty(URL, "revokeObjectURL", {
+			value: vi.fn(),
+			configurable: true,
+			writable: true,
+		});
+		const createElement = document.createElement.bind(document);
+		vi.spyOn(document, "createElement").mockImplementation((tag) => {
+			if (tag === "a") {
+				return { click: vi.fn() } as unknown as HTMLAnchorElement;
+			}
+			return createElement(tag);
+		});
+		document.body.appendChild = vi.fn() as typeof document.body.appendChild;
+		document.body.removeChild = vi.fn() as typeof document.body.removeChild;
+
+		vi.stubEnv("VITE_API_BASE_URL", "https://backend.example/api");
+		vi.resetModules();
+		const { machineApiUrl: withStubbedBase } = await import(
+			"@shared/utils/api"
+		);
+		const requests: URL[] = [];
+		server.use(
+			http.get("*/api/machines/m-1/volumes/shared/export", ({ request }) => {
+				requests.push(new URL(request.url));
+				return HttpResponse.arrayBuffer(new ArrayBuffer(0), {
+					headers: { "Content-Type": "application/x-tar" },
+				});
+			}),
+		);
+
+		await downloadFile(
+			withStubbedBase("m-1", "volumes", "shared", "export"),
+			"shared.tar",
+		);
+
+		expect(requests).toHaveLength(1);
+		expect(requests[0].origin).toBe("https://backend.example");
+		expect(requests[0].pathname).toBe(
+			"/api/machines/m-1/volumes/shared/export",
+		);
 	});
 });
 

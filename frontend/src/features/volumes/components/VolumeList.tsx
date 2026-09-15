@@ -25,6 +25,7 @@ import {
 import {
 	buildPopulateForm,
 	type VolumeSummary,
+	volumeExportUrl,
 } from "@features/volumes/services/volumesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import {
@@ -379,7 +380,7 @@ export function VolumeList({
 		setExportingName(volume.name);
 		try {
 			await downloadFile(
-				`/api/machines/${encodeURIComponent(machineId)}/volumes/${encodeURIComponent(volume.name)}/export`,
+				volumeExportUrl(machineId, volume.name),
 				`${volume.name}.tar`,
 			);
 		} catch (error) {

@@ -8,7 +8,7 @@ Formatting is automated: a Crush pre-edit hook (`.crushrc` → `.crush/hooks/bio
 
 Each feature lives in `src/features/<name>/`:
 
-- `services/<feature>Api.ts` — API client functions through the shared axios instance (`@shared/utils/api`), plus the **DTO response types colocated here** (see CONTEXT.md "DTO types"). Encode path segments with `encodeURIComponent`.
+- `services/<feature>Api.ts` — API client functions through the shared axios instance (`@shared/utils/api`), plus the **DTO response types colocated here** (see CONTEXT.md "DTO types"). Machine-scoped request URLs route through the builder pair `machineApiPath`/`machineApiUrl` (`@shared/utils/api`), the single owner of machine-scoped URL construction: it percent-encodes every path segment, machineId first — services never hand-encode. Axios calls take the path form (the shared instance prepends the base); fetch consumers (stream transport, `downloadFile`) take the full form. Stream and download URLs are consumed from the owning service's export (`pullStreamUrl`, `autoUpdateStreamUrl`, `volumeExportUrl`), never re-derived in hooks or components, and importing `apiBaseUrl` outside `@shared/utils/api` is off-limits (module-private; the compiler enforces it).
 - `hooks/<feature>Api hooks` — React Query hooks in `use<Feature>.ts`.
 - `components/` — UI components and their colocated tests.
 

@@ -1,7 +1,7 @@
+import { autoUpdateStreamUrl } from "@features/quadlets/services/quadletsApi";
 import { invalidateMachineResources } from "@shared/queries/useListInvalidatingMutation";
 import { useNdjsonOperation } from "@shared/streaming/streamTransport";
 import type { ApiError } from "@shared/types/api";
-import { apiBaseUrl } from "@shared/utils/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
@@ -82,11 +82,8 @@ export function useQuadletAutoUpdate(
 			setDryRun(runDryRun);
 			setLines([]);
 			setReport(null);
-			const params = new URLSearchParams();
-			if (runDryRun) params.set("dryRun", "true");
-			const query = params.size > 0 ? `?${params.toString()}` : "";
 			start({
-				url: `${apiBaseUrl}/machines/${machineId}/quadlets/auto-update${query}`,
+				url: autoUpdateStreamUrl(machineId, { dryRun: runDryRun }),
 				init: { method: "POST" },
 				onEvent: (value) => {
 					if (!isAutoUpdateEvent(value)) {

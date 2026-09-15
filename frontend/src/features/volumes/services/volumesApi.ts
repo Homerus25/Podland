@@ -1,4 +1,4 @@
-import { api } from "@shared/utils/api";
+import { api, machineApiPath, machineApiUrl } from "@shared/utils/api";
 
 // Volume as returned by GET /api/machines/{id}/volumes
 // (backend/internal/domain/volumes volume DTO). size is only present when
@@ -26,7 +26,7 @@ export async function inspectVolume(
 	volumeName: string,
 ): Promise<VolumeDetail> {
 	const response = await api.get<VolumeDetail>(
-		`/machines/${encodeURIComponent(machineId)}/volumes/${encodeURIComponent(volumeName)}`,
+		machineApiPath(machineId, "volumes", volumeName),
 	);
 	return response.data;
 }
@@ -52,7 +52,7 @@ export async function createVolume(
 	input: VolumeCreateInput,
 ): Promise<VolumeCreated> {
 	const response = await api.post<VolumeCreated>(
-		`/machines/${encodeURIComponent(machineId)}/volumes`,
+		machineApiPath(machineId, "volumes"),
 		input,
 	);
 	return response.data;
@@ -60,7 +60,7 @@ export async function createVolume(
 
 export async function listVolumes(machineId: string): Promise<VolumeSummary[]> {
 	const response = await api.get<VolumeSummary[]>(
-		`/machines/${encodeURIComponent(machineId)}/volumes`,
+		machineApiPath(machineId, "volumes"),
 	);
 	return response.data;
 }
@@ -73,10 +73,9 @@ export async function deleteVolume(
 	volumeName: string,
 	force: boolean,
 ): Promise<void> {
-	await api.delete(
-		`/machines/${encodeURIComponent(machineId)}/volumes/${encodeURIComponent(volumeName)}`,
-		{ params: force ? { force: "true" } : undefined },
-	);
+	await api.delete(machineApiPath(machineId, "volumes", volumeName), {
+		params: force ? { force: "true" } : undefined,
+	});
 }
 
 // One entry of POST /api/machines/{id}/volumes/prune -> 200 (backend
@@ -94,7 +93,7 @@ export async function pruneVolumes(
 	machineId: string,
 ): Promise<VolumePruneReport[]> {
 	const response = await api.post<VolumePruneReport[]>(
-		`/machines/${encodeURIComponent(machineId)}/volumes/prune`,
+		machineApiPath(machineId, "volumes", "prune"),
 	);
 	return response.data;
 }
@@ -130,12 +129,10 @@ export async function populateVolume(
 	form: FormData,
 	onProgress?: (fraction: number) => void,
 ): Promise<void> {
-	const path = `/machines/${encodeURIComponent(machineId)}/volumes/${encodeURIComponent(volumeName)}/populate`;
-	// The fetch adapter needs an absolute URL. Resolve against the axios
-	// baseURL (e.g. "/api") the same way every other request does, so the
-	// populate call lands on the same origin/prefix as the rest of the API.
-	const base = new URL(api.defaults.baseURL ?? "/", window.location.origin);
-	const url = new URL(path, base).toString();
+	const url = new URL(
+		machineApiUrl(machineId, "volumes", volumeName, "populate"),
+		window.location.origin,
+	).toString();
 	await api.post(url, form, {
 		adapter: "fetch",
 		onUploadProgress: onProgress
@@ -144,4 +141,10 @@ export async function populateVolume(
 				}
 			: undefined,
 	});
+}
+
+// Full download URL for GET .../volumes/{name}/export, for the fetch-based
+// downloadFile (which carries no axios baseURL of its own).
+export function volumeExportUrl(machineId: string, volumeName: string): string {
+	return machineApiUrl(machineId, "volumes", volumeName, "export");
 }

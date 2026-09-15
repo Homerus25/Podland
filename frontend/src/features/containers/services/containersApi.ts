@@ -1,5 +1,5 @@
 import { followLogStream, type LogEvent } from "@shared/streaming/logStream";
-import { api, apiBaseUrl } from "@shared/utils/api";
+import { api, machineApiPath, machineApiUrl } from "@shared/utils/api";
 
 // Container as returned by GET /api/machines/{id}/containers
 // (backend/internal/domain/containers/dto.go ContainerListResponse).
@@ -33,7 +33,7 @@ export async function listContainers(
 ): Promise<ContainerSummary[]> {
 	// all=true includes stopped containers; podman lists only running ones by default.
 	const response = await api.get<ContainerListResult>(
-		`/machines/${machineId}/containers`,
+		machineApiPath(machineId, "containers"),
 		{
 			params: { all: true },
 		},
@@ -66,14 +66,10 @@ export async function createContainer(
 	input: CreateContainerInput,
 ): Promise<ContainerCreated> {
 	const response = await api.post<ContainerCreated>(
-		`/machines/${machineId}/containers`,
+		machineApiPath(machineId, "containers"),
 		input,
 	);
 	return response.data;
-}
-
-function containerUrl(machineId: string, containerId: string): string {
-	return `/machines/${machineId}/containers/${encodeURIComponent(containerId)}`;
 }
 
 // POST /api/machines/{id}/containers/{containerId}/start
@@ -82,7 +78,7 @@ export async function startContainer(
 	machineId: string,
 	containerId: string,
 ): Promise<void> {
-	await api.post(`${containerUrl(machineId, containerId)}/start`);
+	await api.post(machineApiPath(machineId, "containers", containerId, "start"));
 }
 
 // POST /api/machines/{id}/containers/{containerId}/stop
@@ -91,7 +87,7 @@ export async function stopContainer(
 	machineId: string,
 	containerId: string,
 ): Promise<void> {
-	await api.post(`${containerUrl(machineId, containerId)}/stop`);
+	await api.post(machineApiPath(machineId, "containers", containerId, "stop"));
 }
 
 // DELETE /api/machines/{id}/containers/{containerId} -> 204
@@ -101,7 +97,7 @@ export async function deleteContainer(
 	machineId: string,
 	containerId: string,
 ): Promise<void> {
-	await api.delete(containerUrl(machineId, containerId));
+	await api.delete(machineApiPath(machineId, "containers", containerId));
 }
 
 // GET /api/machines/{id}/containers/{containerId}/logs?tail=N (no follow)
@@ -113,7 +109,7 @@ export async function fetchContainerLogs(
 	tail: number,
 ): Promise<string[]> {
 	const response = await api.get<{ id: string; logs: string }>(
-		`${containerUrl(machineId, containerId)}/logs`,
+		machineApiPath(machineId, "containers", containerId, "logs"),
 		{ params: { tail } },
 	);
 	return response.data.logs.split("\n").filter((line) => line !== "");
@@ -129,7 +125,7 @@ export async function followContainerLogs(
 	signal: AbortSignal,
 ): Promise<void> {
 	await followLogStream(
-		`${apiBaseUrl}${containerUrl(machineId, containerId)}/logs?tail=${tail}&follow=true`,
+		`${machineApiUrl(machineId, "containers", containerId, "logs")}?tail=${tail}&follow=true`,
 		onEvent,
 		signal,
 	);

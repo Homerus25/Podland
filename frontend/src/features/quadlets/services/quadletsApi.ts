@@ -1,5 +1,5 @@
 import { followLogStream, type LogEvent } from "@shared/streaming/logStream";
-import { api, apiBaseUrl } from "@shared/utils/api";
+import { api, machineApiPath, machineApiUrl } from "@shared/utils/api";
 
 // Quadlet as returned by GET /api/machines/{id}/quadlets
 // (backend/internal/domain/quadlets/dto.go QuadletListResponse; raw is omitted
@@ -20,7 +20,7 @@ export async function listQuadlets(
 	machineId: string,
 ): Promise<QuadletSummary[]> {
 	const response = await api.get<QuadletSummary[]>(
-		`/machines/${machineId}/quadlets`,
+		machineApiPath(machineId, "quadlets"),
 	);
 	return response.data;
 }
@@ -64,7 +64,7 @@ export async function createQuadlet(
 	input: CreateQuadletInput,
 ): Promise<QuadletCreated> {
 	const response = await api.post<QuadletCreated>(
-		`/machines/${machineId}/quadlets`,
+		machineApiPath(machineId, "quadlets"),
 		input,
 	);
 	return response.data;
@@ -87,7 +87,7 @@ export async function getQuadlet(
 	quadletId: string,
 ): Promise<QuadletDetail> {
 	const response = await api.get<QuadletDetail>(
-		quadletUrl(machineId, quadletId),
+		machineApiPath(machineId, "quadlets", quadletId),
 	);
 	return response.data;
 }
@@ -106,14 +106,10 @@ export async function updateQuadlet(
 	input: UpdateQuadletInput,
 ): Promise<QuadletDetail> {
 	const response = await api.put<QuadletDetail>(
-		quadletUrl(machineId, quadletId),
+		machineApiPath(machineId, "quadlets", quadletId),
 		input,
 	);
 	return response.data;
-}
-
-function quadletUrl(machineId: string, quadletId: string): string {
-	return `/machines/${machineId}/quadlets/${encodeURIComponent(quadletId)}`;
 }
 
 // DELETE /api/machines/{id}/quadlets/{quadletId} -> 204
@@ -131,7 +127,7 @@ export async function deleteQuadlet(
 	quadletId: string,
 	options: DeleteQuadletOptions,
 ): Promise<void> {
-	await api.delete(quadletUrl(machineId, quadletId), {
+	await api.delete(machineApiPath(machineId, "quadlets", quadletId), {
 		params: { stop: options.stop, force: options.force },
 	});
 }
@@ -143,7 +139,7 @@ export async function startQuadlet(
 	machineId: string,
 	quadletId: string,
 ): Promise<void> {
-	await api.post(`${quadletUrl(machineId, quadletId)}/start`);
+	await api.post(machineApiPath(machineId, "quadlets", quadletId, "start"));
 }
 
 // Query parameters for the stop and restart endpoints
@@ -162,9 +158,13 @@ export async function stopQuadlet(
 	quadletId: string,
 	options: QuadletLifecycleOptions,
 ): Promise<void> {
-	await api.post(`${quadletUrl(machineId, quadletId)}/stop`, undefined, {
-		params: lifecycleParams(options),
-	});
+	await api.post(
+		machineApiPath(machineId, "quadlets", quadletId, "stop"),
+		undefined,
+		{
+			params: lifecycleParams(options),
+		},
+	);
 }
 
 // POST /api/machines/{id}/quadlets/{quadletId}/restart -> 200
@@ -175,9 +175,13 @@ export async function restartQuadlet(
 	quadletId: string,
 	options: QuadletLifecycleOptions,
 ): Promise<void> {
-	await api.post(`${quadletUrl(machineId, quadletId)}/restart`, undefined, {
-		params: lifecycleParams(options),
-	});
+	await api.post(
+		machineApiPath(machineId, "quadlets", quadletId, "restart"),
+		undefined,
+		{
+			params: lifecycleParams(options),
+		},
+	);
 }
 
 function lifecycleParams(options: QuadletLifecycleOptions) {
@@ -195,7 +199,7 @@ export async function fetchQuadletLogs(
 	tail: number,
 ): Promise<string[]> {
 	const response = await api.get<{ id: string; logs: string }>(
-		`${quadletUrl(machineId, quadletId)}/logs`,
+		machineApiPath(machineId, "quadlets", quadletId, "logs"),
 		{ params: { tail } },
 	);
 	return response.data.logs.split("\n").filter((line) => line !== "");
@@ -211,8 +215,18 @@ export async function followQuadletLogs(
 	signal: AbortSignal,
 ): Promise<void> {
 	await followLogStream(
-		`${apiBaseUrl}${quadletUrl(machineId, quadletId)}/logs?tail=${tail}&follow=true`,
+		`${machineApiUrl(machineId, "quadlets", quadletId, "logs")}?tail=${tail}&follow=true`,
 		onEvent,
 		signal,
 	);
+}
+
+// Full stream URL for POST .../quadlets/auto-update; the ?dryRun=true query
+// is the builder's, not the caller's (no query on a real run).
+export function autoUpdateStreamUrl(
+	machineId: string,
+	options: { dryRun: boolean },
+): string {
+	const query = options.dryRun ? "?dryRun=true" : "";
+	return `${machineApiUrl(machineId, "quadlets", "auto-update")}${query}`;
 }

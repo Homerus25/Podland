@@ -1,11 +1,30 @@
 import type { ApiError, ApiErrorEnvelope } from "@shared/types/api";
 import axios from "axios";
 
-export const apiBaseUrl: string = import.meta.env.VITE_API_BASE_URL || "/api";
+const apiBaseUrl: string = import.meta.env.VITE_API_BASE_URL || "/api";
 
 export const api = axios.create({
 	baseURL: apiBaseUrl,
 });
+
+// The single owner of machine-scoped URL construction: every path segment,
+// machineId first, is percent-encoded. Axios calls take the path form (the
+// shared instance prepends the base); fetch consumers (stream transport,
+// downloadFile) take machineApiUrl, the full form.
+export function machineApiPath(
+	machineId: string,
+	...segments: string[]
+): string {
+	const encoded = [machineId, ...segments].map(encodeURIComponent);
+	return `/machines/${encoded.join("/")}`;
+}
+
+export function machineApiUrl(
+	machineId: string,
+	...segments: string[]
+): string {
+	return `${apiBaseUrl.replace(/\/$/, "")}${machineApiPath(machineId, ...segments)}`;
+}
 
 // The access token is held only in this module variable for the lifetime of
 // the page — never localStorage/sessionStorage — so XSS cannot exfiltrate a

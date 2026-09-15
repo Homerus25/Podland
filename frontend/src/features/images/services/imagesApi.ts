@@ -1,4 +1,4 @@
-import { api } from "@shared/utils/api";
+import { api, machineApiPath, machineApiUrl } from "@shared/utils/api";
 
 // Image as returned by GET /api/machines/{id}/images
 // (backend/internal/domain/images/dto.go ImageListResponse).
@@ -17,7 +17,7 @@ export interface ImageSummary {
 
 export async function listImages(machineId: string): Promise<ImageSummary[]> {
 	const response = await api.get<ImageSummary[]>(
-		`/machines/${machineId}/images`,
+		machineApiPath(machineId, "images"),
 	);
 	return response.data;
 }
@@ -37,7 +37,7 @@ export async function pruneImages(
 	machineId: string,
 ): Promise<ImagePruneReport[]> {
 	const response = await api.post<ImagePruneReport[]>(
-		`/machines/${encodeURIComponent(machineId)}/images/prune`,
+		machineApiPath(machineId, "images", "prune"),
 	);
 	return response.data;
 }
@@ -47,10 +47,11 @@ export async function deleteImage(
 	imageId: string,
 	force = false,
 ): Promise<void> {
-	await api.delete(
-		`/machines/${machineId}/images/${encodeURIComponent(imageId)}`,
-		{
-			params: force ? { force: true } : undefined,
-		},
-	);
+	await api.delete(machineApiPath(machineId, "images", imageId), {
+		params: force ? { force: true } : undefined,
+	});
+}
+
+export function pullStreamUrl(machineId: string): string {
+	return machineApiUrl(machineId, "images", "pull");
 }
