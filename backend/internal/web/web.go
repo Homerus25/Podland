@@ -1,8 +1,10 @@
 // Package web owns the endpoint envelope: the uniform response contract
-// every machine-scoped JSON endpoint speaks. Failures surface as the
-// {requestId, error{code, message}} envelope, successes as a DTO with an
-// explicit status. Handlers cross this seam instead of re-assembling the
-// identity guards, error mapping, and JSON encode per endpoint.
+// every machine-scoped endpoint speaks. Failures surface as the
+// {requestId, error{code, message}} envelope; successes are wire-shaped —
+// a DTO with an explicit status for JSON endpoints (Handle), a byte
+// stream or multipart upload for binary endpoints (HandleStream).
+// Handlers cross this seam instead of re-assembling the identity guards
+// and error mapping per endpoint.
 //
 // CONTEXT.md "endpoint envelope" is the glossary entry for this contract.
 package web
@@ -82,22 +84,29 @@ func Handle[T any](w http.ResponseWriter, r *http.Request, successStatus int, ca
 // HandleStream runs a machine-scoped endpoint whose success is a byte
 // stream or multipart upload rather than a JSON DTO through the
 // endpoint envelope's error side: the same identity extraction, AppError
-// mapping, and 500 fallback Handle owns, without the JSON encode. The
+// mapping, and 500 fallback Handle owns, without the JSON encode. It
+// extracts the caller and machine identities the subtree middleware
+// (RequireMachineAccess / RequireMachinePermission in
+// internal/middleware) has already validated and invokes stream; the
 // closure owns everything wire-specific — response headers, the body
 // ritual, the service call, and the success write (an implicit 200, an
 // explicit 204, whatever the format needs).
 //
-// Within stream, route-specific validation failures are returned as
-// *appErrors.AppError values (the sentinels from internal/errors, or
-// NewAppError for route-specific codes) and ride the same envelope;
-// wrapped AppErrors are unwrapped via errors.AsType, so services may
+// Within stream, everything route-specific stays plain Go: query
+// parsing, extra URL params (e.g. volumeName). Validation failures are
+// returned as *appErrors.AppError values (the sentinels from
+// internal/errors, or NewAppError for route-specific codes) and ride
+// the same envelope. Both errors.As and direct returns work: wrapped
+// AppErrors are unwrapped via errors.AsType, so services may
 // fmt.Errorf("%w", …) a sentinel while adding context for logs. Any
-// other error answers the 500 fallback.
+// other error answers the 500 fallback with Handle's log shape
+// (requestID + error).
 //
 // A missing userID or machineID maps to 500 INTERNAL_ERROR and a loud
-// log line (the same invariant ruling as Handle): the subtree
-// middleware guarantees both, so a miss means a miswired route, and
-// stream never runs.
+// log line: on the /api/machines/{id} subtree the middleware guarantees
+// both, so a miss means a miswired route, not a client error — and
+// stream never runs. Mounting a HandleStream endpoint outside the
+// subtree is a wiring bug the log will surface.
 func HandleStream(w http.ResponseWriter, r *http.Request, stream func(ctx context.Context, userID, machineID string) error) {
 	requestID := contextutils.GetRequestID(r.Context())
 	userID := contextutils.GetUserIDFromContext(r.Context())
