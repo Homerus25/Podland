@@ -1,6 +1,7 @@
 import { authApi } from "@features/auth/services/authApi";
 import type { LoginCredentials, User } from "@shared/types/api";
-import { setBearerToken } from "@shared/utils/api";
+import { setBearerToken, setSessionExpiredHandler } from "@shared/utils/api";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
 	createContext,
@@ -48,6 +49,7 @@ export function AuthProvider({
 }) {
 	const [user, setUser] = useState<User | null>(null);
 	const [isResolving, setIsResolving] = useState(true);
+	const queryClient = useQueryClient();
 
 	useEffect(() => {
 		let cancelled = false;
@@ -71,7 +73,10 @@ export function AuthProvider({
 	// in-memory token even if the call fails — a failed exit must not
 	// strand the user in the app. (The backend clears the cookie before
 	// revoking, so a failed call usually means the session was already
-	// unreachable, and logout is idempotent on retry.)
+	// unreachable, and logout is idempotent on retry.) The query cache is
+	// cleared with the same state drop, in the same finally: logout is the
+	// one in-session identity exit, so the next identity never starts from
+	// the predecessor's cached lists.
 	const logout = useCallback(async () => {
 		try {
 			await authApi.logout();
@@ -80,8 +85,19 @@ export function AuthProvider({
 		} finally {
 			setBearerToken(null);
 			setUser(null);
+			queryClient.clear();
 		}
-	}, []);
+	}, [queryClient]);
+
+	// The 401 policy owns session death; while this provider lives, its
+	// one registered handler is the existing exit path. Unmount
+	// unregisters, so a seam firing after teardown reaches nobody.
+	useEffect(() => {
+		setSessionExpiredHandler(logout);
+		return () => {
+			setSessionExpiredHandler(null);
+		};
+	}, [logout]);
 
 	const value = useMemo(
 		() => ({

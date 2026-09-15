@@ -46,17 +46,22 @@ export function renderApp(
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
-	return render(
-		<QueryClientProvider client={queryClient}>
-			<ChakraProvider theme={theme}>
-				<MemoryRouter initialEntries={[at]}>
-					<AuthProvider resolveInitialState={resolveInitialState}>
-						<LocationProbe />
-						{usernameProbe && <UsernameProbe />}
-						<App />
-					</AuthProvider>
-				</MemoryRouter>
-			</ChakraProvider>
-		</QueryClientProvider>,
-	);
+	// The helper's client is returned so tests can observe cache-level
+	// behavior (e.g. the logout cache clear) on the instance the app uses.
+	return {
+		queryClient,
+		...render(
+			<QueryClientProvider client={queryClient}>
+				<ChakraProvider theme={theme}>
+					<MemoryRouter initialEntries={[at]}>
+						<AuthProvider resolveInitialState={resolveInitialState}>
+							<LocationProbe />
+							{usernameProbe && <UsernameProbe />}
+							<App />
+						</AuthProvider>
+					</MemoryRouter>
+				</ChakraProvider>
+			</QueryClientProvider>,
+		),
+	};
 }
