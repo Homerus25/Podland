@@ -3,7 +3,6 @@ package volumes
 import (
 	"archive/tar"
 	"context"
-	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"io"
@@ -87,8 +86,8 @@ func (h *VolumeHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *VolumeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (VolumeInspectResponse, error) {
 		var request VolumeCreateRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			return VolumeInspectResponse{}, errors.ErrInvalidRequest.WithMessage("Invalid request body")
+		if appErr := web.Decode(r, &request); appErr != nil {
+			return VolumeInspectResponse{}, appErr
 		}
 
 		report, err := h.service.Create(ctx, userID, machineID, request)

@@ -160,7 +160,11 @@ var (
 	ErrInternalError      = NewAppError("INTERNAL_ERROR", "An unexpected error occurred", http.StatusInternalServerError)
 	ErrServiceUnavailable = NewAppError("SERVICE_UNAVAILABLE", "Service temporarily unavailable", http.StatusServiceUnavailable)
 	ErrInvalidRequest     = NewAppError("INVALID_REQUEST", "Invalid request", http.StatusBadRequest)
-	ErrNotImplemented     = NewAppError("NOT_IMPLEMENTED", "Feature not implemented", http.StatusNotImplemented)
+	// ErrValidationFailed backs web.Decode's struct-validation branch: the
+	// request body decoded as JSON but failed its validate tags. Minted
+	// only by Decode (WithMessage carries the validator's message).
+	ErrValidationFailed = NewAppError("VALIDATION_FAILED", "Validation failed", http.StatusBadRequest)
+	ErrNotImplemented   = NewAppError("NOT_IMPLEMENTED", "Feature not implemented", http.StatusNotImplemented)
 )
 
 // ToAppError converts an error to its AppError: a (possibly wrapped)

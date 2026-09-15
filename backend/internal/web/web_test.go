@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
@@ -266,4 +267,64 @@ func TestHandleStream_MissingMachineIDIsAnInvariantViolation(t *testing.T) {
 	var env envelope
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
 	assert.Equal(t, "INTERNAL_ERROR", env.Error.Code)
+}
+
+// Decode pins — the decode twin every body-bearing handler crosses. The
+// ritual (JSON decode + struct validation, one error vocabulary) is
+// pinned here once, not per domain.
+
+// decodeTarget is the tagged shape the failure cases decode into.
+type decodeTarget struct {
+	Name string `json:"name" validate:"required,min=1"`
+}
+
+func decodeRequest(body string) *http.Request {
+	return httptest.NewRequest(http.MethodPost, "/api/machines/m/volumes", strings.NewReader(body))
+}
+
+func TestDecode_MalformedBodyAnswersInvalidRequest(t *testing.T) {
+	appErr := Decode(decodeRequest(`{not json`), &decodeTarget{})
+
+	require.NotNil(t, appErr)
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Equal(t, "INVALID_REQUEST", appErr.Code)
+	assert.Equal(t, "Invalid request body", appErr.Message)
+}
+
+func TestDecode_WrongTypedFieldAnswersInvalidRequest(t *testing.T) {
+	appErr := Decode(decodeRequest(`{"name": 42}`), &decodeTarget{})
+
+	require.NotNil(t, appErr)
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Equal(t, "INVALID_REQUEST", appErr.Code)
+	assert.Equal(t, "Invalid request body", appErr.Message)
+}
+
+func TestDecode_MissingRequiredFieldAnswersValidationFailed(t *testing.T) {
+	appErr := Decode(decodeRequest(`{}`), &decodeTarget{})
+
+	require.NotNil(t, appErr)
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Equal(t, "VALIDATION_FAILED", appErr.Code)
+	assert.Equal(t,
+		"Key: 'decodeTarget.Name' Error:Field validation for 'Name' failed on the 'required' tag",
+		appErr.Message,
+		"the validation failure must carry the validator's message")
+}
+
+func TestDecode_TaglessStructSkipsValidation(t *testing.T) {
+	var tagless struct {
+		Name string `json:"name"`
+	}
+
+	assert.Nil(t, Decode(decodeRequest(`{"name": ""}`), &tagless),
+		"a DTO without validate tags imposes no rules in Decode")
+}
+
+func TestDecode_CleanBodyAnswersNil(t *testing.T) {
+	var target decodeTarget
+
+	assert.Nil(t, Decode(decodeRequest(`{"name": "my-volume", "extra": "ignored"}`), &target),
+		"a clean body decodes nil, and unknown fields are ignored (no DisallowUnknownFields)")
+	assert.Equal(t, "my-volume", target.Name)
 }

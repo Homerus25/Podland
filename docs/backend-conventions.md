@@ -12,9 +12,17 @@ closest sibling that already exists. Rulings so far:
   the seam every machine-scoped JSON endpoint crosses: it owns identity
   extraction, the AppError→envelope mapping, the 500 fallback, and JSON
   encode. The volumes handler (`internal/domain/volumes/handler.go`) is
-  the reference: a handler is decode + URL params + service call inside
-  one `web.Handle` closure; identity/machine guards and error envelopes
-  belong to the envelope and the subtree middleware, never to handlers.
+  the reference: a handler is `web.Decode` + URL params + service call
+  inside one `web.Handle` closure; identity/machine guards and error
+  envelopes belong to the envelope and the subtree middleware, never to
+  handlers. `web.Decode` (`internal/web`) owns the decode+validate
+  ritual: a malformed body answers 400 `INVALID_REQUEST` ("Invalid
+  request body"), a struct-tag failure 400 `VALIDATION_FAILED` with the
+  validator's message — decode and validation errors belong to
+  `web.Decode`'s vocabulary and are never hand-minted per handler. The
+  one body-bearing endpoint outside the envelope (images Pull, the
+  pre-stream reference) responds the returned AppError itself before
+  `streaming.Begin`.
   Every domain has migrated (volumes, containers, quadlets, secrets,
   images, machines subtree): the subtree handlers are envelope closures
   across the board, machines update/delete/status/access included.
@@ -140,10 +148,11 @@ already diverged, extraction triggers even below the third copy — the
 log-stream kit (`.scratch/380-log-stream-kit`) is the precedent, where
 two timestamp parsers that disagreed on a spaceless podman line made
 the streaming path un-changeable in one place. The threshold has been
-crossed three times and all three extractions are
-now the reference: the endpoint ritual became `internal/web.Handle`,
-the handler-test scaffolding became `testutils.Perform`, and podman
-error classification became `internal/podmanerr` — one leaf adapter
+crossed four times and all four extractions are now the reference: the
+endpoint ritual became `internal/web.Handle`, the handler-test
+scaffolding became `testutils.Perform`, the decode+validate ritual
+became `web.Decode`, and podman error classification became
+`internal/podmanerr` — one leaf adapter
 owning podman's error model (typed `ErrorModel` status first, phrase
 fallback over the lowercased text) for volumes, secrets, containers,
 images, and quadlets. Domains classify through its predicates, check

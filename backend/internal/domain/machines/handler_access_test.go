@@ -39,17 +39,10 @@ func grantRequest(t *testing.T, body string) *httptest.ResponseRecorder {
 }
 
 // TestMachineHandler_GrantAccess pins what the handler owns on the grant
-// endpoint: an undecodable JSON body answers 400 INVALID_REQUEST, and an
-// invalid permission value crosses to the service's 400
-// INVALID_PERMISSION. Every other grant rule lives behind the service.
+// endpoint: an invalid permission value crosses to the service's 400
+// INVALID_PERMISSION. Every other grant rule (including body decoding)
+// lives behind the service and web.Decode.
 func TestMachineHandler_GrantAccess(t *testing.T) {
-	t.Run("malformed body", func(t *testing.T) {
-		w := grantRequest(t, "{not json")
-
-		require.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-		assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
-	})
-
 	t.Run("invalid permission value", func(t *testing.T) {
 		w := grantRequest(t, `{"userId":"reader-1","permission":"superuser"}`)
 

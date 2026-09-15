@@ -2,7 +2,6 @@ package secrets
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -11,7 +10,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-playground/validator/v10"
 )
 
 // SecretHandler handles secret requests. All endpoints are JSON and
@@ -38,27 +36,26 @@ var secretNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 // strings, and the cap — like podman's own size limit — is in bytes.
 const maxSecretValueBytes = 1048576
 
-// Create handles creating a secret. The name is trimmed BEFORE validation
-// so the rules apply to the trimmed form (a padded-but-valid name must not
-// be rejected for its padding); the value is validated as-is and forwarded
-// byte-identical. Neither the request DTO nor the value ever reaches a log
-// statement on this path: a decode failure returns without logging (json
-// syntax errors quote the offending character, and any fragment of the
-// body may be a fragment of the value), validator errors name the failing
-// field, not its content, and the response echoes only the created ID.
+// Create handles creating a secret. Decode validates the untrimmed name;
+// the handler then trims and applies its pattern and byte-cap checks (so a
+// whitespace-only name still answers VALIDATION_FAILED via the pattern
+// check, while a name pushed over max=255 only by its padding now fails
+// Decode's max tag — the more defensible edge). The value is validated
+// as-is and forwarded byte-identical. Neither the request DTO nor the
+// value ever reaches a log statement on this path: a decode failure
+// returns without logging (json syntax errors quote the offending
+// character, and any fragment of the body may be a fragment of the
+// value), validator errors name the failing field, not its content, and
+// the response echoes only the created ID.
 func (h *SecretHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*SecretCreateResponse, error) {
 		var request SecretCreateRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			return nil, errors.ErrInvalidRequest.WithMessage("Invalid request body")
+		if appErr := web.Decode(r, &request); appErr != nil {
+			return nil, appErr
 		}
 
 		request.Name = strings.TrimSpace(request.Name)
 
-		validate := validator.New()
-		if err := validate.Struct(request); err != nil {
-			return nil, errors.NewAppError("VALIDATION_FAILED", err.Error(), http.StatusBadRequest)
-		}
 		if !secretNamePattern.MatchString(request.Name) {
 			return nil, errors.NewAppError("VALIDATION_FAILED",
 				"Name must start with a letter or digit and contain only letters, digits, underscores, dots, or dashes",

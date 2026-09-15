@@ -2,7 +2,6 @@ package containers
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-playground/validator/v10"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -111,13 +109,8 @@ func parseContainerListOptions(r *http.Request) entities.ContainerListOptions {
 func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*ContainerCreateResponse, error) {
 		var request ContainerCreateRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			return nil, errors.ErrInvalidRequest.WithMessage("Invalid request body")
-		}
-
-		validate := validator.New()
-		if err := validate.Struct(request); err != nil {
-			return nil, errors.NewAppError("VALIDATION_FAILED", err.Error(), http.StatusBadRequest)
+		if appErr := web.Decode(r, &request); appErr != nil {
+			return nil, appErr
 		}
 
 		return h.service.Create(ctx, userID, machineID, request)

@@ -78,21 +78,3 @@ func TestVolumeHandler_Create_Anonymous(t *testing.T) {
 	assert.True(t, got.Anonymous, "anonymous volume must be flagged")
 	assert.NotEmpty(t, got.Name, "generated name must be present in the response")
 }
-
-func TestVolumeHandler_Create_MalformedBody(t *testing.T) {
-	engine := &fakeVolumeEngine{}
-
-	w := createRequest(newTestHandler(engine).Create, `{"labels": 42}`)
-
-	assert.Equal(t, 400, w.Code, "wrong-typed body must be rejected as a validation error")
-	assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
-}
-
-func TestVolumeHandler_Create_MalformedJSON(t *testing.T) {
-	engine := &fakeVolumeEngine{}
-
-	w := createRequest(newTestHandler(engine).Create, `{bad}`)
-
-	assert.Equal(t, 400, w.Code, "syntactically malformed body must be rejected as a validation error")
-	assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
-}

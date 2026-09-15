@@ -12,7 +12,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -69,19 +68,11 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 	slog.InfoContext(r.Context(), "Pull")
 
-	// Body validation answers 400s before the stream begins; the streaming
+	// Decode answers 400s before the stream begins; the streaming
 	// envelope takes over from there.
 	var request ImagePullRequest
-	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "Invalid request body", slog.Any("error", err))
-		return
-	}
-
-	validate := validator.New()
-	if err := validate.Struct(request); err != nil {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "VALIDATION_FAILED", err.Error(), contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "Validation failed", slog.Any("error", err))
+	if appErr := web.Decode(r, &request); appErr != nil {
+		errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 		return
 	}
 

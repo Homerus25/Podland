@@ -289,8 +289,8 @@ func TestSecretHandler_Create_HappyPath(t *testing.T) {
 
 // TestSecretHandler_Create_ValidationFailures pins the 400 contract: a
 // missing/oversized/pattern-breaking name or an empty/oversized value is
-// refused with VALIDATION_FAILED before the machine is asked, and a
-// malformed body is refused with INVALID_REQUEST. The engine stays
+// refused with VALIDATION_FAILED before the machine is asked (body
+// decoding itself is pinned once by web.Decode). The engine stays
 // unarmed: any create reaching it panics the test.
 func TestSecretHandler_Create_ValidationFailures(t *testing.T) {
 	oversizedName := strings.Repeat("a", 256)
@@ -317,7 +317,6 @@ func TestSecretHandler_Create_ValidationFailures(t *testing.T) {
 			body:       `{"name":"db-password","value":"` + strings.Repeat("€", 600000) + `"}`,
 			expectCode: "VALIDATION_FAILED",
 		},
-		{name: "malformed body", body: `{"name":`, expectCode: "INVALID_REQUEST"},
 	}
 
 	for _, tt := range tests {

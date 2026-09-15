@@ -321,7 +321,6 @@ func TestQuadletHandler_Update(t *testing.T) {
 	}{
 		{name: "validation failure: missing content", quadletID: "my-container.container", requestBody: `{}`},
 		{name: "validation failure: empty content", quadletID: "my-container.container", requestBody: `{"content":""}`},
-		{name: "malformed JSON body", quadletID: "my-container.container", requestBody: `{not valid json`},
 		{name: "missing quadlet ID", quadletID: "", requestBody: `{"content":"x"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -671,7 +670,6 @@ func TestQuadletHandler_Generate(t *testing.T) {
 		{name: "validation failure: missing resourceType", requestBody: `{"resourceId":"my-container"}`},
 		{name: "validation failure: empty resourceType", requestBody: `{"resourceId":"my-container","resourceType":""}`},
 		{name: "validation failure: invalid resourceType", requestBody: `{"resourceId":"my-resource","resourceType":"invalid"}`},
-		{name: "malformed JSON body", requestBody: `{not valid json`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := &fakeQuadletEngine{}

@@ -2,7 +2,6 @@ package quadlets
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -14,7 +13,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 )
 
@@ -57,13 +55,8 @@ func (h *QuadletHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *QuadletHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*QuadletCreateResponse, error) {
 		var request QuadletCreateRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			return nil, errors.ErrInvalidRequest.WithMessage("Invalid request body")
-		}
-
-		validate := validator.New()
-		if err := validate.Struct(request); err != nil {
-			return nil, errors.NewAppError("VALIDATION_FAILED", err.Error(), http.StatusBadRequest)
+		if appErr := web.Decode(r, &request); appErr != nil {
+			return nil, appErr
 		}
 
 		return h.service.Create(ctx, userID, machineID, request)
@@ -88,13 +81,8 @@ func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var request QuadletUpdateRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			return nil, errors.ErrInvalidRequest.WithMessage("Invalid request body")
-		}
-
-		validate := validator.New()
-		if err := validate.Struct(request); err != nil {
-			return nil, errors.NewAppError("VALIDATION_FAILED", err.Error(), http.StatusBadRequest)
+		if appErr := web.Decode(r, &request); appErr != nil {
+			return nil, appErr
 		}
 
 		return h.service.Update(ctx, userID, machineID, chi.URLParam(r, "quadletId"), request)
@@ -224,13 +212,8 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 func (h *QuadletHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletGenerateResponse, error) {
 		var request QuadletGenerateRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			return nil, errors.ErrInvalidRequest.WithMessage("Invalid request body")
-		}
-
-		validate := validator.New()
-		if err := validate.Struct(request); err != nil {
-			return nil, errors.NewAppError("VALIDATION_FAILED", err.Error(), http.StatusBadRequest)
+		if appErr := web.Decode(r, &request); appErr != nil {
+			return nil, appErr
 		}
 
 		return h.service.Generate(ctx, userID, machineID, request)
@@ -241,13 +224,8 @@ func (h *QuadletHandler) Generate(w http.ResponseWriter, r *http.Request) {
 func (h *QuadletHandler) Import(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*QuadletImportResponse, error) {
 		var request QuadletImportRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			return nil, errors.ErrInvalidRequest.WithMessage("Invalid request body")
-		}
-
-		validate := validator.New()
-		if err := validate.Struct(request); err != nil {
-			return nil, errors.NewAppError("VALIDATION_FAILED", err.Error(), http.StatusBadRequest)
+		if appErr := web.Decode(r, &request); appErr != nil {
+			return nil, appErr
 		}
 
 		return h.service.Import(ctx, userID, machineID, request)

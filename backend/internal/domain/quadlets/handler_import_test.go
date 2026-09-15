@@ -59,17 +59,6 @@ func TestHandlerImport_Success(t *testing.T) {
 		"each entry must be installed under its resource-derived filename")
 }
 
-func TestHandlerImport_InvalidRequestBody(t *testing.T) {
-	t.Parallel()
-
-	engine := &fakeQuadletEngine{}
-
-	w := httptest.NewRecorder()
-	newTestHandler(engine).Import(w, importRequest(t, "invalid json"))
-
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
 func TestHandlerImport_EmptyQuadletsList(t *testing.T) {
 	t.Parallel()
 

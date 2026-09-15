@@ -132,8 +132,8 @@ func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *MachineHandler) Update(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (MachineResponse, error) {
 		var req CreateMachineRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			return MachineResponse{}, errors.NewAppError("INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		if appErr := web.Decode(r, &req); appErr != nil {
+			return MachineResponse{}, appErr
 		}
 
 		machine, err := h.service.Update(ctx, userID, machineID, &req)
@@ -185,8 +185,8 @@ func (h *MachineHandler) ListAccess(w http.ResponseWriter, r *http.Request) {
 func (h *MachineHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, grantorID, machineID string) (AccessResponse, error) {
 		var req GrantAccessRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			return AccessResponse{}, errors.NewAppError("INVALID_REQUEST", err.Error(), http.StatusBadRequest)
+		if appErr := web.Decode(r, &req); appErr != nil {
+			return AccessResponse{}, appErr
 		}
 
 		access, err := h.service.GrantAccess(grantorID, machineID, &req)

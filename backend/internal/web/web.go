@@ -19,6 +19,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/go-chi/chi/v5"
+	"github.com/go-playground/validator/v10"
 )
 
 // Handle runs a machine-scoped JSON endpoint through the endpoint
@@ -132,4 +133,31 @@ func HandleStream(w http.ResponseWriter, r *http.Request, stream func(ctx contex
 		appErrors.RespondWithError(w, appErrors.ErrInternalError, requestID)
 		return
 	}
+}
+
+// validate is the package-level shared validator instance behind Decode.
+// validator instances are thread-safe, so one instance serves every
+// request; caching struct metadata across calls is the point of sharing
+// it instead of minting one per decode.
+var validate = validator.New()
+
+// Decode reads the request body into target as JSON and validates it —
+// the decode+validate ritual every body-bearing handler crosses, with
+// one error vocabulary. A body that is not valid JSON (syntax or
+// wrong-typed field) answers 400 INVALID_REQUEST "Invalid request body";
+// a body that decodes but fails target's validate tags answers 400
+// VALIDATION_FAILED carrying the validator's message; a clean body
+// answers nil and leaves target populated. Unknown fields are ignored
+// (no DisallowUnknownFields), and a DTO without validate tags imposes no
+// rules — its domain rules stay in the service. Handlers return the
+// *AppError from their envelope closure (or respond it directly before a
+// stream begins, as images Pull does); the envelope maps it to the wire.
+func Decode(r *http.Request, target any) *appErrors.AppError {
+	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
+		return appErrors.ErrInvalidRequest.WithMessage("Invalid request body")
+	}
+	if err := validate.Struct(target); err != nil {
+		return appErrors.ErrValidationFailed.WithMessage(err.Error())
+	}
+	return nil
 }
