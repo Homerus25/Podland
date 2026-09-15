@@ -65,29 +65,8 @@ func TestVolumeHandler_Export_NotFound(t *testing.T) {
 		"error response must not keep the tar content type")
 }
 
-func TestVolumeHandler_Export_ServiceError(t *testing.T) {
-	engine := &fakeVolumeEngine{
-		inspectFn: func(string) (*entities.VolumeInspectReport, error) {
-			return inspectFixture("my-volume"), nil
-		},
-		exportFn: func(string, io.Writer) error {
-			return assert.AnError
-		},
-	}
-
-	w := exportRequest(newTestHandler(engine).Export, "test-machine", "my-volume")
-
-	assert.Equal(t, 500, w.Code)
-}
-
 func TestVolumeHandler_Export_MissingVolumeName(t *testing.T) {
 	engine := &fakeVolumeEngine{}
 	w := exportRequest(newTestHandler(engine).Export, "test-machine", "")
-	assert.Equal(t, 400, w.Code)
-}
-
-func TestVolumeHandler_Export_MissingMachineID(t *testing.T) {
-	engine := &fakeVolumeEngine{}
-	w := exportRequest(newTestHandler(engine).Export, "", "my-volume")
 	assert.Equal(t, 400, w.Code)
 }

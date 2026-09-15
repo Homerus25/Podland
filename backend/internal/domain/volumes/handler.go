@@ -7,7 +7,6 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -16,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"github.com/go-chi/chi/v5"
@@ -142,46 +140,28 @@ func (h *VolumeHandler) Prune(w http.ResponseWriter, r *http.Request) {
 
 // Export handles streaming a volume's contents as a tar download.
 // Read-level permission suffices (subtree RequireMachineAccess): users
-// who can read a machine's state can read its data. Headers are set
-// before the service streams, so the download starts with the right
+// who can read a machine's state can read its data. It crosses the
+// endpoint envelope's binary twin (web.HandleStream): identity guards,
+// AppError mapping, and the 500 fallback live there; the closure is tar
+// headers plus the streaming service call. Headers are set before the
+// service streams, so the download starts with the right
 // Content-Type/Disposition; a 404/4xx happens before any byte is
 // written (the service resolves existence first), so error envelopes
-// stay intact. Mid-stream failures can't retroactively change the
+// stay intact — the envelope's error write replaces the tar
+// Content-Type. Mid-stream failures can't retroactively change the
 // status — the connection just truncates.
 func (h *VolumeHandler) Export(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Export")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	volumeName := chi.URLParam(r, "volumeName")
-	if volumeName == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_VOLUME_NAME", "Volume name is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/x-tar")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", volumeName+".tar"))
-
-	if err := h.service.Export(r.Context(), userID, machineID, volumeName, w); err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+		volumeName := chi.URLParam(r, "volumeName")
+		if volumeName == "" {
+			return errors.NewAppError("MISSING_VOLUME_NAME", "Volume name is required", http.StatusBadRequest)
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "export", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("volumeName", volumeName))
-		return
-	}
+
+		w.Header().Set("Content-Type", "application/x-tar")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", volumeName+".tar"))
+
+		return h.service.Export(ctx, userID, machineID, volumeName, w)
+	})
 }
 
 // Populate handles filling a volume from an upload. The body is
@@ -200,66 +180,35 @@ func (h *VolumeHandler) Export(w http.ResponseWriter, r *http.Request) {
 // the max-bytes reader, and exceeding it yields 413
 // VOLUME_UPLOAD_TOO_LARGE. Temp files are removed on every path.
 func (h *VolumeHandler) Populate(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Populate")
-
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), errors.ErrInvalidCredentials.Code)
-		return
-	}
-
-	machineID := chi.URLParam(r, "id")
-	if machineID == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	volumeName := chi.URLParam(r, "volumeName")
-	if volumeName == "" {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_VOLUME_NAME", "Volume name is required", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, h.maxUploadBytes)
-	mr, err := r.MultipartReader()
-	if err != nil {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", "body must be multipart/form-data", contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	payload, err := h.collectUpload(mr)
-	if payload != nil {
-		// Every temp file is removed on every path once the handler is
-		// done with it.
-		defer payload.cleanup()
-	}
-	if err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+		volumeName := chi.URLParam(r, "volumeName")
+		if volumeName == "" {
+			return errors.NewAppError("MISSING_VOLUME_NAME", "Volume name is required", http.StatusBadRequest)
 		}
-		var maxBytesErr *http.MaxBytesError
-		if stderrors.As(err, &maxBytesErr) {
-			errors.RespondWithError(w, errors.ErrVolumeUploadTooLarge, contextutils.GetRequestID(r.Context()))
-			return
-		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "populate upload", slog.Any("error", err), slog.Any("machineID", machineID))
-		return
-	}
 
-	if err := h.service.Import(r.Context(), userID, machineID, volumeName, payload.reader()); err != nil {
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+		r.Body = http.MaxBytesReader(w, r.Body, h.maxUploadBytes)
+		mr, err := r.MultipartReader()
+		if err != nil {
+			return errors.ErrInvalidRequest.WithMessage("body must be multipart/form-data")
 		}
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		slog.ErrorContext(r.Context(), "populate", slog.Any("error", err), slog.Any("userID", userID), slog.Any("machineID", machineID), slog.Any("volumeName", volumeName))
-		return
-	}
 
-	w.WriteHeader(http.StatusNoContent)
+		payload, err := h.collectUpload(mr)
+		if payload != nil {
+			// Every temp file is removed on every path once the handler is
+			// done with it.
+			defer payload.cleanup()
+		}
+		if err != nil {
+			return err
+		}
+
+		if err := h.service.Import(ctx, userID, machineID, volumeName, payload.reader()); err != nil {
+			return err
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	})
 }
 
 // spooledFile is one part streamed to a temp file: its spool and the
@@ -302,9 +251,10 @@ func (p *uploadPayload) cleanup() {
 }
 
 // collectUpload streams the multipart body to temp files and resolves
-// the shape. Both shapes at once, or neither, is a client error; an
-// oversized upload surfaces as the max-bytes error for the caller to
-// map to 413.
+// the shape. Both shapes at once, or neither, is a client error; the
+// max-bytes reader's MaxBytesError is folded into the 413 sentinel here,
+// so collectUpload's client errors all leave as AppErrors — anything
+// else rides the envelope's 500 fallback.
 func (h *VolumeHandler) collectUpload(mr *multipart.Reader) (*uploadPayload, error) {
 	payload := &uploadPayload{}
 	var tarWriter *tar.Writer
@@ -315,7 +265,7 @@ func (h *VolumeHandler) collectUpload(mr *multipart.Reader) (*uploadPayload, err
 			break
 		}
 		if err != nil {
-			return payload, err
+			return payload, uploadError(err)
 		}
 
 		switch part.FormName() {
@@ -375,6 +325,16 @@ func (h *VolumeHandler) collectUpload(mr *multipart.Reader) (*uploadPayload, err
 	return payload, nil
 }
 
+// uploadError folds the max-bytes reader's MaxBytesError into the 413
+// sentinel; anything else passes through unchanged.
+func uploadError(err error) error {
+	var maxBytesErr *http.MaxBytesError
+	if stderrors.As(err, &maxBytesErr) {
+		return errors.ErrVolumeUploadTooLarge
+	}
+	return err
+}
+
 // spoolPart streams one part to a temp file. Nothing is buffered in
 // RAM; the cap is enforced by the max-bytes reader wrapping the body.
 func spoolPart(part *multipart.Part) (*spooledFile, error) {
@@ -386,7 +346,7 @@ func spoolPart(part *multipart.Part) (*spooledFile, error) {
 	if err != nil {
 		spool.Close()
 		os.Remove(spool.Name())
-		return nil, err
+		return nil, uploadError(err)
 	}
 	return &spooledFile{spool: spool, size: size}, nil
 }

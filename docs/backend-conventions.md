@@ -47,6 +47,18 @@ closest sibling that already exists. Rulings so far:
   closures (the `LogStreamOp.Stream` callback and the buffered
   `web.Handle` service call). The images pull handler remains the
   reference for progress streams.
+- **Binary endpoints (the binary envelope)** — `web.HandleStream`
+  (`internal/web`) is the seam every machine-scoped endpoint whose
+  success is a byte stream or multipart upload rather than a DTO
+  crosses. The envelope owns identity extraction (a missing identity is
+  the same wiring-bug ruling as `web.Handle`: 500 `INTERNAL_ERROR` plus
+  a loud log), AppError mapping (wrapped sentinels unwrapped via
+  `errors.AsType`), and the 500 fallback with its log; the handler owns
+  everything wire-specific — response headers, the body ritual, the
+  service call, and the success write (implicit 200 for export,
+  explicit 204 for populate). The volumes export/populate handler
+  (`internal/domain/volumes/handler.go`, `Export`/`Populate`) is the
+  reference.
 - **Handler contract tests** — `testutils.Perform` builds the
   request (identity, chi URL params, body) the way the router would;
   per-domain `recordXRequest` chi scaffolding is retired. Handler tests
