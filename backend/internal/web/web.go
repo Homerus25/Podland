@@ -78,3 +78,49 @@ func Handle[T any](w http.ResponseWriter, r *http.Request, successStatus int, ca
 	w.WriteHeader(successStatus)
 	json.NewEncoder(w).Encode(result)
 }
+
+// HandleStream runs a machine-scoped endpoint whose success is a byte
+// stream or multipart upload rather than a JSON DTO through the
+// endpoint envelope's error side: the same identity extraction, AppError
+// mapping, and 500 fallback Handle owns, without the JSON encode. The
+// closure owns everything wire-specific — response headers, the body
+// ritual, the service call, and the success write (an implicit 200, an
+// explicit 204, whatever the format needs).
+//
+// Within stream, route-specific validation failures are returned as
+// *appErrors.AppError values (the sentinels from internal/errors, or
+// NewAppError for route-specific codes) and ride the same envelope;
+// wrapped AppErrors are unwrapped via errors.AsType, so services may
+// fmt.Errorf("%w", …) a sentinel while adding context for logs. Any
+// other error answers the 500 fallback.
+//
+// A missing userID or machineID maps to 500 INTERNAL_ERROR and a loud
+// log line (the same invariant ruling as Handle): the subtree
+// middleware guarantees both, so a miss means a miswired route, and
+// stream never runs.
+func HandleStream(w http.ResponseWriter, r *http.Request, stream func(ctx context.Context, userID, machineID string) error) {
+	requestID := contextutils.GetRequestID(r.Context())
+	userID := contextutils.GetUserIDFromContext(r.Context())
+	machineID := chi.URLParam(r, "id")
+
+	if userID == "" || machineID == "" {
+		slog.ErrorContext(r.Context(), "endpoint envelope: identity invariant violated (route mounted outside the machine subtree?)",
+			slog.Any("requestID", requestID),
+			slog.Any("userID", userID),
+			slog.Any("machineID", machineID))
+		appErrors.RespondWithError(w, appErrors.ErrInternalError, requestID)
+		return
+	}
+
+	if err := stream(r.Context(), userID, machineID); err != nil {
+		if appErr, ok := errors.AsType[*appErrors.AppError](err); ok {
+			appErrors.RespondWithError(w, appErr, requestID)
+			return
+		}
+		slog.ErrorContext(r.Context(), "endpoint envelope: unexpected error",
+			slog.Any("requestID", requestID),
+			slog.Any("error", err))
+		appErrors.RespondWithError(w, appErrors.ErrInternalError, requestID)
+		return
+	}
+}
