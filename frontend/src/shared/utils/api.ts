@@ -68,7 +68,11 @@ export function setSessionExpiredHandler(handler: (() => void) | null) {
 	sessionExpiredHandler = handler;
 }
 
-function fireSessionExpired() {
+// Declares the session dead: latched exactly once per installed token, and
+// the registered handler (if any) fires once. Exported for the stream
+// transport, whose marked replay is loop state instead of an axios config
+// flag, so its second 401 needs to declare death directly.
+export function fireSessionExpired() {
 	if (sessionExpiredFired) return;
 	sessionExpiredFired = true;
 	sessionExpiredHandler?.();
