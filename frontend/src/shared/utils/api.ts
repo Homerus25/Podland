@@ -7,6 +7,13 @@ export const api = axios.create({
 	baseURL: apiBaseUrl,
 });
 
+// Auth calls (login/refresh/logout) and the 401 policy's refresh ride this
+// interceptor-free instance: a login failure is itself a 401, and it must
+// never be readable as session death by any response-side policy.
+export const bareApi = axios.create({
+	baseURL: apiBaseUrl,
+});
+
 // The access token is held only in this module variable for the lifetime of
 // the page — never localStorage/sessionStorage — so XSS cannot exfiltrate a
 // persisted bearer credential. The request interceptor attaches it below.
