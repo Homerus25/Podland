@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 import { loginViaForm, renderApp } from "@/test/auth";
+import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
 function deferred<T>() {
@@ -163,5 +164,63 @@ describe("app routing guard", () => {
 
 		expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
 		expect(screen.getByTestId("auth-user")).toHaveTextContent("anonymous");
+	});
+
+	describe("session death mid-app", () => {
+		it("lands on /login with the deep link preserved and an empty cache when a query 401s and refresh is rejected", async () => {
+			// The live session holds a bearer; installing one also re-arms
+			// the policy's once-latch for this module instance.
+			setBearerToken("mid-session-token");
+			server.use(
+				http.get("*/api/machines", () => {
+					return HttpResponse.json(
+						{
+							requestId: "req-1",
+							error: {
+								code: "TOKEN_EXPIRED",
+								message: "Token has expired",
+							},
+						},
+						{ status: 401 },
+					);
+				}),
+				http.post("*/api/auth/refresh", () => {
+					return HttpResponse.json(
+						{
+							requestId: "req-2",
+							error: {
+								code: "AUTH_REFRESH_INVALID",
+								message: "Refresh token invalid",
+							},
+						},
+						{ status: 401 },
+					);
+				}),
+			);
+			const { queryClient } = renderApp("/machines", {
+				resolveInitialState: async () => ({ username: "alice" }),
+			});
+
+			expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/login");
+			expect(
+				screen.queryByRole("heading", { name: "Machines" }),
+			).not.toBeInTheDocument();
+			expect(screen.getByTestId("auth-user")).toHaveTextContent("anonymous");
+			expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+
+			// Logging back in returns to the originally requested page: the
+			// session-death redirect attached that location to /login's state.
+			server.use(
+				http.get("*/api/machines", () => HttpResponse.json([machineFixture()])),
+			);
+			await loginViaForm();
+
+			expect(
+				await screen.findByRole("heading", { name: "Machines" }),
+			).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/machines");
+			expect(screen.getByTestId("auth-user")).toHaveTextContent("alice");
+		});
 	});
 });

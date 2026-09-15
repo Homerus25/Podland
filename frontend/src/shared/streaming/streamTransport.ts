@@ -1,9 +1,11 @@
 import { consumeNdjsonValues } from "@shared/streaming/ndjsonStream";
 import type { ApiError } from "@shared/types/api";
 import {
+	fireSessionExpired,
 	genericError,
 	getApiErrorFromResponse,
 	getBearerToken,
+	handleUnauthorized,
 } from "@shared/utils/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -13,22 +15,16 @@ export interface StreamNdjsonInit {
 	signal: AbortSignal;
 }
 
-// The streaming fetch every NDJSON endpoint uses: it injects the Bearer
-// credential from the shared token holder, sends Content-Type only when a
-// body is present, turns non-ok responses into the displayable error
-// envelope and every other failure into the generic sentinel, leaves abort
-// errors raw for the lifecycle owner to interpret, and pumps every parsed
-// NDJSON value to the caller without judging its shape. Resolves on clean
-// stream end.
-export async function streamNdjson(
+// One wire attempt: the Bearer preamble from the shared token holder,
+// Content-Type only when a body is present, and abort errors rethrown raw
+// for the lifecycle owner to interpret.
+async function openNdjsonStream(
 	url: string,
 	init: StreamNdjsonInit,
-	onValue: (value: unknown) => void,
-): Promise<void> {
+): Promise<Response> {
 	const token = getBearerToken();
-	let response: Response;
 	try {
-		response = await fetch(url, {
+		return await fetch(url, {
 			method: init.method,
 			headers: {
 				...(init.body !== undefined
@@ -42,6 +38,57 @@ export async function streamNdjson(
 	} catch (fetchError) {
 		if (init.signal.aborted) throw fetchError;
 		throw { ...genericError };
+	}
+}
+
+// Races the signal against `promise` without cancelling it: the refresh is
+// single-flight and may be shared with other 401s, so an abort stops this
+// waiter only.
+function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+	if (signal.aborted) return Promise.reject(signal.reason);
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(signal.reason);
+		signal.addEventListener("abort", onAbort, { once: true });
+		promise.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort);
+				resolve(value);
+			},
+			(error: unknown) => {
+				signal.removeEventListener("abort", onAbort);
+				reject(error);
+			},
+		);
+	});
+}
+
+// The streaming fetch every NDJSON endpoint uses: it injects the Bearer
+// credential from the shared token holder, sends Content-Type only when a
+// body is present, turns non-ok responses into the displayable error
+// envelope and every other failure into the generic sentinel, leaves abort
+// errors raw for the lifecycle owner to interpret, and pumps every parsed
+// NDJSON value to the caller without judging its shape. A 401 runs the
+// shared 401 policy: one refresh, then one re-fetch; a rejected refresh or
+// a 401 on the re-fetch (the marked replay) surfaces the envelope with the
+// session-expired seam already fired. Resolves on clean stream end.
+export async function streamNdjson(
+	url: string,
+	init: StreamNdjsonInit,
+	onValue: (value: unknown) => void,
+): Promise<void> {
+	let response = await openNdjsonStream(url, init);
+
+	if (response.status === 401) {
+		// A 401 means the request was rejected before execution, so the
+		// re-fetch (including a streamed POST) is safe.
+		if (!(await abortable(handleUnauthorized(), init.signal))) {
+			throw await getApiErrorFromResponse(response);
+		}
+		response = await openNdjsonStream(url, init);
+		if (response.status === 401) {
+			fireSessionExpired();
+			throw await getApiErrorFromResponse(response);
+		}
 	}
 
 	if (!response.ok) {

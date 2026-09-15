@@ -2,10 +2,15 @@ import {
 	streamNdjson,
 	useNdjsonOperation,
 } from "@shared/streaming/streamTransport";
-import { genericError, setBearerToken } from "@shared/utils/api";
+import {
+	genericError,
+	getBearerToken,
+	setBearerToken,
+	setSessionExpiredHandler,
+} from "@shared/utils/api";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { server } from "@/test/server";
 import {
 	abortableNdjsonResponse,
@@ -34,6 +39,7 @@ function mockStream(method: "get" | "post", handler: StreamHandler) {
 
 afterEach(() => {
 	setBearerToken(null);
+	setSessionExpiredHandler(null);
 	vi.restoreAllMocks();
 });
 
@@ -243,6 +249,165 @@ describe("streamNdjson", () => {
 			expect.objectContaining({ type: "complete" }),
 		]);
 		expect(warn).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("streamNdjson 401 policy", () => {
+	let refreshCalls: number;
+	let sessionExpiredCalls: number;
+
+	beforeEach(() => {
+		refreshCalls = 0;
+		sessionExpiredCalls = 0;
+	});
+
+	function okRefresh(gate?: Promise<void>) {
+		return http.post("*/api/auth/refresh", async () => {
+			refreshCalls++;
+			if (gate) await gate;
+			return HttpResponse.json({
+				token: "fresh-access-token",
+				username: "alice",
+			});
+		});
+	}
+
+	function rejectedRefresh() {
+		return http.post("*/api/auth/refresh", () => {
+			refreshCalls++;
+			return HttpResponse.json(
+				{
+					requestId: "req-refresh",
+					error: {
+						code: "AUTH_REFRESH_INVALID",
+						message: "Refresh token invalid",
+					},
+				},
+				{ status: 401 },
+			);
+		});
+	}
+
+	function unauthorized() {
+		return HttpResponse.json(
+			{
+				requestId: "req-stream",
+				error: { code: "TOKEN_EXPIRED", message: "Token has expired" },
+			},
+			{ status: 401 },
+		);
+	}
+
+	it("refreshes once and re-fetches with the same method, body, and signal, pumping the values", async () => {
+		let streamCalls = 0;
+		const bodies: string[] = [];
+		mockStream("post", async (request) => {
+			streamCalls++;
+			bodies.push(await request.text());
+			return streamCalls === 1
+				? unauthorized()
+				: ndjsonResponse([progressEvent(), completeEvent()]);
+		});
+		server.use(okRefresh());
+		setBearerToken("expired-access-token");
+
+		const values: unknown[] = [];
+		await streamNdjson(
+			"/api/transport-stream",
+			{ method: "POST", body: "{}", signal: new AbortController().signal },
+			(value) => values.push(value),
+		);
+
+		expect(values).toEqual([
+			expect.objectContaining({ type: "progress" }),
+			expect.objectContaining({ type: "complete" }),
+		]);
+		expect(requests).toHaveLength(2);
+		expect(requests.map((request) => request.method)).toEqual(["POST", "POST"]);
+		expect(bodies).toEqual(["{}", "{}"]);
+		expect(requests.map((request) => request.signal.aborted)).toEqual([
+			false,
+			false,
+		]);
+		expect(requests[0].headers.get("Authorization")).toBe(
+			"Bearer expired-access-token",
+		);
+		expect(requests[1].headers.get("Authorization")).toBe(
+			"Bearer fresh-access-token",
+		);
+		expect(refreshCalls).toBe(1);
+		expect(sessionExpiredCalls).toBe(0);
+	});
+
+	it("fires the seam and throws the envelope when the refresh is rejected", async () => {
+		mockStream("post", () => unauthorized());
+		server.use(rejectedRefresh());
+		setBearerToken("expired-access-token");
+		setSessionExpiredHandler(() => {
+			sessionExpiredCalls++;
+		});
+
+		await expect(
+			streamNdjson(
+				"/api/transport-stream",
+				{ method: "POST", body: "{}", signal: new AbortController().signal },
+				() => undefined,
+			),
+		).rejects.toEqual({ code: "TOKEN_EXPIRED", message: "Token has expired" });
+
+		expect(requests).toHaveLength(1);
+		expect(refreshCalls).toBe(1);
+		expect(sessionExpiredCalls).toBe(1);
+	});
+
+	it("goes straight to session death when the re-fetched stream 401s again", async () => {
+		mockStream("post", () => unauthorized());
+		server.use(okRefresh());
+		setBearerToken("expired-access-token");
+		setSessionExpiredHandler(() => {
+			sessionExpiredCalls++;
+		});
+
+		await expect(
+			streamNdjson(
+				"/api/transport-stream",
+				{ method: "POST", body: "{}", signal: new AbortController().signal },
+				() => undefined,
+			),
+		).rejects.toEqual({ code: "TOKEN_EXPIRED", message: "Token has expired" });
+
+		expect(requests).toHaveLength(2);
+		expect(refreshCalls).toBe(1);
+		expect(sessionExpiredCalls).toBe(1);
+	});
+
+	it("propagates an abort fired while awaiting the refresh as cancellation", async () => {
+		let releaseRefresh: (() => void) | undefined;
+		const refreshGate = new Promise<void>((resolve) => {
+			releaseRefresh = resolve;
+		});
+		server.use(okRefresh(refreshGate));
+		mockStream("post", () => unauthorized());
+		setBearerToken("expired-access-token");
+		setSessionExpiredHandler(() => {
+			sessionExpiredCalls++;
+		});
+
+		const controller = new AbortController();
+		const consumption = streamNdjson(
+			"/api/transport-stream",
+			{ method: "POST", body: "{}", signal: controller.signal },
+			() => undefined,
+		);
+		await waitFor(() => expect(refreshCalls).toBe(1));
+		controller.abort();
+
+		await expect(consumption).rejects.toMatchObject({ name: "AbortError" });
+		expect(requests).toHaveLength(1);
+		expect(sessionExpiredCalls).toBe(0);
+
+		releaseRefresh?.();
+		await waitFor(() => expect(getBearerToken()).toBe("fresh-access-token"));
 	});
 });
 
