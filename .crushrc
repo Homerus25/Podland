@@ -24,3 +24,5 @@ lsp add gopls --command gopls \
 	--options '{"buildFlags": ["-tags=integration"]}'
 
 option attribution-generated-with false
+
+mcp add forgejo --type http --url http://localhost:8080/mcp --header Authorization "Bearer d2e9579ac0cda068fde5ed9b86aaf747db056198"
