@@ -1,13 +1,13 @@
 package auth
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/web"
 )
 
 // AuthHandler handles authentication requests
@@ -26,8 +26,8 @@ func NewAuthHandler(service *AuthService, userRepo models.UserRepositoryInterfac
 
 // LoginRequest represents a login request
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username string `json:"username" validate:"required"`
+	Password string `json:"password" validate:"required"`
 }
 
 // LoginResponse represents a login response
@@ -66,37 +66,29 @@ func setRefreshCookie(w http.ResponseWriter, refreshToken string) {
 
 // Login handles user login: it shapes the request and response, while
 // credential verification, token issuance, and session persistence live
-// in AuthService.Login.
+// in AuthService.Login. The auth surface has no authenticated caller, so
+// the closure's user ID is unused; the refresh cookie is set inside the
+// closure (headers only) — the envelope owns the status line and body.
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	requestID := contextutils.GetRequestID(r.Context())
+	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (LoginResponse, error) {
+		var req LoginRequest
+		if appErr := web.Decode(r, &req); appErr != nil {
+			return LoginResponse{}, appErr
+		}
 
-	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithError(w, errors.ErrInvalidRequest, requestID)
-		return
-	}
+		token, refreshToken, user, err := h.service.Login(req.Username, req.Password)
+		if err != nil {
+			return LoginResponse{}, err
+		}
 
-	// Validate required fields
-	if req.Username == "" || req.Password == "" {
-		errors.RespondWithError(w, errors.ErrMissingRequiredFields, requestID)
-		return
-	}
+		// The refresh token exists only inside this cookie: httpOnly keeps
+		// it out of JavaScript reach, the narrow path keeps it out of every
+		// non-auth request, and SameSite=Strict + Secure harden it against
+		// cross-site sending and plaintext transport.
+		setRefreshCookie(w, refreshToken)
 
-	token, refreshToken, user, err := h.service.Login(req.Username, req.Password)
-	if err != nil {
-		errors.RespondWithError(w, errors.ToAppError(err), requestID)
-		return
-	}
-
-	// The refresh token exists only inside this cookie: httpOnly keeps
-	// it out of JavaScript reach, the narrow path keeps it out of every
-	// non-auth request, and SameSite=Strict + Secure harden it against
-	// cross-site sending and plaintext transport.
-	setRefreshCookie(w, refreshToken)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(LoginResponse{Token: token, Username: user.Username})
+		return LoginResponse{Token: token, Username: user.Username}, nil
+	})
 }
 
 // RefreshResponse represents a refresh response. It intentionally
@@ -111,25 +103,21 @@ type RefreshResponse = LoginResponse
 // error envelope — the browser-facing behavior is a silent re-login
 // prompt, not an error screen.
 func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
-	requestID := contextutils.GetRequestID(r.Context())
+	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (RefreshResponse, error) {
+		cookie, err := r.Cookie(refreshTokenCookieName)
+		if err != nil {
+			return RefreshResponse{}, errors.ErrRefreshInvalid
+		}
 
-	cookie, err := r.Cookie(refreshTokenCookieName)
-	if err != nil {
-		errors.RespondWithError(w, errors.ErrRefreshInvalid, requestID)
-		return
-	}
+		token, refreshToken, user, err := h.service.Refresh(cookie.Value)
+		if err != nil {
+			return RefreshResponse{}, err
+		}
 
-	token, refreshToken, user, err := h.service.Refresh(cookie.Value)
-	if err != nil {
-		errors.RespondWithError(w, errors.ToAppError(err), requestID)
-		return
-	}
+		setRefreshCookie(w, refreshToken)
 
-	setRefreshCookie(w, refreshToken)
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(RefreshResponse{Token: token, Username: user.Username})
+		return RefreshResponse{Token: token, Username: user.Username}, nil
+	})
 }
 
 // clearRefreshCookie expires the refresh cookie: the same name, path,
@@ -145,26 +133,24 @@ func clearRefreshCookie(w http.ResponseWriter) {
 
 // Logout handles user logout. When the request carries a refresh
 // cookie, the session behind it is revoked server-side; the cookie is
-// cleared in every case — before revocation runs — so even a storage
-// failure cannot leave the browser holding a token its user tried to
-// give up. Logout is idempotent: no cookie, or a cookie whose session
-// is already gone, still succeeds with the same response — the end
-// state (no session, no cookie) is what the caller asked for.
+// cleared in every case — before revocation runs, inside the closure —
+// so even a storage failure cannot leave the browser holding a token
+// its user tried to give up. Logout is idempotent: no cookie, or a
+// cookie whose session is already gone, still succeeds with the same
+// response — the end state (no session, no cookie) is what the caller
+// asked for.
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	requestID := contextutils.GetRequestID(r.Context())
+	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (map[string]string, error) {
+		clearRefreshCookie(w)
 
-	clearRefreshCookie(w)
-
-	if cookie, err := r.Cookie(refreshTokenCookieName); err == nil {
-		if err := h.service.Logout(cookie.Value); err != nil {
-			errors.RespondWithError(w, errors.ToAppError(err), requestID)
-			return
+		if cookie, err := r.Cookie(refreshTokenCookieName); err == nil {
+			if err := h.service.Logout(cookie.Value); err != nil {
+				return nil, err
+			}
 		}
-	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"message": "Logged out successfully"})
+		return map[string]string{"message": "Logged out successfully"}, nil
+	})
 }
 
 // StatusResponse represents authentication status response
@@ -180,16 +166,18 @@ type StatusResponse struct {
 	Role          string `json:"role,omitempty"`
 }
 
-// Status handles authentication status check
+// Status handles authentication status check. The caller's user ID
+// passes through as-is: empty means an anonymous caller (the route is
+// served without a token too) and answers {authenticated: false}.
 func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
-	// Check if user is authenticated by looking for user ID in context
-	userID := contextutils.GetUserIDFromContext(r.Context())
+	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (StatusResponse, error) {
+		if userID == "" {
+			return StatusResponse{Authenticated: false}, nil
+		}
 
-	if userID != "" {
 		user, err := h.userRepo.GetByID(userID)
 		if err != nil {
-			errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-			return
+			return StatusResponse{}, err
 		}
 
 		resp := StatusResponse{
@@ -199,15 +187,6 @@ func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 		if user != nil {
 			resp.Role = user.Role
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resp)
-	} else {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(StatusResponse{
-			Authenticated: false,
-		})
-	}
+		return resp, nil
+	})
 }

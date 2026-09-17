@@ -2,11 +2,9 @@ package machines
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"github.com/go-chi/chi/v5"
@@ -14,9 +12,9 @@ import (
 
 // MachineHandler handles machine requests
 //
-// The subtree handlers ({id}-scoped routes, behind RequireMachineAccess)
-// cross the endpoint envelope (internal/web). Create and List sit
-// outside the subtree with no machine ID and keep their own shape.
+// Every handler crosses the endpoint envelope (internal/web): the
+// {id}-scoped routes web.Handle, Create and List web.HandleUser (outside
+// the subtree, no machine ID).
 type MachineHandler struct {
 	service *MachineService
 }
@@ -28,39 +26,22 @@ func NewMachineHandler(service *MachineService) *MachineHandler {
 	}
 }
 
-// Create handles machine creation
+// Create handles machine creation. The registration rules — field
+// validation, the SSH key check, the synchronous connection probe — live
+// in the service; the handler decodes the body and crosses the envelope.
 func (h *MachineHandler) Create(w http.ResponseWriter, r *http.Request) {
-	// Get user ID from context
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	// Parse request body
-	var req CreateMachineRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		errors.RespondWithHTTPError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	// Create machine through service
-	machine, err := h.service.Create(r.Context(), userID, &req)
-	if err != nil {
-		// Handle specific error types
-		if appErr, ok := err.(*errors.AppError); ok {
-			errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-			return
+	web.HandleUser(w, r, http.StatusCreated, func(ctx context.Context, userID string) (MachineResponse, error) {
+		var req CreateMachineRequest
+		if appErr := web.Decode(r, &req); appErr != nil {
+			return MachineResponse{}, appErr
 		}
-		// Handle generic errors
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		return
-	}
 
-	// Return success response
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(FromModel(machine))
+		machine, err := h.service.Create(ctx, userID, &req)
+		if err != nil {
+			return MachineResponse{}, err
+		}
+		return FromModel(machine), nil
+	})
 }
 
 // Get handles getting a machine by ID
@@ -98,32 +79,22 @@ func (h *MachineHandler) Status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// List handles listing machines
+// List handles listing the machines the caller can access
 func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
-	// Get user ID from context
-	userID := contextutils.GetUserIDFromContext(r.Context())
-	if userID == "" {
-		errors.RespondWithError(w, errors.ErrInvalidCredentials, contextutils.GetRequestID(r.Context()))
-		return
-	}
+	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) ([]MachineResponse, error) {
+		machines, err := h.service.ListAllMachines(userID)
+		if err != nil {
+			return nil, err
+		}
 
-	// List machines accessible to user
-	machines, err := h.service.ListAllMachines(userID)
-	if err != nil {
-		errors.RespondWithError(w, errors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	// Convert to responses, carrying the caller's permission on each
-	responses := make([]MachineResponse, len(machines))
-	for i, machine := range machines {
-		responses[i] = FromModel(machine.Machine)
-		responses[i].Permission = machine.Permission
-	}
-
-	// Return success response
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(responses)
+		// Convert to responses, carrying the caller's permission on each
+		responses := make([]MachineResponse, len(machines))
+		for i, machine := range machines {
+			responses[i] = FromModel(machine.Machine)
+			responses[i].Permission = machine.Permission
+		}
+		return responses, nil
+	})
 }
 
 // Update handles updating a machine. The update rules — owner-only

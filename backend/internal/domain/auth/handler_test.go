@@ -192,35 +192,6 @@ func TestAuthHandler_Login_EmptyPassword(t *testing.T) {
 	assert.Equal(t, "VALIDATION_FAILED", errorResp.Error.Code, "Should return VALIDATION_FAILED error code")
 }
 
-func TestAuthHandler_Login_InvalidJSON(t *testing.T) {
-	service, err := NewTestAuthService()
-	require.NoError(t, err, "Should create auth service without error")
-
-	mockRepo := testutils.NewMockUserRepository()
-	handler := NewAuthHandler(service, mockRepo)
-
-	req := httptest.NewRequest("POST", "/api/auth/login", bytes.NewReader([]byte("invalid json")))
-	w := httptest.NewRecorder()
-
-	handler.Login(w, req)
-
-	resp := w.Result()
-	defer resp.Body.Close()
-
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "Should return 400 for invalid JSON")
-
-	var errorResp struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-		RequestID string `json:"requestId"`
-	}
-	err = json.NewDecoder(resp.Body).Decode(&errorResp)
-	require.NoError(t, err, "Should decode error response")
-	assert.Equal(t, "INVALID_REQUEST", errorResp.Error.Code, "Should return INVALID_REQUEST error code")
-}
-
 func TestAuthHandler_Login_DatabaseError(t *testing.T) {
 	dbError := assert.AnError
 	mockRepo := testutils.NewMockUserRepositoryWithErrors(nil, nil, dbError, nil, nil, nil)

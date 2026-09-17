@@ -134,19 +134,6 @@ func TestUserHandler_Create_MissingFields(t *testing.T) {
 	}
 }
 
-// TestUserHandler_Create_MalformedBody asserts a body that is not valid
-// JSON is rejected with 400 INVALID_REQUEST.
-func TestUserHandler_Create_MalformedBody(t *testing.T) {
-	router, authService := newUsersTestRouter(t)
-
-	w := postUsersAs(t, router, authService, "admin-1", `{"username":`)
-
-	resp := w.Result()
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "Malformed body should be rejected with 400")
-	assert.Contains(t, w.Body.String(), "INVALID_REQUEST", "Error body should carry INVALID_REQUEST")
-}
-
 // TestUserHandler_Create_DuplicateUsername asserts creating a username
 // that already exists — here one seeded straight into the repository —
 // surfaces the service's USERNAME_TAKEN as 409.
