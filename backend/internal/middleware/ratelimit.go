@@ -15,8 +15,9 @@ import (
 func NewRateLimiter(requests int, window time.Duration) *RateLimiter {
 	return &RateLimiter{
 		store: &RateLimitStore{
-			mu:      sync.Mutex{},
-			entries: make(map[string]*RateLimitEntry),
+			mu:        sync.Mutex{},
+			entries:   make(map[string]*RateLimitEntry),
+			lastSweep: time.Now(),
 		},
 		requests: requests,
 		window:   window,
@@ -35,6 +36,19 @@ func (rl *RateLimiter) Allow(key string) bool {
 	defer rl.store.mu.Unlock()
 
 	now := time.Now()
+
+	// Amortized janitor: at most once per window, evict entries whose
+	// window started more than 2×window ago, so the map stays bounded
+	// by keys active in the last two windows. O(active keys) per
+	// window, not per request.
+	if now.Sub(rl.store.lastSweep) > rl.window {
+		for entryKey, entry := range rl.store.entries {
+			if now.Sub(entry.windowStart) > 2*rl.window {
+				delete(rl.store.entries, entryKey)
+			}
+		}
+		rl.store.lastSweep = now
+	}
 
 	entry, exists := rl.store.entries[key]
 	if !exists {
@@ -109,9 +123,13 @@ func (rl *RateLimiter) GetResetIn(key string) time.Duration {
 }
 
 // RateLimitStore stores rate limit information
+//
+// Entries are evicted lazily from Allow: lastSweep throttles the
+// sweep to at most one per window, so no background janitor runs.
 type RateLimitStore struct {
-	mu      sync.Mutex
-	entries map[string]*RateLimitEntry
+	mu        sync.Mutex
+	entries   map[string]*RateLimitEntry
+	lastSweep time.Time
 }
 
 // RateLimitEntry represents rate limit information for one key
@@ -134,9 +152,8 @@ func RateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
 			userID := contextutils.GetUserIDFromContext(r.Context())
 
 			if !rl.Allow(userID) {
-				w.Header().Set("Content-Type", "application/json")
 				rl.setRateLimitHeaders(w, 0, rl.GetResetIn(userID))
-				w.WriteHeader(http.StatusTooManyRequests)
+				apperrors.RespondWithError(w, apperrors.ErrRateLimitExceeded, contextutils.GetRequestID(r.Context()))
 				return
 			}
 
@@ -194,19 +211,4 @@ func clientIP(r *http.Request) string {
 		return host
 	}
 	return r.RemoteAddr
-}
-
-// Cleanup removes old entries from the store
-func (rl *RateLimiter) Cleanup() {
-	for {
-		time.Sleep(rl.window)
-		rl.store.mu.Lock()
-		now := time.Now()
-		for key, entry := range rl.store.entries {
-			if now.Sub(entry.windowStart) > rl.window*2 {
-				delete(rl.store.entries, key)
-			}
-		}
-		rl.store.mu.Unlock()
-	}
 }

@@ -105,7 +105,7 @@ func TestImageService_Delete_ClassifiesPodmanRefusals(t *testing.T) {
 	})
 }
 
-func TestImageService_Pull_ReturnsEngineReport(t *testing.T) {
+func TestImageService_PullWithProgress_ReturnsEngineReport(t *testing.T) {
 	report := &entities.ImagePullReport{ID: "nginx:latest"}
 	engine := &fakeImageEngine{
 		pullFn: func(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {
@@ -115,13 +115,13 @@ func TestImageService_Pull_ReturnsEngineReport(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Pull(context.Background(), "user", "machine", "nginx:latest", entities.ImagePullOptions{})
+	got, err := service.PullWithProgress(context.Background(), "user", "machine", "nginx:latest", entities.ImagePullOptions{}, nil)
 
 	require.NoError(t, err)
 	assert.Same(t, report, got)
 }
 
-func TestImageService_Pull_MapsFailureToPullFailed(t *testing.T) {
+func TestImageService_PullWithProgress_MapsFailureToPullFailed(t *testing.T) {
 	engine := &fakeImageEngine{
 		pullFn: func(string, entities.ImagePullOptions) (*entities.ImagePullReport, error) {
 			return nil, errors.New("registry unreachable")
@@ -129,13 +129,13 @@ func TestImageService_Pull_MapsFailureToPullFailed(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Pull(context.Background(), "user", "machine", "nginx:latest", entities.ImagePullOptions{})
+	got, err := service.PullWithProgress(context.Background(), "user", "machine", "nginx:latest", entities.ImagePullOptions{}, nil)
 
 	require.ErrorIs(t, err, appErrors.ErrImagePullFailed)
 	assert.Nil(t, got)
 }
 
-func TestImageService_Pull_MapsCancellationToOperationCancelled(t *testing.T) {
+func TestImageService_PullWithProgress_MapsCancellationToOperationCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	engine := &fakeImageEngine{
@@ -145,7 +145,7 @@ func TestImageService_Pull_MapsCancellationToOperationCancelled(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Pull(ctx, "user", "machine", "nginx:latest", entities.ImagePullOptions{})
+	got, err := service.PullWithProgress(ctx, "user", "machine", "nginx:latest", entities.ImagePullOptions{}, nil)
 
 	require.ErrorIs(t, err, appErrors.ErrOperationCancelled, "a cancelled pull must not masquerade as a pull failure")
 	assert.Nil(t, got)
@@ -154,7 +154,8 @@ func TestImageService_Pull_MapsCancellationToOperationCancelled(t *testing.T) {
 // TestImageService_PullWithProgress_ArmsTheProgressWriter pins the progress
 // seam: a pull with a progress callback hands the engine options carrying a
 // writer (podman streams its progress into it), so progress events flow
-// without the engine knowing about the NDJSON vocabulary.
+// without the engine knowing about the NDJSON vocabulary. Events arrive with
+// a zero operation ID — the streaming handler owns stamping it.
 func TestImageService_PullWithProgress_ArmsTheProgressWriter(t *testing.T) {
 	var writerArmed bool
 	var events []PullProgressEvent
@@ -176,6 +177,7 @@ func TestImageService_PullWithProgress_ArmsTheProgressWriter(t *testing.T) {
 	require.NotNil(t, got)
 	assert.True(t, writerArmed, "a progress callback must arm the pull options' writer")
 	require.Len(t, events, 1, "the engine's progress bytes must arrive as progress events")
+	assert.Empty(t, events[0].OperationID, "the adapter must not stamp the operation ID; the handler owns it")
 }
 
 func TestImageService_Prune_ReturnsEngineReports(t *testing.T) {

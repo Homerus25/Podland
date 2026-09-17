@@ -414,21 +414,6 @@ func TestMockServiceHelpers(t *testing.T) {
 	})
 }
 
-// TestMockPodmanConnection tests the mock Podman connection
-func TestMockPodmanConnection(t *testing.T) {
-	t.Run("GetMachineID", func(t *testing.T) {
-		conn := &MockPodmanConnection{MachineID: "test-machine"}
-		assert.Equal(t, "test-machine", conn.GetMachineID())
-	})
-
-	t.Run("Execute", func(t *testing.T) {
-		conn := &MockPodmanConnection{MachineID: "test-machine"}
-		result, err := conn.Execute("test-command", "arg1", "arg2")
-		assert.NoError(t, err)
-		assert.Contains(t, result.(string), "executed: test-command")
-	})
-}
-
 // TestMockConnectionManager_WithConnection pins the mock's
 // WithConnection behavior: fn runs once with a connection context and its
 // error crosses untouched; an injected acquisition error short-circuits

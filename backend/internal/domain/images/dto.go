@@ -103,12 +103,12 @@ type EventError struct {
 	Message string `json:"message"`
 }
 
-// NewProgressEvent creates a new progress event
-func NewProgressEvent(operationID, machineID, status, message string, current, total int) PullProgressEvent {
+// NewProgressEvent creates a new progress event. The operation ID is
+// left zero here and stamped by the handler that owns the operation.
+func NewProgressEvent(machineID, status, message string, current, total int) PullProgressEvent {
 	return PullProgressEvent{
-		OperationID: operationID,
-		Type:        EventTypeProgress,
-		MachineID:   machineID,
+		Type:      EventTypeProgress,
+		MachineID: machineID,
 		State: &EventState{
 			Current: current,
 			Total:   total,

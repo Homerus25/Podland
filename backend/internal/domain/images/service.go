@@ -3,7 +3,6 @@ package images
 import (
 	"context"
 	"fmt"
-	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
@@ -65,19 +64,13 @@ func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID st
 	})
 }
 
-// Pull pulls an image on the specified machine.
-func (s *ImageService) Pull(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {
-	return s.PullWithProgress(ctx, userID, machineID, rawImage, opts, nil)
-}
-
 // PullWithProgress pulls an image on the specified machine and reports progress via the provided callback.
 func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, rawImage string, opts entities.ImagePullOptions, progressWriter func(event PullProgressEvent)) (*entities.ImagePullReport, error) {
 	// Set up progress writer if callback is provided
 	if progressWriter != nil {
 		opts.Writer = &progressAdapter{
-			writer:      progressWriter,
-			machineID:   machineID,
-			operationID: generateOperationID(),
+			writer:    progressWriter,
+			machineID: machineID,
 		}
 	}
 
@@ -116,20 +109,14 @@ func (s *ImageService) Prune(ctx context.Context, userID, machineID string) ([]*
 
 // progressAdapter adapts podman progress output to our progress event format
 type progressAdapter struct {
-	writer      func(event PullProgressEvent)
-	machineID   string
-	operationID string
+	writer    func(event PullProgressEvent)
+	machineID string
 }
 
 // Write implements io.Writer to capture podman progress output
 func (p *progressAdapter) Write(data []byte) (int, error) {
 	// For now, we'll emit basic progress events
 	// The actual podman progress format may vary, so we emit a generic status update
-	p.writer(NewProgressEvent(p.operationID, p.machineID, "pulling", string(data), 0, 0))
+	p.writer(NewProgressEvent(p.machineID, "pulling", string(data), 0, 0))
 	return len(data), nil
-}
-
-// generateOperationID generates a unique operation ID for tracking pull operations
-func generateOperationID() string {
-	return fmt.Sprintf("pull-%d", time.Now().UnixNano())
 }

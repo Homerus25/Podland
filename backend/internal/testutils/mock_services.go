@@ -50,52 +50,6 @@ func (m *MockEncryptionService) EncryptSSHKey(privateKey string) ([]byte, string
 	return encrypted, fingerprint, nil
 }
 
-// MockPodmanConnectionService implements a mock Podman connection service
-type MockPodmanConnectionService struct {
-	connectError error
-	closeError   error
-}
-
-func NewMockPodmanConnectionService() *MockPodmanConnectionService {
-	return &MockPodmanConnectionService{}
-}
-
-func NewMockPodmanConnectionServiceWithErrors(connectErr, closeErr error) *MockPodmanConnectionService {
-	return &MockPodmanConnectionService{
-		connectError: connectErr,
-		closeError:   closeErr,
-	}
-}
-
-func (m *MockPodmanConnectionService) Connect(ctx context.Context, machineID string, sshConfig any) (any, error) {
-	if m.connectError != nil {
-		return nil, m.connectError
-	}
-	// Return a mock connection
-	return &MockPodmanConnection{MachineID: machineID}, nil
-}
-
-func (m *MockPodmanConnectionService) Close(ctx context.Context, connection any) error {
-	if m.closeError != nil {
-		return m.closeError
-	}
-	return nil
-}
-
-// MockPodmanConnection represents a mock Podman connection
-type MockPodmanConnection struct {
-	MachineID string
-}
-
-func (m *MockPodmanConnection) GetMachineID() string {
-	return m.MachineID
-}
-
-func (m *MockPodmanConnection) Execute(command string, args ...any) (any, error) {
-	// Simple mock execution - just return the command
-	return fmt.Sprintf("executed: %s %v", command, args), nil
-}
-
 // MockTestConnectionCall records a single TestConnection invocation so
 // tests can assert the probe received the expected (defaulted) raw
 // credentials. Defined locally (rather than reusing a domain type) so
