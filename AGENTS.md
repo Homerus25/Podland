@@ -1,6 +1,6 @@
 # Agent Configuration for Podland
 
-Podman Management Web-App. Issues are tracked as local markdown in `.scratch/` (each issue is an `issue.md` in a numbered directory; parent epics link their slices).
+Podman Management Web-App. Issues are tracked on Forgejo, via the forgejo MCP tools — see `docs/agents/issue-tracker.md`.
 
 ## Navigation
 
