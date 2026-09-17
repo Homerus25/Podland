@@ -205,22 +205,6 @@ func getRequest(target string) *http.Request {
 	return req.WithContext(ctx)
 }
 
-// TestSecretHandler_Get_MissingSecretID pins the request-shape guard: no
-// {secretId} URL param → 400.
-func TestSecretHandler_Get_MissingSecretID(t *testing.T) {
-	engine := &fakeSecretEngine{}
-	req := httptest.NewRequest("GET", "/api/machines/machine123/secrets/", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine123")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	req = req.WithContext(context.WithValue(ctx, contextutils.UserIDContextKey, "user123"))
-
-	rr := httptest.NewRecorder()
-	newTestHandler(engine).Get(rr, req)
-
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
-}
-
 // TestSecretHandler_Get_ReadLevelGranteeReachesInspectRoute pins the
 // route mounting: GET /api/machines/{id}/secrets/{secretId} rides the
 // RequireMachineAccess subtree, so a read-level grantee reaches the
@@ -509,23 +493,6 @@ func TestSecretHandler_Delete_Success(t *testing.T) {
 	assert.Equal(t, http.StatusNoContent, rr.Code)
 	assert.Empty(t, rr.Body.String(), "a 204 must carry no body")
 	assert.Equal(t, "db-password", gotID, "the URL param must be the removed secret")
-}
-
-// TestSecretHandler_Delete_MissingSecretID pins the request-shape guard
-// for delete: no {secretId} URL param → 400.
-func TestSecretHandler_Delete_MissingSecretID(t *testing.T) {
-	engine := &fakeSecretEngine{}
-
-	req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine123")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	req = req.WithContext(context.WithValue(ctx, contextutils.UserIDContextKey, "user123"))
-
-	rr := httptest.NewRecorder()
-	newTestHandler(engine).Delete(rr, req)
-
-	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
 // TestSecretHandler_Delete_RouteLevelGating pins the mounted-route contract

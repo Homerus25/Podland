@@ -4,12 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"strconv"
 
-	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
-	"github.com/go-chi/chi/v5"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -50,57 +47,23 @@ func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // parseContainerListOptions reads the list query parameters podman
 // understands (all, filters, size, namespace, sync, external, last,
-// latest). Malformed values are ignored, matching the endpoints'
-// documented behavior.
+// latest). The bool/int flags cross web's lenient query helpers:
+// malformed values fall back to the zero defaults.
 func parseContainerListOptions(r *http.Request) entities.ContainerListOptions {
 	opts := entities.ContainerListOptions{}
-
-	if allParam := r.URL.Query().Get("all"); allParam != "" {
-		if all, err := strconv.ParseBool(allParam); err == nil {
-			opts.All = all
-		}
-	}
+	opts.All = web.QueryBool(r, "all", false)
 
 	if filtersParam := r.URL.Query().Get("filters"); filtersParam != "" {
 		opts.Filters = make(map[string][]string)
 		opts.Filters["custom"] = []string{filtersParam}
 	}
 
-	if sizeParam := r.URL.Query().Get("size"); sizeParam != "" {
-		if size, err := strconv.ParseBool(sizeParam); err == nil {
-			opts.Size = size
-		}
-	}
-
-	if namespaceParam := r.URL.Query().Get("namespace"); namespaceParam != "" {
-		if namespace, err := strconv.ParseBool(namespaceParam); err == nil {
-			opts.Namespace = namespace
-		}
-	}
-
-	if syncParam := r.URL.Query().Get("sync"); syncParam != "" {
-		if sync, err := strconv.ParseBool(syncParam); err == nil {
-			opts.Sync = sync
-		}
-	}
-
-	if externalParam := r.URL.Query().Get("external"); externalParam != "" {
-		if external, err := strconv.ParseBool(externalParam); err == nil {
-			opts.External = external
-		}
-	}
-
-	if lastParam := r.URL.Query().Get("last"); lastParam != "" {
-		if last, err := strconv.Atoi(lastParam); err == nil {
-			opts.Last = last
-		}
-	}
-
-	if latestParam := r.URL.Query().Get("latest"); latestParam != "" {
-		if latest, err := strconv.ParseBool(latestParam); err == nil {
-			opts.Latest = latest
-		}
-	}
+	opts.Size = web.QueryBool(r, "size", false)
+	opts.Namespace = web.QueryBool(r, "namespace", false)
+	opts.Sync = web.QueryBool(r, "sync", false)
+	opts.External = web.QueryBool(r, "external", false)
+	opts.Last = web.QueryInt(r, "last", 0)
+	opts.Latest = web.QueryBool(r, "latest", false)
 
 	return opts
 }
@@ -120,9 +83,9 @@ func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
 // Get handles getting a container by ID
 func (h *ContainerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerGetResponse, error) {
-		containerID := chi.URLParam(r, "containerId")
-		if containerID == "" {
-			return ContainerGetResponse{}, errors.NewAppError("MISSING_CONTAINER_ID", "Container ID is required", http.StatusBadRequest)
+		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
+		if guard != nil {
+			return ContainerGetResponse{}, guard
 		}
 
 		containerData, err := h.service.Get(ctx, userID, machineID, containerID)
@@ -136,9 +99,9 @@ func (h *ContainerHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Start handles starting a container
 func (h *ContainerHandler) Start(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerStartResponse, error) {
-		containerID := chi.URLParam(r, "containerId")
-		if containerID == "" {
-			return nil, errors.NewAppError("MISSING_CONTAINER_ID", "Container ID is required", http.StatusBadRequest)
+		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
+		if guard != nil {
+			return nil, guard
 		}
 
 		return h.service.Start(ctx, userID, machineID, containerID)
@@ -148,9 +111,9 @@ func (h *ContainerHandler) Start(w http.ResponseWriter, r *http.Request) {
 // Stop handles stopping a container
 func (h *ContainerHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerStopResponse, error) {
-		containerID := chi.URLParam(r, "containerId")
-		if containerID == "" {
-			return nil, errors.NewAppError("MISSING_CONTAINER_ID", "Container ID is required", http.StatusBadRequest)
+		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
+		if guard != nil {
+			return nil, guard
 		}
 
 		return h.service.Stop(ctx, userID, machineID, containerID)
@@ -160,19 +123,12 @@ func (h *ContainerHandler) Stop(w http.ResponseWriter, r *http.Request) {
 // Delete handles deleting a container
 func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
-		containerID := chi.URLParam(r, "containerId")
-		if containerID == "" {
-			return struct{}{}, errors.NewAppError("MISSING_CONTAINER_ID", "Container ID is required", http.StatusBadRequest)
+		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
+		if guard != nil {
+			return struct{}{}, guard
 		}
 
-		// A malformed force flag is ignored (deletes as unforced),
-		// matching the documented behavior of this endpoint.
-		force := false
-		if forceParam := r.URL.Query().Get("force"); forceParam != "" {
-			if parsed, err := strconv.ParseBool(forceParam); err == nil {
-				force = parsed
-			}
-		}
+		force := web.QueryBool(r, "force", false)
 
 		return struct{}{}, h.service.Delete(ctx, userID, machineID, containerID, force)
 	})
@@ -191,9 +147,9 @@ func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	containerID := chi.URLParam(r, "containerId")
+	containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 
-	if streaming.ParseFollow(r) && containerID != "" {
+	if guard == nil && streaming.ParseFollow(r) {
 		slog.InfoContext(r.Context(), "streamLogs", slog.String("containerID", containerID), slog.Bool("follow", true))
 		streaming.RunLogStream(w, r, streaming.LogStreamOp{
 			Since: since,
@@ -206,8 +162,8 @@ func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerLogsResponse, error) {
-		if containerID == "" {
-			return nil, errors.NewAppError("MISSING_CONTAINER_ID", "Container ID is required", http.StatusBadRequest)
+		if guard != nil {
+			return nil, guard
 		}
 		return h.service.GetLogs(ctx, userID, machineID, containerID, since, tail)
 	})

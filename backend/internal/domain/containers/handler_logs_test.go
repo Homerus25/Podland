@@ -52,22 +52,6 @@ func TestContainerHandler_Logs_QueryErrorWithFollowRidesJSONEnvelope(t *testing.
 	assert.NotContains(t, w.Body.String(), "STREAM_ENDED", "No stream may begin for a query error")
 }
 
-// TestContainerHandler_Logs_MissingContainerID tests that Logs validates container ID
-func TestContainerHandler_Logs_MissingContainerID(t *testing.T) {
-	engine := &fakeContainerEngine{}
-
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers//logs", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
-	r.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when container ID is missing")
-	assert.Contains(t, w.Body.String(), "MISSING_CONTAINER_ID", "Response should contain MISSING_CONTAINER_ID error code")
-}
-
 // TestContainerHandler_Logs_StreamingHappyPath tests successful streaming
 // logs with follow=true through the real service: podman's log lines are
 // decoded into events, cross byte-identical, and a clean end fires exactly

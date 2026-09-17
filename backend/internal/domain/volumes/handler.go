@@ -11,12 +11,10 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"strconv"
 	"strings"
 
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/web"
-	"github.com/go-chi/chi/v5"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -65,9 +63,9 @@ func (h *VolumeHandler) List(w http.ResponseWriter, r *http.Request) {
 // Get handles inspecting a single volume on a machine
 func (h *VolumeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (VolumeInspectResponse, error) {
-		volumeName := chi.URLParam(r, "volumeName")
-		if volumeName == "" {
-			return VolumeInspectResponse{}, errors.NewAppError("MISSING_VOLUME_NAME", "Volume name is required", http.StatusBadRequest)
+		volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
+		if guard != nil {
+			return VolumeInspectResponse{}, guard
 		}
 
 		report, err := h.service.Get(ctx, userID, machineID, volumeName)
@@ -105,19 +103,12 @@ func (h *VolumeHandler) Create(w http.ResponseWriter, r *http.Request) {
 // VOLUME_IN_USE. Returns 204 with an empty body.
 func (h *VolumeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
-		volumeName := chi.URLParam(r, "volumeName")
-		if volumeName == "" {
-			return struct{}{}, errors.NewAppError("MISSING_VOLUME_NAME", "Volume name is required", http.StatusBadRequest)
+		volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
+		if guard != nil {
+			return struct{}{}, guard
 		}
 
-		force := false
-		if raw := r.URL.Query().Get("force"); raw != "" {
-			var err error
-			force, err = strconv.ParseBool(raw)
-			if err != nil {
-				return struct{}{}, errors.ErrInvalidRequest.WithMessage("force must be a boolean")
-			}
-		}
+		force := web.QueryBool(r, "force", false)
 
 		return struct{}{}, h.service.Delete(ctx, userID, machineID, volumeName, force)
 	})
@@ -151,9 +142,9 @@ func (h *VolumeHandler) Prune(w http.ResponseWriter, r *http.Request) {
 // status — the connection just truncates.
 func (h *VolumeHandler) Export(w http.ResponseWriter, r *http.Request) {
 	web.HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
-		volumeName := chi.URLParam(r, "volumeName")
-		if volumeName == "" {
-			return errors.NewAppError("MISSING_VOLUME_NAME", "Volume name is required", http.StatusBadRequest)
+		volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
+		if guard != nil {
+			return guard
 		}
 
 		w.Header().Set("Content-Type", "application/x-tar")
@@ -180,9 +171,9 @@ func (h *VolumeHandler) Export(w http.ResponseWriter, r *http.Request) {
 // VOLUME_UPLOAD_TOO_LARGE. Temp files are removed on every path.
 func (h *VolumeHandler) Populate(w http.ResponseWriter, r *http.Request) {
 	web.HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
-		volumeName := chi.URLParam(r, "volumeName")
-		if volumeName == "" {
-			return errors.NewAppError("MISSING_VOLUME_NAME", "Volume name is required", http.StatusBadRequest)
+		volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
+		if guard != nil {
+			return guard
 		}
 
 		r.Body = http.MaxBytesReader(w, r.Body, h.maxUploadBytes)

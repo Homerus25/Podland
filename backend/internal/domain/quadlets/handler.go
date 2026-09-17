@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
@@ -29,15 +28,6 @@ func NewQuadletHandler(service *QuadletService) *QuadletHandler {
 	return &QuadletHandler{
 		service: service,
 	}
-}
-
-// missingQuadletID is the guard the quadlet-scoped endpoints share:
-// the {quadletId} URL param is required.
-func missingQuadletID(r *http.Request) error {
-	if chi.URLParam(r, "quadletId") == "" {
-		return errors.NewAppError("MISSING_QUADLET_ID", "Quadlet ID is required", http.StatusBadRequest)
-	}
-	return nil
 }
 
 // List handles listing quadlets
@@ -66,18 +56,20 @@ func (h *QuadletHandler) Create(w http.ResponseWriter, r *http.Request) {
 // Get handles getting a quadlet by ID
 func (h *QuadletHandler) Get(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletGetResponse, error) {
-		if err := missingQuadletID(r); err != nil {
-			return nil, err
+		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
+		if guard != nil {
+			return nil, guard
 		}
-		return h.service.Get(ctx, userID, machineID, chi.URLParam(r, "quadletId"))
+		return h.service.Get(ctx, userID, machineID, quadletID)
 	})
 }
 
 // Update handles updating a quadlet
 func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletGetResponse, error) {
-		if err := missingQuadletID(r); err != nil {
-			return nil, err
+		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
+		if guard != nil {
+			return nil, guard
 		}
 
 		var request QuadletUpdateRequest
@@ -85,7 +77,7 @@ func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return nil, appErr
 		}
 
-		return h.service.Update(ctx, userID, machineID, chi.URLParam(r, "quadletId"), request)
+		return h.service.Update(ctx, userID, machineID, quadletID, request)
 	})
 }
 
@@ -94,24 +86,13 @@ func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
 // values leave the defaults in place.
 func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
-		if err := missingQuadletID(r); err != nil {
-			return struct{}{}, err
-		}
-		quadletID := chi.URLParam(r, "quadletId")
-
-		force := false
-		if forceParam := r.URL.Query().Get("force"); forceParam != "" {
-			if parsed, err := strconv.ParseBool(forceParam); err == nil {
-				force = parsed
-			}
+		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
+		if guard != nil {
+			return struct{}{}, guard
 		}
 
-		stop := true
-		if stopParam := r.URL.Query().Get("stop"); stopParam != "" {
-			if parsed, err := strconv.ParseBool(stopParam); err == nil {
-				stop = parsed
-			}
-		}
+		force := web.QueryBool(r, "force", false)
+		stop := web.QueryBool(r, "stop", true)
 
 		return struct{}{}, h.service.Delete(ctx, userID, machineID, quadletID, force, stop)
 	})
@@ -123,10 +104,11 @@ func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // QUADLET_NOT_FOUND (404) / CONNECTION_FAILED (502) on error.
 func (h *QuadletHandler) Start(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletLifecycleResponse, error) {
-		if err := missingQuadletID(r); err != nil {
-			return nil, err
+		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
+		if guard != nil {
+			return nil, guard
 		}
-		return h.service.Start(ctx, userID, machineID, chi.URLParam(r, "quadletId"))
+		return h.service.Start(ctx, userID, machineID, quadletID)
 	})
 }
 
@@ -135,10 +117,11 @@ func (h *QuadletHandler) Start(w http.ResponseWriter, r *http.Request) {
 // query params (doku/description_quadlets_api.md:194-196).
 func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletLifecycleResponse, error) {
-		if err := missingQuadletID(r); err != nil {
-			return nil, err
+		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
+		if guard != nil {
+			return nil, guard
 		}
-		return h.service.Stop(ctx, userID, machineID, chi.URLParam(r, "quadletId"), parseLifecycleOptions(r))
+		return h.service.Stop(ctx, userID, machineID, quadletID, parseLifecycleOptions(r))
 	})
 }
 
@@ -147,28 +130,22 @@ func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
 // query params (doku/description_quadlets_api.md:223-225).
 func (h *QuadletHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletLifecycleResponse, error) {
-		if err := missingQuadletID(r); err != nil {
-			return nil, err
+		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
+		if guard != nil {
+			return nil, guard
 		}
-		return h.service.Restart(ctx, userID, machineID, chi.URLParam(r, "quadletId"), parseLifecycleOptions(r))
+		return h.service.Restart(ctx, userID, machineID, quadletID, parseLifecycleOptions(r))
 	})
 }
 
 // parseLifecycleOptions reads the `force` (bool) and `timeout` (int, seconds)
-// query parameters for stop/restart. force defaults to false; an unparseable
-// value is ignored (stays false), matching the Delete handler convention.
-// timeout defaults to 0 (unset); an unparseable or negative value is ignored.
+// query parameters for stop/restart through web's lenient helpers.
+// force defaults to false; timeout defaults to 0 (unset) — positivity is
+// this domain's judgment, so a non-positive value stays unset.
 func parseLifecycleOptions(r *http.Request) LifecycleOptions {
-	opts := LifecycleOptions{}
-	if forceParam := r.URL.Query().Get("force"); forceParam != "" {
-		if parsed, err := strconv.ParseBool(forceParam); err == nil {
-			opts.Force = parsed
-		}
-	}
-	if timeoutParam := r.URL.Query().Get("timeout"); timeoutParam != "" {
-		if parsed, err := strconv.Atoi(timeoutParam); err == nil && parsed > 0 {
-			opts.Timeout = parsed
-		}
+	opts := LifecycleOptions{Force: web.QueryBool(r, "force", false)}
+	if t := web.QueryInt(r, "timeout", 0); t > 0 {
+		opts.Timeout = t
 	}
 	return opts
 }
@@ -186,9 +163,9 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	quadletID := chi.URLParam(r, "quadletId")
+	quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
 
-	if streaming.ParseFollow(r) && quadletID != "" {
+	if guard == nil && streaming.ParseFollow(r) {
 		slog.InfoContext(r.Context(), "streamLogs", slog.String("quadletID", quadletID), slog.Bool("follow", true))
 		streaming.RunLogStream(w, r, streaming.LogStreamOp{
 			Since: since,
@@ -201,8 +178,8 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletLogsResponse, error) {
-		if quadletID == "" {
-			return nil, errors.NewAppError("MISSING_QUADLET_ID", "Quadlet ID is required", http.StatusBadRequest)
+		if guard != nil {
+			return nil, guard
 		}
 		return h.service.GetLogs(ctx, userID, machineID, quadletID, since, tail)
 	})
@@ -240,7 +217,7 @@ func (h *QuadletHandler) Import(w http.ResponseWriter, r *http.Request) {
 // fact like that stays handler-side; the streaming envelope (Begin + Run)
 // owns everything else.
 func (h *QuadletHandler) AutoUpdate(w http.ResponseWriter, r *http.Request) {
-	dryRun, _ := strconv.ParseBool(r.URL.Query().Get("dryRun"))
+	dryRun := web.QueryBool(r, "dryRun", false)
 
 	operationID := uuid.New().String()
 	slog.InfoContext(r.Context(), "AutoUpdate quadlets",

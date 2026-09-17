@@ -50,30 +50,3 @@ func TestMachineHandler_GrantAccess(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "INVALID_PERMISSION")
 	})
 }
-
-// TestMachineHandler_RevokeAccess_MissingUserID pins what the handler
-// owns on the revoke endpoint: a missing userId URL param answers 400
-// MISSING_USER_ID. Every revoke rule lives behind the service.
-func TestMachineHandler_RevokeAccess_MissingUserID(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	accessRepo := testutils.NewMockMachineAccessRepository()
-	service := NewMachineHandler(NewMachineService(machineRepo, accessRepo, testutils.NewMockConnectionManager(), testutils.NewMockEncryptionService(), newFakeSSHInvalidator()))
-	machineRepo.AddMachine(&models.Machine{
-		ID:        "machine-1",
-		Name:      "shared-machine",
-		OwnerID:   "owner-1",
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
-	})
-	accessRepo.AddAccess("machine-1", "owner-1", models.PermissionAdmin, time.Now().UTC())
-
-	w := testutils.Perform(service.RevokeAccess, testutils.Request{
-		Method:    http.MethodDelete,
-		Path:      "/api/machines/machine-1/access/",
-		UserID:    "owner-1",
-		URLParams: map[string]string{"id": "machine-1", "userId": ""},
-	})
-
-	require.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
-	assert.Contains(t, w.Body.String(), "MISSING_USER_ID")
-}

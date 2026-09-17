@@ -200,19 +200,21 @@ enforced while streaming. Temp files are removed on every path.
 
 Remove a volume by exact name. Query flag `force` (default false): with
 `force=true` podman stops dependent containers first and removes the
-volume anyway.
+volume anyway. A non-boolean `force` value is ignored (treated as
+false), matching every other boolean query flag in the API.
 
 **Authentication:** Required
 
 **Access:** Write level on `{id}`.
 
 **Query Parameters:**
-- `force` (boolean, optional, default false)
+- `force` (boolean, optional, default false; non-boolean values are
+  ignored and treated as false)
 
 **Response (Success - 204):** no body.
 
 **Response (Error):**
-- 400: `MISSING_VOLUME_NAME`, `INVALID_REQUEST` (non-boolean `force`)
+- 400: `MISSING_VOLUME_NAME`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
 - 404: `MACHINE_NOT_FOUND`, `VOLUME_NOT_FOUND`

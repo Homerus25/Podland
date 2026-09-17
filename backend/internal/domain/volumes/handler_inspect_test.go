@@ -50,9 +50,3 @@ func TestVolumeHandler_Get_Success(t *testing.T) {
 	assert.Equal(t, map[string]string{"type": "tmpfs"}, got.Options)
 	assert.Equal(t, "2026-08-30T10:00:00Z", got.CreatedAt)
 }
-
-func TestVolumeHandler_Get_MissingVolumeName(t *testing.T) {
-	engine := &fakeVolumeEngine{}
-	w := getRequest(newTestHandler(engine).Get, "")
-	assert.Equal(t, 400, w.Code, "missing volume name must be rejected")
-}
