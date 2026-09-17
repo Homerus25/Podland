@@ -37,7 +37,7 @@ Content-Type: application/json
 
 **Response (Error):**
 - 401 Unauthorized: Invalid credentials (`INVALID_CREDENTIALS`)
-- 400 Bad Request: Invalid request format
+- 400 Bad Request: Malformed JSON body (`INVALID_REQUEST`, "Invalid request body"); missing or empty username/password (`VALIDATION_FAILED`, carrying the validator's message)
 
 ---
 

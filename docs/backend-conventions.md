@@ -26,8 +26,18 @@ closest sibling that already exists. Rulings so far:
   Every domain has migrated (volumes, containers, quadlets, secrets,
   images, machines subtree): the subtree handlers are envelope closures
   across the board, machines update/delete/status/access included.
-  Exceptions that keep their own shape:
-  machines Create/List (outside the subtree, no machine ID).
+  JSON endpoints outside the machine subtree (auth
+  Login/Refresh/Logout/Status, users Create, machines Create/List)
+  cross the user-scoped twin `web.HandleUser` (`internal/web`): it
+  passes the context user ID through as-is — empty is a legal state
+  (Status answers anonymous callers), the JWT middleware is the
+  guarantor for the routes that need a caller, so there is no
+  missing-identity invariant — and shares `Handle`'s error-mapping and
+  success-write core, including the 204-skip. The auth handler
+  (`internal/domain/auth/handler.go`) is the user-scoped reference:
+  its body-bearing closures cross `web.Decode` like every other
+  endpoint, and cookies are set or cleared inside the closure (headers
+  only — the envelope owns the status line and body).
 - **NDJSON streaming endpoints (the streaming envelope)** —
   `streaming.Begin` + `streaming.Run` (`internal/streaming/`) are the
   single entry point for every NDJSON endpoint (container logs follow

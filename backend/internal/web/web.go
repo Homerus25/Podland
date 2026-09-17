@@ -1,10 +1,16 @@
 // Package web owns the endpoint envelope: the uniform response contract
-// every machine-scoped endpoint speaks. Failures surface as the
+// every JSON endpoint speaks. Failures surface as the
 // {requestId, error{code, message}} envelope; successes are wire-shaped —
-// a DTO with an explicit status for JSON endpoints (Handle), a byte
-// stream or multipart upload for binary endpoints (HandleStream).
-// Handlers cross this seam instead of re-assembling the identity guards
-// and error mapping per endpoint.
+// a DTO with an explicit status. Three entry points share one private
+// core for the error-mapping and success-write tail: Handle for
+// machine-scoped JSON endpoints (behind the /api/machines/{id} subtree
+// middleware), HandleStream for machine-scoped endpoints whose success
+// is a byte stream or multipart upload, and HandleUser for user-scoped
+// JSON endpoints outside the subtree (auth, users, machines
+// Create/List), where the user ID is passed through as-is — empty is a
+// legal state there, and there is no machine ID. Handlers cross this
+// seam instead of re-assembling the identity guards and error mapping
+// per endpoint.
 //
 // CONTEXT.md "endpoint envelope" is the glossary entry for this contract.
 package web
@@ -29,13 +35,13 @@ import (
 // the result with successStatus — or the error envelope when call
 // fails.
 //
-// Within call, everything route-specific stays plain Go: body decode,
-// extra URL params (e.g. volumeName), query parsing. Validation
-// failures are returned as *appErrors.AppError values (the sentinels
-// from internal/errors, or NewAppError for route-specific codes) and
-// ride the same envelope. Both errors.As and direct returns work:
-// wrapped AppErrors are unwrapped, so services may fmt.Errorf("%w", …)
-// a sentinel while adding context for logs.
+// Within call, everything route-specific stays plain Go: body decode
+// (cross web.Decode), extra URL params (e.g. volumeName), query parsing.
+// Validation failures are returned as *appErrors.AppError values (the
+// sentinels from internal/errors, or NewAppError for route-specific
+// codes) and ride the same envelope. Both errors.As and direct returns
+// work: wrapped AppErrors are unwrapped, so services may
+// fmt.Errorf("%w", …) a sentinel while adding context for logs.
 //
 // successStatus of http.StatusNoContent skips JSON encoding (the
 // closure should return a zero value); any other status encodes the
@@ -61,25 +67,7 @@ func Handle[T any](w http.ResponseWriter, r *http.Request, successStatus int, ca
 	}
 
 	result, err := call(r.Context(), userID, machineID)
-	if err != nil {
-		if appErr, ok := errors.AsType[*appErrors.AppError](err); ok {
-			appErrors.RespondWithError(w, appErr, requestID)
-			return
-		}
-		slog.ErrorContext(r.Context(), "endpoint envelope: unexpected error",
-			slog.Any("requestID", requestID),
-			slog.Any("error", err))
-		appErrors.RespondWithError(w, appErrors.ErrInternalError, requestID)
-		return
-	}
-
-	if successStatus == http.StatusNoContent {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(successStatus)
-	json.NewEncoder(w).Encode(result)
+	respond(w, r, successStatus, result, err)
 }
 
 // HandleStream runs a machine-scoped endpoint whose success is a byte
@@ -123,16 +111,80 @@ func HandleStream(w http.ResponseWriter, r *http.Request, stream func(ctx contex
 	}
 
 	if err := stream(r.Context(), userID, machineID); err != nil {
-		if appErr, ok := errors.AsType[*appErrors.AppError](err); ok {
-			appErrors.RespondWithError(w, appErr, requestID)
-			return
-		}
-		slog.ErrorContext(r.Context(), "endpoint envelope: unexpected error",
-			slog.Any("requestID", requestID),
-			slog.Any("error", err))
-		appErrors.RespondWithError(w, appErrors.ErrInternalError, requestID)
+		respondError(w, r, err)
+	}
+}
+
+// HandleUser runs a user-scoped JSON endpoint outside the machine
+// subtree (auth Login/Refresh/Logout/Status, users Create, machines
+// Create/List) through the endpoint envelope. It passes the caller's
+// user ID from the request context to call as-is — empty included — and
+// writes the result with successStatus, or the error envelope when call
+// fails.
+//
+// Unlike Handle and HandleStream there is no identity invariant: an
+// empty user ID is a legal state, because the auth surface answers
+// anonymous callers (Status) and the refresh/logout paths authenticate
+// by cookie, not JWT. Routes that need a caller rely on the JWT
+// middleware upstream; a miswire surfaces through the envelope's
+// unexpected-error log when the closure's service call fails. There is
+// no machine ID for the same reason — these endpoints sit outside the
+// /api/machines/{id} subtree.
+//
+// Within call, everything route-specific stays plain Go: body decode
+// (cross web.Decode), cookie reading, and header writes — cookies are
+// set inside the closure by capturing the writer; the envelope owns the
+// status line and body. Validation failures are returned as
+// *appErrors.AppError values (the sentinels from internal/errors, or
+// NewAppError for route-specific codes) and ride the same envelope;
+// wrapped AppErrors are unwrapped, and anything else answers the same
+// logged 500 fallback the other entry points use.
+//
+// successStatus of http.StatusNoContent skips JSON encoding (the
+// closure should return a zero value); any other status encodes the
+// returned value as JSON.
+func HandleUser[T any](w http.ResponseWriter, r *http.Request, successStatus int, call func(ctx context.Context, userID string) (T, error)) {
+	userID := contextutils.GetUserIDFromContext(r.Context())
+
+	result, err := call(r.Context(), userID)
+	respond(w, r, successStatus, result, err)
+}
+
+// respond is the envelope's shared success/error tail for the JSON
+// entry points (Handle, HandleUser): an error maps through respondError,
+// a success writes successStatus — 204 skips encoding — with the result
+// as JSON.
+func respond[T any](w http.ResponseWriter, r *http.Request, successStatus int, result T, err error) {
+	if err != nil {
+		respondError(w, r, err)
 		return
 	}
+
+	if successStatus == http.StatusNoContent {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(successStatus)
+	json.NewEncoder(w).Encode(result)
+}
+
+// respondError is the envelope's shared error tail: a *AppError —
+// wrapped included, unwrapped via errors.AsType — answers with its own
+// status, code, and message; any other error logs once (requestID +
+// error) and answers the generic 500 fallback so internal detail never
+// leaks to the wire.
+func respondError(w http.ResponseWriter, r *http.Request, err error) {
+	requestID := contextutils.GetRequestID(r.Context())
+
+	if appErr, ok := errors.AsType[*appErrors.AppError](err); ok {
+		appErrors.RespondWithError(w, appErr, requestID)
+		return
+	}
+	slog.ErrorContext(r.Context(), "endpoint envelope: unexpected error",
+		slog.Any("requestID", requestID),
+		slog.Any("error", err))
+	appErrors.RespondWithError(w, appErrors.ErrInternalError, requestID)
 }
 
 // validate is the package-level shared validator instance behind Decode.

@@ -1,7 +1,6 @@
 package errors
 
 import (
-	stderrors "errors"
 	"fmt"
 	"net/http"
 )
@@ -166,13 +165,3 @@ var (
 	ErrValidationFailed = NewAppError("VALIDATION_FAILED", "Validation failed", http.StatusBadRequest)
 	ErrNotImplemented   = NewAppError("NOT_IMPLEMENTED", "Feature not implemented", http.StatusNotImplemented)
 )
-
-// ToAppError converts an error to its AppError: a (possibly wrapped)
-// *AppError comes back unwrapped; anything else becomes the
-// internal-error sentinel.
-func ToAppError(err error) *AppError {
-	if appErr, ok := stderrors.AsType[*AppError](err); ok {
-		return appErr
-	}
-	return ErrInternalError
-}

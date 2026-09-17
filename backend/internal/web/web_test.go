@@ -269,6 +269,124 @@ func TestHandleStream_MissingMachineIDIsAnInvariantViolation(t *testing.T) {
 	assert.Equal(t, "INTERNAL_ERROR", env.Error.Code)
 }
 
+// HandleUser pins — the user-scoped twin for JSON endpoints outside the
+// machine subtree (auth, users, machines Create/List). Same error
+// mapping and success write as Handle, but the user ID is passed through
+// as-is: empty is a legal state (the auth surface answers anonymous
+// callers), so there is no identity invariant and the closure always
+// runs.
+
+// serveUser runs a user-scoped endpoint the way the router does:
+// request-scoped context values, no chi URL params.
+func serveUser(t *testing.T, handler http.HandlerFunc, userID string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	ctx := contextutils.SetRequestID(context.Background(), "test-request-id")
+	if userID != "" {
+		ctx = contextutils.SetUserID(ctx, userID)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil).WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	handler(w, req)
+	return w
+}
+
+func TestHandleUser_PassesUserIDThrough(t *testing.T) {
+	var gotUserID string
+
+	w := serveUser(t, func(w http.ResponseWriter, r *http.Request) {
+		HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (map[string]any, error) {
+			gotUserID = userID
+			return map[string]any{"authenticated": true}, nil
+		})
+	}, "test-user")
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "test-user", gotUserID, "closure must receive the context user ID")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, true, body["authenticated"])
+}
+
+func TestHandleUser_EmptyUserIDStillRunsTheClosure(t *testing.T) {
+	ran := false
+
+	w := serveUser(t, func(w http.ResponseWriter, r *http.Request) {
+		HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (map[string]any, error) {
+			ran = true
+			assert.Empty(t, userID, "an empty user ID must be passed through, not gated")
+			return map[string]any{"authenticated": false}, nil
+		})
+	}, "")
+
+	assert.Equal(t, http.StatusOK, w.Code,
+		"an empty user ID is a legal state (anonymous callers), not an invariant violation")
+
+	var body map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, false, body["authenticated"])
+	assert.True(t, ran, "the closure must run even without a user ID")
+}
+
+func TestHandleUser_NoContentSkipsEncoding(t *testing.T) {
+	w := serveUser(t, func(w http.ResponseWriter, r *http.Request) {
+		HandleUser(w, r, http.StatusNoContent, func(ctx context.Context, userID string) (struct{}, error) {
+			return struct{}{}, nil
+		})
+	}, "test-user")
+
+	assert.Equal(t, http.StatusNoContent, w.Code, "204-skip behaviour must be mirrored from Handle")
+	assert.Empty(t, w.Body.String(), "204 responses must have an empty body")
+}
+
+func TestHandleUser_AppErrorMapsToItsStatusAndCode(t *testing.T) {
+	w := serveUser(t, func(w http.ResponseWriter, r *http.Request) {
+		HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (map[string]string, error) {
+			return nil, appErrors.ErrRefreshInvalid
+		})
+	}, "")
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+
+	var env envelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, "AUTH_REFRESH_INVALID", env.Error.Code)
+	assert.Equal(t, "test-request-id", env.RequestID, "envelope must carry requestId")
+}
+
+func TestHandleUser_WrappedAppErrorIsUnwrapped(t *testing.T) {
+	w := serveUser(t, func(w http.ResponseWriter, r *http.Request) {
+		HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (map[string]string, error) {
+			return nil, fmt.Errorf("refreshing session: %w", appErrors.ErrSessionExpired)
+		})
+	}, "")
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code, "wrapped AppErrors must keep their status")
+
+	var env envelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, "AUTH_SESSION_EXPIRED", env.Error.Code)
+}
+
+func TestHandleUser_PlainErrorFallsBackTo500WithGenericMessage(t *testing.T) {
+	w := serveUser(t, func(w http.ResponseWriter, r *http.Request) {
+		HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (map[string]string, error) {
+			return nil, errors.New("boom with secret detail")
+		})
+	}, "test-user")
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var env envelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
+	assert.Equal(t, "INTERNAL_ERROR", env.Error.Code)
+	assert.Equal(t, "An unexpected error occurred", env.Error.Message, "5xx messages must be rewritten generic")
+	assert.NotContains(t, w.Body.String(), "secret detail", "internal detail must not leak")
+	assert.Equal(t, "test-request-id", env.RequestID)
+}
+
 // Decode pins — the decode twin every body-bearing handler crosses. The
 // ritual (JSON decode + struct validation, one error vocabulary) is
 // pinned here once, not per domain.
