@@ -20,6 +20,13 @@ closest sibling that already exists. Rulings so far:
   request body"), a struct-tag failure 400 `VALIDATION_FAILED` with the
   validator's message — decode and validation errors belong to
   `web.Decode`'s vocabulary and are never hand-minted per handler. The
+  same ruling covers route params and query flags: `web.URLParam` owns
+  the missing-param guard (the error code stays explicit at the call
+  site, the 400 message is derived from it) and
+  `web.QueryBool`/`web.QueryInt` own the lenient flag parse (a missing
+  or malformed value yields the explicit default) — route-param guards
+  and query-flag parses belong to `web`'s vocabulary, never hand-minted
+  per handler. The
   one body-bearing endpoint outside the envelope (images Pull, the
   pre-stream reference) responds the returned AppError itself before
   `streaming.Begin`.
@@ -148,14 +155,15 @@ already diverged, extraction triggers even below the third copy — the
 log-stream kit (`.scratch/380-log-stream-kit`) is the precedent, where
 two timestamp parsers that disagreed on a spaceless podman line made
 the streaming path un-changeable in one place. The threshold has been
-crossed four times and all four extractions are now the reference: the
+crossed five times and all five extractions are now the reference: the
 endpoint ritual became `internal/web.Handle`, the handler-test
 scaffolding became `testutils.Perform`, the decode+validate ritual
-became `web.Decode`, and podman error classification became
-`internal/podmanerr` — one leaf adapter
-owning podman's error model (typed `ErrorModel` status first, phrase
-fallback over the lowercased text) for volumes, secrets, containers,
-images, and quadlets. Domains classify through its predicates, check
+became `web.Decode`, podman error classification became
+`internal/podmanerr` — one leaf adapter owning podman's error model
+(typed `ErrorModel` status first, phrase fallback over the lowercased
+text) for volumes, secrets, containers, images, and quadlets — and the
+param ritual became `web.URLParam`/`web.QueryBool`/`web.QueryInt`.
+Domains classify through its predicates, check
 most-specific first, and map the results to their own sentinels; the
 adapter never imports `internal/errors`, so sentinels stay
 domain-owned. Two vocabularies deliberately stay quadlet-local: the

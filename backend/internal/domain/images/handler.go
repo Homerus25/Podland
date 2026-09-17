@@ -5,13 +5,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -36,12 +34,7 @@ func NewImageHandler(service *ImageService) *ImageHandler {
 func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]ImageListResponse, error) {
 		opts := entities.ImageListOptions{}
-
-		if allParam := r.URL.Query().Get("all"); allParam != "" {
-			if all, err := strconv.ParseBool(allParam); err == nil {
-				opts.All = all
-			}
-		}
+		opts.All = web.QueryBool(r, "all", false)
 
 		if filtersParam := r.URL.Query().Get("filters"); filtersParam != "" {
 			var filters map[string][]string
@@ -138,17 +131,12 @@ func (h *ImageHandler) Prune(w http.ResponseWriter, r *http.Request) {
 // (deletes as unforced), matching the documented behavior.
 func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
-		imageID := chi.URLParam(r, "imageId")
-		if imageID == "" {
-			return struct{}{}, errors.NewAppError("MISSING_IMAGE_ID", "Image ID is required", http.StatusBadRequest)
+		imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
+		if guard != nil {
+			return struct{}{}, guard
 		}
 
-		force := false
-		if forceParam := r.URL.Query().Get("force"); forceParam != "" {
-			if parsed, err := strconv.ParseBool(forceParam); err == nil {
-				force = parsed
-			}
-		}
+		force := web.QueryBool(r, "force", false)
 
 		return struct{}{}, h.service.Delete(ctx, userID, machineID, imageID, force)
 	})

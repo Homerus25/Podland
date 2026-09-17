@@ -64,9 +64,3 @@ func TestVolumeHandler_Export_NotFound(t *testing.T) {
 	assert.NotEqual(t, "application/x-tar", w.Header().Get("Content-Type"),
 		"error response must not keep the tar content type")
 }
-
-func TestVolumeHandler_Export_MissingVolumeName(t *testing.T) {
-	engine := &fakeVolumeEngine{}
-	w := exportRequest(newTestHandler(engine).Export, "test-machine", "")
-	assert.Equal(t, 400, w.Code)
-}

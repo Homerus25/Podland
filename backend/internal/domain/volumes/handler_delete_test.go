@@ -59,21 +59,23 @@ func TestVolumeHandler_Delete_Success(t *testing.T) {
 	}
 }
 
-// TestVolumeHandler_Delete_InvalidForceFlag pins force-flag parsing: a
-// non-boolean force value is a client error before the machine is called.
-func TestVolumeHandler_Delete_InvalidForceFlag(t *testing.T) {
-	engine := &fakeVolumeEngine{}
+// TestVolumeHandler_Delete_NonBooleanForceIsIgnored pins force-flag
+// parsing: a non-boolean force value is ignored (deletes as unforced),
+// the same lenient contract every domain's delete shares via
+// web.QueryBool.
+func TestVolumeHandler_Delete_NonBooleanForceIsIgnored(t *testing.T) {
+	var gotForce bool
+	engine := &fakeVolumeEngine{
+		removeFn: func(name string, force bool) ([]*entities.VolumeRmReport, error) {
+			gotForce = force
+			return nil, nil
+		},
+	}
 
 	w := deleteRequest(newTestHandler(engine).Delete, "my-volume", "?force=yes")
 
-	assert.Equal(t, 400, w.Code)
-	assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
-}
-
-func TestVolumeHandler_Delete_MissingVolumeName(t *testing.T) {
-	engine := &fakeVolumeEngine{}
-	w := deleteRequest(newTestHandler(engine).Delete, "", "")
-	assert.Equal(t, 400, w.Code, "missing volume name must be rejected")
+	assert.Equal(t, 204, w.Code, "a non-boolean force deletes as unforced, not as a client error")
+	assert.False(t, gotForce, "the non-boolean force must reach the machine as false")
 }
 
 // TestMapInUseError pins the in-use mapping: podman's 409 ErrorModel and

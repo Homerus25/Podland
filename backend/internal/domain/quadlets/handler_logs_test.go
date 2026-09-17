@@ -82,24 +82,6 @@ func TestQuadletHandler_GetLogs_QueryErrorWithFollowRidesJSONEnvelope(t *testing
 	assert.NotContains(t, w.Body.String(), "STREAM_ENDED", "No stream may begin for a query error")
 }
 
-// TestQuadletHandler_GetLogs_MissingQuadletID tests that Logs validates quadlet ID
-func TestQuadletHandler_GetLogs_MissingQuadletID(t *testing.T) {
-	engine := &fakeQuadletEngine{}
-
-	req := httptest.NewRequest("GET", "/api/machines/machine123/quadlets//logs", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine123")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-	req = req.WithContext(ctx)
-
-	w := httptest.NewRecorder()
-	newTestHandler(engine).GetLogs(w, req)
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when quadlet ID is missing")
-	assert.Contains(t, w.Body.String(), "MISSING_QUADLET_ID", "Response should contain MISSING_QUADLET_ID error code")
-}
-
 // TestQuadletHandler_GetLogs_StreamingHappyPath tests successful streaming
 // logs with follow=true through the real service: podman's timestamped log
 // lines are decoded into events, cross with their levels, and a clean end

@@ -224,22 +224,6 @@ func TestImageHandler_Delete_Force(t *testing.T) {
 	assert.True(t, gotForce, "force=true must reach the machine")
 }
 
-// TestImageHandler_Delete_MissingImageID tests that Delete validates image ID
-func TestImageHandler_Delete_MissingImageID(t *testing.T) {
-	handler := newTestHandler(&fakeImageEngine{})
-
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/", nil).WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
-	r.ServeHTTP(w, req)
-
-	// Chi returns 404 for route not found when trailing slash doesn't match
-	// This is expected behavior since the route requires the imageId parameter
-	assert.Equal(t, http.StatusNotFound, w.Code, "Should return 404 when image ID is missing (route not matched)")
-}
-
 // TestImageHandler_Pull_InvalidRequestBody tests that Pull handles invalid request body
 func TestImageHandler_Pull_InvalidRequestBody(t *testing.T) {
 	handler := newTestHandler(&fakeImageEngine{})

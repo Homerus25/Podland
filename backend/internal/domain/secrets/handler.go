@@ -9,7 +9,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/web"
-	"github.com/go-chi/chi/v5"
 )
 
 // SecretHandler handles secret requests. All endpoints are JSON and
@@ -77,9 +76,9 @@ func (h *SecretHandler) Create(w http.ResponseWriter, r *http.Request) {
 // the frontend series (170) invalidates the list on the 204.
 func (h *SecretHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
-		secretID := chi.URLParam(r, "secretId")
-		if secretID == "" {
-			return struct{}{}, errors.NewAppError("MISSING_SECRET_ID", "Secret ID is required", http.StatusBadRequest)
+		secretID, guard := web.URLParam(r, "secretId", "MISSING_SECRET_ID")
+		if guard != nil {
+			return struct{}{}, guard
 		}
 
 		return struct{}{}, h.service.Delete(ctx, userID, machineID, secretID)
@@ -100,9 +99,9 @@ func (h *SecretHandler) List(w http.ResponseWriter, r *http.Request) {
 // never logged: a reveal's JSON carries the value.
 func (h *SecretHandler) Get(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*SecretInspectResponse, error) {
-		secretID := chi.URLParam(r, "secretId")
-		if secretID == "" {
-			return nil, errors.NewAppError("MISSING_SECRET_ID", "Secret ID is required", http.StatusBadRequest)
+		secretID, guard := web.URLParam(r, "secretId", "MISSING_SECRET_ID")
+		if guard != nil {
+			return nil, guard
 		}
 
 		reveal := r.URL.Query().Get("reveal") == "true"

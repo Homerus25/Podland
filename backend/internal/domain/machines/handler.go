@@ -9,7 +9,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/web"
-	"github.com/go-chi/chi/v5"
 )
 
 // MachineHandler handles machine requests
@@ -207,9 +206,9 @@ func (h *MachineHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 // the URL param and crosses the envelope.
 func (h *MachineHandler) RevokeAccess(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, revokerID, machineID string) (struct{}, error) {
-		targetUserID := chi.URLParam(r, "userId")
-		if targetUserID == "" {
-			return struct{}{}, errors.NewAppError("MISSING_USER_ID", "User ID is required", http.StatusBadRequest)
+		targetUserID, guard := web.URLParam(r, "userId", "MISSING_USER_ID")
+		if guard != nil {
+			return struct{}{}, guard
 		}
 
 		return struct{}{}, h.service.RevokeAccess(revokerID, machineID, targetUserID)

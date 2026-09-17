@@ -328,3 +328,73 @@ func TestDecode_CleanBodyAnswersNil(t *testing.T) {
 		"a clean body decodes nil, and unknown fields are ignored (no DisallowUnknownFields)")
 	assert.Equal(t, "my-volume", target.Name)
 }
+
+// URLParam / QueryBool / QueryInt pins — the param ritual every
+// route-param guard and query-flag parse crosses, pinned here once, not
+// per domain.
+
+// paramRequest builds a request carrying chi URL params the way the
+// router would.
+func paramRequest(params map[string]string) *http.Request {
+	req := httptest.NewRequest(http.MethodGet, "/api/machines/m/volumes", nil)
+	rctx := chi.NewRouteContext()
+	for name, value := range params {
+		rctx.URLParams.Add(name, value)
+	}
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func TestURLParam_PresentValuePassesThrough(t *testing.T) {
+	value, appErr := URLParam(paramRequest(map[string]string{"volumeName": "my-volume"}), "volumeName", "MISSING_VOLUME_NAME")
+
+	assert.Nil(t, appErr)
+	assert.Equal(t, "my-volume", value)
+}
+
+func TestURLParam_EmptyValueAnswersGuardWithDerivedMessage(t *testing.T) {
+	for _, tc := range []struct{ code, wantMessage string }{
+		{"MISSING_VOLUME_NAME", "Volume name is required"},
+		{"MISSING_CONTAINER_ID", "Container ID is required"},
+		{"MISSING_QUADLET_ID", "Quadlet ID is required"},
+		{"MISSING_SECRET_ID", "Secret ID is required"},
+		{"MISSING_IMAGE_ID", "Image ID is required"},
+		{"MISSING_USER_ID", "User ID is required"},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			value, appErr := URLParam(paramRequest(nil), "volumeName", tc.code)
+
+			require.NotNil(t, appErr)
+			assert.Empty(t, value)
+			assert.Equal(t, http.StatusBadRequest, appErr.Status)
+			assert.Equal(t, tc.code, appErr.Code)
+			assert.Equal(t, tc.wantMessage, appErr.Message,
+				"the message must be derived from the code")
+		})
+	}
+}
+
+func TestQueryBool_ParsedValueWinsOverDefault(t *testing.T) {
+	assert.True(t, QueryBool(queryRequest("force=true"), "force", false))
+	assert.False(t, QueryBool(queryRequest("force=false"), "force", true))
+}
+
+func TestQueryBool_MissingOrMalformedYieldsDefault(t *testing.T) {
+	assert.False(t, QueryBool(queryRequest(""), "force", false), "missing flag yields the false default")
+	assert.True(t, QueryBool(queryRequest(""), "stop", true), "missing flag yields the true default")
+	assert.False(t, QueryBool(queryRequest("force=yes"), "force", false), "malformed flag yields the false default")
+	assert.True(t, QueryBool(queryRequest("stop=notabool"), "stop", true), "malformed flag yields the true default")
+}
+
+func TestQueryInt_ParsedValueWinsOverDefault(t *testing.T) {
+	assert.Equal(t, 5, QueryInt(queryRequest("last=5"), "last", 0))
+	assert.Equal(t, 7, QueryInt(queryRequest("last=NaN"), "last", 7), "malformed value yields the default")
+	assert.Equal(t, 0, QueryInt(queryRequest(""), "last", 0), "missing value yields the default")
+}
+
+func queryRequest(query string) *http.Request {
+	target := "/api/machines/m/volumes"
+	if query != "" {
+		target += "?" + query
+	}
+	return httptest.NewRequest(http.MethodGet, target, nil)
+}
