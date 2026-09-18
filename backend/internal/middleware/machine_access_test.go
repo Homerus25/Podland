@@ -189,9 +189,10 @@ func permissionTestCase(t *testing.T, userID, permission string, observed *strin
 	return machinePermissionRouter(machineRepo, accessRepo, observed)
 }
 
-// TestRequireMachinePermission_ReadUserForbiddenOnWriteRoute asserts the
-// level-aware gate: a caller holding only read cannot reach a mutating
-// route, getting 403 ACCESS_DENIED with the handler never running.
+// TestRequireMachinePermission_ReadUserForbiddenOnWriteRoute pins the
+// gate's one 403 envelope shape (the level-comparison table itself is
+// owned by the permission package's suite): a below-write caller gets
+// 403 ACCESS_DENIED with the handler never running.
 func TestRequireMachinePermission_ReadUserForbiddenOnWriteRoute(t *testing.T) {
 	var observed string
 	router := permissionTestCase(t, "reader-1", models.PermissionRead, &observed)
@@ -203,40 +204,6 @@ func TestRequireMachinePermission_ReadUserForbiddenOnWriteRoute(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "read-level caller must be rejected with 403 on a write route")
 	assert.Empty(t, observed, "Handler must not run for a read-level caller")
 	assert.Contains(t, w.Body.String(), "ACCESS_DENIED", "Error body should carry the ACCESS_DENIED code")
-}
-
-// TestRequireMachinePermission_NoAccessRowForbidden asserts a caller
-// with no machine_access row at all is also denied (the empty permission
-// is below every level).
-func TestRequireMachinePermission_NoAccessRowForbidden(t *testing.T) {
-	var observed string
-	router := permissionTestCase(t, "stranger-1", "", &observed)
-
-	req := requestAsUser(http.MethodPost, "/api/machines/machine-1/containers/no-such-container/start", "stranger-1")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "caller without an access row must be rejected with 403")
-	assert.Empty(t, observed, "Handler must not run for a caller without an access row")
-}
-
-// TestRequireMachinePermission_WriteAndAdminPassThrough asserts the
-// levels at or above the requirement still reach the handler with the
-// user ID intact.
-func TestRequireMachinePermission_WriteAndAdminPassThrough(t *testing.T) {
-	for _, level := range []string{models.PermissionWrite, models.PermissionAdmin} {
-		t.Run(level, func(t *testing.T) {
-			var observed string
-			router := permissionTestCase(t, "writer-1", level, &observed)
-
-			req := requestAsUser(http.MethodPost, "/api/machines/machine-1/containers/no-such-container/start", "writer-1")
-			w := httptest.NewRecorder()
-			router.ServeHTTP(w, req)
-
-			assert.Equal(t, http.StatusOK, w.Result().StatusCode, "%s-level caller should reach the handler", level)
-			assert.Equal(t, "writer-1", observed, "User ID should survive into the downstream handler")
-		})
-	}
 }
 
 // TestRequireMachinePermission_UnknownMachineNotFound asserts an

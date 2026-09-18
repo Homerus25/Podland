@@ -7,18 +7,9 @@ import (
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 )
-
-// accessPermissionGetter is the slice of the machine-access repository
-// SecretService needs: the caller's stored permission level (empty string
-// when no row exists). Declared locally — mirroring the middleware's
-// accessRepoPermissionGetter — so the service depends only on the lookup
-// it performs; *models.MachineAccessRepository and the test mocks satisfy
-// it structurally.
-type accessPermissionGetter interface {
-	GetPermission(machineID, userID string) (string, error)
-}
 
 // SecretService provides business logic for secrets. Secrets live only in
 // the remote machine's podman; this service proxies podman directly and
@@ -31,13 +22,13 @@ type SecretService struct {
 	// accessRepo resolves the caller's permission level for the
 	// admin-only value reveal (?reveal=true): the gate is a query param,
 	// not a separate route, so it cannot ride on route-level middleware.
-	accessRepo accessPermissionGetter
+	accessRepo permission.PermissionGetter
 }
 
 // NewSecretService creates a new SecretService with the given engine
 // provider and machine-access repository (permission lookup for the
 // admin-only reveal).
-func NewSecretService(engines SecretEngineProvider, accessRepo accessPermissionGetter) *SecretService {
+func NewSecretService(engines SecretEngineProvider, accessRepo permission.PermissionGetter) *SecretService {
 	return &SecretService{
 		engines:    engines,
 		accessRepo: accessRepo,
@@ -70,16 +61,12 @@ func (s *SecretService) Get(ctx context.Context, userID, machineID, secretID str
 	// a below-admin caller is refused outright (403 ACCESS_DENIED, not a
 	// silent metadata degrade) and podman is never asked for the value.
 	// The subtree-level RequireMachineAccess already proved some access
-	// row exists; GetPermission re-reads the LEVEL so revocations and
-	// upgrades take effect immediately. A failing lookup is a 500, never
-	// a silent allow/deny guess (the middleware's contract).
+	// row exists; the re-read of the LEVEL (so revocations and upgrades
+	// take effect immediately) and the 500/403 decision belong to
+	// permission.RequireLevel, the gate's single owner.
 	if reveal {
-		level, err := s.accessRepo.GetPermission(machineID, userID)
-		if err != nil {
-			return nil, appErrors.ErrInternalError
-		}
-		if !models.HasAtLeast(models.PermissionAdmin, level) {
-			return nil, appErrors.ErrAccessDenied
+		if err := permission.RequireLevel(s.accessRepo, machineID, userID, models.PermissionAdmin); err != nil {
+			return nil, err
 		}
 	}
 

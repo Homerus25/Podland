@@ -1,11 +1,13 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -23,13 +25,6 @@ type machineRepoGetter interface {
 // MachineService.UserHasAccess.
 type accessRepoChecker interface {
 	HasAccess(machineID, userID string) (bool, error)
-}
-
-// accessRepoPermissionGetter is the slice of the machine-access
-// repository RequireMachinePermission needs: the caller's stored
-// permission level (empty string when no row exists).
-type accessRepoPermissionGetter interface {
-	GetPermission(machineID, userID string) (string, error)
 }
 
 // resolveMachineAndCaller performs the checks RequireMachineAccess and
@@ -124,10 +119,15 @@ func RequireMachineAccess(
 // inside the RequireMachineAccess-protected /api/machines/{id} subtree
 // on mutating routes: RequireMachineAccess stays the subtree-level
 // read gate, this adds "the stored permission must be at least
-// `required`" (read < write < admin, via models.HasAtLeast) for
-// endpoints that change remote state — container create/delete/start/
-// stop, image pull/delete, quadlet create/import/update/delete/start/
-// stop/restart, and later secret writes.
+// `required`" for endpoints that change remote state — container
+// create/delete/start/stop, image pull/delete, quadlet
+// create/import/update/delete/start/stop/restart, and later secret
+// writes. The level comparison itself is owned by
+// permission.RequireLevel (lookup error ⇒ 500, level below required ⇒
+// 403, never a silent allow/deny guess); this middleware contributes
+// the HTTP-shaped ritual around it — machine resolution with its
+// 401/400/404 answers — and maps the returned sentinels onto the error
+// envelope the same way the web envelope unwraps AppErrors.
 //
 // Semantics mirror RequireMachineAccess so the two compose without
 // surprises:
@@ -135,13 +135,14 @@ func RequireMachineAccess(
 //   - Unknown machine ID → 404 MACHINE_NOT_FOUND (checked here again,
 //     so the gate is correct even if mounted outside the subtree).
 //   - Stored level below `required` — including no row at all — →
-//     403 ACCESS_DENIED.
+//     403 ACCESS_DENIED (permission.RequireLevel).
 //   - User-ID-less request → 401, RequireAdmin's contract for a
 //     miswired route.
-//   - A failing lookup gets 500, never a silent allow/deny guess.
+//   - A failing lookup gets 500, never a silent allow/deny guess
+//     (permission.RequireLevel).
 func RequireMachinePermission(
 	machineRepo machineRepoGetter,
-	accessRepo accessRepoPermissionGetter,
+	accessRepo permission.PermissionGetter,
 	required string,
 ) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -151,13 +152,12 @@ func RequireMachinePermission(
 				return
 			}
 
-			actual, err := accessRepo.GetPermission(machineID, userID)
-			if err != nil {
-				apperrors.RespondWithError(w, apperrors.ErrInternalError, contextutils.GetRequestID(r.Context()))
-				return
-			}
-			if !models.HasAtLeast(required, actual) {
-				apperrors.RespondWithError(w, apperrors.ErrAccessDenied, contextutils.GetRequestID(r.Context()))
+			if err := permission.RequireLevel(accessRepo, machineID, userID, required); err != nil {
+				appErr := apperrors.ErrInternalError
+				if mapped, ok := errors.AsType[*apperrors.AppError](err); ok {
+					appErr = mapped
+				}
+				apperrors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 				return
 			}
 

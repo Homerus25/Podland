@@ -119,7 +119,19 @@ closest sibling that already exists. Rulings so far:
 - **Permission gating** — list/inspect at read level; anything that
   mutates remote state at write level via `r.With(requireWrite)` in
   `internal/app/app.go`. Bulk operations (prune) are write-level even
-  if single-item deletes might be argued otherwise.
+  if single-item deletes might be argued otherwise. The level contract
+  itself — permission lookup fails ⇒ 500 `ErrInternalError`, stored
+  level below the required one (an empty row included) ⇒ 403
+  `ErrAccessDenied`, never a silent allow/deny guess — has one owner:
+  `permission.RequireLevel` (`internal/permission`, with its
+  `PermissionGetter` lookup interface). Its callers are the
+  `RequireMachinePermission` middleware (which contributes the
+  HTTP-shaped machine-resolution ritual — 401/400/404 — and maps the
+  returned sentinels onto the error envelope the way the web envelope
+  unwraps AppErrors) and the secrets reveal gate (admin level, fired
+  before the connection lease). `models.HasAtLeast` and the level
+  constants stay in `models`; `RequireAdmin` is a different domain
+  (role, not level) with its own single owner already.
 - **Runtime connection failures** — a persisted machine's podman socket
   unreachable during an operation is 502 `CONNECTION_FAILED`
   (`appErrors.ErrConnectionFailed`). The cause log (op, machineID,
