@@ -2,9 +2,11 @@ import {
 	api,
 	bareApi,
 	getApiError,
+	getBearerToken,
 	handleUnauthorized,
 	machineApiPath,
 	machineApiUrl,
+	refreshSession,
 	setBearerToken,
 	setSessionExpiredHandler,
 } from "@shared/utils/api";
@@ -242,6 +244,92 @@ describe("getApiError", () => {
 			code: "INTERNAL_ERROR",
 			message: "An unexpected error occurred",
 		});
+	});
+});
+
+describe("refreshSession", () => {
+	let refreshCalls: number;
+	let seamCalls: number;
+
+	beforeEach(() => {
+		refreshCalls = 0;
+		seamCalls = 0;
+	});
+
+	afterEach(() => {
+		setBearerToken(null);
+		setSessionExpiredHandler(null);
+	});
+
+	// The migrated authApi pin: refresh is cookie-based, so the access
+	// token must never ride the call even with one installed.
+	it("resolves the payload and installs the token without an Authorization header", async () => {
+		setBearerToken("stale-access-token");
+		let authorization: string | null = null;
+		server.use(
+			http.post("*/api/auth/refresh", ({ request }) => {
+				authorization = request.headers.get("authorization");
+				return HttpResponse.json({ token: "fresh-token", username: "ada" });
+			}),
+		);
+
+		await expect(refreshSession()).resolves.toEqual({
+			token: "fresh-token",
+			username: "ada",
+		});
+
+		expect(authorization).toBeNull();
+		expect(getBearerToken()).toBe("fresh-token");
+	});
+
+	// Mount asymmetry: a failed refresh at mount means logged-out, not
+	// session death — only the 401 policy translates null into the seam.
+	it("resolves null on failure without firing the seam; only handleUnauthorized fires it", async () => {
+		server.use(
+			http.post("*/api/auth/refresh", () => {
+				return HttpResponse.json(
+					{
+						requestId: "req-refresh",
+						error: {
+							code: "AUTH_REFRESH_INVALID",
+							message: "Refresh token invalid",
+						},
+					},
+					{ status: 401 },
+				);
+			}),
+		);
+		setSessionExpiredHandler(() => {
+			seamCalls++;
+		});
+
+		await expect(refreshSession()).resolves.toBeNull();
+		expect(seamCalls).toBe(0);
+
+		await expect(handleUnauthorized()).resolves.toBe(false);
+		expect(seamCalls).toBe(1);
+	});
+
+	// The contract's one invariant: mount-refresh and 401-refresh share a
+	// single flight, so both callers together still trigger one POST.
+	it("shares one flight between refreshSession and handleUnauthorized", async () => {
+		server.use(
+			http.post("*/api/auth/refresh", async () => {
+				refreshCalls++;
+				await new Promise((r) => setTimeout(r, 20));
+				return HttpResponse.json({ token: "fresh-token", username: "ada" });
+			}),
+		);
+		setBearerToken("expired-access-token");
+
+		const [payload, replayed] = await Promise.all([
+			refreshSession(),
+			handleUnauthorized(),
+		]);
+
+		expect(payload).toEqual({ token: "fresh-token", username: "ada" });
+		expect(replayed).toBe(true);
+		expect(refreshCalls).toBe(1);
 	});
 });
 

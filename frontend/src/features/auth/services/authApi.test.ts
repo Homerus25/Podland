@@ -36,24 +36,6 @@ describe("authApi", () => {
 		expect(authorization).toBeNull();
 	});
 
-	// Refresh is cookie-based: the httpOnly refresh cookie travels on its
-	// own; the access token must not be attached to the call.
-	it("refreshes without an Authorization header, riding the cookie", async () => {
-		setBearerToken("stale-access-token");
-		let authorization: string | null = null;
-		server.use(
-			http.post("*/api/auth/refresh", ({ request }) => {
-				authorization = request.headers.get("authorization");
-				return HttpResponse.json({ token: "fresh-token", username: "ada" });
-			}),
-		);
-
-		const response = await authApi.refresh();
-
-		expect(response).toEqual({ token: "fresh-token", username: "ada" });
-		expect(authorization).toBeNull();
-	});
-
 	it("logs out without an Authorization header", async () => {
 		setBearerToken("stale-access-token");
 		let authorization: string | null = null;

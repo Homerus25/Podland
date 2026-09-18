@@ -38,6 +38,7 @@ Each feature lives in `src/features/<name>/`:
 
 ## Auth and 401s
 
+- "Refresh the session" has one owner, `refreshSession()` in `@shared/utils/api`: it alone assembles the POST literal, installs the fresh token, and holds the single flight every caller shares; success resolves the payload, any failure (auth rejection or network) resolves `null` without throwing or firing the seam. Its two thin callers are `AuthContext`'s default `resolveInitialState` resolver (mount restore) and `handleUnauthorized()` — only the 401 policy translates `null` into `fireSessionExpired()`, since a mount failure is logged-out, not session death. Never re-assemble a refresh elsewhere or keep a second vocabulary for the same act (`authApi.refresh` was deleted outright for exactly that).
 - 401s are owned by the shared session policy, never by a feature: the axios response interceptor on the shared instance (`@shared/utils/api`) and the stream transport both route through `handleUnauthorized` — single-flight refresh, replay once, session death when refresh or replay fails. The refresh/replay/seam semantics are pinned once in the shared suites (`shared/utils/api.test.ts`, `shared/streaming/streamTransport.test.tsx`, and the session-death wiring test in `App.test.tsx`); feature suites never pin 401 behavior or add their own expiry handling. File downloads stay outside the policy by decision.
 
 ## Tests
