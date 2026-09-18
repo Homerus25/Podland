@@ -3,6 +3,7 @@ package quadlets
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -26,11 +27,15 @@ func quadletLogsFixture() []*entities.ListQuadlet {
 }
 
 func logsRequest(target string) *http.Request {
+	return logsRequestWithBase(context.Background(), target)
+}
+
+func logsRequestWithBase(base context.Context, target string) *http.Request {
 	req := httptest.NewRequest("GET", target, nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "machine123")
 	rctx.URLParams.Add("quadletId", "web.container")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx := context.WithValue(base, chi.RouteCtxKey, rctx)
 	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
 	return req.WithContext(ctx)
 }
@@ -66,6 +71,25 @@ func TestQuadletHandler_GetLogs_Success(t *testing.T) {
 		"a container quadlet logs under the systemd-spawned container name derived from the quadlet name")
 	assert.Contains(t, w.Body.String(), `"id":"web.container"`, "Response should contain quadlet ID")
 	assert.Contains(t, w.Body.String(), `"logs":"quadlet log line"`, "Response should contain logs")
+}
+
+// TestQuadletHandler_GetLogs_BufferedCancellationAnswers504 pins the
+// buffered cancellation contract end to end: a cancelled context maps to
+// 504 OPERATION_CANCELLED even when the engine returns a generic error.
+func TestQuadletHandler_GetLogs_BufferedCancellationAnswers504(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	engine := &fakeQuadletEngine{}
+	handler := logsHandler(engine, func(string, entities.ContainerLogsOptions) error {
+		return errors.New("boom")
+	})
+
+	w := httptest.NewRecorder()
+	handler.GetLogs(w, logsRequestWithBase(ctx, "/api/machines/machine123/quadlets/web.container/logs"))
+
+	assert.Equal(t, http.StatusGatewayTimeout, w.Code,
+		"a cancelled buffered fetch must answer the 504 cancellation sentinel, not a wrapped 500")
+	assert.NotContains(t, w.Body.String(), "boom", "the raw cause must never ride the wire")
 }
 
 // TestQuadletHandler_GetLogs_QueryErrorWithFollowRidesJSONEnvelope tests

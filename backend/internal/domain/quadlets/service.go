@@ -1,7 +1,6 @@
 package quadlets
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -378,22 +377,12 @@ func isResourceRunningError(err error) bool {
 	return strings.Contains(msg, "running") || strings.Contains(msg, "active")
 }
 
-// GetLogs retrieves logs for the managed container of a quadlet.
-// Per the issue spec, this resolves the quadlet name → managed container name
-// and then streams logs via the engine's Logs, mirroring the 060-04 image-pull
-// NDJSON pattern. The non-streaming mode returns a single multiline string; the
-// streaming mode emits NDJSON events via callback.
-//
-// The flow (doku/description_quadlets_api.md:247-285):
-//
-//  1. Resolve the quadlet via List — existence check (404 if absent)
-//     and managed container name resolution (prefer the Pod container name,
-//     fall back to deriving it from the quadlet name).
-//  2. Call Logs with Follow=false, concatenating stdout and stderr into a
-//     single multiline string.
-//  3. Map "no such container" → QUADLET_NOT_FOUND (404).
-//
-// Returns `{id, logs}` on success. Supports `since` and `tail` query params.
+// GetLogs retrieves logs for the managed container of a quadlet: the
+// service resolves the quadlet to its managed container name, then
+// crosses the kit's buffered fetch (FetchLogs owns the options build,
+// writer pair, combine, not-found mapping, and cancellation mapping).
+// Returns `{id, logs}` on success; supports `since` and `tail` query
+// params. See doku/description_quadlets_api.md.
 func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64) (*QuadletLogsResponse, error) {
 	var response *QuadletLogsResponse
 	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.GetLogs", func(e QuadletEngine) error {
@@ -402,37 +391,20 @@ func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadlet
 			return err
 		}
 
-		var stdoutBuffer, stderrBuffer bytes.Buffer
-		logsOpts := entities.ContainerLogsOptions{
-			Follow:       false,
-			Since:        since,
-			Tail:         tail,
-			Timestamps:   false,
-			StdoutWriter: &stdoutBuffer,
-			StderrWriter: &stderrBuffer,
-		}
-
-		err = e.Logs(containerName, logsOpts)
+		logs, err := streaming.FetchLogs(ctx, streaming.FetchLogsOp{
+			Target:   containerName,
+			Since:    since,
+			Tail:     tail,
+			NotFound: appErrors.ErrQuadletNotFound,
+			Logs:     e.Logs,
+		})
 		if err != nil {
-			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrQuadletNotFound
-			}
-			return fmt.Errorf("failed to get quadlet logs: %w", err)
-		}
-
-		combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
-		if stderrBuffer.Len() > 0 {
-			stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
-			if combinedLogs != "" {
-				combinedLogs += "\n" + stderrContent
-			} else {
-				combinedLogs = stderrContent
-			}
+			return err
 		}
 
 		response = &QuadletLogsResponse{
 			ID:   quadletName,
-			Logs: combinedLogs,
+			Logs: logs,
 		}
 		return nil
 	})
@@ -465,9 +437,6 @@ func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineI
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrQuadletNotFound
-			}
-			if ctx.Err() == context.Canceled {
-				return appErrors.ErrOperationCancelled
 			}
 			return fmt.Errorf("failed to get quadlet logs: %w", err)
 		}

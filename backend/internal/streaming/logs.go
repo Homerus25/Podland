@@ -1,7 +1,9 @@
 package streaming
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -9,6 +11,8 @@ import (
 	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // LogEvent is the kit-owned wire shape of one follow-mode log-stream
@@ -132,6 +136,67 @@ func RunLogStream(w http.ResponseWriter, r *http.Request, op LogStreamOp) {
 			}
 		},
 	})
+}
+
+// FetchLogsOp is the buffered-fetch kit's input: the already-resolved
+// target (the container name to log from; quadlet name resolution stays
+// domain work), the parsed query window, the domain's not-found sentinel,
+// and the domain's Logs function.
+type FetchLogsOp struct {
+	Target string
+	Since  time.Time
+	Tail   int64
+	// NotFound is the caller's not-found sentinel: podman's not-found
+	// answer (containers → ErrContainerNotFound, quadlets →
+	// ErrQuadletNotFound) maps to it.
+	NotFound *appErrors.AppError
+	// Logs runs the domain's log fetch through the options FetchLogs
+	// builds. It must honour ctx cancellation.
+	Logs func(name string, opts entities.ContainerLogsOptions) error
+}
+
+// FetchLogs is the entry point for buffered (follow=false) log fetches:
+// one call that owns that ritual end to end. It builds the podman logs
+// options itself (Follow=false, Timestamps=false, the Since/Tail window
+// passed through), installs the stdout/stderr writer pair, combines the
+// captured output (stdout first, stderr appended, exactly one trailing
+// newline trimmed), and maps the failure mirroring Run's terminal
+// mapping: a cancelled context answers ErrOperationCancelled (logs can be
+// very long, so a buffered fetch being fast was never a guarantee),
+// podman's not-found answer maps to the op's NotFound sentinel, and any
+// other cause carries one kit-owned "failed to get logs" wrap whose text
+// is log-only, never a wire payload.
+func FetchLogs(ctx context.Context, op FetchLogsOp) (string, error) {
+	var stdout, stderr bytes.Buffer
+	opts := entities.ContainerLogsOptions{
+		Follow:       false,
+		Since:        op.Since,
+		Tail:         op.Tail,
+		Timestamps:   false,
+		StdoutWriter: &stdout,
+		StderrWriter: &stderr,
+	}
+
+	if err := op.Logs(op.Target, opts); err != nil {
+		if ctx.Err() == context.Canceled {
+			return "", appErrors.ErrOperationCancelled
+		}
+		if podmanerr.IsNotFound(err) {
+			return "", op.NotFound
+		}
+		return "", fmt.Errorf("failed to get logs: %w", err)
+	}
+
+	combined := strings.TrimSuffix(stdout.String(), "\n")
+	if stderr.Len() > 0 {
+		stderrContent := strings.TrimSuffix(stderr.String(), "\n")
+		if combined != "" {
+			combined += "\n" + stderrContent
+		} else {
+			combined = stderrContent
+		}
+	}
+	return combined, nil
 }
 
 // Compile-time proof the kit writer satisfies the io.Writer seam the

@@ -76,11 +76,11 @@ func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, 
 
 	var report *entities.ImagePullReport
 	err := s.engines.WithEngine(ctx, userID, machineID, "images.Pull", func(e ImageEngine) error {
+		// Cancellation is not mapped here: the call crosses streaming
+		// Run, whose cancelled-wins rule answers OPERATION_CANCELLED
+		// whatever the operation returns.
 		pullReport, err := e.Pull(rawImage, opts)
 		if err != nil {
-			if ctx.Err() == context.Canceled {
-				return appErrors.ErrOperationCancelled
-			}
 			return appErrors.ErrImagePullFailed
 		}
 
