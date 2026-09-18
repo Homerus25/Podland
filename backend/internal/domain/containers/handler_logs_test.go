@@ -1,6 +1,8 @@
 package containers
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -50,6 +52,31 @@ func TestContainerHandler_Logs_QueryErrorWithFollowRidesJSONEnvelope(t *testing.
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid since even with follow=true")
 	assert.Contains(t, w.Body.String(), "INVALID_SINCE_PARAM", "Response should contain INVALID_SINCE_PARAM error code")
 	assert.NotContains(t, w.Body.String(), "STREAM_ENDED", "No stream may begin for a query error")
+}
+
+// TestContainerHandler_Logs_BufferedCancellationAnswers504 pins the
+// buffered cancellation contract end to end: a cancelled context maps to
+// 504 OPERATION_CANCELLED even when the engine returns a generic error.
+func TestContainerHandler_Logs_BufferedCancellationAnswers504(t *testing.T) {
+	ctx, cancel := context.WithCancel(authedContext())
+	cancel()
+	engine := &fakeContainerEngine{
+		logsFn: func(string, entities.ContainerLogsOptions) error {
+			return errors.New("boom")
+		},
+	}
+
+	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs", nil).
+		WithContext(ctx)
+
+	w := httptest.NewRecorder()
+	r := chi.NewRouter()
+	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusGatewayTimeout, w.Code,
+		"a cancelled buffered fetch must answer the 504 cancellation sentinel, not a wrapped 500")
+	assert.NotContains(t, w.Body.String(), "boom", "the raw cause must never ride the wire")
 }
 
 // TestContainerHandler_Logs_StreamingHappyPath tests successful streaming

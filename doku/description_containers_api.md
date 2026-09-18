@@ -300,3 +300,4 @@ one terminal event:
 - 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR` (also for a miswired route missing identity), `STREAMING_NOT_SUPPORTED`
 - 502: `CONNECTION_FAILED`
+- 504: `OPERATION_CANCELLED` (buffered fetch cancelled by a client disconnect; follow-mode cancellation is the WARN terminal event above)

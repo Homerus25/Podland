@@ -1,7 +1,6 @@
 package containers
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"maps"
@@ -244,7 +243,10 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 	})
 }
 
-// GetLogs retrieves logs for a specific container on the specified machine
+// GetLogs retrieves logs for a specific container on the specified
+// machine. The buffered ritual (options build, writer pair, combine,
+// not-found and cancellation mapping) belongs to the kit's FetchLogs;
+// the service keeps validation, engine acquisition, and dispatch.
 func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64) (*ContainerLogsResponse, error) {
 	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
 		return nil, err
@@ -252,44 +254,20 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 
 	var response *ContainerLogsResponse
 	err := s.engines.WithEngine(ctx, userID, machineID, "containers.GetLogs", func(e ContainerEngine) error {
-		// Prepare buffers for stdout and stderr
-		var stdoutBuffer, stderrBuffer bytes.Buffer
-
-		// Set up container logs options
-		logsOpts := entities.ContainerLogsOptions{
-			Follow:     false,
-			Since:      since,
-			Tail:       tail,
-			Timestamps: false,
-		}
-
-		// Set writers to capture output
-		logsOpts.StdoutWriter = &stdoutBuffer
-		logsOpts.StderrWriter = &stderrBuffer
-
-		// Fetch logs from container
-		err := e.Logs(containerID, logsOpts)
+		logs, err := streaming.FetchLogs(ctx, streaming.FetchLogsOp{
+			Target:   containerID,
+			Since:    since,
+			Tail:     tail,
+			NotFound: appErrors.ErrContainerNotFound,
+			Logs:     e.Logs,
+		})
 		if err != nil {
-			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrContainerNotFound
-			}
-			return fmt.Errorf("failed to get container logs: %w", err)
-		}
-
-		// Combine stdout and stderr logs
-		combinedLogs := strings.TrimSuffix(stdoutBuffer.String(), "\n")
-		if stderrBuffer.Len() > 0 {
-			stderrContent := strings.TrimSuffix(stderrBuffer.String(), "\n")
-			if combinedLogs != "" {
-				combinedLogs += "\n" + stderrContent
-			} else {
-				combinedLogs = stderrContent
-			}
+			return err
 		}
 
 		response = &ContainerLogsResponse{
 			ID:   containerID,
-			Logs: combinedLogs,
+			Logs: logs,
 		}
 		return nil
 	})
@@ -323,9 +301,6 @@ func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machin
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrContainerNotFound
-			}
-			if ctx.Err() == context.Canceled {
-				return appErrors.ErrOperationCancelled
 			}
 			return fmt.Errorf("failed to get container logs: %w", err)
 		}

@@ -14,26 +14,10 @@ import (
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// Service behaviour tests for the two logs modes: one-shot (GetLogs
-// concatenates stdout+stderr) and follow (GetLogsWithStream converts each
-// line to an event via the writers it hands the engine).
-
-func TestContainerService_GetLogs_CombinesStdoutAndStderr(t *testing.T) {
-	engine := &fakeContainerEngine{
-		logsFn: func(_ string, opts entities.ContainerLogsOptions) error {
-			writeLogsInto(opts, "out line\n", "err line\n")
-			return nil
-		},
-	}
-	service := NewContainerService(fakeEngineProvider{engine: engine})
-
-	got, err := service.GetLogs(context.Background(), "user", "machine", "container-123", time.Time{}, 0)
-
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, "container-123", got.ID)
-	assert.Equal(t, "out line\nerr line", got.Logs, "stdout comes first, stderr appended, trailing newline trimmed")
-}
+// Service behaviour tests for the two logs modes: one-shot (the kit's
+// FetchLogs owns the buffered ritual, so only the domain-owned mapping
+// and validation are pinned here) and follow (GetLogsWithStream converts
+// each line to an event via the writers it hands the engine).
 
 func TestContainerService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
 	engine := &fakeContainerEngine{
@@ -47,21 +31,6 @@ func TestContainerService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
 
 	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 	assert.Nil(t, got)
-}
-
-func TestContainerService_GetLogs_WrapsEngineFailure(t *testing.T) {
-	engine := &fakeContainerEngine{
-		logsFn: func(string, entities.ContainerLogsOptions) error {
-			return assert.AnError
-		},
-	}
-	service := NewContainerService(fakeEngineProvider{engine: engine})
-
-	got, err := service.GetLogs(context.Background(), "user", "machine", "container-123", time.Time{}, 0)
-
-	require.Error(t, err)
-	assert.Nil(t, got)
-	assert.Contains(t, err.Error(), "failed to get container logs")
 }
 
 func TestContainerService_GetLogs_MissingParameters(t *testing.T) {
@@ -87,22 +56,6 @@ func TestContainerService_GetLogs_MissingParameters(t *testing.T) {
 			assert.Nil(t, result, "Should return nil result when parameters are missing")
 		})
 	}
-}
-
-func TestContainerService_GetLogsWithStream_MapsCancellationToOperationCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	engine := &fakeContainerEngine{
-		logsFn: func(string, entities.ContainerLogsOptions) error {
-			return context.Canceled
-		},
-	}
-	service := NewContainerService(fakeEngineProvider{engine: engine})
-
-	err := service.GetLogsWithStream(ctx, "user", "machine", "container-123", time.Time{}, 0,
-		func(streaming.LogEvent) {})
-
-	require.ErrorIs(t, err, appErrors.ErrOperationCancelled)
 }
 
 func TestContainerService_GetLogsWithStream_MapsMissingContainerTo404(t *testing.T) {

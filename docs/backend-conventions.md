@@ -70,8 +70,20 @@ closest sibling that already exists. Rulings so far:
   clean end, `"CODE: message"` errors) and the `ErrConnectionFailed`
   error default; a log handler is query parse + follow dispatch + two
   closures (the `LogStreamOp.Stream` callback and the buffered
-  `web.Handle` service call). The images pull handler remains the
-  reference for progress streams.
+  `web.Handle` service call). The kit owns the buffered fetch too:
+  `streaming.FetchLogs` (same file) builds the podman logs options
+  itself (`Follow=false`, `Timestamps=false`, the `Since`/`Tail` window
+  through), installs the stdout/stderr writer pair, combines the
+  output, and maps the failure mirroring `Run`'s terminal mapping:
+  cancelled ctx → `OPERATION_CANCELLED`, else podman not-found → the
+  op's caller-supplied sentinel, else one kit-owned
+  `failed to get logs` wrap. A buffered log service is validate +
+  engine acquisition + target resolution + the `FetchLogsOp`
+  (containers and quadlets `GetLogs` are the references). Cancellation
+  mapping lives nowhere below the kit: no service hand-copies
+  `ctx.Err() == context.Canceled` — `Run`'s cancelled-wins decides for
+  every streaming call, `FetchLogs` for every buffered log fetch. The
+  images pull handler remains the reference for progress streams.
 - **Binary endpoints (the binary envelope)** — `web.HandleStream`
   (`internal/web`) is the seam every machine-scoped endpoint whose
   success is a byte stream or multipart upload rather than a DTO

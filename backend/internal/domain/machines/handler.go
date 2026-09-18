@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/web"
 )
 

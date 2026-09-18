@@ -135,22 +135,6 @@ func TestImageService_PullWithProgress_MapsFailureToPullFailed(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-func TestImageService_PullWithProgress_MapsCancellationToOperationCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	engine := &fakeImageEngine{
-		pullFn: func(string, entities.ImagePullOptions) (*entities.ImagePullReport, error) {
-			return nil, context.Canceled
-		},
-	}
-	service := NewImageService(fakeEngineProvider{engine: engine})
-
-	got, err := service.PullWithProgress(ctx, "user", "machine", "nginx:latest", entities.ImagePullOptions{}, nil)
-
-	require.ErrorIs(t, err, appErrors.ErrOperationCancelled, "a cancelled pull must not masquerade as a pull failure")
-	assert.Nil(t, got)
-}
-
 // TestImageService_PullWithProgress_ArmsTheProgressWriter pins the progress
 // seam: a pull with a progress callback hands the engine options carrying a
 // writer (podman streams its progress into it), so progress events flow

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -134,28 +133,6 @@ func TestQuadletService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	assert.Nil(t, got)
-}
-
-func TestQuadletService_GetLogsWithStream_MapsCancellationToOperationCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	engine := &fakeQuadletEngine{
-		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
-			return []*entities.ListQuadlet{{Name: "web.container"}}, nil
-		},
-		printFn: func(string) (string, error) {
-			return "[Container]\n", nil
-		},
-		logsFn: func(string, entities.ContainerLogsOptions) error {
-			return context.Canceled
-		},
-	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
-
-	err := service.GetLogsWithStream(ctx, "user", "machine", "web.container", time.Time{}, 0,
-		func(streaming.LogEvent) {})
-
-	require.ErrorIs(t, err, appErrors.ErrOperationCancelled)
 }
 
 // TestQuadletService_GetLogs_ResolveContainerName tests container name resolution
