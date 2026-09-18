@@ -11,9 +11,9 @@ export const api = axios.create({
 	baseURL: apiBaseUrl,
 });
 
-// Auth calls (login/refresh/logout) and the 401 policy's refresh ride this
-// interceptor-free instance: a login failure is itself a 401, and it must
-// never be readable as session death by any response-side policy.
+// Auth calls (login/logout) and refreshSession ride this interceptor-free
+// instance: a login failure is itself a 401, and it must never be readable
+// as session death by any response-side policy.
 export const bareApi = axios.create({
 	baseURL: apiBaseUrl,
 });
@@ -97,30 +97,46 @@ export function fireSessionExpired() {
 	sessionExpiredHandler?.();
 }
 
-// One shared in-flight refresh for all concurrent 401s, so N simultaneous
-// rejections trigger exactly one POST /auth/refresh; cleared on settle so
-// a later 401 starts a fresh attempt.
-let refreshInFlight: Promise<boolean> | null = null;
+// One shared in-flight refresh for all callers — the mount-time resolver
+// and the 401 policy alike — so N simultaneous callers trigger exactly one
+// POST /auth/refresh; cleared on settle so a later caller starts a fresh
+// attempt.
+let refreshInFlight: Promise<LoginResponse | null> | null = null;
 
-// The one 401 policy for every transport: resolves true only when a fresh
-// token was installed (the caller replays its request once); false means
-// the session is dead, the seam has already fired, and the caller surfaces
-// the error. Any refresh failure — auth rejection or network — is session
-// death, matching the mount-time refresh resolver.
-export function handleUnauthorized(): Promise<boolean> {
+// The one owner of "refresh the session": exchanges the httpOnly refresh
+// cookie for a fresh access JWT, installs the token itself, and resolves
+// the payload. Any failure — auth rejection or network — resolves null and
+// never throws. Failure here is not session death: the mount caller reads
+// it as logged-out, so firing the seam is the 401 policy's decision alone.
+export function refreshSession(): Promise<LoginResponse | null> {
 	refreshInFlight ??= (async () => {
 		try {
 			const { data } = await bareApi.post<LoginResponse>("/auth/refresh");
 			setBearerToken(data.token);
-			return true;
+			return data;
 		} catch {
-			fireSessionExpired();
-			return false;
+			return null;
 		}
 	})().finally(() => {
 		refreshInFlight = null;
 	});
 	return refreshInFlight;
+}
+
+// The one 401 policy for every transport: resolves true only when a fresh
+// token was installed (the caller replays its request once); false means
+// the session is dead, the seam has already fired, and the caller surfaces
+// the error. Any refresh failure — auth rejection or network — is session
+// death here, unlike the mount-time caller, whose failure is just
+// logged-out.
+export function handleUnauthorized(): Promise<boolean> {
+	return refreshSession().then((payload) => {
+		if (payload === null) {
+			fireSessionExpired();
+			return false;
+		}
+		return true;
+	});
 }
 
 api.interceptors.response.use(undefined, async (error: unknown) => {

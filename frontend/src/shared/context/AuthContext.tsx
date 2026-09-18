@@ -1,6 +1,10 @@
 import { authApi } from "@features/auth/services/authApi";
 import type { LoginCredentials, User } from "@shared/types/api";
-import { setBearerToken, setSessionExpiredHandler } from "@shared/utils/api";
+import {
+	refreshSession,
+	setBearerToken,
+	setSessionExpiredHandler,
+} from "@shared/utils/api";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
@@ -23,21 +27,16 @@ export const AuthContext = createContext<AuthContextType>(null!);
 
 // Auth state is memory-only, so a reload starts with nothing and must
 // be rebuilt from the httpOnly refresh cookie: this silent-refresh
-// resolver exchanges that cookie for a fresh access JWT and the user it
-// belongs to. Any failure (no cookie, expired/revoked session, network)
-// simply resolves to logged-out — an expired session behaves exactly
+// resolver asks the one refresh owner (refreshSession) for a fresh
+// access JWT and the user it belongs to. Any failure simply resolves to
+// logged-out — an expired session behaves exactly
 // like a logged-out one, no error screen. The seam exists so the
 // routing guard can cover the resolving state (full-page spinner)
 // instead of flashing protected content or the login form, and so tests
 // can pin the initial state deterministically.
 const resolveFromRefreshSession = async (): Promise<User | null> => {
-	try {
-		const { token, username } = await authApi.refresh();
-		setBearerToken(token);
-		return { username };
-	} catch {
-		return null;
-	}
+	const payload = await refreshSession();
+	return payload === null ? null : { username: payload.username };
 };
 
 export function AuthProvider({
