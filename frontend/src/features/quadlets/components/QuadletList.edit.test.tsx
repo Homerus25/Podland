@@ -1,12 +1,12 @@
 import { QuadletList } from "@features/quadlets/components/QuadletList";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorJson, errorResponse } from "@/test/errors";
 import { quadletFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 const existing = quadletFixture({
@@ -57,16 +57,9 @@ function updateHandler(
 }
 
 function renderQuadletList() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
+	renderWithQuery(<QuadletList machineId="m-1" permission="admin" />, {
+		router: true,
 	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<QuadletList machineId="m-1" permission="admin" />
-			</MemoryRouter>
-		</QueryClientProvider>,
-	);
 }
 
 async function openEditModal() {
@@ -194,13 +187,7 @@ describe("QuadletList edit", () => {
 		server.use(
 			quadletsHandler(() => [existing]),
 			http.get("*/api/machines/m-1/quadlets/:quadletId", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-41",
-						error: { message: "Quadlet not found", code: "QUADLET_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
+				errorResponse(404, "QUADLET_NOT_FOUND", "Quadlet not found", "req-41"),
 			),
 		);
 		renderQuadletList();
@@ -221,10 +208,10 @@ describe("QuadletList edit", () => {
 		server.use(
 			quadletsHandler(() => [existing]),
 			getHandler(),
-			updateHandler(404, {
-				requestId: "req-42",
-				error: { message: "Quadlet not found", code: "QUADLET_NOT_FOUND" },
-			}),
+			updateHandler(
+				404,
+				errorJson("QUADLET_NOT_FOUND", "Quadlet not found", "req-42"),
+			),
 		);
 		const user = await openEditModal();
 

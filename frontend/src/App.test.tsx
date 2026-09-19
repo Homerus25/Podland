@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 import { loginViaForm, renderApp } from "@/test/auth";
+import { errorResponse } from "@/test/errors";
 import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
@@ -92,18 +93,9 @@ describe("app routing guard", () => {
 
 		it("redirects to /login when the refresh cookie is rejected", async () => {
 			server.use(
-				http.post("*/api/auth/refresh", () => {
-					return HttpResponse.json(
-						{
-							requestId: "req-1",
-							error: {
-								code: "AUTH_REFRESH_INVALID",
-								message: "Refresh token invalid",
-							},
-						},
-						{ status: 401 },
-					);
-				}),
+				http.post("*/api/auth/refresh", () =>
+					errorResponse(401, "AUTH_REFRESH_INVALID", "Refresh token invalid"),
+				),
 			);
 			renderApp("/machines");
 
@@ -142,15 +134,9 @@ describe("app routing guard", () => {
 
 	it("still clears state and lands on /login when the revocation call fails", async () => {
 		server.use(
-			http.post("*/api/auth/logout", () => {
-				return HttpResponse.json(
-					{
-						requestId: "req-1",
-						error: { message: "session store down", code: "INTERNAL_ERROR" },
-					},
-					{ status: 500 },
-				);
-			}),
+			http.post("*/api/auth/logout", () =>
+				errorResponse(500, "INTERNAL_ERROR", "session store down"),
+			),
 		);
 		renderApp("/", {
 			resolveInitialState: async () => ({ username: "alice" }),
@@ -172,30 +158,17 @@ describe("app routing guard", () => {
 			// the policy's once-latch for this module instance.
 			setBearerToken("mid-session-token");
 			server.use(
-				http.get("*/api/machines", () => {
-					return HttpResponse.json(
-						{
-							requestId: "req-1",
-							error: {
-								code: "TOKEN_EXPIRED",
-								message: "Token has expired",
-							},
-						},
-						{ status: 401 },
-					);
-				}),
-				http.post("*/api/auth/refresh", () => {
-					return HttpResponse.json(
-						{
-							requestId: "req-2",
-							error: {
-								code: "AUTH_REFRESH_INVALID",
-								message: "Refresh token invalid",
-							},
-						},
-						{ status: 401 },
-					);
-				}),
+				http.get("*/api/machines", () =>
+					errorResponse(401, "TOKEN_EXPIRED", "Token has expired"),
+				),
+				http.post("*/api/auth/refresh", () =>
+					errorResponse(
+						401,
+						"AUTH_REFRESH_INVALID",
+						"Refresh token invalid",
+						"req-2",
+					),
+				),
 			);
 			const { queryClient } = renderApp("/machines", {
 				resolveInitialState: async () => ({ username: "alice" }),

@@ -4,17 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 import { loginViaForm, renderApp } from "@/test/auth";
+import { errorResponse } from "@/test/errors";
 import { server } from "@/test/server";
-
-// Mirrors the backend error envelope (backend/internal/errors/handlers.go)
-function loginFailureHandler(status: number, code: string, message: string) {
-	return http.post("*/api/auth/login", () => {
-		return HttpResponse.json(
-			{ requestId: "req-1", error: { message, code } },
-			{ status },
-		);
-	});
-}
 
 afterEach(() => {
 	setBearerToken(null);
@@ -65,10 +56,12 @@ describe("LoginPage", () => {
 
 	it("shows the error envelope inline when credentials are rejected", async () => {
 		server.use(
-			loginFailureHandler(
-				401,
-				"INVALID_CREDENTIALS",
-				"Invalid username or password",
+			http.post("*/api/auth/login", () =>
+				errorResponse(
+					401,
+					"INVALID_CREDENTIALS",
+					"Invalid username or password",
+				),
 			),
 		);
 		renderApp("/login");
@@ -85,7 +78,11 @@ describe("LoginPage", () => {
 	});
 
 	it("substitutes generic text for internal errors, hiding leaked details", async () => {
-		server.use(loginFailureHandler(500, "PANIC", "database is on fire"));
+		server.use(
+			http.post("*/api/auth/login", () =>
+				errorResponse(500, "PANIC", "database is on fire"),
+			),
+		);
 		renderApp("/login");
 
 		await loginViaForm();

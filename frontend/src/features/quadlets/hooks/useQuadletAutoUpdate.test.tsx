@@ -4,10 +4,10 @@ import {
 	imagesQueryKey,
 	quadletsQueryKey,
 } from "@shared/queries/queryKeys";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, waitFor } from "@testing-library/react";
 import { type DefaultBodyType, type HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import { ndjsonResponse } from "@/test/stream";
 
@@ -74,14 +74,7 @@ function streamResponse(events: AutoUpdateEvent[]) {
 }
 
 function renderAutoUpdateHook() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	const wrapper = ({ children }: { children: React.ReactNode }) => (
-		<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-	);
-	const hook = renderHook(() => useQuadletAutoUpdate("m-1"), { wrapper });
-	return { ...hook, queryClient };
+	return renderHookWithQuery(() => useQuadletAutoUpdate("m-1"));
 }
 
 afterEach(() => {

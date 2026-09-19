@@ -14,12 +14,8 @@ import { downloadFile } from "@shared/utils/download";
 import { AxiosError, type AxiosResponse } from "axios";
 import { HttpResponse, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { errorJson, errorResponse } from "@/test/errors";
 import { server } from "@/test/server";
-
-const tokenExpiredEnvelope = (requestId: string) => ({
-	requestId,
-	error: { code: "TOKEN_EXPIRED", message: "Token has expired" },
-});
 
 function responseOf(status: number, data: unknown): AxiosResponse {
 	return {
@@ -167,13 +163,10 @@ describe("getApiError", () => {
 			"ERR_BAD_REQUEST",
 			undefined,
 			undefined,
-			responseOf(401, {
-				requestId: "req-1",
-				error: {
-					code: "INVALID_CREDENTIALS",
-					message: "Invalid username or password",
-				},
-			}),
+			responseOf(
+				401,
+				errorJson("INVALID_CREDENTIALS", "Invalid username or password"),
+			),
 		);
 
 		expect(getApiError(error)).toEqual({
@@ -188,13 +181,14 @@ describe("getApiError", () => {
 			"ERR_BAD_RESPONSE",
 			undefined,
 			undefined,
-			responseOf(503, {
-				requestId: "req-2",
-				error: {
-					code: "SERVICE_UNAVAILABLE",
-					message: "Service temporarily unavailable",
-				},
-			}),
+			responseOf(
+				503,
+				errorJson(
+					"SERVICE_UNAVAILABLE",
+					"Service temporarily unavailable",
+					"req-2",
+				),
+			),
 		);
 
 		expect(getApiError(error)).toEqual({
@@ -231,13 +225,10 @@ describe("getApiError", () => {
 			"ERR_BAD_REQUEST",
 			undefined,
 			undefined,
-			responseOf(400, {
-				requestId: "req-3",
-				error: {
-					code: "INTERNAL_ERROR",
-					message: "Invalid username or password",
-				},
-			}),
+			responseOf(
+				400,
+				errorJson("INTERNAL_ERROR", "Invalid username or password", "req-3"),
+			),
 		);
 
 		expect(getApiError(error)).toEqual({
@@ -286,18 +277,14 @@ describe("refreshSession", () => {
 	// session death — only the 401 policy translates null into the seam.
 	it("resolves null on failure without firing the seam; only handleUnauthorized fires it", async () => {
 		server.use(
-			http.post("*/api/auth/refresh", () => {
-				return HttpResponse.json(
-					{
-						requestId: "req-refresh",
-						error: {
-							code: "AUTH_REFRESH_INVALID",
-							message: "Refresh token invalid",
-						},
-					},
-					{ status: 401 },
-				);
-			}),
+			http.post("*/api/auth/refresh", () =>
+				errorResponse(
+					401,
+					"AUTH_REFRESH_INVALID",
+					"Refresh token invalid",
+					"req-refresh",
+				),
+			),
 		);
 		setSessionExpiredHandler(() => {
 			seamCalls++;
@@ -358,15 +345,11 @@ describe("401 policy", () => {
 	function rejectedRefreshHandler() {
 		return http.post("*/api/auth/refresh", () => {
 			refreshCalls++;
-			return HttpResponse.json(
-				{
-					requestId: "req-refresh",
-					error: {
-						code: "AUTH_REFRESH_INVALID",
-						message: "Refresh token invalid",
-					},
-				},
-				{ status: 401 },
+			return errorResponse(
+				401,
+				"AUTH_REFRESH_INVALID",
+				"Refresh token invalid",
+				"req-refresh",
 			);
 		});
 	}
@@ -377,9 +360,12 @@ describe("401 policy", () => {
 	}
 
 	function unauthorized(call: number) {
-		return HttpResponse.json(tokenExpiredEnvelope(`req-${call}`), {
-			status: 401,
-		});
+		return errorResponse(
+			401,
+			"TOKEN_EXPIRED",
+			"Token has expired",
+			`req-${call}`,
+		);
 	}
 
 	it("resolves true only when a fresh token was installed", async () => {
@@ -452,7 +438,9 @@ describe("401 policy", () => {
 		}
 
 		expect(caught?.response?.status).toBe(401);
-		expect(caught?.response?.data).toEqual(tokenExpiredEnvelope("req-1"));
+		expect(caught?.response?.data).toEqual(
+			errorJson("TOKEN_EXPIRED", "Token has expired", "req-1"),
+		);
 		expect(seamCalls).toBe(1);
 		expect(refreshCalls).toBe(1);
 	});
@@ -493,7 +481,9 @@ describe("401 policy", () => {
 			caught = error as AxiosError;
 		}
 
-		expect(caught?.response?.data).toEqual(tokenExpiredEnvelope("req-2"));
+		expect(caught?.response?.data).toEqual(
+			errorJson("TOKEN_EXPIRED", "Token has expired", "req-2"),
+		);
 		expect(seamCalls).toBe(1);
 		expect(refreshCalls).toBe(1);
 	});
@@ -501,15 +491,10 @@ describe("401 policy", () => {
 	it("does not refresh or fire the seam when a login on the bare transport is rejected", async () => {
 		server.use(
 			http.post("*/api/auth/login", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-1",
-						error: {
-							code: "INVALID_CREDENTIALS",
-							message: "Invalid username or password",
-						},
-					},
-					{ status: 401 },
+				errorResponse(
+					401,
+					"INVALID_CREDENTIALS",
+					"Invalid username or password",
 				),
 			),
 			refreshHandler(),

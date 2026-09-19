@@ -1,13 +1,29 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
 import { containerFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
+
+function renderContainerList() {
+	renderWithQuery(
+		<Routes>
+			<Route
+				path="/machines/:machineId"
+				element={<ContainerList machineId="m-1" />}
+			/>
+			<Route
+				path="/machines/:machineId/logs/:kind/:targetId"
+				element={<LogsPage />}
+			/>
+		</Routes>,
+		{ router: { initialEntries: ["/machines/m-1"] } },
+	);
+}
 
 describe("ContainerList logs", () => {
 	it("wires a list row's logs button to the container logs endpoint and renders its history", async () => {
@@ -28,28 +44,7 @@ describe("ContainerList logs", () => {
 				});
 			}),
 		);
-		render(
-			<QueryClientProvider
-				client={
-					new QueryClient({
-						defaultOptions: { queries: { retry: false } },
-					})
-				}
-			>
-				<MemoryRouter initialEntries={["/machines/m-1"]}>
-					<Routes>
-						<Route
-							path="/machines/:machineId"
-							element={<ContainerList machineId="m-1" />}
-						/>
-						<Route
-							path="/machines/:machineId/logs/:kind/:targetId"
-							element={<LogsPage />}
-						/>
-					</Routes>
-				</MemoryRouter>
-			</QueryClientProvider>,
-		);
+		renderContainerList();
 
 		await screen.findByText("my-container");
 		const user = userEvent.setup();

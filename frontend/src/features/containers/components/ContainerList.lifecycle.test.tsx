@@ -1,12 +1,12 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { containerFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function containersHandler(containers: ContainerSummary[]) {
@@ -34,34 +34,8 @@ function lifecycleHandler(
 	);
 }
 
-function lifecycleErrorHandler(action: "start" | "stop", containerId: string) {
-	return http.post(
-		`*/api/machines/m-1/containers/${containerId}/${action}`,
-		() =>
-			HttpResponse.json(
-				{
-					requestId: "req-12",
-					error: {
-						message: "container failed to start",
-						code: "CONTAINER_START_FAILED",
-					},
-				},
-				{ status: 409 },
-			),
-	);
-}
-
 function renderContainerList() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<ContainerList machineId="m-1" />
-			</MemoryRouter>
-		</QueryClientProvider>,
-	);
+	renderWithQuery(<ContainerList machineId="m-1" />, { router: true });
 }
 
 describe("ContainerList lifecycle", () => {
@@ -189,7 +163,14 @@ describe("ContainerList lifecycle", () => {
 			containersHandler([
 				containerFixture({ id: "c-1", names: ["/sleepy"], state: "exited" }),
 			]),
-			lifecycleErrorHandler("start", "c-1"),
+			http.post("*/api/machines/m-1/containers/c-1/start", () =>
+				errorResponse(
+					409,
+					"CONTAINER_START_FAILED",
+					"container failed to start",
+					"req-12",
+				),
+			),
 		);
 		const user = userEvent.setup();
 		renderContainerList();

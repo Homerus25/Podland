@@ -1,12 +1,12 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { errorJson } from "@/test/errors";
 import { containerFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 const existing = containerFixture({ names: ["/existing"] });
@@ -46,16 +46,7 @@ function createHandler(status = 201, body?: Record<string, unknown>) {
 }
 
 function renderContainerList() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<ContainerList machineId="m-1" />
-			</MemoryRouter>
-		</QueryClientProvider>,
-	);
+	renderWithQuery(<ContainerList machineId="m-1" />, { router: true });
 }
 
 async function openCreateModal() {
@@ -253,10 +244,10 @@ describe("ContainerList create", () => {
 		resetCounters();
 		server.use(
 			containersHandler(() => [existing]),
-			createHandler(404, {
-				requestId: "req-14",
-				error: { message: "image not found", code: "IMAGE_NOT_FOUND" },
-			}),
+			createHandler(
+				404,
+				errorJson("IMAGE_NOT_FOUND", "image not found", "req-14"),
+			),
 		);
 		const user = await openCreateModal();
 

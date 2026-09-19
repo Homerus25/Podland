@@ -1,10 +1,11 @@
 import { ImageList } from "@features/images/components/ImageList";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { errorJson, errorResponse } from "@/test/errors";
 import { imageFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 const imagesFixture = [
@@ -36,14 +37,7 @@ function deleteHandler(status = 204, body?: Record<string, unknown>) {
 }
 
 async function renderImageList() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<ImageList machineId="m-1" permission="admin" />
-		</QueryClientProvider>,
-	);
+	renderWithQuery(<ImageList machineId="m-1" permission="admin" />);
 	await screen.findByText("docker.io/library/nginx:1.27");
 }
 
@@ -92,13 +86,11 @@ describe("ImageList delete", () => {
 
 	it("explains in-use rejection and force-deletes when the user opts in", async () => {
 		resetCounters();
-		const usedByContainers = {
-			requestId: "req-11",
-			error: {
-				message: "Image is used by one or more containers",
-				code: "IMAGE_USED_BY_CONTAINERS",
-			},
-		};
+		const usedByContainers = errorJson(
+			"IMAGE_USED_BY_CONTAINERS",
+			"Image is used by one or more containers",
+			"req-11",
+		);
 		let forceRequested = false;
 		let remaining = [...imagesFixture];
 		server.use(
@@ -143,15 +135,11 @@ describe("ImageList delete", () => {
 				HttpResponse.json(imagesFixture),
 			),
 			http.delete("*/api/machines/m-1/images/*", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-12",
-						error: {
-							message: "Image removal failed on the host",
-							code: "IMAGE_REMOVE_FAILED",
-						},
-					},
-					{ status: 400 },
+				errorResponse(
+					400,
+					"IMAGE_REMOVE_FAILED",
+					"Image removal failed on the host",
+					"req-12",
 				),
 			),
 		);

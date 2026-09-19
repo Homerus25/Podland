@@ -1,9 +1,10 @@
 import { usePullImage } from "@features/images/hooks/usePullImage";
 import { imagesQueryKey } from "@shared/queries/queryKeys";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { type DefaultBodyType, HttpResponse, http } from "msw";
+import { act, waitFor } from "@testing-library/react";
+import { type DefaultBodyType, type HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { errorResponse } from "@/test/errors";
+import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import { ndjsonResponse, streamFixtures } from "@/test/stream";
 
@@ -29,14 +30,7 @@ function mockPull(handler: PullHandler) {
 }
 
 function renderPullHook() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	const wrapper = ({ children }: { children: React.ReactNode }) => (
-		<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-	);
-	const hook = renderHook(() => usePullImage("m-1"), { wrapper });
-	return { ...hook, queryClient };
+	return renderHookWithQuery(() => usePullImage("m-1"));
 }
 
 afterEach(() => {
@@ -107,13 +101,7 @@ describe("usePullImage", () => {
 
 	it("exposes non-2xx HTTP failures through the error envelope", async () => {
 		mockPull(() =>
-			HttpResponse.json(
-				{
-					requestId: "req-1",
-					error: { code: "MACHINE_NOT_FOUND", message: "Machine not found" },
-				},
-				{ status: 404 },
-			),
+			errorResponse(404, "MACHINE_NOT_FOUND", "Machine not found"),
 		);
 		const { result } = renderPullHook();
 

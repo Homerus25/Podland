@@ -4,8 +4,8 @@ import {
 } from "@shared/components/PruneReportDialog";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AxiosError, type AxiosResponse } from "axios";
 import { describe, expect, it, vi } from "vitest";
+import { axiosError } from "@/test/errors";
 
 // The module drives the prune mutation result the caller hands it, never
 // react-query itself: the stub below is the whole interface under test.
@@ -26,22 +26,6 @@ function makeMutation(
 		reset: vi.fn(),
 		...overrides,
 	};
-}
-
-function envelopeError() {
-	return new AxiosError(
-		"Request failed with status code 409",
-		AxiosError.ERR_BAD_REQUEST,
-		undefined,
-		undefined,
-		{
-			status: 409,
-			data: {
-				requestId: "req-9",
-				error: { code: "PRUNE_DENIED", message: "Prune is denied" },
-			},
-		} as unknown as AxiosResponse,
-	);
 }
 
 function renderDialog(
@@ -229,7 +213,9 @@ describe("PruneReportDialog noun-derived copy", () => {
 describe("PruneReportDialog error region", () => {
 	it("renders the default error region from the envelope and stays open", async () => {
 		const user = userEvent.setup();
-		const mutation = makeMutation({ error: envelopeError() });
+		const mutation = makeMutation({
+			error: axiosError(409, "PRUNE_DENIED", "Prune is denied", "req-9"),
+		});
 		const onClose = renderDialog(mutation);
 
 		const alert = screen.getByRole("alert");

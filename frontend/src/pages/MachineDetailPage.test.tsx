@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { errorResponse } from "@/test/errors";
 import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
@@ -227,13 +228,7 @@ describe("MachineDetailPage", () => {
 	it("renders the error envelope for an unknown machine id", async () => {
 		server.use(
 			http.get("*/api/machines/m-missing", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-9",
-						error: { message: "Machine not found", code: "MACHINE_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
+				errorResponse(404, "MACHINE_NOT_FOUND", "Machine not found", "req-9"),
 			),
 		);
 		renderMachineDetailPage("m-missing");

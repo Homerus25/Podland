@@ -1,13 +1,11 @@
-import { ChakraProvider } from "@chakra-ui/react";
 import { useAuth } from "@features/auth/hooks/useAuth";
 import { AuthProvider } from "@shared/context/AuthContext";
 import type { User } from "@shared/types/api";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { App } from "@/App";
-import { theme } from "@/theme";
+import { renderWithQuery } from "@/test/render";
 
 export function UsernameProbe() {
 	const { user } = useAuth();
@@ -43,25 +41,14 @@ export function renderApp(
 	} = {},
 ) {
 	const { resolveInitialState, usernameProbe = true } = options;
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	// The helper's client is returned so tests can observe cache-level
-	// behavior (e.g. the logout cache clear) on the instance the app uses.
-	return {
-		queryClient,
-		...render(
-			<QueryClientProvider client={queryClient}>
-				<ChakraProvider theme={theme}>
-					<MemoryRouter initialEntries={[at]}>
-						<AuthProvider resolveInitialState={resolveInitialState}>
-							<LocationProbe />
-							{usernameProbe && <UsernameProbe />}
-							<App />
-						</AuthProvider>
-					</MemoryRouter>
-				</ChakraProvider>
-			</QueryClientProvider>,
-		),
-	};
+	// AuthProvider stays inside the router (auth-inside-router order), with
+	// the probes above the App so suites can read them before routes render.
+	return renderWithQuery(
+		<AuthProvider resolveInitialState={resolveInitialState}>
+			<LocationProbe />
+			{usernameProbe && <UsernameProbe />}
+			<App />
+		</AuthProvider>,
+		{ router: { initialEntries: [at] }, chakra: true },
+	);
 }

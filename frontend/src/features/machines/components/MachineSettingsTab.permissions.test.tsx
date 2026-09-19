@@ -1,21 +1,14 @@
 import { MachineSettingsTab } from "@features/machines/components/MachineSettingsTab";
 import type { MachinePermission } from "@shared/types/api";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { machineFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 
 function renderSettingsTab(permission: MachinePermission) {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<MachineSettingsTab machine={machineFixture({ permission })} />
-			</MemoryRouter>
-		</QueryClientProvider>,
+	renderWithQuery(
+		<MachineSettingsTab machine={machineFixture({ permission })} />,
+		{ router: true },
 	);
 }
 

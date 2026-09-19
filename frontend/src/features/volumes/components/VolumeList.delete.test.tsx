@@ -1,12 +1,12 @@
-import { ChakraProvider, theme } from "@chakra-ui/react";
 import { VolumeList } from "@features/volumes/components/VolumeList";
 import type { VolumeSummary } from "@features/volumes/services/volumesApi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorJson } from "@/test/errors";
 import { volumeFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 const remaining = volumeFixture({ name: "survivor" });
@@ -59,17 +59,9 @@ function installHandlers(
 }
 
 function renderVolumeList(permission: "read" | "write" | "admin" = "admin") {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
+	renderWithQuery(<VolumeList machineId="m-1" permission={permission} />, {
+		chakra: true,
 	});
-	// The Chakra provider is required for useToast to render its portal.
-	render(
-		<ChakraProvider theme={theme}>
-			<QueryClientProvider client={queryClient}>
-				<VolumeList machineId="m-1" permission={permission} />
-			</QueryClientProvider>
-		</ChakraProvider>,
-	);
 }
 
 async function openDeleteModal(
@@ -145,13 +137,11 @@ describe("VolumeList delete", () => {
 	it("renders the podman message plus a force-required hint on 409 in-use", async () => {
 		installHandlers(() => ({
 			status: 409,
-			body: {
-				requestId: "req-42",
-				error: {
-					message: "volume is in use by container abc",
-					code: "VOLUME_IN_USE",
-				},
-			},
+			body: errorJson(
+				"VOLUME_IN_USE",
+				"volume is in use by container abc",
+				"req-42",
+			),
 		}));
 		const user = await openDeleteModal();
 

@@ -1,10 +1,11 @@
 import { VolumeInspectDrawer } from "@features/volumes/components/VolumeInspectDrawer";
 import { useVolumes } from "@features/volumes/hooks/useVolumes";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { volumeFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function mockInspect(
@@ -14,20 +15,14 @@ function mockInspect(
 	server.use(http.get(`*/api/machines/m-1/volumes/${name}`, responder));
 }
 
-function renderDrawer(
-	queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	}),
-) {
-	return render(
-		<QueryClientProvider client={queryClient}>
-			<VolumeInspectDrawer
-				machineId="m-1"
-				volumeName="app-data"
-				isOpen={true}
-				onClose={() => {}}
-			/>
-		</QueryClientProvider>,
+function renderDrawer() {
+	return renderWithQuery(
+		<VolumeInspectDrawer
+			machineId="m-1"
+			volumeName="app-data"
+			isOpen={true}
+			onClose={() => {}}
+		/>,
 	);
 }
 
@@ -101,13 +96,7 @@ describe("VolumeInspectDrawer", () => {
 
 	it("on 404 shows a stale-volume message and refetches the volume list", async () => {
 		mockInspect("app-data", () =>
-			HttpResponse.json(
-				{
-					requestId: "r-1",
-					error: { code: "VOLUME_NOT_FOUND", message: "Volume not found" },
-				},
-				{ status: 404 },
-			),
+			errorResponse(404, "VOLUME_NOT_FOUND", "Volume not found", "r-1"),
 		);
 		const listRequests: string[] = [];
 		server.use(
@@ -122,11 +111,8 @@ describe("VolumeInspectDrawer", () => {
 			useVolumes("m-1");
 			return null;
 		}
-		const queryClient = new QueryClient({
-			defaultOptions: { queries: { retry: false } },
-		});
-		render(
-			<QueryClientProvider client={queryClient}>
+		renderWithQuery(
+			<>
 				<VolumeListProbe />
 				<VolumeInspectDrawer
 					machineId="m-1"
@@ -134,7 +120,7 @@ describe("VolumeInspectDrawer", () => {
 					isOpen={true}
 					onClose={() => {}}
 				/>
-			</QueryClientProvider>,
+			</>,
 		);
 
 		expect(
@@ -145,13 +131,7 @@ describe("VolumeInspectDrawer", () => {
 
 	it("shows the standard error treatment on server errors", async () => {
 		mockInspect("app-data", () =>
-			HttpResponse.json(
-				{
-					requestId: "r-2",
-					error: { code: "INTERNAL_ERROR", message: "ssh failed" },
-				},
-				{ status: 500 },
-			),
+			errorResponse(500, "INTERNAL_ERROR", "ssh failed", "r-2"),
 		);
 		renderDrawer();
 
@@ -167,19 +147,13 @@ describe("VolumeInspectDrawer", () => {
 	});
 
 	it("does not render anything when closed", () => {
-		render(
-			<QueryClientProvider
-				client={
-					new QueryClient({ defaultOptions: { queries: { retry: false } } })
-				}
-			>
-				<VolumeInspectDrawer
-					machineId="m-1"
-					volumeName="app-data"
-					isOpen={false}
-					onClose={() => {}}
-				/>
-			</QueryClientProvider>,
+		renderWithQuery(
+			<VolumeInspectDrawer
+				machineId="m-1"
+				volumeName="app-data"
+				isOpen={false}
+				onClose={() => {}}
+			/>,
 		);
 
 		expect(

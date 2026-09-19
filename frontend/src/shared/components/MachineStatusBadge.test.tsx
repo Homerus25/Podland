@@ -1,18 +1,15 @@
-import { ChakraProvider } from "@chakra-ui/react";
 import {
 	MachineStatusBadge,
 	machineStatusColorScheme,
 } from "@shared/components/MachineStatusBadge";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { theme } from "@/theme";
+import { renderWithQuery } from "@/test/render";
 
 function renderBadge(props: Parameters<typeof MachineStatusBadge>[0]) {
-	return render(
-		<ChakraProvider theme={theme}>
-			<MachineStatusBadge {...props} />
-		</ChakraProvider>,
-	);
+	return renderWithQuery(<MachineStatusBadge {...props} />, {
+		chakra: true,
+	});
 }
 
 describe("MachineStatusBadge", () => {

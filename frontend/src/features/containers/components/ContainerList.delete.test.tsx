@@ -1,12 +1,12 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { containerFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 const first = containerFixture({ id: "c-1", names: ["/victim"] });
@@ -55,16 +55,7 @@ function deleteHandler(onSuccess?: () => void) {
 }
 
 function renderContainerList() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<ContainerList machineId="m-1" />
-			</MemoryRouter>
-		</QueryClientProvider>,
-	);
+	renderWithQuery(<ContainerList machineId="m-1" />, { router: true });
 }
 
 async function openDeleteModal() {
@@ -116,15 +107,11 @@ describe("ContainerList delete", () => {
 		server.use(
 			containersHandler(() => [first]),
 			http.delete("*/api/machines/m-1/containers/*", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-13",
-						error: {
-							message: "container is running",
-							code: "CONTAINER_RUNNING",
-						},
-					},
-					{ status: 409 },
+				errorResponse(
+					409,
+					"CONTAINER_RUNNING",
+					"container is running",
+					"req-13",
 				),
 			),
 		);

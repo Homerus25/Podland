@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { errorResponse } from "@/test/errors";
 import { server } from "@/test/server";
 
 const existingMachine: Machine = {
@@ -175,16 +176,7 @@ describe("Add Machine modal", () => {
 		server.use(
 			mockMachines([existingMachine]),
 			http.post("*/api/machines", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-1",
-						error: {
-							message: "SSH handshake failed",
-							code: "MACHINE_UNREACHABLE",
-						},
-					},
-					{ status: 422 },
-				),
+				errorResponse(422, "MACHINE_UNREACHABLE", "SSH handshake failed"),
 			),
 		);
 		await renderAndOpenModal();
@@ -201,16 +193,7 @@ describe("Add Machine modal", () => {
 		server.use(
 			mockMachines([existingMachine]),
 			http.post("*/api/machines", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-1",
-						error: {
-							message: "SSH handshake failed",
-							code: "MACHINE_UNREACHABLE",
-						},
-					},
-					{ status: 422 },
-				),
+				errorResponse(422, "MACHINE_UNREACHABLE", "SSH handshake failed"),
 			),
 		);
 		await renderAndOpenModal();

@@ -1,12 +1,11 @@
-import { ChakraProvider, theme } from "@chakra-ui/react";
 import { VolumeList } from "@features/volumes/components/VolumeList";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { axiosError } from "@/test/errors";
 import { volumeFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 // MSW cannot stream FormData bodies in this jsdom environment (the handler
@@ -23,25 +22,6 @@ vi.mock("@features/volumes/services/volumesApi", async (importOriginal) => {
 		populateVolume: (...args: unknown[]) => populateVolumeMock(...args),
 	};
 });
-
-function tooLargeError(): AxiosError {
-	return new AxiosError(
-		"Request failed with status code 413",
-		undefined,
-		{} as InternalAxiosRequestConfig,
-		{},
-		{
-			status: 413,
-			data: {
-				requestId: "req-9",
-				error: {
-					message: "upload exceeds the configured limit",
-					code: "VOLUME_UPLOAD_TOO_LARGE",
-				},
-			},
-		} as never,
-	);
-}
 
 let populateRequests: { count: number; pathname: string } = {
 	count: 0,
@@ -67,17 +47,9 @@ function installHandlers() {
 }
 
 function renderVolumeList(permission: "read" | "write" | "admin" = "admin") {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
+	renderWithQuery(<VolumeList machineId="m-1" permission={permission} />, {
+		chakra: true,
 	});
-	// The Chakra provider is required for useToast to render its portal.
-	render(
-		<ChakraProvider theme={theme}>
-			<QueryClientProvider client={queryClient}>
-				<VolumeList machineId="m-1" permission={permission} />
-			</QueryClientProvider>
-		</ChakraProvider>,
-	);
 }
 
 function file(name: string, contents = "x"): File {
@@ -219,7 +191,14 @@ describe("VolumeList populate", () => {
 
 	it("renders an actionable size-limit message on 413", async () => {
 		installHandlers();
-		populateVolumeMock.mockRejectedValue(tooLargeError());
+		populateVolumeMock.mockRejectedValue(
+			axiosError(
+				413,
+				"VOLUME_UPLOAD_TOO_LARGE",
+				"upload exceeds the configured limit",
+				"req-9",
+			),
+		);
 		const user = await openPopulateModal();
 
 		const input = screen
