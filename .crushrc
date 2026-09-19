@@ -25,4 +25,4 @@ lsp add gopls --command gopls \
 
 option attribution-generated-with false
 
-mcp add forgejo --type http --url http://localhost:8080/mcp --header Authorization "Bearer d2e9579ac0cda068fde5ed9b86aaf747db056198"
+mcp add forgejo --type http --url http://localhost:8080/mcp --header Authorization "Bearer 65170f465ad6d205fdfd76f58a57c47c527b664d"
