@@ -2,7 +2,7 @@ import { QuadletList } from "@features/quadlets/components/QuadletList";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse, http } from "msw";
+import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
 import { quadletFixture } from "@/test/factories";
@@ -30,7 +30,7 @@ function quadletsHandler(quadlets: () => QuadletSummary[]) {
 
 function createHandler(
 	status = 201,
-	body?: Record<string, unknown>,
+	body?: JsonBodyType,
 	onCreated?: () => void,
 ) {
 	return http.post("*/api/machines/m-1/quadlets", async ({ request }) => {

@@ -2,7 +2,7 @@ import { SecretList } from "@features/secrets/components/SecretList";
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse, http } from "msw";
+import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
 import { secretFixture } from "@/test/factories";
@@ -25,7 +25,7 @@ function secretsHandler(secrets: () => SecretSummary[]) {
 
 function createHandler(
 	status = 201,
-	body?: Record<string, unknown>,
+	body?: JsonBodyType,
 	onCreated?: () => void,
 ) {
 	return http.post("*/api/machines/m-1/secrets", async ({ request }) => {

@@ -2,7 +2,7 @@ import { ContainerList } from "@features/containers/components/ContainerList";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse, http } from "msw";
+import { HttpResponse, http, type JsonBodyType } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
 import { containerFixture } from "@/test/factories";
@@ -27,7 +27,7 @@ function containersHandler(containers: () => ContainerSummary[]) {
 	);
 }
 
-function createHandler(status = 201, body?: Record<string, unknown>) {
+function createHandler(status = 201, body?: JsonBodyType) {
 	return http.post("*/api/machines/m-1/containers", async ({ request }) => {
 		createRequests.count++;
 		createRequests.body = await request.json();
