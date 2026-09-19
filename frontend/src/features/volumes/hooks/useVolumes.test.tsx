@@ -4,6 +4,7 @@ import { volumesQueryKey } from "@shared/queries/queryKeys";
 import { waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { volumeFixture } from "@/test/factories";
 import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -41,13 +42,7 @@ describe("useVolumes", () => {
 	it("surfaces request errors without retrying", async () => {
 		server.use(
 			http.get("*/api/machines/m-1/volumes", () =>
-				HttpResponse.json(
-					{
-						requestId: "r-1",
-						error: { code: "INTERNAL_ERROR", message: "ssh failed" },
-					},
-					{ status: 500 },
-				),
+				errorResponse(500, "INTERNAL_ERROR", "ssh failed", "r-1"),
 			),
 		);
 

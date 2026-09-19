@@ -1,4 +1,5 @@
 import { HttpResponse, http } from "msw";
+import { errorResponse } from "@/test/errors";
 
 // Handlers mirror the real API shapes from the backend
 // (see backend/internal/app/app.go and backend/internal/domain/auth/handler.go).
@@ -15,18 +16,9 @@ export const loginSuccessHandler = http.post(
 // Default refresh rejection so full-app renders start logged-out, the
 // pre-session browser state; session-restore tests override with
 // server.use().
-export const refreshRejectedHandler = http.post("*/api/auth/refresh", () => {
-	return HttpResponse.json(
-		{
-			requestId: "req-1",
-			error: {
-				code: "AUTH_REFRESH_INVALID",
-				message: "Refresh token invalid",
-			},
-		},
-		{ status: 401 },
-	);
-});
+export const refreshRejectedHandler = http.post("*/api/auth/refresh", () =>
+	errorResponse(401, "AUTH_REFRESH_INVALID", "Refresh token invalid"),
+);
 
 export const handlers = [
 	http.get("*/api/health", () => {

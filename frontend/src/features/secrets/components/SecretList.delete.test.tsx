@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorJson } from "@/test/errors";
 import { secretFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -109,13 +110,14 @@ describe("SecretList delete", () => {
 	it("keeps the modal open and shows the SECRET_IN_USE envelope when deletion is rejected", async () => {
 		server.use(
 			secretsHandler(() => [dbPassword]),
-			deleteHandler(409, {
-				requestId: "req-61",
-				error: {
-					message: "secret db-password is in use by container web",
-					code: "SECRET_IN_USE",
-				},
-			}),
+			deleteHandler(
+				409,
+				errorJson(
+					"SECRET_IN_USE",
+					"secret db-password is in use by container web",
+					"req-61",
+				),
+			),
 		);
 		const user = await openDeleteModal();
 
@@ -133,10 +135,10 @@ describe("SecretList delete", () => {
 	it("shows the SECRET_NOT_FOUND envelope when the secret vanished before deletion", async () => {
 		server.use(
 			secretsHandler(() => [dbPassword]),
-			deleteHandler(404, {
-				requestId: "req-62",
-				error: { message: "Secret not found", code: "SECRET_NOT_FOUND" },
-			}),
+			deleteHandler(
+				404,
+				errorJson("SECRET_NOT_FOUND", "Secret not found", "req-62"),
+			),
 		);
 		const user = await openDeleteModal();
 

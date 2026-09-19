@@ -11,6 +11,7 @@ import {
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { server } from "@/test/server";
 import {
 	abortableNdjsonResponse,
@@ -97,13 +98,7 @@ describe("streamNdjson", () => {
 
 	it("rejects non-ok responses with the envelope, collapsing internal codes to the generic sentinel", async () => {
 		mockStream("post", () =>
-			HttpResponse.json(
-				{
-					requestId: "req-1",
-					error: { code: "MACHINE_NOT_FOUND", message: "Machine not found" },
-				},
-				{ status: 404 },
-			),
+			errorResponse(404, "MACHINE_NOT_FOUND", "Machine not found"),
 		);
 		await expect(
 			streamNdjson(
@@ -117,16 +112,7 @@ describe("streamNdjson", () => {
 		});
 
 		mockStream("post", () =>
-			HttpResponse.json(
-				{
-					requestId: "req-2",
-					error: {
-						code: "SERVICE_UNAVAILABLE",
-						message: "internal detail",
-					},
-				},
-				{ status: 404 },
-			),
+			errorResponse(404, "SERVICE_UNAVAILABLE", "internal detail", "req-2"),
 		);
 		await expect(
 			streamNdjson(
@@ -275,26 +261,21 @@ describe("streamNdjson 401 policy", () => {
 	function rejectedRefresh() {
 		return http.post("*/api/auth/refresh", () => {
 			refreshCalls++;
-			return HttpResponse.json(
-				{
-					requestId: "req-refresh",
-					error: {
-						code: "AUTH_REFRESH_INVALID",
-						message: "Refresh token invalid",
-					},
-				},
-				{ status: 401 },
+			return errorResponse(
+				401,
+				"AUTH_REFRESH_INVALID",
+				"Refresh token invalid",
+				"req-refresh",
 			);
 		});
 	}
 
 	function unauthorized() {
-		return HttpResponse.json(
-			{
-				requestId: "req-stream",
-				error: { code: "TOKEN_EXPIRED", message: "Token has expired" },
-			},
-			{ status: 401 },
+		return errorResponse(
+			401,
+			"TOKEN_EXPIRED",
+			"Token has expired",
+			"req-stream",
 		);
 	}
 
@@ -617,13 +598,7 @@ describe("useNdjsonOperation", () => {
 
 	it("surfaces transport failures as the error state and clears it on the next start", async () => {
 		mockStream("post", () =>
-			HttpResponse.json(
-				{
-					requestId: "req-1",
-					error: { code: "MACHINE_NOT_FOUND", message: "Machine not found" },
-				},
-				{ status: 404 },
-			),
+			errorResponse(404, "MACHINE_NOT_FOUND", "Machine not found"),
 		);
 		const { result } = renderOperation();
 

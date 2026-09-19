@@ -1,8 +1,8 @@
 import { Button, Td, Tr } from "@chakra-ui/react";
 import { ResourceList } from "@shared/components/ResourceList";
 import { render, screen, within } from "@testing-library/react";
-import { AxiosError, type AxiosResponse } from "axios";
 import { describe, expect, it } from "vitest";
+import { axiosError } from "@/test/errors";
 
 type Gadget = { id: string; name: string };
 
@@ -39,22 +39,6 @@ function renderResourceList(
 	return render(<ResourceList {...props} />);
 }
 
-function envelopeError() {
-	return new AxiosError(
-		"Request failed with status code 404",
-		AxiosError.ERR_BAD_REQUEST,
-		undefined,
-		undefined,
-		{
-			status: 404,
-			data: {
-				requestId: "req-1",
-				error: { code: "GADGET_DOWN", message: "Gadget exploded" },
-			},
-		} as unknown as AxiosResponse,
-	);
-}
-
 describe("ResourceList triad", () => {
 	it("renders loading alone, with the toolbar still above it", () => {
 		renderResourceList({ isPending: true, items: undefined });
@@ -68,7 +52,9 @@ describe("ResourceList triad", () => {
 	});
 
 	it("renders the error envelope alone on the derived error testid", () => {
-		renderResourceList({ error: envelopeError() });
+		renderResourceList({
+			error: axiosError(404, "GADGET_DOWN", "Gadget exploded"),
+		});
 
 		expect(screen.getByTestId("gadgets-error")).toHaveRole("alert");
 		expect(screen.getByText("GADGET_DOWN")).toBeInTheDocument();

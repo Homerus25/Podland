@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorJson } from "@/test/errors";
 import { volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -159,13 +160,11 @@ describe("VolumeList create", () => {
 	it("surfaces backend validation errors inline in the modal", async () => {
 		installHandlers(() => ({
 			status: 400,
-			body: {
-				requestId: "r-1",
-				error: {
-					code: "INVALID_REQUEST",
-					message: "invalid volume name: bad name",
-				},
-			},
+			body: errorJson(
+				"INVALID_REQUEST",
+				"invalid volume name: bad name",
+				"r-1",
+			),
 		}));
 		const user = await openCreateModal();
 

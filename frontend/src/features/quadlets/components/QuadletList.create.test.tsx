@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorJson } from "@/test/errors";
 import { quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -184,13 +185,10 @@ describe("QuadletList create", () => {
 	it("keeps the modal open and shows the error envelope on failure", async () => {
 		server.use(
 			quadletsHandler(() => [existing]),
-			createHandler(409, {
-				requestId: "req-31",
-				error: {
-					message: "Quadlet already exists",
-					code: "QUADLET_ALREADY_EXISTS",
-				},
-			}),
+			createHandler(
+				409,
+				errorJson("QUADLET_ALREADY_EXISTS", "Quadlet already exists", "req-31"),
+			),
 		);
 		const user = await openCreateModal();
 

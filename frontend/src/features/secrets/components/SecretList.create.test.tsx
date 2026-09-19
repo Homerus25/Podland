@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorJson } from "@/test/errors";
 import { secretFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -217,13 +218,14 @@ describe("SecretList create", () => {
 	it("keeps the modal open and shows the error envelope on a 409 conflict", async () => {
 		server.use(
 			secretsHandler(() => [existing]),
-			createHandler(409, {
-				requestId: "req-51",
-				error: {
-					message: "Secret with this name already exists",
-					code: "SECRET_ALREADY_EXISTS",
-				},
-			}),
+			createHandler(
+				409,
+				errorJson(
+					"SECRET_ALREADY_EXISTS",
+					"Secret with this name already exists",
+					"req-51",
+				),
+			),
 		);
 		const user = await openCreateModal();
 

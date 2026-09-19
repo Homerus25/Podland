@@ -4,6 +4,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -265,13 +266,7 @@ describe("QuadletList lifecycle", () => {
 		server.use(
 			quadletsHandler(() => [quadletFixture({ state: "stopped" })]),
 			http.post("*/api/machines/m-1/quadlets/:quadletId/start", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-61",
-						error: { message: "Unit is masked", code: "QUADLET_START_FAILED" },
-					},
-					{ status: 409 },
-				),
+				errorResponse(409, "QUADLET_START_FAILED", "Unit is masked", "req-61"),
 			),
 		);
 		const user = userEvent.setup();
@@ -290,13 +285,7 @@ describe("QuadletList lifecycle", () => {
 		server.use(
 			quadletsHandler(() => [quadletFixture()]),
 			http.post("*/api/machines/m-1/quadlets/:quadletId/stop", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-62",
-						error: { message: "Quadlet not found", code: "QUADLET_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
+				errorResponse(404, "QUADLET_NOT_FOUND", "Quadlet not found", "req-62"),
 			),
 		);
 		const user = await openOptionsModal("stop");

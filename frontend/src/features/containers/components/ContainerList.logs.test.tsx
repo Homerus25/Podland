@@ -6,6 +6,7 @@ import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
+import { errorResponse } from "@/test/errors";
 import { containerFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -156,15 +157,11 @@ describe("ContainerList logs", () => {
 		server.use(
 			containersHandler([containerFixture()]),
 			http.get("*/api/machines/m-1/containers/c-1/logs", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-16",
-						error: {
-							message: "no such container",
-							code: "CONTAINER_NOT_FOUND",
-						},
-					},
-					{ status: 404 },
+				errorResponse(
+					404,
+					"CONTAINER_NOT_FOUND",
+					"no such container",
+					"req-16",
 				),
 			),
 		);

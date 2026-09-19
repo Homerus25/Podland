@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { errorJson } from "@/test/errors";
 import { machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -112,13 +113,7 @@ describe("MachineSettingsTab (edit machine)", () => {
 			updateHandler(
 				machine,
 				409,
-				{
-					requestId: "req-4",
-					error: {
-						message: "Machine name already exists",
-						code: "MACHINE_NAME_TAKEN",
-					},
-				},
+				errorJson("MACHINE_NAME_TAKEN", "Machine name already exists", "req-4"),
 				50,
 			),
 		);

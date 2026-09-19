@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { errorJson } from "@/test/errors";
 import { containerFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -243,10 +244,10 @@ describe("ContainerList create", () => {
 		resetCounters();
 		server.use(
 			containersHandler(() => [existing]),
-			createHandler(404, {
-				requestId: "req-14",
-				error: { message: "image not found", code: "IMAGE_NOT_FOUND" },
-			}),
+			createHandler(
+				404,
+				errorJson("IMAGE_NOT_FOUND", "image not found", "req-14"),
+			),
 		);
 		const user = await openCreateModal();
 

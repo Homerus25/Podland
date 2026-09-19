@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -110,13 +111,7 @@ describe("ShareMachineSection", () => {
 		server.use(
 			http.post("*/api/machines/m-1/access", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
-				return HttpResponse.json(
-					{
-						requestId: "req-6",
-						error: { message: "User not found", code: "USER_NOT_FOUND" },
-					},
-					{ status: 404 },
-				);
+				return errorResponse(404, "USER_NOT_FOUND", "User not found", "req-6");
 			}),
 		);
 
@@ -132,13 +127,7 @@ describe("ShareMachineSection", () => {
 		await screen.findByTestId("grant-row-u-bob");
 		server.use(
 			http.delete("*/api/machines/m-1/access/:userId", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-7",
-						error: { message: "Not allowed", code: "ACCESS_DENIED" },
-					},
-					{ status: 403 },
-				),
+				errorResponse(403, "ACCESS_DENIED", "Not allowed", "req-7"),
 			),
 		);
 

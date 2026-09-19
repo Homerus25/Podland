@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { containerFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -106,15 +107,11 @@ describe("ContainerList delete", () => {
 		server.use(
 			containersHandler(() => [first]),
 			http.delete("*/api/machines/m-1/containers/*", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-13",
-						error: {
-							message: "container is running",
-							code: "CONTAINER_RUNNING",
-						},
-					},
-					{ status: 409 },
+				errorResponse(
+					409,
+					"CONTAINER_RUNNING",
+					"container is running",
+					"req-13",
 				),
 			),
 		);

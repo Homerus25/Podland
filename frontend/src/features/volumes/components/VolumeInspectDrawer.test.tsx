@@ -3,6 +3,7 @@ import { useVolumes } from "@features/volumes/hooks/useVolumes";
 import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -95,13 +96,7 @@ describe("VolumeInspectDrawer", () => {
 
 	it("on 404 shows a stale-volume message and refetches the volume list", async () => {
 		mockInspect("app-data", () =>
-			HttpResponse.json(
-				{
-					requestId: "r-1",
-					error: { code: "VOLUME_NOT_FOUND", message: "Volume not found" },
-				},
-				{ status: 404 },
-			),
+			errorResponse(404, "VOLUME_NOT_FOUND", "Volume not found", "r-1"),
 		);
 		const listRequests: string[] = [];
 		server.use(
@@ -136,13 +131,7 @@ describe("VolumeInspectDrawer", () => {
 
 	it("shows the standard error treatment on server errors", async () => {
 		mockInspect("app-data", () =>
-			HttpResponse.json(
-				{
-					requestId: "r-2",
-					error: { code: "INTERNAL_ERROR", message: "ssh failed" },
-				},
-				{ status: 500 },
-			),
+			errorResponse(500, "INTERNAL_ERROR", "ssh failed", "r-2"),
 		);
 		renderDrawer();
 

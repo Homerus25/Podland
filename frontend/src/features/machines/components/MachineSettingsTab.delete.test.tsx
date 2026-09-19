@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -17,12 +18,11 @@ function deleteHandler(status = 204, delayMs = 0) {
 	return http.delete("*/api/machines/m-1", async () => {
 		if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));
 		if (status !== 204) {
-			return HttpResponse.json(
-				{
-					requestId: "req-5",
-					error: { message: "Failed to delete machine", code: "DELETE_FAILED" },
-				},
-				{ status },
+			return errorResponse(
+				status,
+				"DELETE_FAILED",
+				"Failed to delete machine",
+				"req-5",
 			);
 		}
 		deleteRequested = true;

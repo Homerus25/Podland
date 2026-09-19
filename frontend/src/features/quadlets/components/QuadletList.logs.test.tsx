@@ -6,6 +6,7 @@ import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
+import { errorResponse } from "@/test/errors";
 import { quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -153,13 +154,7 @@ describe("QuadletList logs", () => {
 		server.use(
 			quadletsHandler([quadletFixture()]),
 			http.get("*/api/machines/m-1/quadlets/web/logs", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-61",
-						error: { message: "quadlet not found", code: "QUADLET_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
+				errorResponse(404, "QUADLET_NOT_FOUND", "quadlet not found", "req-61"),
 			),
 		);
 		await openLogsViewer();
@@ -190,15 +185,11 @@ describe("QuadletList logs", () => {
 				if (url.searchParams.get("follow") === "true") {
 					// The quadlet disappearing between open and follow: a 4xx envelope
 					// passes through unmasked (5xx is deliberately collapsed).
-					return HttpResponse.json(
-						{
-							requestId: "req-62",
-							error: {
-								message: "quadlet not found",
-								code: "QUADLET_NOT_FOUND",
-							},
-						},
-						{ status: 404 },
+					return errorResponse(
+						404,
+						"QUADLET_NOT_FOUND",
+						"quadlet not found",
+						"req-62",
 					);
 				}
 				return HttpResponse.json({ id: "web", logs: "hist-line-1" });

@@ -1,9 +1,9 @@
 import { VolumeList } from "@features/volumes/components/VolumeList";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { axiosError } from "@/test/errors";
 import { volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -22,25 +22,6 @@ vi.mock("@features/volumes/services/volumesApi", async (importOriginal) => {
 		populateVolume: (...args: unknown[]) => populateVolumeMock(...args),
 	};
 });
-
-function tooLargeError(): AxiosError {
-	return new AxiosError(
-		"Request failed with status code 413",
-		undefined,
-		{} as InternalAxiosRequestConfig,
-		{},
-		{
-			status: 413,
-			data: {
-				requestId: "req-9",
-				error: {
-					message: "upload exceeds the configured limit",
-					code: "VOLUME_UPLOAD_TOO_LARGE",
-				},
-			},
-		} as never,
-	);
-}
 
 let populateRequests: { count: number; pathname: string } = {
 	count: 0,
@@ -210,7 +191,14 @@ describe("VolumeList populate", () => {
 
 	it("renders an actionable size-limit message on 413", async () => {
 		installHandlers();
-		populateVolumeMock.mockRejectedValue(tooLargeError());
+		populateVolumeMock.mockRejectedValue(
+			axiosError(
+				413,
+				"VOLUME_UPLOAD_TOO_LARGE",
+				"upload exceeds the configured limit",
+				"req-9",
+			),
+		);
 		const user = await openPopulateModal();
 
 		const input = screen

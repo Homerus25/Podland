@@ -6,6 +6,7 @@ import { handleUnauthorized, setBearerToken } from "@shared/utils/api";
 import { act, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -86,18 +87,14 @@ describe("session-expired seam", () => {
 	}
 
 	function rejectedRefreshHandler() {
-		return http.post("*/api/auth/refresh", () => {
-			return HttpResponse.json(
-				{
-					requestId: "req-refresh",
-					error: {
-						code: "AUTH_REFRESH_INVALID",
-						message: "Refresh token invalid",
-					},
-				},
-				{ status: 401 },
-			);
-		});
+		return http.post("*/api/auth/refresh", () =>
+			errorResponse(
+				401,
+				"AUTH_REFRESH_INVALID",
+				"Refresh token invalid",
+				"req-refresh",
+			),
+		);
 	}
 
 	it("runs the existing logout when the policy declares the session dead", async () => {

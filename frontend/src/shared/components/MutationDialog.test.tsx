@@ -6,8 +6,8 @@ import {
 } from "@shared/components/MutationDialog";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AxiosError, type AxiosResponse } from "axios";
 import { describe, expect, it, vi } from "vitest";
+import { axiosError } from "@/test/errors";
 
 // The module drives the mutation result the caller hands it, never
 // react-query itself: the stub below is the whole interface under test.
@@ -22,22 +22,6 @@ function makeMutation(
 		reset: vi.fn(),
 		...overrides,
 	};
-}
-
-function envelopeError() {
-	return new AxiosError(
-		"Request failed with status code 409",
-		AxiosError.ERR_BAD_REQUEST,
-		undefined,
-		undefined,
-		{
-			status: 409,
-			data: {
-				requestId: "req-9",
-				error: { code: "GADGET_IN_USE", message: "Gadget is in use" },
-			},
-		} as unknown as AxiosResponse,
-	);
 }
 
 function stubBody() {
@@ -168,7 +152,7 @@ describe("MutationDialog error region", () => {
 				onError={onError}
 			/>,
 		);
-		const error = envelopeError();
+		const error = axiosError(409, "GADGET_IN_USE", "Gadget is in use", "req-9");
 		view.rerender(
 			<MutationDialog
 				mutation={{ ...mutation, error }}
@@ -186,7 +170,9 @@ describe("MutationDialog error region", () => {
 	});
 
 	it("renders the default error region from the envelope, above the body", () => {
-		const mutation = makeMutation({ error: envelopeError() });
+		const mutation = makeMutation({
+			error: axiosError(409, "GADGET_IN_USE", "Gadget is in use", "req-9"),
+		});
 
 		render(
 			<MutationDialog
@@ -225,7 +211,9 @@ describe("MutationDialog error region", () => {
 		const renderError = vi.fn((apiError: { code: string; message: string }) => (
 			<Text data-testid="custom-error">{`${apiError.code}: ${apiError.message}`}</Text>
 		));
-		const mutation = makeMutation({ error: envelopeError() });
+		const mutation = makeMutation({
+			error: axiosError(409, "GADGET_IN_USE", "Gadget is in use", "req-9"),
+		});
 
 		render(
 			<MutationDialog
@@ -316,7 +304,7 @@ describe("ConfirmDialog danger footer", () => {
 
 	it("replaces the default confirm button with renderConfirm, receiving error, pending, and the confirm handler", async () => {
 		const user = userEvent.setup();
-		const error = envelopeError();
+		const error = axiosError(409, "GADGET_IN_USE", "Gadget is in use", "req-9");
 		const mutation = makeMutation({ error });
 		const confirm = vi.fn(() => "db-password");
 		const renderConfirm = vi.fn(

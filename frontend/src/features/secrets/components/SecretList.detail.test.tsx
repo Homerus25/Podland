@@ -8,6 +8,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { secretFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -134,15 +135,11 @@ describe("SecretDetailModal", () => {
 		server.use(
 			http.get("*/api/machines/m-1/secrets/db-password", ({ request }) => {
 				if (request.url.includes("reveal=true")) {
-					return HttpResponse.json(
-						{
-							requestId: "req-7",
-							error: {
-								message: "Admin access required",
-								code: "ACCESS_DENIED",
-							},
-						},
-						{ status: 403 },
+					return errorResponse(
+						403,
+						"ACCESS_DENIED",
+						"Admin access required",
+						"req-7",
 					);
 				}
 				return HttpResponse.json(
@@ -164,13 +161,7 @@ describe("SecretDetailModal", () => {
 		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
 		server.use(
 			http.get("*/api/machines/m-1/secrets/db-password", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-9",
-						error: { message: "Secret not found", code: "SECRET_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
+				errorResponse(404, "SECRET_NOT_FOUND", "Secret not found", "req-9"),
 			),
 		);
 		renderSecretList();

@@ -2,6 +2,7 @@ import { setBearerToken } from "@shared/utils/api";
 import { downloadFile } from "@shared/utils/download";
 import { HttpResponse, http } from "msw";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { server } from "@/test/server";
 
 const createObjectURL = vi.fn(() => "blob:mock");
@@ -91,13 +92,7 @@ describe("downloadFile", () => {
 	it("rejects with the standard error treatment on a non-ok response", async () => {
 		server.use(
 			http.get("*/api/files/blob", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-7",
-						error: { message: "no such volume", code: "VOLUME_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
+				errorResponse(404, "VOLUME_NOT_FOUND", "no such volume", "req-7"),
 			),
 		);
 		const anchor = stubAnchor();

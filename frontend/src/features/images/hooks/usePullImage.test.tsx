@@ -1,8 +1,9 @@
 import { usePullImage } from "@features/images/hooks/usePullImage";
 import { imagesQueryKey } from "@shared/queries/queryKeys";
 import { act, waitFor } from "@testing-library/react";
-import { type DefaultBodyType, HttpResponse, http } from "msw";
+import { type DefaultBodyType, type HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import { ndjsonResponse, streamFixtures } from "@/test/stream";
@@ -100,13 +101,7 @@ describe("usePullImage", () => {
 
 	it("exposes non-2xx HTTP failures through the error envelope", async () => {
 		mockPull(() =>
-			HttpResponse.json(
-				{
-					requestId: "req-1",
-					error: { code: "MACHINE_NOT_FOUND", message: "Machine not found" },
-				},
-				{ status: 404 },
-			),
+			errorResponse(404, "MACHINE_NOT_FOUND", "Machine not found"),
 		);
 		const { result } = renderPullHook();
 

@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorJson } from "@/test/errors";
 import { quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -133,10 +134,10 @@ describe("QuadletList delete", () => {
 	it("keeps the modal open and shows the error envelope when deleting fails", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			deleteHandler(404, {
-				requestId: "req-51",
-				error: { message: "Quadlet not found", code: "QUADLET_NOT_FOUND" },
-			}),
+			deleteHandler(
+				404,
+				errorJson("QUADLET_NOT_FOUND", "Quadlet not found", "req-51"),
+			),
 		);
 		const user = await openDeleteModal();
 
@@ -155,13 +156,14 @@ describe("QuadletList delete", () => {
 		// generic error by the shared api error policy, so they share this path.
 		server.use(
 			quadletsHandler(() => [web]),
-			deleteHandler(400, {
-				requestId: "req-52",
-				error: {
-					message: "Quadlet-managed resource is running",
-					code: "QUADLET_RESOURCE_RUNNING",
-				},
-			}),
+			deleteHandler(
+				400,
+				errorJson(
+					"QUADLET_RESOURCE_RUNNING",
+					"Quadlet-managed resource is running",
+					"req-52",
+				),
+			),
 		);
 		const user = await openDeleteModal();
 

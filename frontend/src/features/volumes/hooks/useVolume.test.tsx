@@ -4,6 +4,7 @@ import { volumeQueryKey } from "@shared/queries/queryKeys";
 import { waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { volumeFixture } from "@/test/factories";
 import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -50,13 +51,7 @@ describe("useVolume", () => {
 	it("exposes 404 without retrying when the volume is gone", async () => {
 		server.use(
 			http.get("*/api/machines/m-1/volumes/gone", () =>
-				HttpResponse.json(
-					{
-						requestId: "r-1",
-						error: { code: "VOLUME_NOT_FOUND", message: "Volume not found" },
-					},
-					{ status: 404 },
-				),
+				errorResponse(404, "VOLUME_NOT_FOUND", "Volume not found", "r-1"),
 			),
 		);
 

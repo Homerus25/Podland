@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorJson, errorResponse } from "@/test/errors";
 import { quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -186,13 +187,7 @@ describe("QuadletList edit", () => {
 		server.use(
 			quadletsHandler(() => [existing]),
 			http.get("*/api/machines/m-1/quadlets/:quadletId", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-41",
-						error: { message: "Quadlet not found", code: "QUADLET_NOT_FOUND" },
-					},
-					{ status: 404 },
-				),
+				errorResponse(404, "QUADLET_NOT_FOUND", "Quadlet not found", "req-41"),
 			),
 		);
 		renderQuadletList();
@@ -213,10 +208,10 @@ describe("QuadletList edit", () => {
 		server.use(
 			quadletsHandler(() => [existing]),
 			getHandler(),
-			updateHandler(404, {
-				requestId: "req-42",
-				error: { message: "Quadlet not found", code: "QUADLET_NOT_FOUND" },
-			}),
+			updateHandler(
+				404,
+				errorJson("QUADLET_NOT_FOUND", "Quadlet not found", "req-42"),
+			),
 		);
 		const user = await openEditModal();
 

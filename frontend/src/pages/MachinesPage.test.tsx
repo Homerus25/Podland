@@ -3,6 +3,7 @@ import { screen } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { errorResponse } from "@/test/errors";
 import { machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
@@ -73,13 +74,7 @@ describe("MachinesPage", () => {
 	it("shows generic text for internal error codes, hiding leaked details", async () => {
 		server.use(
 			http.get("*/api/machines", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-3",
-						error: { message: "database is on fire", code: "INTERNAL_ERROR" },
-					},
-					{ status: 500 },
-				),
+				errorResponse(500, "INTERNAL_ERROR", "database is on fire", "req-3"),
 			),
 		);
 		renderMachinesPage();
