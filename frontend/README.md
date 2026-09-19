@@ -32,3 +32,12 @@ Tests standardize on a single network-level seam: MSW intercepts HTTP requests, 
 ## Environment
 
 See `.env.example`. `VITE_API_BASE_URL` (default `/api`), `VITE_APP_NAME` (default `Podland`), `VITE_DEFAULT_THEME` (`light`/`dark`/`system`, default `system`).
+
+## Production delivery
+
+There is no separate frontend container: the production build (`dist/`) is
+embedded into the Go backend binary via `go:embed`, and the backend serves
+the SPA alongside `/api` on :8080. The one-container image runs the build
+in its Node stage (see the root `Containerfile`, built with named contexts
+`backend`, `frontend`, and `podman`); locally, `make ui` in `backend/`
+drops a fresh `dist/` into the embed directory.

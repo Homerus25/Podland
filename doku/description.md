@@ -8,7 +8,7 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **Backend**: Go service using Podman's Service API
 - **Frontend**: React 18+ application with Chakra UI
 - **Database**: SQLite for storing machine metadata and user data
-- **Reverse Proxy**: Caddy for serving frontend and routing to backend
+- **Delivery**: One container — the Go backend serves the embedded frontend and the API on :8080
 
 ---
 
@@ -94,9 +94,9 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **E2E tests**: Frontend + backend + Podman in Podman pod
 
 ### 13. Deployment & Distribution
-- **Backend**: Distributed as container image, run via `podman run`
-- **Frontend**: Built with Vite, served through Caddy reverse proxy
-- **Caddy**: Handles both frontend and backend routing
+- **One container image**: a Node stage builds the frontend, a Go stage embeds it into the backend binary, the runtime is minimal alpine
+- **UI + API on :8080**: the backend serves the embedded SPA (unknown paths fall back to `index.html`) alongside `/api/*`; healthcheck on `/api/health`
+- **Build**: `podman build` at the repo root with named contexts (`backend`, `frontend`, `podman` fork), run via `podman run`
 
 ### 14. Rate Limiting
 - **Custom rate limiting** in Go backend
@@ -139,8 +139,8 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **TypeScript**: Strict mode with path aliases
 
 ### Infrastructure
-- **Reverse Proxy**: Caddy
-- **Container Runtime**: Podman (for both backend and integration tests)
+- **Delivery**: One container image (backend with embedded UI)
+- **Container Runtime**: Podman (for the app image and integration tests)
 - **Database**: SQLite (embedded)
 
 ---
@@ -250,7 +250,6 @@ Podland/
 - **React**: 18+
 - **Node.js**: 18+ (for frontend development)
 - **Podman**: Version matching forked Podman
-- **Caddy**: For reverse proxy
 - **SQLite**: 3.x
 
 ---

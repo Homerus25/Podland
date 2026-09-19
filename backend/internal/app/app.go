@@ -36,6 +36,7 @@ import (
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
+	"github.com/Homerus25/podland/backend/internal/webui"
 	"github.com/Homerus25/podland/backend/migrations"
 	"github.com/go-chi/chi/v5"
 	chimid "github.com/go-chi/chi/v5/middleware"
@@ -325,6 +326,13 @@ func New(cfg *config.Config) (*App, error) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 	})
+
+	// SPA — the frontend build embedded by internal/webui, mounted under
+	// the catch-all AFTER /api: chi gives the API subtree precedence, so
+	// every API route (and its 404s) stays API-shaped while all other
+	// paths fall back to index.html, mirroring the Caddy container's
+	// try_files contract this replaces.
+	router.Handle("/*", webui.Handler())
 
 	return &App{
 		db:                db,

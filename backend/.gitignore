@@ -43,6 +43,13 @@ logs/
 build/
 dist/
 
+# Embedded frontend bundle (internal/webui): `make ui` drops the real
+# Vite build into that directory; only the placeholder index.html is
+# committed so the backend builds and serves standalone.
+!internal/webui/dist/
+internal/webui/dist/*
+!internal/webui/dist/index.html
+
 # Test files
 coverage.txt
 profile.out

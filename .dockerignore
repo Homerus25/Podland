@@ -1,0 +1,6 @@
+# The one-container image sources everything from named contexts
+# (backend, frontend, podman — see Containerfile). Keep the root build
+# context lean: no clones, bundles, or local secrets.
+.git
+backend
+frontend

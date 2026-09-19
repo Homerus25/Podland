@@ -73,7 +73,6 @@ backend/
 │   └── generate-keys.sh        # JWT key generation
 ├── go.mod
 ├── go.sum
-├── Dockerfile
 └── .env.example
 ```
 
@@ -1037,61 +1036,41 @@ func main() {
 
 ---
 
-## Docker Configuration
+## Container Image
 
-```dockerfile
-# Dockerfile
-FROM golang:1.21-alpine AS builder
+The backend ships as **one container image** defined by the root
+`Containerfile` (not a file in `backend/`). Three stages:
 
-WORKDIR /app
+1. **Node stage** — `npm ci` against the committed lockfile, then the
+   frontend production build (`npm run build`: typecheck + Vite).
+2. **Go stage** — CGO build of `./cmd/server` with the podman fork from the
+   `podman` named context (the `replace` directive in `go.mod` is
+   normalized to the fork's in-image path, `/srv/podman`). The frontend
+   `dist/` from stage 1 is copied over `internal/webui/dist/`, so the real
+   SPA is embedded into the binary via `go:embed`.
+3. **Runtime stage** — minimal alpine (no Node, no Caddy): binary,
+   `migrations/` (read from disk at startup), `.env.example`, and
+   `scripts/generate-keys.sh`. Only :8080 is exposed; the healthcheck hits
+   `/api/health`. On first boot the entrypoint generates JWT keys when none
+   are mounted, and SQLite is created and migrated automatically.
 
-# Install dependencies
-RUN apk add --no-cache git ca-certificates
+Build and run from the repo root:
 
-# Copy go mod files
-COPY go.mod go.sum ./
-RUN go mod download
+```bash
+podman build \
+  --build-context backend=backend \
+  --build-context frontend=frontend \
+  --build-context podman=~/repos/podman \
+  -t podland .
 
-# Copy source
-COPY . .
-
-# Build
-RUN CGO_ENABLED=0 GOOS=linux go build -o /podland ./cmd/server
-
-# Final stage
-FROM alpine:latest
-
-WORKDIR /app
-
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates tzdata
-
-# Copy binary
-COPY --from=builder /podland /app/podland
-
-# Copy migrations
-COPY --from=builder /app/migrations ./migrations
-
-# Copy default config
-COPY --from=builder /app/.env.example .env.example
-
-# Create data directory
-RUN mkdir -p /app/data
-
-# Set permissions
-RUN chown -R nobody:nogroup /app
-USER nobody:nogroup
-
-# Expose port
-EXPOSE 8080
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1
-
-# Run
-CMD ["/app/podland"]
+podman run -p 8080:8080 podland
 ```
+
+`--build-context podman` points at a local checkout of the patched fork of
+Podman's Go bindings. The SPA is served by the backend binary itself
+(see the `webui` package): unknown paths fall back to `index.html`, hashed
+`/assets/*` files are served immutable, `index.html` revalidates with
+`Cache-Control: no-cache`.
 
 ---
 

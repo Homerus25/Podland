@@ -44,6 +44,31 @@ npm install
 npm run dev
 ```
 
+In development the frontend runs on Vite's dev server (:3000) proxying
+`/api` to the backend on :8080.
+
+## One-Container Delivery
+
+For deployment Podland ships as a **single container image**: the Go
+backend binary with the compiled React SPA embedded. One build, one image,
+one `podman run` — the UI and the API are both served on **:8080**
+(healthcheck on `/api/health`).
+
+```bash
+podman build \
+  --build-context backend=backend \
+  --build-context frontend=frontend \
+  --build-context podman=$HOME/repos/podman \
+  -t podland .
+
+podman run -p 8080:8080 podland
+```
+
+`--build-context podman` points at a local checkout of the patched Podman
+bindings fork ([github.com/Homerus25/podman](https://github.com/Homerus25/podman))
+that `backend/go.mod` carries as a `replace` directive. See the root
+[Containerfile](Containerfile) for the build stages.
+
 ## Podman Integration
 
 Podland tightly integrates with Podman: it talks to the Podman Service API

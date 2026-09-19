@@ -24,9 +24,10 @@ Authentication uses JWT Bearer tokens; see the [Auth](description_auth_api.md) d
 http://localhost:8080/api
 ```
 
-In production, the API is served behind a Caddy reverse proxy, which routes:
-- `/api/*` to the backend service
-- All other requests to the frontend static files
+In production, one container serves everything on :8080: the backend handles
+`/api/*`, and every other path is answered with the embedded frontend
+(SPA fallback to `index.html`). During development, the Vite dev server on
+:3000 proxies `/api` to the backend on :8080.
 
 ---
 

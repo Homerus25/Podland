@@ -1,6 +1,6 @@
 # Makefile for Podland Backend
 
-.PHONY: all build run clean deps lint test test-integration testhost-build migrate generate-keys init-db
+.PHONY: all build run clean deps lint test test-integration testhost-build migrate generate-keys init-db ui ui-clean
 
 # Go parameters
 GOCMD=go
@@ -18,6 +18,12 @@ PORT=8080
 
 # Database path
 DATABASE_PATH=./podland.db
+
+# Frontend bundle — make ui builds the SPA (../frontend) and copies its
+# dist/ into the webui embed directory, so the backend binary serves the
+# real UI from one process without the Caddy container. Needs node/npm.
+FRONTEND_DIR := ../frontend
+UI_DIST_DIR := internal/webui/dist
 
 # Default admin password for initialization
 ADMIN_PASSWORD=admin123
@@ -41,6 +47,27 @@ clean:
 	@rm -f $(BINARY_NAME)
 	@rm -f $(DATABASE_PATH)
 	@echo "Cleaned up"
+
+# Build the frontend and drop its bundle into the webui embed directory.
+# The next `make build` serves the real SPA from the binary; without
+# this, the committed placeholder page ships instead.
+ui:
+	@if [ ! -d "$(FRONTEND_DIR)/node_modules" ]; then \
+		echo "Installing frontend dependencies..."; \
+		cd $(FRONTEND_DIR) && npm ci; \
+	fi
+	cd $(FRONTEND_DIR) && npm run build
+	rm -rf $(UI_DIST_DIR)
+	mkdir -p $(UI_DIST_DIR)
+	cp -r $(FRONTEND_DIR)/dist/. $(UI_DIST_DIR)/
+	@echo "Frontend bundle embedded into $(UI_DIST_DIR) — rebuild the server to serve it."
+
+# Reset the embed directory to the committed placeholder (undo make ui).
+ui-clean:
+	rm -rf $(UI_DIST_DIR)
+	mkdir -p $(UI_DIST_DIR)
+	@git checkout -- $(UI_DIST_DIR)/index.html
+	@echo "Embed directory reset to the committed placeholder."
 
 # Dependency management
 tidy:
@@ -135,12 +162,17 @@ init-db:
 	@cd cmd/initdb && go run . -username admin -password $(ADMIN_PASSWORD) -db $(DATABASE_PATH)
 	@echo "Database initialization complete"
 
-# Docker commands
+# Container commands — the one-container app image is defined by the
+# root Containerfile (backend=. , frontend=../frontend, fork via
+# PODMAN_FORK; defaults to the documented host layout ~/repos/podman).
+PODMAN_FORK ?= $(HOME)/repos/podman
+
 podman-build:
-	podman build -t podland-backend .
+	@test -d "$(PODMAN_FORK)" || { echo "PODMAN_FORK=$(PODMAN_FORK) not found — point PODMAN_FORK at your podman fork checkout (see root Containerfile)"; exit 1; }
+	podman build --build-context backend=. --build-context frontend=../frontend --build-context podman=$(PODMAN_FORK) -t podland ..
 
 podman-run:
-	podman run -p $(PORT):8080 -v $(PWD)/podland.db:/app/podland.db podland-backend
+	podman run -p $(PORT):8080 podland
 
 # Help
 help:
@@ -150,9 +182,11 @@ help:
 	@echo "  make debug     - Run in debug mode"
 	@echo "  make clean     - Clean build artifacts"
 	@echo "  make test      - Run tests"
+	@echo "  make ui        - Build the frontend and embed it into the backend"
+	@echo "  make ui-clean  - Reset the embedded UI to the committed placeholder"
 	@echo "  make test-integration - Run integration tests against the containerized podman test host"
 	@echo "  make testhost-build - Build the container test host image"
 	@echo "  make migrate   - Run database migrations"
 	@echo "  make keys      - Generate JWT keys"
-	@echo "  make podman-build - Build Docker image"
-	@echo "  make podman-run  - Run Docker container"
+	@echo "  make podman-build - Build the one-container app image (root Containerfile)"
+	@echo "  make podman-run  - Run the app image on port $(PORT)"

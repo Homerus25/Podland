@@ -8,7 +8,7 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **Backend**: Go service using Podman's Service API
 - **Frontend**: React 18+ application with Chakra UI
 - **Database**: SQLite for storing machine metadata and user data
-- **Reverse Proxy**: Caddy for serving frontend and routing to backend
+- **Delivery**: One container — the Go backend serves the embedded frontend and the API on :8080
 
 ---
 
@@ -101,9 +101,9 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **E2E tests**: Frontend + backend + Podman in Podman pod
 
 ### 13. Deployment & Distribution
-- **Backend**: Distributed as container image, run via `podman run`
-- **Frontend**: Built with Vite, served through Caddy reverse proxy
-- **Caddy**: Handles both frontend and backend routing
+- **One container image**: a Node stage builds the frontend, a Go stage embeds it into the backend binary, the runtime is minimal alpine
+- **UI + API on :8080**: the backend serves the embedded SPA (unknown paths fall back to `index.html`) alongside `/api/*`; healthcheck on `/api/health`
+- **Build**: `podman build` at the repo root with named contexts (`backend`, `frontend`, `podman` fork), run via `podman run`
 
 ### 14. Rate Limiting
 - **Custom rate limiting** in Go backend
@@ -158,8 +158,8 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **Test-kit owners**: the test kit (`frontend/src/test/`) owns the two rituals every suite used to hand-copy — the render harness (`render.tsx`, `renderWithQuery`/`renderHookWithQuery`) builds the provider stack (QueryClient > Chakra > Router) with a fresh retry-off client per call and hands back that client for cache-level assertions, and the envelope builders (`errors.ts`, `errorJson`/`errorResponse`/`axiosError`) mint the backend error envelope's three test lives (body comparison, MSW response, stub-mutation AxiosError) with an overridable requestId; the literal shape itself is pinned once in `errors.test.ts`, the one sanctioned literal site. Adopted across the fleet after the expand half had landed the owners and their pins: ~60 hand-written envelope literals and per-suite provider stacks collapsed onto them, taking the verbatim `envelopeError` copies, `tokenExpiredEnvelope`, and the per-file MSW wrappers that only packaged a literal with them — the arc's shape is expand-then-adopt, owner first and pinned, then a mechanical migration with assertions untouched. Settled 2026-09-19 (architecture-review candidate C20).
 
 ### Infrastructure
-- **Reverse Proxy**: Caddy
-- **Container Runtime**: Podman (for both backend and integration tests)
+- **Delivery**: One container image (backend with embedded UI)
+- **Container Runtime**: Podman (for the app image and integration tests)
 - **Database**: SQLite (embedded)
 
 ---
@@ -276,7 +276,6 @@ Podland/
 - **React**: 18+
 - **Node.js**: 18+ (for frontend development)
 - **Podman**: Version matching forked Podman
-- **Caddy**: For reverse proxy
 - **SQLite**: 3.x
 
 ---

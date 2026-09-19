@@ -160,6 +160,42 @@ func TestApp_Handler_UsersRouteIsProtected(t *testing.T) {
 		"POST /api/users must sit behind the JWT middleware (401, not 404)")
 }
 
+// TestApp_Handler_SPARidesUnderAPI pins the mounting contract of the
+// embedded frontend (issue 154): the catch-all SPA handler is mounted
+// after /api, so real API routes keep precedence, unknown /api paths
+// still answer the API's 404 (never the SPA shell), and every other
+// path — client-side routes included — falls back to index.html with
+// 200, mirroring the Caddy try_files contract it replaces.
+func TestApp_Handler_SPARidesUnderAPI(t *testing.T) {
+	cfg := newTestConfig(t)
+
+	a, err := app.New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = a.Close() })
+
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/api/health")
+	require.NoError(t, err, "GET /api/health must connect")
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode,
+		"real API routes must keep precedence over the SPA catch-all")
+
+	apiMiss, err := http.Get(srv.URL + "/api/nonexistent")
+	require.NoError(t, err, "GET /api/nonexistent must connect")
+	defer apiMiss.Body.Close()
+	assert.Equal(t, http.StatusNotFound, apiMiss.StatusCode,
+		"unknown /api paths must stay API-shaped (404), never fall back to the SPA")
+
+	spa, err := http.Get(srv.URL + "/machines/xyz")
+	require.NoError(t, err, "GET /machines/xyz must connect")
+	defer spa.Body.Close()
+	assert.Equal(t, http.StatusOK, spa.StatusCode,
+		"non-API client-side routes fall back to index.html with 200")
+	assert.Contains(t, spa.Header.Get("Content-Type"), "text/html")
+}
+
 // TestApp_Close_IsIdempotent pins the "safe to call once" promise: App.Close
 // must not panic or error when called multiple times. App.Close stops the
 // connection-manager goroutine and the sshexec dialer-cleanup goroutine;
