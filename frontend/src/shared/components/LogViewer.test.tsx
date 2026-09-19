@@ -1,4 +1,5 @@
-import { type LogSource, LogViewer } from "@shared/components/LogViewer";
+import { LogViewer } from "@shared/components/LogViewer";
+import type { LogSource } from "@shared/streaming/logSource";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";

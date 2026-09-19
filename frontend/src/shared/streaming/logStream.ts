@@ -9,6 +9,14 @@ export interface LogEvent {
 	message: string;
 }
 
+// The buffered (no-follow) log response of the same endpoints
+// (backend/internal/domain/containers/dto.go ContainerLogsResponse): the
+// target id plus the requested tail as one multiline string.
+export interface BufferedLogs {
+	id: string;
+	logs: string;
+}
+
 export function isLogEvent(value: unknown): value is LogEvent {
 	if (typeof value !== "object" || value === null) return false;
 	const event = value as Record<string, unknown>;

@@ -1,25 +1,10 @@
 import { Box, Select, Switch, Text, VStack } from "@chakra-ui/react";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
+import type { LogSource } from "@shared/streaming/logSource";
 import { type LogEvent, parseLogErrorEvent } from "@shared/streaming/logStream";
 import type { ApiError } from "@shared/types/api";
 import { genericError } from "@shared/utils/api";
 import { useEffect, useRef, useState } from "react";
-
-// How a log viewer obtains its lines. The same component serves any backend
-// log endpoint (container and quadlet logs today): the caller wires
-// the two calls to its own URLs and params.
-export interface LogSource {
-	// Fetches the last `tail` lines without following.
-	fetchTail: (tail: number) => Promise<string[]>;
-	// Opens the live stream; calls onEvent per streamed log event and resolves
-	// when the stream ends. Must honor the AbortSignal so toggling follow off,
-	// closing the viewer, or unmounting tears down the connection.
-	follow: (
-		tail: number,
-		onEvent: (event: LogEvent) => void,
-		signal: AbortSignal,
-	) => Promise<void>;
-}
 
 const TAIL_OPTIONS = [50, 100, 200, 500];
 const DEFAULT_TAIL = 100;

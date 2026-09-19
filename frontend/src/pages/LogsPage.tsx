@@ -1,14 +1,8 @@
 import { Button, Heading, HStack, VStack } from "@chakra-ui/react";
-import {
-	fetchContainerLogs,
-	followContainerLogs,
-} from "@features/containers/services/containersApi";
-import {
-	fetchQuadletLogs,
-	followQuadletLogs,
-} from "@features/quadlets/services/quadletsApi";
-import { type LogSource, LogViewer } from "@shared/components/LogViewer";
-import { getApiError } from "@shared/utils/api";
+import { containerLogs } from "@features/containers/services/containersApi";
+import { quadletLogs } from "@features/quadlets/services/quadletsApi";
+import { LogViewer } from "@shared/components/LogViewer";
+import type { LogSource } from "@shared/streaming/logSource";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 type LogKind = "container" | "quadlet";
@@ -17,36 +11,15 @@ function isLogKind(value: string | undefined): value is LogKind {
 	return value === "container" || value === "quadlet";
 }
 
-function buildSource(
-	kind: LogKind,
-	machineId: string,
-	targetId: string,
-): LogSource {
-	if (kind === "container") {
-		return {
-			fetchTail: async (tail) => {
-				try {
-					return await fetchContainerLogs(machineId, targetId, tail);
-				} catch (error) {
-					throw getApiError(error);
-				}
-			},
-			follow: (tail, onEvent, signal) =>
-				followContainerLogs(machineId, targetId, tail, onEvent, signal),
-		};
-	}
-	return {
-		fetchTail: async (tail) => {
-			try {
-				return await fetchQuadletLogs(machineId, targetId, tail);
-			} catch (error) {
-				throw getApiError(error);
-			}
-		},
-		follow: (tail, onEvent, signal) =>
-			followQuadletLogs(machineId, targetId, tail, onEvent, signal),
-	};
-}
+// Exhaustive over LogKind: a future log-bearing kind is a type error until it
+// gets an entry. The kind guard still narrows before the lookup.
+const LOG_SOURCES: Record<
+	LogKind,
+	(machineId: string, targetId: string) => LogSource
+> = {
+	container: containerLogs,
+	quadlet: quadletLogs,
+};
 
 // Full-page log viewer for a container or quadlet. The list buttons navigate
 // here instead of opening a small modal, so logs get the whole viewport.
@@ -79,7 +52,7 @@ export function LogsPage() {
 				</Button>
 			</HStack>
 			<LogViewer
-				source={buildSource(kind, machineId, targetId)}
+				source={LOG_SOURCES[kind](machineId, targetId)}
 				maxHeight="70vh"
 			/>
 		</VStack>

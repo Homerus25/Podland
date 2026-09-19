@@ -1,7 +1,6 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
-import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -9,175 +8,64 @@ import { describe, expect, it } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
 import { containerFixture } from "@/test/factories";
 import { server } from "@/test/server";
-import { chunkedStream, streamResponse } from "@/test/stream";
-
-function logEvent(
-	overrides: Partial<{
-		timestamp: string;
-		level: string;
-		message: string;
-	}> = {},
-) {
-	return JSON.stringify({
-		timestamp: "2026-08-26T10:00:00Z",
-		level: "INFO",
-		message: "booted",
-		...overrides,
-	});
-}
-
-let logQueries: { tail: string | null; follow: string | null; count: number } =
-	{
-		tail: null,
-		follow: null,
-		count: 0,
-	};
-
-function resetCounters() {
-	logQueries = { tail: null, follow: null, count: 0 };
-}
-
-function containersHandler(containers: ContainerSummary[]) {
-	return http.get("*/api/machines/m-1/containers", () =>
-		HttpResponse.json({
-			containers,
-			total: containers.length,
-			timestamp: "2026-08-26T00:00:00Z",
-		}),
-	);
-}
-
-function logsHandler() {
-	return http.get("*/api/machines/m-1/containers/c-1/logs", ({ request }) => {
-		const url = new URL(request.url);
-		logQueries.count++;
-		logQueries.tail = url.searchParams.get("tail");
-		logQueries.follow = url.searchParams.get("follow");
-		if (url.searchParams.get("follow") === "true") {
-			return streamResponse(
-				chunkedStream([
-					`${logEvent()}\n`,
-					`${logEvent({ message: "live line" })}\n`,
-				]),
-			);
-		}
-		return HttpResponse.json({ id: "c-1", logs: "hist-line-1\nhist-line-2" });
-	});
-}
-
-function renderContainerList() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter initialEntries={["/machines/m-1"]}>
-				<Routes>
-					<Route
-						path="/machines/:machineId"
-						element={<ContainerList machineId="m-1" />}
-					/>
-					<Route
-						path="/machines/:machineId/logs/:kind/:targetId"
-						element={<LogsPage />}
-					/>
-				</Routes>
-			</MemoryRouter>
-		</QueryClientProvider>,
-	);
-}
-
-async function openLogsViewer() {
-	renderContainerList();
-	await screen.findByText("my-container");
-	const user = userEvent.setup();
-	await user.click(screen.getByRole("button", { name: /logs.*my-container/i }));
-	return user;
-}
 
 describe("ContainerList logs", () => {
-	it("opens the viewer and fetches the last 100 lines by default", async () => {
-		resetCounters();
-		server.use(containersHandler([containerFixture()]), logsHandler());
-		await openLogsViewer();
+	it("wires a list row's logs button to the container logs endpoint and renders its history", async () => {
+		const requestedPaths: string[] = [];
+		server.use(
+			http.get("*/api/machines/m-1/containers", () =>
+				HttpResponse.json({
+					containers: [containerFixture()],
+					total: 1,
+					timestamp: "2026-08-26T00:00:00Z",
+				}),
+			),
+			http.get("*/api/machines/m-1/containers/c-1/logs", ({ request }) => {
+				requestedPaths.push(new URL(request.url).pathname);
+				return HttpResponse.json({
+					id: "c-1",
+					logs: "hist-line-1\nhist-line-2",
+				});
+			}),
+		);
+		render(
+			<QueryClientProvider
+				client={
+					new QueryClient({
+						defaultOptions: { queries: { retry: false } },
+					})
+				}
+			>
+				<MemoryRouter initialEntries={["/machines/m-1"]}>
+					<Routes>
+						<Route
+							path="/machines/:machineId"
+							element={<ContainerList machineId="m-1" />}
+						/>
+						<Route
+							path="/machines/:machineId/logs/:kind/:targetId"
+							element={<LogsPage />}
+						/>
+					</Routes>
+				</MemoryRouter>
+			</QueryClientProvider>,
+		);
 
+		await screen.findByText("my-container");
+		const user = userEvent.setup();
+		await user.click(
+			screen.getByRole("button", { name: /logs.*my-container/i }),
+		);
+
+		expect(
+			screen.getByRole("heading", { name: "Logs — my-container" }),
+		).toBeInTheDocument();
 		expect(await screen.findAllByTestId("log-viewer-line")).toHaveLength(2);
 		expect(screen.getByText(/hist-line-1/)).toBeInTheDocument();
 		expect(screen.getByText(/hist-line-2/)).toBeInTheDocument();
-		await waitFor(() => expect(logQueries.count).toBeGreaterThanOrEqual(1));
-		expect(logQueries.tail).toBe("100");
-		expect(logQueries.follow).not.toBe("true");
-	});
-
-	it("streams live lines when follow is enabled", async () => {
-		resetCounters();
-		server.use(containersHandler([containerFixture()]), logsHandler());
-		const user = await openLogsViewer();
-		await screen.findAllByTestId("log-viewer-line");
-
-		await user.click(screen.getByTestId("log-follow-toggle"));
-
-		expect(await screen.findByText(/live line/)).toBeInTheDocument();
-		await waitFor(() => expect(logQueries.follow).toBe("true"));
-	});
-
-	it("aborts the stream when the viewer is closed", async () => {
-		resetCounters();
-		let streamSignal: AbortSignal | null = null;
-		server.use(
-			containersHandler([containerFixture()]),
-			http.get("*/api/machines/m-1/containers/c-1/logs", ({ request }) => {
-				const url = new URL(request.url);
-				if (url.searchParams.get("follow") === "true") {
-					streamSignal = request.signal;
-					return streamResponse(
-						new ReadableStream<Uint8Array>({
-							start(controller) {
-								controller.enqueue(new TextEncoder().encode(`${logEvent()}\n`));
-								request.signal.addEventListener("abort", () =>
-									controller.error(new DOMException("Aborted", "AbortError")),
-								);
-							},
-						}),
-					);
-				}
-				return HttpResponse.json({ id: "c-1", logs: "hist-line-1" });
-			}),
-		);
-		const user = await openLogsViewer();
-		await screen.findAllByTestId("log-viewer-line");
-		await user.click(screen.getByTestId("log-follow-toggle"));
-		await waitFor(() => expect(streamSignal).not.toBeNull());
-
-		await user.click(screen.getByTestId("logs-back-button"));
-
-		await waitFor(() => expect(streamSignal?.aborted).toBe(true));
-		await waitFor(() =>
-			expect(screen.queryByTestId("log-viewer")).not.toBeInTheDocument(),
-		);
-	});
-
-	it("surfaces the error envelope when the initial fetch fails", async () => {
-		resetCounters();
-		server.use(
-			containersHandler([containerFixture()]),
-			http.get("*/api/machines/m-1/containers/c-1/logs", () =>
-				HttpResponse.json(
-					{
-						requestId: "req-16",
-						error: {
-							message: "no such container",
-							code: "CONTAINER_NOT_FOUND",
-						},
-					},
-					{ status: 404 },
-				),
-			),
-		);
-		await openLogsViewer();
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("CONTAINER_NOT_FOUND")).toBeInTheDocument();
-		expect(screen.getByText("no such container")).toBeInTheDocument();
+		expect(requestedPaths.length).toBeGreaterThan(0);
+		for (const path of requestedPaths) {
+			expect(path).toBe("/api/machines/m-1/containers/c-1/logs");
+		}
 	});
 });

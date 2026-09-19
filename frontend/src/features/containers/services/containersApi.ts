@@ -1,4 +1,4 @@
-import { followLogStream, type LogEvent } from "@shared/streaming/logStream";
+import { createLogSource, type LogSource } from "@shared/streaming/logSource";
 import { api, machineApiPath, machineApiUrl } from "@shared/utils/api";
 
 // Container as returned by GET /api/machines/{id}/containers
@@ -100,33 +100,15 @@ export async function deleteContainer(
 	await api.delete(machineApiPath(machineId, "containers", containerId));
 }
 
-// GET /api/machines/{id}/containers/{containerId}/logs?tail=N (no follow)
-// returns the last lines as one multiline string
-// (backend/internal/domain/containers/dto.go ContainerLogsResponse).
-export async function fetchContainerLogs(
+// Log source for GET /api/machines/{machineId}/containers/{containerId}/logs:
+// the kit owns the buffered tail fetch and the follow stream
+// (backend/internal/domain/containers handler pair).
+export function containerLogs(
 	machineId: string,
 	containerId: string,
-	tail: number,
-): Promise<string[]> {
-	const response = await api.get<{ id: string; logs: string }>(
+): LogSource {
+	return createLogSource(
 		machineApiPath(machineId, "containers", containerId, "logs"),
-		{ params: { tail } },
-	);
-	return response.data.logs.split("\n").filter((line) => line !== "");
-}
-
-// Same endpoint with follow=true: NDJSON stream of ContainerLogEvent values.
-// Uses plain fetch via the shared stream helper (axios buffers responses).
-export async function followContainerLogs(
-	machineId: string,
-	containerId: string,
-	tail: number,
-	onEvent: (event: LogEvent) => void,
-	signal: AbortSignal,
-): Promise<void> {
-	await followLogStream(
-		`${machineApiUrl(machineId, "containers", containerId, "logs")}?tail=${tail}&follow=true`,
-		onEvent,
-		signal,
+		machineApiUrl(machineId, "containers", containerId, "logs"),
 	);
 }
