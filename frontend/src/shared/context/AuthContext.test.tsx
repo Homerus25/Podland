@@ -3,33 +3,40 @@ import { AuthProvider } from "@shared/context/AuthContext";
 import { machinesQueryKey } from "@shared/queries/queryKeys";
 import type { User } from "@shared/types/api";
 import { handleUnauthorized, setBearerToken } from "@shared/utils/api";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 import { machineFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
+// AuthProvider must sit above the hook, and renderHookWithQuery's wrapper
+// is query-only, so the hook value surfaces through a probe under the
+// provider while the harness owns the QueryClientProvider.
 function renderAuth(
 	options: { resolveInitialState?: () => Promise<User | null> } = {},
 ) {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	const utils = renderHook(() => useAuth(), {
-		wrapper: ({ children }) => (
-			<QueryClientProvider client={queryClient}>
-				<AuthProvider
-					resolveInitialState={
-						options.resolveInitialState ?? (async () => null)
-					}
-				>
-					{children}
-				</AuthProvider>
-			</QueryClientProvider>
-		),
-	});
-	return { queryClient, ...utils };
+	let current: ReturnType<typeof useAuth>;
+	function AuthProbe() {
+		current = useAuth();
+		return null;
+	}
+	const utils = renderWithQuery(
+		<AuthProvider
+			resolveInitialState={options.resolveInitialState ?? (async () => null)}
+		>
+			<AuthProbe />
+		</AuthProvider>,
+	);
+	return {
+		result: {
+			get current() {
+				return current;
+			},
+		},
+		queryClient: utils.queryClient,
+		unmount: utils.unmount,
+	};
 }
 
 afterEach(() => {

@@ -1,12 +1,11 @@
 import { MachineSettingsTab } from "@features/machines/components/MachineSettingsTab";
 import type { Machine } from "@shared/types/api";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { machineFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 let updatePayload: Record<string, unknown> | undefined;
@@ -32,16 +31,9 @@ function updateHandler(
 
 function renderSettingsTab(machine: Machine = machineFixture()) {
 	server.use(grantsHandler());
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
+	renderWithQuery(<MachineSettingsTab machine={machine} />, {
+		router: true,
 	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<MachineSettingsTab machine={machine} />
-			</MemoryRouter>
-		</QueryClientProvider>,
-	);
 }
 
 async function editAndSave() {

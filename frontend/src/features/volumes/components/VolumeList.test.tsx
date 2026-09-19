@@ -1,11 +1,11 @@
 import { VolumeList } from "@features/volumes/components/VolumeList";
 import type { VolumeSummary } from "@features/volumes/services/volumesApi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { volumeFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function mockVolumes(volumes: VolumeSummary[]) {
@@ -17,13 +17,8 @@ function mockVolumes(volumes: VolumeSummary[]) {
 function renderVolumeList(
 	permission: "read" | "write" | "admin" = "admin" as const,
 ) {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	return render(
-		<QueryClientProvider client={queryClient}>
-			<VolumeList machineId="m-1" permission={permission} />
-		</QueryClientProvider>,
+	return renderWithQuery(
+		<VolumeList machineId="m-1" permission={permission} />,
 	);
 }
 

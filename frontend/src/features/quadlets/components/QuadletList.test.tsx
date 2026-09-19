@@ -1,12 +1,11 @@
 import { QuadletList } from "@features/quadlets/components/QuadletList";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { quadletsQueryKey } from "@shared/queries/queryKeys";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { quadletFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function mockQuadlets(quadlets: QuadletSummary[]) {
@@ -16,17 +15,9 @@ function mockQuadlets(quadlets: QuadletSummary[]) {
 }
 
 function renderQuadletList() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
+	return renderWithQuery(<QuadletList machineId="m-1" permission="admin" />, {
+		router: true,
 	});
-	const view = render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<QuadletList machineId="m-1" permission="admin" />
-			</MemoryRouter>
-		</QueryClientProvider>,
-	);
-	return { queryClient, ...view };
 }
 
 describe("QuadletList", () => {

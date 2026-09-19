@@ -5,24 +5,24 @@ import {
 	quadletsQueryKey,
 } from "@shared/queries/queryKeys";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { QueryClient } from "@tanstack/react-query";
+import { waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { renderHookWithQuery } from "@/test/render";
 
 function renderMutation(
 	resources: MachineResource | MachineResource[],
 	run: (input: string) => Promise<string>,
 ) {
+	// The sanctioned invalidation-spy suite: it owns its client so the spy
+	// exists before the hook renders, and injects it through the harness.
 	const queryClient = new QueryClient({
 		defaultOptions: { queries: { retry: false } },
 	});
 	const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-	const wrapper = ({ children }: { children: React.ReactNode }) => (
-		<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-	);
-	const hook = renderHook(
+	const hook = renderHookWithQuery(
 		() => useListInvalidatingMutation("m-1", resources, run),
-		{ wrapper },
+		{ queryClient },
 	);
 	return { ...hook, invalidateSpy };
 }

@@ -1,11 +1,11 @@
 import { SecretList } from "@features/secrets/components/SecretList";
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { secretFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 const dbPassword = secretFixture();
@@ -38,14 +38,7 @@ function deleteHandler(
 }
 
 function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<SecretList machineId="m-1" permission={permission} />
-		</QueryClientProvider>,
-	);
+	renderWithQuery(<SecretList machineId="m-1" permission={permission} />);
 }
 
 async function openDeleteModal(name = "db-password") {

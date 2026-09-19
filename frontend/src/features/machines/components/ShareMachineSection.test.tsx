@@ -1,10 +1,10 @@
 import { ShareMachineSection } from "@features/machines/components/ShareMachineSection";
 import type { AccessGrant } from "@shared/types/api";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 const defaultGrants: AccessGrant[] = [
@@ -42,14 +42,7 @@ function accessHandlers() {
 }
 
 function renderShareMachineSection() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<ShareMachineSection machineId="m-1" />
-		</QueryClientProvider>,
-	);
+	renderWithQuery(<ShareMachineSection machineId="m-1" />);
 }
 
 async function renderWithGrants() {

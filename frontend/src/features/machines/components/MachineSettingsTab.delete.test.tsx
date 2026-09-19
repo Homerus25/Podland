@@ -1,13 +1,13 @@
 import { MachineSettingsTab } from "@features/machines/components/MachineSettingsTab";
 import { useMachines } from "@features/machines/hooks/useMachines";
 import type { Machine } from "@shared/types/api";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { machineFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 let deleteRequested = false;
@@ -50,17 +50,13 @@ function LocationProbe() {
 }
 
 function renderSettingsTab(machine: Machine = machineFixture()) {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter initialEntries={["/machines/m-1"]}>
-				<LocationProbe />
-				<MachinesListProbe />
-				<MachineSettingsTab machine={machine} />
-			</MemoryRouter>
-		</QueryClientProvider>,
+	renderWithQuery(
+		<>
+			<LocationProbe />
+			<MachinesListProbe />
+			<MachineSettingsTab machine={machine} />
+		</>,
+		{ router: { initialEntries: ["/machines/m-1"] } },
 	);
 }
 

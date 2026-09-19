@@ -1,12 +1,11 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { containersQueryKey } from "@shared/queries/queryKeys";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { containerFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function containersResponse(containers: ContainerSummary[]) {
@@ -26,17 +25,7 @@ function mockContainers(containers: ContainerSummary[]) {
 }
 
 function renderContainerList() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	const view = render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<ContainerList machineId="m-1" />
-			</MemoryRouter>
-		</QueryClientProvider>,
-	);
-	return { queryClient, ...view };
+	return renderWithQuery(<ContainerList machineId="m-1" />, { router: true });
 }
 
 describe("ContainerList", () => {

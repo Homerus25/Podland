@@ -1,12 +1,11 @@
 import { QuadletList } from "@features/quadlets/components/QuadletList";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { quadletFixture } from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 const existing = quadletFixture({
@@ -52,16 +51,9 @@ function createHandler(
 }
 
 function renderQuadletList() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
+	renderWithQuery(<QuadletList machineId="m-1" permission="admin" />, {
+		router: true,
 	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<MemoryRouter>
-				<QuadletList machineId="m-1" permission="admin" />
-			</MemoryRouter>
-		</QueryClientProvider>,
-	);
 }
 
 async function openCreateModal() {

@@ -1,10 +1,10 @@
 import { ImageList } from "@features/images/components/ImageList";
 import { PullImageForm } from "@features/images/components/PullImageForm";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
+import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import {
 	abortableNdjsonResponse,
@@ -32,27 +32,13 @@ function mockPullStream(chunks: Array<StreamEvent | string>) {
 }
 
 function renderForm() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<PullImageForm machineId="m-1" />
-		</QueryClientProvider>,
-	);
+	renderWithQuery(<PullImageForm machineId="m-1" />);
 }
 
 // The pull form lives inside the Images tab's toolbar in every list state,
 // next to the list it refreshes.
 function renderTab() {
-	const queryClient = new QueryClient({
-		defaultOptions: { queries: { retry: false } },
-	});
-	render(
-		<QueryClientProvider client={queryClient}>
-			<ImageList machineId="m-1" permission="admin" />
-		</QueryClientProvider>,
-	);
+	renderWithQuery(<ImageList machineId="m-1" permission="admin" />);
 }
 
 async function startPull(imageRef = "nginx:latest") {

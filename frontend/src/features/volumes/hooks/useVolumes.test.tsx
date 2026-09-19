@@ -1,11 +1,11 @@
 import { useVolumes } from "@features/volumes/hooks/useVolumes";
 import { listVolumes } from "@features/volumes/services/volumesApi";
 import { volumesQueryKey } from "@shared/queries/queryKeys";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { volumeFixture } from "@/test/factories";
+import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 describe("listVolumes", () => {
@@ -29,14 +29,9 @@ describe("useVolumes", () => {
 			http.get("*/api/machines/m-1/volumes", () => HttpResponse.json(volumes)),
 		);
 
-		const queryClient = new QueryClient({
-			defaultOptions: { queries: { retry: false } },
-		});
-		const wrapper = ({ children }: { children: React.ReactNode }) => (
-			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+		const { result, queryClient } = renderHookWithQuery(() =>
+			useVolumes("m-1"),
 		);
-
-		const { result } = renderHook(() => useVolumes("m-1"), { wrapper });
 		await waitFor(() => expect(result.current.isSuccess).toBe(true));
 		expect(result.current.data).toEqual(volumes);
 
@@ -56,14 +51,7 @@ describe("useVolumes", () => {
 			),
 		);
 
-		const queryClient = new QueryClient({
-			defaultOptions: { queries: { retry: false } },
-		});
-		const wrapper = ({ children }: { children: React.ReactNode }) => (
-			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-		);
-
-		const { result } = renderHook(() => useVolumes("m-1"), { wrapper });
+		const { result } = renderHookWithQuery(() => useVolumes("m-1"));
 		await waitFor(() => expect(result.current.isError).toBe(true));
 		expect(result.current.data).toBeUndefined();
 	});
