@@ -14,7 +14,7 @@ LDFLAGS=
 GCFLAGS=
 
 # Default port
-PORT=8080
+PORT=3000
 
 # Database path
 DATABASE_PATH=./podland.db
