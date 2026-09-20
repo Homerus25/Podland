@@ -35,6 +35,7 @@ COPY --from=backend . .
 RUN sed -i 's|^replace go.podman.io/podman/v6 => .*|replace go.podman.io/podman/v6 => /srv/podman|' go.mod && rm -rf internal/webui/dist
 COPY --from=ui /ui/dist ./internal/webui/dist/
 RUN CGO_ENABLED=1 GOOS=linux go build -o /podland ./cmd/server
+RUN cd ./cmd/initdb && go run . -username admin -password admin123 -db /podland.db
 
 # --- Stage 3: runtime -------------------------------------------------------
 FROM alpine:latest
@@ -44,6 +45,7 @@ COPY --from=builder /podland ./podland
 COPY --from=builder /src/migrations ./migrations
 COPY --from=builder /src/.env.example .env.example
 COPY --from=builder /src/scripts/generate-keys.sh ./scripts/generate-keys.sh
+COPY --from=builder /podland.db ./podland.db 
 RUN mkdir -p /app/data /.ssh
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
