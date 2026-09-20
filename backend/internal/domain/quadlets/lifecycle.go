@@ -204,7 +204,7 @@ func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.
 
 // runSystemctl executes `systemctl <action> [flags] <unit>` over SSH via the
 // SSHExecInterface. An SSH-layer failure (dial, session, network) maps to
-// ErrConnectionFailed — fail-fast, no retry, per CONTEXT.md §4.
+// ErrConnectionFailed — fail-fast, no retry, per docs/architecture-decisions.md §4.
 func (s *QuadletService) runSystemctl(ctx context.Context, machineID, userID, action, unit string, opts LifecycleOptions) (sshexec.ExecResult, error) {
 	if s.sshExec == nil {
 		// Defensive: production wiring always supplies an SSHExecInterface

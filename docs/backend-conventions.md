@@ -44,7 +44,8 @@ closest sibling that already exists. Rulings so far:
   (`internal/domain/auth/handler.go`) is the user-scoped reference:
   its body-bearing closures cross `web.Decode` like every other
   endpoint, and cookies are set or cleared inside the closure (headers
-  only — the envelope owns the status line and body).
+  only — the envelope owns the status line and body). The decode
+  ritual is settled 2026-09-15 (architecture-review candidate C9).
 - **NDJSON streaming endpoints (the streaming envelope)** —
   `streaming.Begin` + `streaming.Run` (`internal/streaming/`) are the
   single entry point for every NDJSON endpoint (container logs follow
@@ -83,7 +84,14 @@ closest sibling that already exists. Rulings so far:
   mapping lives nowhere below the kit: no service hand-copies
   `ctx.Err() == context.Canceled` — `Run`'s cancelled-wins decides for
   every streaming call, `FetchLogs` for every buffered log fetch. The
+  kit's DTO vocabulary — the shared `LogEvent` and the
+  `LogEventWriter` (RFC3339Nano parse, RFC3339 UTC re-emit,
+  spaceless-line guard) — is pinned in `internal/streaming/logs.go`,
+  and a log handler's query parse keeps its JSON-envelope fallback
+  (issue 340's dispatch ruling). The
   images pull handler remains the reference for progress streams.
+  Settled 2026-09-13 (architecture-review candidate C7); the buffered
+  fetch settled 2026-09-18 (candidate C16).
 - **Binary endpoints (the binary envelope)** — `web.HandleStream`
   (`internal/web`) is the seam every machine-scoped endpoint whose
   success is a byte stream or multipart upload rather than a DTO
@@ -95,7 +103,7 @@ closest sibling that already exists. Rulings so far:
   service call, and the success write (implicit 200 for export,
   explicit 204 for populate). The volumes export/populate handler
   (`internal/domain/volumes/handler.go`, `Export`/`Populate`) is the
-  reference.
+  reference. Settled 2026-09-15 (architecture-review candidate C8).
 - **Handler contract tests** — `testutils.Perform` builds the
   request (identity, chi URL params, body) the way the router would;
   per-domain `recordXRequest` chi scaffolding is retired. Handler tests

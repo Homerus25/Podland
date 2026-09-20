@@ -9,7 +9,7 @@ import (
 // TestHasAtLeast_Ordering pins the permission ladder the access model
 // is built on: read < write < admin. A caller holding `actual` may act
 // when a route demands `required` iff actual is at or above required.
-// The expectations below are literals from the spec (CONTEXT.md
+// The expectations below are literals from the spec (docs/architecture-decisions.md §3,
 // "Application-level permissions enforced: read, write, admin"), not
 // values recomputed from the implementation.
 func TestHasAtLeast_Ordering(t *testing.T) {

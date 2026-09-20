@@ -6,7 +6,7 @@
 // implementation. The underlying *ssh.Client is cached per machine
 // (mirroring the connection-cache discipline and LRU eviction in
 // internal/connections), and SSH failures fail fast (no retry, per
-// CONTEXT.md §4).
+// docs/architecture-decisions.md §4).
 package sshexec
 
 import (
@@ -57,7 +57,7 @@ type Options struct {
 
 	// MaxClients caps the per-machine *ssh.Client cache (LRU-evicted when
 	// full). Defaults to 100 when zero, matching the connection-cache
-	// default documented in CONTEXT.md §4.
+	// default documented in docs/architecture-decisions.md §4.
 	MaxClients int
 
 	// IdleTimeout controls how long a cached *ssh.Client may sit unused

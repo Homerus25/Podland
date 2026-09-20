@@ -301,7 +301,7 @@ func (d *sshDialer) cleanup() {
 // dialSSHProd is the production dial path: fetch the machine, decrypt its
 // SSH key, parse the key, dial TCP (honouring ctx), perform the SSH
 // handshake, and return the resulting *ssh.Client. Any failure is returned
-// unwrapped-by-retry (CONTEXT.md §4 fail-fast).
+// unwrapped-by-retry (docs/architecture-decisions.md §4 fail-fast).
 func (d *sshDialer) dialSSHProd(ctx context.Context, machineID string) (sshClient, error) {
 	machine, err := d.machineRepo.GetByID(machineID)
 	if err != nil {

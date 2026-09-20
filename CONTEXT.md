@@ -1,293 +1,43 @@
-# Podman Management Web-App: Complete Architecture
+# Podland
 
-## Overview
+A full-stack web application for managing Podman on remote machines: a Go
+backend drives Podman's Service API over SSH, a React frontend rides
+React Query, SQLite stores machine metadata and users, and one container
+serves the embedded UI and API on :8080.
 
-A full-stack web application for managing Podman on remote machines. This document consolidates all architectural decisions made during the grilling sessions.
+## Documentation map
 
-**System Components:**
-- **Backend**: Go service using Podman's Service API
-- **Frontend**: React 18+ application with Chakra UI
-- **Database**: SQLite for storing machine metadata and user data
-- **Delivery**: One container — the Go backend serves the embedded frontend and the API on :8080
+- `docs/architecture-decisions.md` — all system-level decisions, §-numbered
+  (§1 podman integration … §16 machine registration). Code comments cite
+  these numbers; keep them stable.
+- `docs/backend-conventions.md` — read before touching `backend/`:
+  endpoint envelopes, streaming kit, connection seam, testing expectations.
+- `docs/frontend-conventions.md` — read before touching `frontend/src/`:
+  feature folders, React Query keys, component and test patterns.
+- `doku/description_*_api.md` — API contracts per area; update the matching
+  file when an endpoint's contract changes.
+- `docs/agents/issue-tracker.md` — Forgejo tracker usage.
 
----
+## Decisions at a glance
 
-## Core Architecture Decisions
+One line each; full detail in `docs/architecture-decisions.md`.
 
-### 1. Podman Integration
-- **Forked Podman** extended for custom needs (Project folder: ~/repos/podman/)
-- **Backend interacts via Podman Service API** (REST over Unix socket, accessed via SSH tunnel)
-- **Connection Mechanism**: Uses `~/repos/podman/pkg/bindings/connection.go` for SSH tunneling
-- **No CLI integration** - only Go API usage via the connection package
-
-### 2. Remote Machine Access
-- Podman must be **pre-installed** on remote machines
-- **No deployment of Podman** - backend assumes it exists
-- Backend uses owner's SSH credentials to connect to remote machines
-- All users access a machine through the **owner's SSH connection**
-
-### 3. Multi-User Model
-- Each machine is **registered by an owner** (user)
-- Owner's SSH private key is stored **encrypted in SQLite**
-- Machine can be **shared with other users** via permission table
-- Application-level permissions enforced: `read`, `write`, `admin`
-- **One connection per machine** (not per user) - cached and reused
-
-### 4. Concurrency & Performance
-- **One connection per machine**: Each machine has at most one active SSH connection, cached and reused
-- **Per-machine in-flight dial dedup**: concurrent cold acquisitions for the same machine share a single dial; dials to different machines never serialize behind a lock
-- **Connection lifetime is the connection's, not the request's**: the cached connection context is detached from the request that dialed it, so an HTTP handler returning never kills the connection for later cache hits
-- **Engine handover at the connection seam**: each domain (volumes, secrets, containers, images, quadlets) declares a caller-width engine interface and a one-method provider that wraps `connections.Manager.WithConnection`; the production adapter constructs the podman engine inside the connection lease, so no domain service builds one inline
-- **Global limit**: Maximum cached machine connections = 100 (configurable, `MAX_CONCURRENT_MACHINES`)
-- **LRU eviction**: When the cache is full, the least recently used idle connection is closed
-- **Real teardown**: LRU eviction, the idle-timeout cleanup (15 minutes), and machine removal genuinely close the SSH session; removal is graceful (in-flight calls finish first)
-- **Fail fast** on connection failures/timeouts (no retry logic, no request queue)
-- **React Query** for frontend state management and caching
-
-### 5. Authentication & Security
-- **JWT tokens** (RS256 asymmetric keys)
-  - Transported via **Authorization: Bearer** header
-  - Frontend redirects to login page on expiration (401 interceptor)
-- **Refresh sessions** (revocable, server-side)
-  - Login additionally sets an **httpOnly refresh cookie**: opaque 256-bit token, `Secure`, `SameSite=Strict`, scoped to `/api/auth`
-  - Only the token's **SHA-256 hash** is persisted (sessions table, one row per login, multi-device)
-  - TTL via `SESSION_TTL_DAYS` (default 30); login lazily purges the user's expired rows
-- **Key Storage**: File-based (PEM files) with auto-generation on startup
-- **CORS**: Environment variables for allowed origins
-- **Sensitive data encryption**: `github.com/secure-systems-lab/go-securesystemslib`
-  - Encrypts SSH private keys and other secrets before SQLite storage
-
-### 6. Real-Time Updates
-- **Server-Sent Events (SSE)** for real-time Podman events
-  - Container start/stop, image pulls, etc.
-- **Centralized event bus** in frontend for distributing SSE events
-- **Lazy connections**: Connect on first subscriber, disconnect on last unsubscribe
-- **Abortable operations** with progress tracking via HTTP streaming
-
-### 7. Error Handling
-- **Endpoint envelope**: the uniform response contract every JSON endpoint speaks — machine-scoped routes cross `web.Handle`, user-scoped routes outside the machine subtree cross its twin `web.HandleUser` (context user ID passed through as-is, empty is a legal state) — failures as `{requestId, error{code, message}}`, successes as a DTO with an explicit status. _Avoid_: error wrapper, response helper
-- **Frontend**:
-  - Detailed error messages for client errors (4xx)
-  - Generic error messages for server errors (5xx)
-  - Context-based error display
-  - Global 401 interceptor for token expiration
-- **Backend**:
-  - Logs via slog
-  - Fail fast on SSH/Podman failures
-  - Structured error responses with requestId
-
-### 8. Configuration
-- **Go backend**: Environment variables only
-- **Frontend**: Environment variables via Vite
-- **No config files** for sensitive data
-
-### 9. Theming
-- **Chakra UI** for component library and theming
-- **CSS variables** with theme provider
-- Supports **dark mode** (system preference + user override)
-
-### 10. Offline Handling
-- Redirect to offline page when connection to backend is lost
-- **Detection**: Combination of `navigator.onLine`, heartbeat endpoint, and request failure tracking
-- **Auto-reconnect**: Automatically attempt to reconnect, redirect back when online
-
-### 11. Input Validation
-- **Go backend**: Struct tags + `github.com/go-playground/validator`
-- **Frontend**: Form validation with React Hook Form or similar
-
-### 12. Testing Strategy
-- **Unit tests**: Mocked Podman responses
-- **Integration tests**: Real Podman instance in container (orchestrated via Podman pods)
-- **E2E tests**: Frontend + backend + Podman in Podman pod
-
-### 13. Deployment & Distribution
-- **One container image**: a Node stage builds the frontend, a Go stage embeds it into the backend binary, the runtime is minimal alpine
-- **UI + API on :8080**: the backend serves the embedded SPA (unknown paths fall back to `index.html`) alongside `/api/*`; healthcheck on `/api/health`
-- **Build**: `podman build` at the repo root with named contexts (`backend`, `frontend`, `podman` fork), run via `podman run`
-
-### 14. Rate Limiting
-- **Custom rate limiting** in Go backend
-- **Scope**: Per-user rate limiting for authenticated requests
-- **Strategy**: Fixed window
-- **Default**: 60 requests per minute per user (configurable)
-
-### 15. File Handling
-- **No file uploads** - container images pulled from registries only
-
-### 16. Machine Registration
-- Frontend uses dedicated endpoint to register machines
-- **Synchronous connection test** during registration
-- Connection details stored encrypted in SQLite database
-- **Owner-based access**: Machine accessible by owner and shared users
-
----
-
-## Technical Stack
-
-### Backend (Go)
-- **Framework**: Standard library + custom routing
-- **API**: RESTful endpoints
-- **Database**: SQLite (via `github.com/mattn/go-sqlite3`)
-- **Authentication**: JWT (RS256) with Authorization: Bearer header
-- **Logging**: slog (structured, `log/slog`)
-- **Validation**: `go-playground/validator`
-- **SSH**: `golang.org/x/crypto/ssh` via forked Podman's connection.go
-- **Containerization**: Podman (for integration tests and deployment)
-- **Log-stream kit**: one kit (`backend/internal/streaming/logs.go`) owns the follow-mode log ritual end to end: `RunLogStream` wires the streaming envelope (`Begin` + `Run`), the terminal `INFO` `STREAM_ENDED` event, `"CODE: message"` error events (`ERROR` level, `WARN` on cancellation), and the baked-in `ErrConnectionFailed` error default, alongside the shared `LogEvent` DTO and the `LogEventWriter` that converts podman log lines to events (RFC3339Nano parse, RFC3339 UTC re-emit, spaceless-line guard). Log domains stay thin adapters: query parse with the JSON-envelope fallback (issue 340's dispatch ruling), route-ID extraction, and two closures — the buffered `web.Handle` service call and the `Stream` closure resolving their target inside the service. The kit also owns the buffered fetch (`streaming.FetchLogs`): it builds the podman logs options itself (the kit's one podman-types import), installs the writer pair, combines stdout/stderr, and maps the failure cancelled-wins (`OPERATION_CANCELLED`), then the caller's not-found sentinel, then one kit-owned wrap; buffered log services shrink to validate + engine acquisition + target resolution + the `FetchLogsOp`, and cancellation mapping exists nowhere below the kit (`Run` for streaming calls, `FetchLogs` for buffered ones). Extracted after the two domain copies drifted, superseding issue 340's below-threshold scoping; the buffered-fetch collapse deleted ~160 duplicated lines and three hand-copied cancellation mappings. Settled 2026-09-13 (architecture-review candidate C7); buffered fetch settled 2026-09-18 (architecture-review candidate C16).
-- **Binary endpoint envelope**: the endpoint envelope's binary twin (`backend/internal/web/web.go`, `HandleStream`) owns the error side for machine-scoped endpoints whose success is a byte stream or multipart upload rather than a JSON DTO: identity extraction (a miss is the same wiring-bug ruling as `web.Handle` — 500 `INTERNAL_ERROR` plus a loud log, the closure never runs), AppError mapping with wrapped sentinels unwrapped, and the 500 fallback; the closure owns everything wire-specific — response headers, body ritual, service call, and the success write (implicit 200 for volumes export, explicit 204 for populate). Sealed the last endpoints that hand-rolled the envelope ritual (volumes export/populate answered an identity miss with 401 and detected AppErrors by direct type assertion) without moving the wire contract. Settled 2026-09-15 (architecture-review candidate C8).
-- **Request decode ritual**: one function (`backend/internal/web/web.go`, `Decode`) owns the JSON body decode + struct validation that every body-bearing handler used to hand-copy: a malformed body answers 400 `INVALID_REQUEST` ("Invalid request body"), a struct-tag failure answers 400 `VALIDATION_FAILED` with the validator's message (`ErrValidationFailed`, minted only by `Decode`); closure handlers return the AppError into the envelope, and the single body-bearing pre-stream site (images pull) responds it itself before `streaming.Begin`. Collapsed eleven call sites speaking three vocabularies — seven minting `VALIDATION_FAILED` by hand, machines answering the raw JSON error with no validator, images Pull writing its own envelope plus the codebase's only client-error logging — without moving a wire error code. The auth Login body later joined, dropping its manual missing-fields check for validate tags. Settled 2026-09-15 (architecture-review candidate C9).
-- **Dependencies**: Go 1.21+
-
-### Frontend (React)
-- **Framework**: React 18+
-- **State Management**: React Query
-- **Styling**: Chakra UI with CSS variables
-- **Routing**: React Router v6
-- **Real-time**: EventSource API for SSE, Fetch API with AbortController for streaming
-- **Error Handling**: Context-aware error display with React Query
-- **Build Tool**: Vite
-- **TypeScript**: Strict mode with path aliases
-- **Feature folders**: each feature lives in `src/features/<name>/` with `services/` (API client), `hooks/` (React Query hooks), `components/`
-- **DTO types**: response types for an endpoint live in that feature's `services/<feature>Api.ts`, colocated with the fetch function; `src/shared/types/api.ts` is only for types shared across features (e.g. `Machine`, error envelope)
-- **Resource lists**: one shared `ResourceList` module owns the read side of every table-backed feature list (loading/error/empty/table triad, table chrome, plural testids, toolbar, hide-and-hint permission hint); features are adapters handing resolved state, columns as data, and their own rows.
-- **Mutation dialogs**: one shared `MutationDialog`/`ConfirmDialog` module (`frontend/src/shared/components/MutationDialog.tsx`) owns the dialog skeleton (modal shell, reset-on-open/close invariant, pending wiring, close-on-success, error region); features are adapters supplying the body, the mutation result slice, and side effects through the `onSuccess`/`onError` seams. Settled 2026-09-11 (architecture-review candidate C6); non-modal mutation sites keep feature-local resets.
-- **Stream transport**: one shared module (`frontend/src/shared/streaming/streamTransport.ts`) owns the transport and lifecycle of every NDJSON streaming fetch in two layers: `streamNdjson` is the streaming fetch (Bearer preamble, error envelopes, the NDJSON consume loop, aborts rethrown raw) and `useNdjsonOperation` on top is the operation lifecycle (abort, supersede, exactly-one-terminal `complete`/`error`, running/error state). Operation streams (image pull, quadlet auto-update) ride the hook; signal-driven follow streams (log following) ride the function; features keep only their event handlers, shape guards, and invalidation choices. Blob download stays out (no abort/supersede, bytes not NDJSON). Settled 2026-09-12 (architecture-review candidate C1).
-- **Machine API URLs**: one builder pair (`frontend/src/shared/utils/api.ts`) owns machine-scoped request URL construction: `machineApiPath(machineId, ...segments)` emits the path with every segment percent-encoded, machineId first, and `machineApiUrl` prepends the configured base with a trailing-slash-safe join, so a `VITE_API_BASE_URL` ending in `/` cannot produce `//`. Axios call sites take the path form (the shared instance prepends the base); fetch consumers — the stream transport and `downloadFile` — take the full form. Services route every machine-scoped literal through the pair and export their stream/download URLs beside the request functions (`pullStreamUrl`, `autoUpdateStreamUrl` with its `?dryRun` query, `volumeExportUrl`), so hooks and the export button never re-derive a URL; `apiBaseUrl` stays module-private so nothing outside the module can rebuild a full URL. App-router navigations are page routes, not API URLs, and stay feature-owned. Built after three encoding conventions spread across the services and two hooks re-derived full request URLs, breaking volume export under a configured base. Settled 2026-09-15 (architecture-review candidate C11).
-- **Session refresh**: one function (`frontend/src/shared/utils/api.ts`, `refreshSession()`) owns the whole "refresh the session" act — the POST literal, the fresh-token install, and the single flight every caller shares — resolving the login payload on success and `null` on any failure without throwing; mount-time restore (`AuthContext`'s default `resolveInitialState` resolver) and the 401 policy (`handleUnauthorized()`, unchanged `Promise<boolean>`) are its two thin callers, and only the policy reads `null` as session death (`fireSessionExpired()`), so a failed mount refresh is logged-out, not dead. Built after the endpoint literal, response shape, and token install were assembled per caller across `authApi.refresh`, the 401 policy, and the mount resolver — twins forced by an import cycle, leaving the contract's one invariant (mount-refresh and 401-refresh sharing a single flight) invisible and unpinnable; `authApi.refresh` was deleted rather than kept as a delegate. Settled 2026-09-18 (architecture-review candidate C18).
-- **Log source factory**: one factory (`frontend/src/shared/streaming/logSource.ts`, `createLogSource(path, url)`) owns the log-endpoint ritual for every log-bearing feature — the buffered tail fetch with its split-and-filter parse, the URLSearchParams follow query, and the `ApiError` wrap on the tail — its follow leg riding `followLogStream` on the stream transport; the `LogSource` contract moved into the kit out of the `LogViewer` component (the buffered-logs DTO moved with it from the feature services), so the viewer, the logs page, and the factory suite share one vocabulary. Features keep only target resolution: each service resolves its machine-scoped path/url pair through the builder pair and exports a one-line builder (`containerLogs`, `quadletLogs`) handing both forms to the factory; the four twin per-feature functions — and the last hand-concatenated log query strings — were deleted with them. The logs page picks its source from a record exhaustive over `LogKind`, so a future log-bearing kind is a type error until it gets an entry. URLSearchParams is the precedent for future stream query construction; the existing service-exported stream URLs (`pullStreamUrl`, `autoUpdateStreamUrl` with its `?dryRun` query, `volumeExportUrl`) stay as C11 settled them. The two feature logs suites collapsed to one wiring smoke each (list renders, logs button navigates, the feature's endpoint gets the request, history lines render) — tail/query/error invariants pinned once in the factory suite, viewer machinery once in the viewer suite. Built after the tail fetch, follow query, and error wrap were hand-copied across four functions in two services, with feature suites re-pinning viewer machinery to reach any log coverage at all. Settled 2026-09-18 (architecture-review candidate C19).
-- **Test-kit owners**: the test kit (`frontend/src/test/`) owns the two rituals every suite used to hand-copy — the render harness (`render.tsx`, `renderWithQuery`/`renderHookWithQuery`) builds the provider stack (QueryClient > Chakra > Router) with a fresh retry-off client per call and hands back that client for cache-level assertions, and the envelope builders (`errors.ts`, `errorJson`/`errorResponse`/`axiosError`) mint the backend error envelope's three test lives (body comparison, MSW response, stub-mutation AxiosError) with an overridable requestId; the literal shape itself is pinned once in `errors.test.ts`, the one sanctioned literal site. Adopted across the fleet after the expand half had landed the owners and their pins: ~60 hand-written envelope literals and per-suite provider stacks collapsed onto them, taking the verbatim `envelopeError` copies, `tokenExpiredEnvelope`, and the per-file MSW wrappers that only packaged a literal with them — the arc's shape is expand-then-adopt, owner first and pinned, then a mechanical migration with assertions untouched. Settled 2026-09-19 (architecture-review candidate C20).
-
-### Infrastructure
-- **Delivery**: One container image (backend with embedded UI)
-- **Container Runtime**: Podman (for the app image and integration tests)
-- **Database**: SQLite (embedded)
-
----
-
-## Value Statements
-
-### Simplicity
-- Fail fast on errors (no retry logic)
-- Authorization: Bearer header for JWT (frontend manages token storage)
-- One connection per machine (not per user)
-- Direct streaming with NDJSON (no buffering)
-
-### Security
-- SSH keys encrypted at rest in SQLite
-- JWT tokens with RS256 asymmetric signing
-- Short-lived tokens transported via Authorization: Bearer header
-- Application-level permissions for machine sharing
-
-### Performance
-- Connection caching and reuse
-- LRU eviction for connection management
-- Per-machine dial dedup; fail fast when a connection cannot be acquired (no queuing)
-- React Query for efficient data fetching and caching
-
-### User Experience
-- Real-time updates via SSE
-- Progress streaming for long operations
-- Offline detection with auto-reconnect
-- Consistent error handling
-
----
-
-## Project Structure
-
-```
-Podland/
-├── description.md                    # High-level architecture
-├── description_backend.md           # Backend details
-├── doku/
-│   ├── description.md               # This file - complete architecture
-│   ├── description_backend.md        # Backend implementation guide
-│   ├── description_frontend.md       # Frontend implementation guide
-│   ├── description_api.md            # API contract (shared conventions)
-│   ├── description_auth_api.md       # Auth endpoints
-│   ├── description_machines_api.md   # Machine + event endpoints
-│   ├── description_containers_api.md # Container endpoints
-│   ├── description_images_api.md     # Image endpoints
-│   ├── description_quadlets_api.md   # Quadlet endpoints
-│   ├── description_users_api.md      # User endpoints
-│   └── description_secrets_api.md    # Secret endpoints
-├── backend/
-│   ├── cmd/
-│   │   └── server/
-│   │       └── main.go
-│   ├── internal/
-│   │   ├── domain/
-│   │   │   ├── machines/
-│   │   │   ├── containers/
-│   │   │   ├── images/
-│   │   │   ├── quadlets/
-│   │   │   ├── secrets/
-│   │   │   ├── users/
-│   │   │   ├── auth/
-│   │   │   └── events/
-│   │   ├── middleware/
-│   │   ├── connections/
-│   │   ├── config/
-│   │   ├── encryption/
-│   │   └── models/
-│   ├── pkg/
-│   └── go.mod
-└── frontend/
-    ├── public/
-    └── src/
-        ├── features/
-        │   ├── auth/
-        │   ├── machines/
-        │   ├── containers/
-        │   ├── images/
-        │   ├── quadlets/
-        │   ├── secrets/
-        │   └── events/
-        ├── shared/
-        ├── pages/
-        ├── App.tsx
-        └── main.tsx
-```
-
----
-
-## Security Considerations
-
-1. **SSH Keys**: Encrypted at rest in SQLite using go-securesystemslib
-2. **JWT**: Short-lived tokens, RS256 asymmetric signing, Authorization: Bearer header
-3. **CORS**: Strict origin control via environment variables
-4. **Input Validation**: Structured validation on all API inputs
-5. **Error Handling**: No sensitive data in error responses
-6. **Offline Handling**: Clear offline state, no data leakage
-7. **Multi-user**: Application-level permissions, owner's SSH credentials used for all access
-
----
-
-## Assumptions & Dependencies
-
-### Assumptions
-- Podman is pre-installed on all remote machines
-- Podman Service API is accessible via Unix socket on remote machines
-- Users have SSH access to remote machines via owner's credentials
-- Backend runs in an environment with network access to remote machines
-- Each machine has a single owner with valid SSH credentials
-
-### Dependencies
-- **Go**: 1.21+
-- **React**: 18+
-- **Node.js**: 18+ (for frontend development)
-- **Podman**: Version matching forked Podman
-- **SQLite**: 3.x
-
----
-
-## Open Questions
-
-1. **Monitoring**: Should Prometheus metrics be added for connection count, request rates, etc.?
-2. **Health Checks**: Should a `/health` endpoint be added for monitoring?
-3. **Metrics Storage**: If metrics are added, where should they be stored?
-4. **Audit Logs**: Should long-term audit logs be implemented?
-
----
+1. **Podman integration** — forked Podman, Service API over SSH tunnel, no CLI
+2. **Remote machine access** — Podman pre-installed; everyone rides the owner's SSH connection
+3. **Multi-user model** — owner-registered machines, shared via `read`/`write`/`admin` permissions; owner's key encrypted in SQLite
+4. **Concurrency** — one cached connection per machine (dial dedup, LRU ≤ 100, real teardown); fail fast, no retries or queuing
+5. **Auth & security** — JWT RS256 via Bearer header + revocable refresh sessions (httpOnly cookie, hashed, TTL'd)
+6. **Real-time** — SSE for podman events; NDJSON HTTP streaming for progress and logs
+7. **Error handling** — uniform endpoint envelope: failures `{requestId, error{code, message}}`
+8. **Configuration** — environment variables only, no config files
+9. **Theming** — Chakra UI + CSS variables, dark mode
+10. **Offline** — detection via heartbeat + failure tracking, auto-reconnect
+11. **Validation** — validator struct tags backend; form validation frontend
+12. **Testing** — unit (fake engines), integration (podman test host), E2E (pod)
+13. **Deployment** — one container: Node builds UI, Go embeds it, alpine runtime, :8080
+14. **Rate limiting** — fixed window; per-user 60/min, auth endpoints per-IP 10/min
+15. **File handling** — no uploads; images pulled from registries only
+16. **Machine registration** — dedicated endpoint, synchronous connection test
 
 ## Glossary
 
@@ -299,8 +49,9 @@ Podland/
 | **Connection Cache** | In-memory cache of SSH connections to remote machines |
 | **Podman Service API** | The REST API provided by Podman for managing containers and images |
 | **SSE** | Server-Sent Events, a standard for push notifications from server to client |
+| **Endpoint envelope** | The uniform response contract every JSON endpoint speaks — failures as `{requestId, error{code, message}}`, successes as a DTO with an explicit status. _Avoid_: error wrapper, response helper |
+| **Kit** | A shared module owning one ritual end to end (log-stream kit, stream transport, test kit); features and domains adapt to it, never copy it |
 
 ---
 
-*Generated from comprehensive grilling sessions*
-*Last updated: 2026-09-09*
+*Decision detail moved to `docs/` on 2026-09-20 to keep this file cheap to read; new settlements are dated inside the conventions docs (architecture-review candidates).*

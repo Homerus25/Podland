@@ -178,7 +178,7 @@ func newRecordingDialer(maxSize int) (*sshDialer, map[string]*fakeSSHClient) {
 }
 
 func TestSSHDialer_RemoveMachine_WaitsForInFlightRunnersBeforeClosing(t *testing.T) {
-	// The graceful-removal contract (CONTEXT.md §4): in-flight execs run to
+	// The graceful-removal contract (docs/architecture-decisions.md §4): in-flight execs run to
 	// completion; the client closes when the LAST in-flight exec releases.
 	d, clients := newRecordingDialer(10)
 	ctx := context.Background()

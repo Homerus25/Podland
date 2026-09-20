@@ -28,7 +28,8 @@ deleting the util). Then the written record catches up so the next agent
 inherits the one-owner ruling instead of the copy-the-sibling ritual: the
 frontend conventions' feature-local-resets clause becomes the hook rule,
 the React Query section gains the hook bullet, the Tests section gains the
-pinned-once clause, and `CONTEXT.md`'s C6 settlement entry is amended.
+pinned-once clause, and the C6 settlement entry (now the dated
+MutationDialog bullet in `docs/frontend-conventions.md`) is amended.
 Users see exactly one difference, and it is the fix: a stale error never
 survives into a retry's pending phase anywhere.
 
@@ -41,7 +42,7 @@ survives into a retry's pending phase anywhere.
 - [ ] `shared/utils/mutationPromise.ts` is deleted, its import is gone, and the `useListInvalidatingMutation` comment no longer mentions it
 - [ ] Grep gate: no raw `.mutate(` or `.reset(` on a `useMutation` result anywhere in `features/` — the dialog modules' sanctioned structural slices are the only mutation-result consumers left
 - [ ] `docs/frontend-conventions.md`: the line-30 clause ("Non-modal mutation sites … keep feature-local resets") is replaced by the rule that non-modal `useMutation` sites ride `useInlineMutation`, with the pull toolbar named as streaming-side and therefore outside it; the React Query section gains a bullet documenting the hook's invariant (`run` = reset+mutate, `dismiss` = reset, per-target pending); the Tests section gains the pinned-once clause pointing at the hook suite
-- [ ] `CONTEXT.md`: the mutation-dialogs decision entry's tail ("non-modal mutation sites keep feature-local resets") is amended to the new ruling, dated and attributed like the C9 entry ("Settled 2026-09-15 (architecture review candidate C12)")
+- [ ] `docs/frontend-conventions.md`: the mutation-dialogs ruling's tail ("Non-modal mutation sites … keep feature-local resets" — the C6-dated bullet in Components) is amended to the new ruling, dated and attributed like the C9 entry ("Settled 2026-09-15 (architecture review candidate C12)")
 - [ ] The full frontend suite is green (`npx vitest run`) — the migrations are behavior-preserving for everything the feature suites pin — and `npx biome check` passes on the touched files
 
 ## Blocked by
