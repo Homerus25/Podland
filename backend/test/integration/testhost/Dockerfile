@@ -4,11 +4,21 @@
 # it with the flags documented next to that target (see
 # test/integration/testhost.go for the automated run contract).
 #
-# The image is the full machine-parity stack the suite relies on:
-# system systemd, sshd, a lingering `core` user (uid/gid 1000) whose
-# user systemd manager exists from boot, and rootless podman behind
-# /run/user/1000/podman/podman.sock using fuse-overlayfs — inner native
+# The image boots WITHOUT systemd: the hosts the suite must run on are
+# often containers without cgroup delegation, where a nested systemd
+# manager cannot boot (it dies at "Failed to create /init.scope"). The
+# machine contract systemd used to provide is carried by plain processes
+# instead (entrypoint.sh, the image ENTRYPOINT): sshd in the foreground
+# plus a rootless `podman system service` for the `core` user serving
+# /run/user/1000/podman/podman.sock over fuse-overlayfs — inner native
 # overlay would be overlay-on-overlay, which the kernel denies.
+#
+# Consequences of no systemd, accepted by design:
+#   - No journald: events and container logs go to files (see
+#     containers.conf below), so `podman logs --follow` keeps working.
+#   - `systemctl --user` is unusable, so podman's quadlet install/remove
+#     (which dial the user systemd over DBus) cannot run. Quadlet suites
+#     gate on requireUserSystemd and skip cleanly on such hosts.
 #
 # Deliberately NOT baked in: SSH host keys (generated into the /etc/ssh
 # volume at first boot, so they stay stable across runs and the
@@ -17,29 +27,36 @@
 FROM fedora:43
 
 RUN dnf -y --setopt=install_weak_deps=False install \
-        podman fuse-overlayfs passt openssh-server systemd \
+        podman fuse-overlayfs passt openssh-server \
     && dnf clean all
 
 # core with uid/gid 1000 and subuid/subgid ranges — the rootless podman
 # identity. uid must be exactly 1000: the suite registers and asserts
 # the rootless socket path /run/user/1000/podman/podman.sock.
 #
-# The ranges are deliberately 1-999 + 1001-65536, not the traditional
-# 100000+ single range, for two reasons:
+# The ranges are deliberately small (1-999 + 1001-65535), for three
+# reasons:
 #   - When the HOST podman is itself rootless, only ~64k ids are mapped
 #     into the outer container; a 100000+ range would not exist there
 #     and every inner `podman run` would fail at userns setup with
-#     EPERM. 1..65536 sits inside every mapping podman produces by
+#     EPERM. 1..65535 sits inside every mapping podman produces by
 #     default, on rootful and rootless hosts alike.
 #   - The two ranges around core's own uid cover the ENTIRE image uid
-#     space (inner 0..65535). OCI images routinely carry uid 65534
-#     (nobody) — e.g. busybox's /home — and unpacking fails with
-#     "lchown: invalid argument" when that uid is unmappable.
+#     space the default outer mapping holds (inner 0..65534, including
+#     uid 65534/nobody that OCI images routinely carry, e.g. busybox's
+#     /home). Unpacking fails with "lchown: invalid argument" when an
+#     image uid is unmappable.
+#   - The upper end is 65535, NOT 65536: a nested userns mapping that
+#     references a uid the CONTAINER's own namespace does not map is
+#     rejected by the kernel with EPERM at newuidmap time (and podman
+#     surfaces it as "cannot set up namespace"). The default rootless
+#     triple maps the container only up to uid 65535, so the subuid
+#     range must stop there too.
 # The files are written wholesale so the image owns the full contents
 # (no stray ranges from base-image defaults).
 RUN useradd --create-home --uid 1000 --user-group core \
-    && printf 'core:1:999\ncore:1001:64536\n' > /etc/subuid \
-    && printf 'core:1:999\ncore:1001:64536\n' > /etc/subgid
+    && printf 'core:1:999\ncore:1001:64535\n' > /etc/subuid \
+    && printf 'core:1:999\ncore:1001:64535\n' > /etc/subgid
 # newuidmap/newgidmap ship with filecaps (cap_setuid/cap_setgid), but
 # the security.capability xattr is dropped by rootless podman builds —
 # restore privilege the xattr-free way: plain setuid mode bits, which
@@ -47,26 +64,12 @@ RUN useradd --create-home --uid 1000 --user-group core \
 # `podman run` dies at userns setup with EPERM.
 RUN chmod 4755 /usr/bin/newuidmap /usr/bin/newgidmap
 
-# Linger: core's user systemd manager must exist from boot without a
-# login session. No systemd runs during build, so create the marker
-# directly instead of invoking a live `loginctl enable-linger`.
-RUN mkdir -p /var/lib/systemd/linger && touch /var/lib/systemd/linger/core
-
-# Activate podman.socket for every user, so core's user manager exposes
-# the rootless socket at boot. Again no live systemctl: create the
-# symlink that `systemctl --global enable podman.socket` would.
-RUN mkdir -p /etc/systemd/user/sockets.target.wants \
-    && ln -s /usr/lib/systemd/user/podman.socket \
-        /etc/systemd/user/sockets.target.wants/podman.socket
-
-# Rootless podman config for core: force fuse-overlayfs. Events go to
-# journald — the same backend a podman machine's Fedora defaults pick —
-# because `podman logs --follow` refuses to run with the journald
-# log-driver over a non-journald events backend, and journald works
-# here (systemd is PID 1; rootless container-root maps to core's uid,
-# so the entries are readable without extra group membership).
+# Rootless podman config for core: force fuse-overlayfs. Events and
+# container logs go to files — there is no journald to receive them
+# here, and `podman logs --follow` refuses the journald log driver over
+# a non-journald events backend.
 RUN mkdir -p /home/core/.config/containers \
-    && printf '[storage]\ndriver = "overlay"\nmount_program = "/usr/bin/fuse-overlayfs"\n\n[engine]\nevents_logger = "journald"\n' \
+    && printf '[storage]\ndriver = "overlay"\nmount_program = "/usr/bin/fuse-overlayfs"\n\n[engine]\nevents_logger = "file"\n\n[containers]\nlog_driver = "json-file"\n' \
         > /home/core/.config/containers/containers.conf \
     && chown -R core:core /home/core/.config
 
@@ -75,10 +78,13 @@ RUN mkdir -p /home/core/.config/containers \
 RUN mkdir -p /home/core/.local/share/containers \
     && chown core:core /home/core/.local/share/containers
 
-# sshd on at boot; host keys generate at first boot into /etc/ssh. The
+# Boot: the plain-process init (sshd + podman system service) is the
+# image ENTRYPOINT. Host keys generate at first boot into /etc/ssh. The
 # trailing rms pin the no-keys-committed invariant (both are no-ops on
 # a clean base image — they exist so a base-image change that starts
 # shipping keys fails loudly here instead of at runtime).
-RUN systemctl enable sshd.service \
+COPY entrypoint.sh /usr/local/bin/podland-testhost-init
+RUN chmod 0755 /usr/local/bin/podland-testhost-init \
     && rm -f /etc/ssh/ssh_host_*_key* \
     && rm -f /home/core/.ssh/authorized_keys
+ENTRYPOINT ["/usr/local/bin/podland-testhost-init"]

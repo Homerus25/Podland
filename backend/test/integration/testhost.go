@@ -69,12 +69,17 @@ func ensureTesthostImage() error {
 }
 
 // startTesthostContainer boots the test host with the full run contract:
-// privileged + systemd=always (PID 1 systemd, cgroup/tmpfs wiring),
+// privileged (nested rootless podman needs the userns/mount latitude),
 // label=disable (no SELinux labeling of the inner overlay), /dev/fuse
 // (fuse-overlayfs), sshd published on a fixed loopback port, and the two
 // persistent volumes — image cache (fast re-runs) and SSH host keys
 // (stable host key, so the bindings' known_hosts auto-append is a
-// one-time event rather than a per-run mismatch).
+// one-time event rather than a per-run mismatch). The image's own
+// ENTRYPOINT is the boot command: a plain-process init (sshd in the
+// foreground + `podman system service` for core's socket) that needs no
+// systemd — the environments this suite runs in are often containers
+// without cgroup delegation, where a nested systemd manager cannot
+// boot.
 //
 // Pre-checked collision surfaces (container name, published port) yield
 // the serialized-runs error; `podman run` itself is the backstop.
@@ -94,17 +99,12 @@ func startTesthostContainer() error {
 		"run", "--detach",
 		"--name", testhostContainer,
 		"--privileged",
-		"--systemd=always",
 		"--security-opt", "label=disable",
 		"--device", "/dev/fuse",
 		"-p", fmt.Sprintf("%s:%d:22", testhostHost, testhostPort),
 		"-v", testhostStoreVolume + ":/home/core/.local/share/containers",
 		"-v", testhostSSHVolume + ":/etc/ssh",
 		testhostImage,
-		// --systemd=always wires cgroups/tmpfs but does not replace the
-		// image CMD — the explicit /sbin/init is what actually boots
-		// systemd as PID 1.
-		"/sbin/init",
 	}
 	if out, err := exec.Command("podman", args...).CombinedOutput(); err != nil {
 		if isSerializedRunsCollision(string(out)) {

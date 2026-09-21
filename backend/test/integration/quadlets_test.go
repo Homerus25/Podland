@@ -58,6 +58,12 @@ func Test_Integration_Quadlets_CRUD(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerQuadletsSweep()
 
+	// Quadlet install/remove dial the user systemd over DBus on the
+	// machine (podman's own requirement), so the whole CRUD lifecycle
+	// needs a user systemd manager. Hosts without one (the systemd-free
+	// container test host) skip here rather than fail on the 500s.
+	requireUserSystemd(t)
+
 	machineID := suite.MachineID
 
 	// --- AC #1: ensure busybox exists (idempotent) -------------------

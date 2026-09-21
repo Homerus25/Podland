@@ -237,19 +237,32 @@ func Test_Integration_Quadlets_Lifecycle(t *testing.T) {
 // Prerequisite probe: user systemd over SSH
 // ---------------------------------------------------------------------------
 
-// requireUserSystemd verifies the machine's SSH target answers and can
-// run `systemctl --user` — the transport every lifecycle action uses. It
-// dials with the exact coordinates the backend registered the machine
-// with (suite.goodMachineRegistration), so what it probes is what the
-// sshexec service will actually hit. Skips (never fails) when the target
-// can't support user systemd units, per the PRD.
+// requireUserSystemd skips the calling test unless the machine's user
+// systemd answers over SSH — the transport every lifecycle action uses.
+// The probe dials with the exact coordinates the backend registered the
+// machine with (suite.goodMachineRegistration), so what it probes is
+// what the sshexec service will actually hit. Skips (never fails) when
+// the target can't support user systemd units, per the PRD.
 func requireUserSystemd(t *testing.T) {
 	t.Helper()
+	if !userSystemdAvailable() {
+		t.Skip("machine user systemd unusable (is-system-running did not answer running/degraded)")
+	}
+}
+
+// userSystemdAvailable is the boolean probe behind requireUserSystemd:
+// it dials the machine's SSH target and checks `systemctl --user
+// is-system-running` answers with "running" or "degraded". The quadlet
+// API surface needs this on the machine (podman's quadlet list/install/
+// remove dial the user systemd over DBus), so callers gate or skip
+// quadlet coverage on the result — e.g. on the systemd-free container
+// test host.
+func userSystemdAvailable() bool {
 	target := suite.goodMachineRegistration
 
 	key, err := ssh.ParsePrivateKey([]byte(target.SSHKey))
 	if err != nil {
-		t.Skipf("machine SSH identity unparseable, cannot run systemctl over SSH: %v", err)
+		return false
 	}
 
 	cfg := &ssh.ClientConfig{
@@ -260,24 +273,23 @@ func requireUserSystemd(t *testing.T) {
 	}
 	client, err := ssh.Dial("tcp", net.JoinHostPort(target.Host, strconv.Itoa(target.Port)), cfg)
 	if err != nil {
-		t.Skipf("machine does not accept SSH (%v) — lifecycle actions cannot run", err)
+		return false
 	}
 	defer client.Close()
 
 	session, err := client.NewSession()
 	if err != nil {
-		t.Skipf("machine SSH refuses sessions (%v) — lifecycle actions cannot run", err)
+		return false
 	}
 	defer session.Close()
 
-	out, err := session.CombinedOutput("systemctl --user is-system-running")
+	out, _ := session.CombinedOutput("systemctl --user is-system-running")
 	status := strings.TrimSpace(string(out))
 	// "degraded" still means the user manager is up; individual units may
 	// have failed but systemctl itself works, which is all we need. Note
-	// systemctl exits 1 for "degraded", so err != nil alone must not skip.
-	if status != "running" && status != "degraded" {
-		t.Skipf("machine user systemd unusable (is-system-running=%q, err=%v)", status, err)
-	}
+	// systemctl exits 1 for "degraded", so the exit error alone must not
+	// fail the probe.
+	return status == "running" || status == "degraded"
 }
 
 // ---------------------------------------------------------------------------

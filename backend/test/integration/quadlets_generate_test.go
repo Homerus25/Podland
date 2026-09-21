@@ -43,6 +43,13 @@ func Test_Integration_Quadlets_Generate(t *testing.T) {
 	registerContainersSweep()
 	registerPodsSweep()
 
+	// Generate itself only inspects the source resource, but the
+	// no-side-effect assertions compare the quadlet list before/after —
+	// and podman's quadlet list dials the user systemd over DBus on the
+	// machine. Hosts without a user systemd manager (the systemd-free
+	// container test host) skip here.
+	requireUserSystemd(t)
+
 	machineID := suite.MachineID
 
 	// `podman create` does not auto-pull; the source container needs the

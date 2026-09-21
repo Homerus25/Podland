@@ -237,8 +237,8 @@ is incomplete.
 - Integration tests live in `test/integration/` behind the
   `integration` build tag and follow the run-scoped-tag isolation
   model (see the header comment of `test/integration/images_test.go`).
-  The suite runs against the **container test host**: a privileged,
-  systemd-booted Fedora container (image built by the `testhost-build`
+  The suite runs against the **container test host**: a privileged
+  Fedora container (image built by the `testhost-build`
   prerequisite of `make test-integration`; run contract owned by
   `test/integration/testhost.go`) that the harness boots and tears
   down per run, registering it through the same public API as any

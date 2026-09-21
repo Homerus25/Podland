@@ -34,6 +34,12 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerQuadletsSweep()
 
+	// The fixtures are installed through the quadlet create endpoint,
+	// which dials the user systemd over DBus on the machine (podman's
+	// own requirement); hosts without a user systemd manager (the
+	// systemd-free container test host) skip here.
+	requireUserSystemd(t)
+
 	machineID := suite.MachineID
 
 	containerName := "it-" + suite.RunID + "-lf-web"

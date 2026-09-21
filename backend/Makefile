@@ -98,25 +98,28 @@ test-integration: testhost-build
 
 # Container test host image — a podman machine stand-in built from
 # test/integration/testhost/Dockerfile (pinned Fedora + podman,
-# fuse-overlayfs, openssh-server, systemd; lingering `core` user with
-# rootless podman behind /run/user/1000/podman/podman.sock). Layer
-# caching makes repeat builds a no-op.
+# fuse-overlayfs, openssh-server; boots WITHOUT systemd via
+# entrypoint.sh: foreground sshd + `podman system service` serving the
+# rootless socket for the `core` user behind
+# /run/user/1000/podman/podman.sock — nested systemd cannot boot in
+# containers without cgroup delegation). Layer caching makes repeat
+# builds a no-op.
 #
 # TESTHOST_IMAGE must match testhostImage in test/integration/testhost.go
 # (the harness fails fast naming this target when the image is missing).
 TESTHOST_IMAGE := podland-testhost
 
 # Manual smoke run — the run contract test/integration/testhost.go
-# automates (systemd is PID 1; sshd reachable on 127.0.0.1:24422; as
-# core: user manager up, /run/user/1000/podman/podman.sock listening,
-# `podman run busybox` working over fuse-overlayfs):
+# automates (sshd reachable on 127.0.0.1:24422; as core:
+# /run/user/1000/podman/podman.sock listening, `podman run busybox`
+# working over fuse-overlayfs):
 #
 #   podman run --detach --name podland-it-testhost \
-#     --privileged --systemd=always --security-opt label=disable \
+#     --privileged --security-opt label=disable \
 #     --device /dev/fuse -p 127.0.0.1:24422:22 \
 #     -v podland-it-testhost-store:/home/core/.local/share/containers \
 #     -v podland-it-testhost-ssh:/etc/ssh \
-#     podland-testhost /sbin/init
+#     podland-testhost
 #
 # The two volumes are persistent by design: the store caches images for
 # fast re-runs and the /etc/ssh volume keeps the host key stable so the

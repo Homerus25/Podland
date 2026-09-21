@@ -181,6 +181,14 @@ func Test_Integration_MachinePermission_ReadUserKeepsReadRoutes(t *testing.T) {
 		"ListQuadlets":   base + "/quadlets/",
 	} {
 		t.Run(name, func(t *testing.T) {
+			// The permission contract under test is the 200 (gate open);
+			// quadlet list additionally needs the machine's user systemd
+			// (podman dials it over DBus), which the systemd-free
+			// container test host cannot provide. Skip only that route
+			// there — the gate itself is what this suite pins.
+			if name == "ListQuadlets" && !userSystemdAvailable() {
+				t.Skip("machine has no user systemd; quadlet list would 500 regardless of permissions")
+			}
 			resp, err := client.Get(url)
 			require.NoError(t, err, "GET must reach the in-process server")
 			defer resp.Body.Close()
@@ -234,6 +242,14 @@ func Test_Integration_MachinePermission_WriteUserPassesMutatingGates(t *testing.
 			"write-level caller must not be denied on the image-delete gate")
 	})
 	t.Run("StopQuadletReachesHandler", func(t *testing.T) {
+		// Reaching the handler means NOT 403; the quadlet lifecycle path
+		// additionally resolves the unit through the quadlet list, which
+		// needs the machine's user systemd (podman dials it over DBus).
+		// Skip on hosts that cannot provide it — the gate is what this
+		// suite pins, not quadlet resolution.
+		if !userSystemdAvailable() {
+			t.Skip("machine has no user systemd; quadlet resolution would 500 regardless of permissions")
+		}
 		expectAPIError(t, client, http.MethodPost, base+"/quadlets/no-such.container/stop", "",
 			http.StatusNotFound, "QUADLET_NOT_FOUND")
 	})

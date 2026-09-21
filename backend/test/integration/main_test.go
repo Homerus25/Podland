@@ -43,7 +43,7 @@ var logf = log.Printf
 //
 //  1. Resolve the test host. By default that is the container test host
 //     (see testhost.go): ensure the image exists (fail fast naming the
-//     make target), start the privileged systemd container under the
+//     make target), start the privileged test-host container under the
 //     serialized-runs contract (fixed name + fixed loopback port), and
 //     inject a freshly generated ed25519 key as core's authorized key.
 //     When any PODLAND_TEST_SSH_* override is set, the container
