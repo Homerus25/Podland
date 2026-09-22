@@ -2,6 +2,7 @@ import type { ContainerSummary } from "@features/containers/services/containersA
 import type { ImageSummary } from "@features/images/services/imagesApi";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
+import type { UserSummary } from "@features/users/services/usersApi";
 import type { VolumeSummary } from "@features/volumes/services/volumesApi";
 import type { Machine } from "@shared/types/api";
 
@@ -75,6 +76,14 @@ export function secretFixture(
 		driver: "file",
 		createdAt: "2026-08-20T10:00:00Z",
 		updatedAt: "2026-08-20T10:00:00Z",
+		...overrides,
+	};
+}
+
+export function userFixture(overrides: Partial<UserSummary> = {}): UserSummary {
+	return {
+		id: "u-1",
+		username: "alice",
 		...overrides,
 	};
 }

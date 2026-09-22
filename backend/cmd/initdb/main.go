@@ -53,7 +53,8 @@ func main() {
 	}
 
 	// Create the bootstrap admin user
-	if err := createAdminUser(models.NewUserRepository(db), *username, *password); err != nil {
+	sessionRepo := models.NewSessionRepository(db)
+	if err := createAdminUser(models.NewUserRepository(db), sessionRepo, *username, *password); err != nil {
 		log.Fatalf("Failed to create admin user: %v", err)
 	}
 }
@@ -63,8 +64,8 @@ func main() {
 // endpoint (hash + exists-check + insert). If the username already
 // exists it is left untouched — re-running the bootstrap tool against
 // an existing admin is an idempotent no-op.
-func createAdminUser(userRepo models.UserRepositoryInterface, username, password string) error {
-	_, err := users.NewUserService(userRepo).CreateUserWithRole(username, password, models.RoleAdmin)
+func createAdminUser(userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, username, password string) error {
+	_, err := users.NewUserService(userRepo, sessionRepo).CreateUserWithRole(username, password, models.RoleAdmin)
 	if err != nil {
 		if err == errors.ErrUsernameTaken {
 			log.Printf("User '%s' already exists", username)

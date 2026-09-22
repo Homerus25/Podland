@@ -15,6 +15,7 @@ type UserRepositoryInterface interface {
 	Create(user *User) error
 	GetByID(id string) (*User, error)
 	GetByUsername(username string) (*User, error)
+	List() ([]*User, error)
 	Update(user *User) error
 	Delete(id string) error
 	UsernameExists(username string) (bool, error)
@@ -30,7 +31,7 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 // an explicit role so a hand-built User can never silently demote an
 // admin back to "user".
 func requireRole(role string) error {
-	if !validRole(role) {
+	if !ValidRole(role) {
 		return fmt.Errorf("invalid role %q: must be %q or %q", role, RoleUser, RoleAdmin)
 	}
 	return nil
@@ -96,6 +97,32 @@ func (r *UserRepository) GetByUsername(username string) (*User, error) {
 	}
 
 	return &user, nil
+}
+
+// List retrieves all users ordered by username, so the users-list
+// endpoint answers with a stable order across calls.
+func (r *UserRepository) List() ([]*User, error) {
+	query := `SELECT id, username, password_hash, role, created_at FROM users ORDER BY username`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list users: %w", err)
+	}
+	defer rows.Close()
+
+	var users []*User
+	for rows.Next() {
+		var user User
+		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to list users: %w", err)
+		}
+		users = append(users, &user)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to list users: %w", err)
+	}
+
+	return users, nil
 }
 
 // Update updates an existing user. The role must be set explicitly —

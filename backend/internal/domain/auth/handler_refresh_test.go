@@ -66,25 +66,10 @@ func TestAuthHandler_Refresh_SetsRotatedCookieAndAccessToken(t *testing.T) {
 
 	var body map[string]any
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body), "Should decode refresh body")
-	assert.ElementsMatch(t, []string{"token", "username"}, mapKeys(body), "Refresh body should carry the access token and the username")
+	assert.ElementsMatch(t, []string{"token", "username", "role"}, mapKeys(body), "Refresh body should match the login body's shape")
 	assert.NotEmpty(t, body["token"], "Refresh body should carry the new access JWT")
 	assert.Equal(t, "testuser", body["username"], "Refresh body should carry the session user's username")
-}
-
-// decodeErrorEnvelope reads a structured error response into its code,
-// so failure tests can assert the exact machine-readable cause.
-func decodeErrorEnvelope(t *testing.T, resp *http.Response) string {
-	t.Helper()
-
-	var envelope struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope), "Should decode error envelope")
-	require.NotEmpty(t, envelope.Error.Code, "Error envelope must carry a code")
-	return envelope.Error.Code
+	assert.Equal(t, models.RoleUser, body["role"], "Refresh body should carry the session user's role")
 }
 
 // TestAuthHandler_Refresh_MissingCookieIsInvalid asserts a request with
@@ -101,7 +86,7 @@ func TestAuthHandler_Refresh_MissingCookieIsInvalid(t *testing.T) {
 	defer resp.Body.Close()
 
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "Missing cookie must be a 401")
-	assert.Equal(t, "AUTH_REFRESH_INVALID", decodeErrorEnvelope(t, resp), "Missing cookie must map to AUTH_REFRESH_INVALID")
+	assert.Equal(t, "AUTH_REFRESH_INVALID", testutils.DecodeErrorEnvelope(t, resp).Error.Code, "Missing cookie must map to AUTH_REFRESH_INVALID")
 }
 
 // TestAuthHandler_Refresh_UnknownCookieValueIsInvalid asserts a cookie
@@ -117,7 +102,7 @@ func TestAuthHandler_Refresh_UnknownCookieValueIsInvalid(t *testing.T) {
 	defer resp.Body.Close()
 
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "Unknown token must be a 401")
-	assert.Equal(t, "AUTH_REFRESH_INVALID", decodeErrorEnvelope(t, resp), "Unknown token must map to AUTH_REFRESH_INVALID")
+	assert.Equal(t, "AUTH_REFRESH_INVALID", testutils.DecodeErrorEnvelope(t, resp).Error.Code, "Unknown token must map to AUTH_REFRESH_INVALID")
 	assert.Nil(t, findRefreshCookie(resp), "A rejected refresh must not set a new cookie")
 }
 
@@ -142,6 +127,6 @@ func TestAuthHandler_Refresh_ExpiredSessionUsesExpiredCode(t *testing.T) {
 	defer resp.Body.Close()
 
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "Expired session must be a 401")
-	assert.Equal(t, "AUTH_SESSION_EXPIRED", decodeErrorEnvelope(t, resp), "Expired session must map to AUTH_SESSION_EXPIRED")
+	assert.Equal(t, "AUTH_SESSION_EXPIRED", testutils.DecodeErrorEnvelope(t, resp).Error.Code, "Expired session must map to AUTH_SESSION_EXPIRED")
 	assert.Nil(t, findRefreshCookie(resp), "An expired refresh must not set a new cookie")
 }

@@ -1,5 +1,5 @@
 import { authApi } from "@features/auth/services/authApi";
-import type { LoginCredentials, User } from "@shared/types/api";
+import type { LoginCredentials, LoginResponse, User } from "@shared/types/api";
 import {
 	refreshSession,
 	setBearerToken,
@@ -20,6 +20,11 @@ interface AuthContextType {
 	isAuthenticated: boolean;
 	isResolving: boolean;
 	login: (credentials: LoginCredentials) => Promise<void>;
+	// Installs an already-issued session payload (the response of an
+	// endpoint that re-issues the login, e.g. self-service password
+	// change): fresh access token in, user replaced. No request, no cache
+	// clear — the session continues, only its credentials rotate.
+	adoptSession: (payload: LoginResponse) => void;
 	logout: () => Promise<void>;
 }
 
@@ -36,7 +41,9 @@ export const AuthContext = createContext<AuthContextType>(null!);
 // can pin the initial state deterministically.
 const resolveFromRefreshSession = async (): Promise<User | null> => {
 	const payload = await refreshSession();
-	return payload === null ? null : { username: payload.username };
+	return payload === null
+		? null
+		: { username: payload.username, role: payload.role };
 };
 
 export function AuthProvider({
@@ -62,11 +69,20 @@ export function AuthProvider({
 		};
 	}, [resolveInitialState]);
 
-	const login = useCallback(async (credentials: LoginCredentials) => {
-		const { token, username } = await authApi.login(credentials);
-		setBearerToken(token);
-		setUser({ username });
+	// The one owner of "install a fresh session": every entry into the
+	// signed-in state (login, adoptSession) rides it, so the token and user
+	// state move together in exactly one vocabulary.
+	const adoptSession = useCallback((payload: LoginResponse) => {
+		setBearerToken(payload.token);
+		setUser({ username: payload.username, role: payload.role });
 	}, []);
+
+	const login = useCallback(
+		async (credentials: LoginCredentials) => {
+			adoptSession(await authApi.login(credentials));
+		},
+		[adoptSession],
+	);
 
 	// Logout revokes the server-side refresh session, then drops the
 	// in-memory token even if the call fails — a failed exit must not
@@ -104,9 +120,10 @@ export function AuthProvider({
 			isAuthenticated: user !== null,
 			isResolving,
 			login,
+			adoptSession,
 			logout,
 		}),
-		[user, isResolving, login, logout],
+		[user, isResolving, login, adoptSession, logout],
 	);
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

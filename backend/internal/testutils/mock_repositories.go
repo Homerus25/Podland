@@ -12,6 +12,7 @@ type MockUserRepository struct {
 	createErr    error
 	getByIDErr   error
 	getByNameErr error
+	listErr      error
 	updateErr    error
 	deleteErr    error
 	existsErr    error
@@ -36,6 +37,22 @@ func NewMockUserRepositoryWithErrors(createErr, getByIDErr, getByNameErr, update
 	}
 }
 
+// WithListError returns the same repository with List configured to
+// fail, for tests injecting a list-time storage failure (mirrors
+// MockSessionRepository.WithRotateError).
+func (m *MockUserRepository) WithListError(err error) *MockUserRepository {
+	m.listErr = err
+	return m
+}
+
+// WithUpdateError returns the same repository with Update configured to
+// fail, for tests injecting an update-time storage failure (mirrors
+// WithListError).
+func (m *MockUserRepository) WithUpdateError(err error) *MockUserRepository {
+	m.updateErr = err
+	return m
+}
+
 // AddUser adds a user directly to the mock repository
 func (m *MockUserRepository) AddUser(user *models.User) {
 	m.users[user.ID] = user
@@ -57,7 +74,11 @@ func (m *MockUserRepository) GetByID(id string) (*models.User, error) {
 	if !exists {
 		return nil, nil
 	}
-	return user, nil
+	// Copy, like a real read: a caller mutating the returned struct must
+	// not change the stored row behind the repository's back — only
+	// Update persists.
+	stored := *user
+	return &stored, nil
 }
 
 func (m *MockUserRepository) GetByUsername(username string) (*models.User, error) {
@@ -66,10 +87,29 @@ func (m *MockUserRepository) GetByUsername(username string) (*models.User, error
 	}
 	for _, user := range m.users {
 		if user.Username == username {
-			return user, nil
+			stored := *user
+			return &stored, nil
 		}
 	}
 	return nil, nil
+}
+
+// List returns every stored user. The mock holds users in a map, so the
+// order is unspecified — tests pinning order must go through the real
+// repository.
+func (m *MockUserRepository) List() ([]*models.User, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	users := make([]*models.User, 0, len(m.users))
+	for _, user := range m.users {
+		// Copy, like a real read: a caller mutating a returned row must
+		// not change the stored row behind the repository's back — only
+		// Update persists.
+		stored := *user
+		users = append(users, &stored)
+	}
+	return users, nil
 }
 
 func (m *MockUserRepository) Update(user *models.User) error {
@@ -211,6 +251,7 @@ type MockSessionRepository struct {
 	deleteErr        error
 	deleteExpiredErr error
 	rotateErr        error
+	deleteAllErr     error
 }
 
 func NewMockSessionRepository() *MockSessionRepository {
@@ -235,6 +276,14 @@ func NewMockSessionRepositoryWithErrors(createErr, getByHashErr, deleteErr, dele
 // fail, for tests injecting a rotation-time storage failure.
 func (m *MockSessionRepository) WithRotateError(err error) *MockSessionRepository {
 	m.rotateErr = err
+	return m
+}
+
+// WithDeleteAllError returns the same repository with DeleteAllForUser
+// configured to fail, for tests injecting a revoke-all storage failure
+// (mirrors WithRotateError).
+func (m *MockSessionRepository) WithDeleteAllError(err error) *MockSessionRepository {
+	m.deleteAllErr = err
 	return m
 }
 
@@ -301,6 +350,18 @@ func (m *MockSessionRepository) DeleteExpiredForUser(userID string) error {
 	now := time.Now().UTC()
 	for hash, session := range m.sessions {
 		if session.UserID == userID && !session.ExpiresAt.After(now) {
+			delete(m.sessions, hash)
+		}
+	}
+	return nil
+}
+
+func (m *MockSessionRepository) DeleteAllForUser(userID string) error {
+	if m.deleteAllErr != nil {
+		return m.deleteAllErr
+	}
+	for hash, session := range m.sessions {
+		if session.UserID == userID {
 			delete(m.sessions, hash)
 		}
 	}

@@ -134,6 +134,6 @@ func TestAuthHandler_Logout_StorageFailureStillClearsCookie(t *testing.T) {
 	defer resp.Body.Close()
 
 	require.Equal(t, http.StatusInternalServerError, resp.StatusCode, "A storage failure must surface as a 500")
-	assert.Equal(t, "INTERNAL_ERROR", decodeErrorEnvelope(t, resp), "Storage failures map to the generic internal-error code")
+	assert.Equal(t, "INTERNAL_ERROR", testutils.DecodeErrorEnvelope(t, resp).Error.Code, "Storage failures map to the generic internal-error code")
 	assertClearedRefreshCookie(t, resp)
 }

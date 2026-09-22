@@ -1,13 +1,13 @@
 package middleware
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -77,9 +77,9 @@ func TestAuthRateLimitMiddleware_OverLimitReturns429(t *testing.T) {
 	assert.Equal(t, "0", result.Header.Get("X-RateLimit-Remaining"), "429 should report no remaining budget")
 	assert.NotEmpty(t, result.Header.Get("X-RateLimit-Reset"), "429 should report when the window resets")
 
-	code, message, _ := decodeErrorEnvelope(t, result)
-	assert.Equal(t, "RATE_LIMIT_EXCEEDED", code, "429 body should carry the rate-limit error code")
-	assert.Equal(t, "Too many requests", message, "429 body should carry the rate-limit message")
+	envelope := testutils.DecodeErrorEnvelope(t, result)
+	assert.Equal(t, "RATE_LIMIT_EXCEEDED", envelope.Error.Code, "429 body should carry the rate-limit error code")
+	assert.Equal(t, "Too many requests", envelope.Error.Message, "429 body should carry the rate-limit message")
 }
 
 // TestAuthRateLimitMiddleware_KeysByIPNotUser asserts the budget is
@@ -184,23 +184,8 @@ func TestRateLimitMiddleware_OverLimitAnswersEnvelope(t *testing.T) {
 	assert.Equal(t, "0", result.Header.Get("X-RateLimit-Remaining"), "429 should report no remaining budget")
 	assert.NotEmpty(t, result.Header.Get("X-RateLimit-Reset"), "429 should report when the window resets")
 
-	code, message, requestID := decodeErrorEnvelope(t, result)
-	assert.Equal(t, "RATE_LIMIT_EXCEEDED", code, "429 body should carry the rate-limit error code")
-	assert.Equal(t, "Too many requests", message, "429 body should carry the rate-limit message")
-	assert.Equal(t, "req-123", requestID, "429 body should carry the request ID from context")
-}
-
-// decodeErrorEnvelope reads a structured error envelope body.
-func decodeErrorEnvelope(t *testing.T, resp *http.Response) (code, message, requestID string) {
-	t.Helper()
-
-	var envelope struct {
-		RequestID string `json:"requestId"`
-		Error     struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope), "Should decode the error envelope")
-	return envelope.Error.Code, envelope.Error.Message, envelope.RequestID
+	envelope := testutils.DecodeErrorEnvelope(t, result)
+	assert.Equal(t, "RATE_LIMIT_EXCEEDED", envelope.Error.Code, "429 body should carry the rate-limit error code")
+	assert.Equal(t, "Too many requests", envelope.Error.Message, "429 body should carry the rate-limit message")
+	assert.Equal(t, "req-123", envelope.RequestID, "429 body should carry the request ID from context")
 }

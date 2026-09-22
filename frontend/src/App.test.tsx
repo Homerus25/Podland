@@ -78,6 +78,7 @@ describe("app routing guard", () => {
 					return HttpResponse.json({
 						token: "refreshed-access-token",
 						username: "alice",
+						role: "user",
 					});
 				}),
 			);
@@ -114,7 +115,7 @@ describe("app routing guard", () => {
 			}),
 		);
 		renderApp("/", {
-			resolveInitialState: async () => ({ username: "alice" }),
+			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
 
 		expect(
@@ -122,7 +123,11 @@ describe("app routing guard", () => {
 		).toBeInTheDocument();
 		expect(screen.getByTestId("auth-user")).toHaveTextContent("alice");
 
-		await userEvent.click(screen.getByRole("button", { name: /log out/i }));
+		// Log out lives in the account menu opened from the header username.
+		await userEvent.click(screen.getByTestId("account-menu-button"));
+		await userEvent.click(
+			await screen.findByRole("menuitem", { name: /log out/i }),
+		);
 
 		expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
 		expect(
@@ -139,14 +144,17 @@ describe("app routing guard", () => {
 			),
 		);
 		renderApp("/", {
-			resolveInitialState: async () => ({ username: "alice" }),
+			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
 
 		expect(
 			await screen.findByRole("heading", { name: "Dashboard" }),
 		).toBeInTheDocument();
 
-		await userEvent.click(screen.getByRole("button", { name: /log out/i }));
+		await userEvent.click(screen.getByTestId("account-menu-button"));
+		await userEvent.click(
+			await screen.findByRole("menuitem", { name: /log out/i }),
+		);
 
 		expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
 		expect(screen.getByTestId("auth-user")).toHaveTextContent("anonymous");
@@ -171,7 +179,7 @@ describe("app routing guard", () => {
 				),
 			);
 			const { queryClient } = renderApp("/machines", {
-				resolveInitialState: async () => ({ username: "alice" }),
+				resolveInitialState: async () => ({ username: "alice", role: "user" }),
 			});
 
 			expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();

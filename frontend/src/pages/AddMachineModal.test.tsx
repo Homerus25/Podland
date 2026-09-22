@@ -64,7 +64,7 @@ function keyFile() {
 async function renderAndOpenModal(machines: Machine[] = [existingMachine]) {
 	server.use(mockMachines(machines));
 	renderApp("/machines", {
-		resolveInitialState: async () => ({ username: "alice" }),
+		resolveInitialState: async () => ({ username: "alice", role: "user" }),
 	});
 	await screen.findByTestId("add-machine-button");
 	await userEvent.click(screen.getByTestId("add-machine-button"));

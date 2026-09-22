@@ -1,5 +1,18 @@
+// Role of a Podland account (backend/internal/domain/users/dto.go): the
+// auth responses carry it so the UI can gate admin surfaces. "admin" is
+// granted to the bootstrap user created by cmd/initdb.
+export type UserRole = "user" | "admin";
+
+// The password policy's floor (backend/internal/models MinPasswordLength,
+// answered as 400 PASSWORD_TOO_SHORT). Every password-setting surface —
+// self-service change, admin create, admin reset — mirrors it client-side
+// so the obvious mistake never needs a round trip. One vocabulary: this
+// constant is the only place the number lives in the frontend.
+export const PASSWORD_MIN_LENGTH = 8;
+
 export interface User {
 	username: string;
+	role: UserRole;
 }
 
 export interface LoginCredentials {
@@ -13,6 +26,7 @@ export interface LoginCredentials {
 export interface LoginResponse {
 	token: string;
 	username: string;
+	role: UserRole;
 }
 
 export type MachinePermission = "read" | "write" | "admin";

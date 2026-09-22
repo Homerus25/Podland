@@ -1,10 +1,12 @@
 import { ShareMachineSection } from "@features/machines/components/ShareMachineSection";
+import type { UserSummary } from "@features/users/services/usersApi";
 import type { AccessGrant } from "@shared/types/api";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
+import { userFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -13,8 +15,17 @@ const defaultGrants: AccessGrant[] = [
 	{ userId: "u-bob", permission: "read", grantedAt: "2026-08-03T10:00:00Z" },
 ];
 
+const defaultUsers: UserSummary[] = [
+	userFixture({ id: "u-owner", username: "olivia" }),
+	userFixture({ id: "u-bob", username: "bob" }),
+	userFixture({ id: "u-carol", username: "carol" }),
+	userFixture({ id: "u-dave", username: "dave" }),
+];
+
 let grants: AccessGrant[] = defaultGrants;
+let users: UserSummary[] = defaultUsers;
 let grantPayload: Record<string, unknown> | undefined;
+let grantRequests = 0;
 let revokedUserId: string | undefined;
 let grantsRequests = 0;
 
@@ -24,7 +35,9 @@ function accessHandlers() {
 			grantsRequests++;
 			return HttpResponse.json(grants);
 		}),
+		http.get("*/api/users", () => HttpResponse.json(users)),
 		http.post("*/api/machines/m-1/access", async ({ request }) => {
+			grantRequests++;
 			grantPayload = (await request.json()) as Record<string, unknown>;
 			const granted = {
 				userId: grantPayload.userId as string,
@@ -43,7 +56,7 @@ function accessHandlers() {
 }
 
 function renderShareMachineSection() {
-	renderWithQuery(<ShareMachineSection machineId="m-1" />);
+	renderWithQuery(<ShareMachineSection machineId="m-1" ownerId="u-owner" />);
 }
 
 async function renderWithGrants() {
@@ -52,36 +65,91 @@ async function renderWithGrants() {
 	return userEvent.setup();
 }
 
-async function grantAccess(permission: string) {
+async function offeredUsernames() {
 	const user = userEvent.setup();
-	await user.type(screen.getByLabelText(/user id/i), "u-carol");
-	await user.selectOptions(screen.getByLabelText(/permission/i), permission);
-	await user.click(screen.getByTestId("grant-access-button"));
+	await user.click(screen.getByLabelText("User"));
+	const listbox = await screen.findByTestId("user-picker-listbox");
+	return within(listbox)
+		.getAllByRole("option")
+		.map((option) => option.textContent);
+}
+
+async function pickUser(username: string, id: string) {
+	const user = await renderWithGrants();
+	await user.type(screen.getByLabelText("User"), username);
+	await user.click(await screen.findByTestId(`user-option-${id}`));
 }
 
 describe("ShareMachineSection", () => {
 	beforeEach(() => {
 		grants = defaultGrants;
+		users = defaultUsers;
 		grantPayload = undefined;
+		grantRequests = 0;
 		revokedUserId = undefined;
 		grantsRequests = 0;
 	});
 
-	it("lists the current grants with user id, permission, and granted time", async () => {
+	it("shows usernames resolved from the users query, not raw user ids", async () => {
 		await renderWithGrants();
 
-		expect(await screen.findByTestId("grant-row-u-bob")).toBeInTheDocument();
-		expect(screen.getByTestId("grant-row-u-bob")).toHaveTextContent("u-bob");
-		expect(screen.getByTestId("grant-row-u-bob")).toHaveTextContent("read");
-		expect(screen.getByTestId("grant-row-u-owner")).toBeInTheDocument();
+		const row = await screen.findByTestId("grant-row-u-bob");
+		// The directory fetch starts only once the grants are in, so the
+		// username swap needs its own wait; exact matching keeps "bob" from
+		// passing via the "u-bob" fallback text.
+		await waitFor(() =>
+			expect(within(row).getByText("bob")).toBeInTheDocument(),
+		);
+		expect(within(row).queryByText("u-bob")).not.toBeInTheDocument();
+		expect(
+			within(screen.getByTestId("grant-row-u-owner")).getByText("olivia"),
+		).toBeInTheDocument();
 	});
 
-	it("grants access with the selected permission and refetches the grants", async () => {
+	it("falls back to the raw user id when the directory does not know the grant's user", async () => {
+		grants = [
+			...defaultGrants,
+			{
+				userId: "u-gone",
+				permission: "write",
+				grantedAt: "2026-08-04T10:00:00Z",
+			},
+		];
 		await renderWithGrants();
-		await screen.findByTestId("grant-row-u-bob");
+
+		expect(await screen.findByTestId("grant-row-u-gone")).toHaveTextContent(
+			"u-gone",
+		);
+	});
+
+	it("offers only users who are neither the owner nor already granted", async () => {
+		await renderWithGrants();
+
+		// olivia owns the machine, bob already holds a grant; only carol
+		// and dave are grantable.
+		expect(await offeredUsernames()).toEqual(["carol", "dave"]);
+	});
+
+	it("excludes the owner even when the access list carries no owner row", async () => {
+		grants = [
+			{
+				userId: "u-bob",
+				permission: "read",
+				grantedAt: "2026-08-03T10:00:00Z",
+			},
+		];
+		await renderWithGrants();
+
+		expect(await offeredUsernames()).toEqual(["carol", "dave"]);
+	});
+
+	it("grants access with the picked user's id and the selected permission, then refetches the grants", async () => {
+		await pickUser("carol", "u-carol");
+		const user = userEvent.setup();
+		await user.selectOptions(screen.getByLabelText("Permission"), "write");
 		const requestsBefore = grantsRequests;
 
-		await grantAccess("write");
+		await user.click(screen.getByTestId("grant-access-button"));
 
 		expect(await screen.findByTestId("grant-row-u-carol")).toBeInTheDocument();
 		expect(grantPayload).toMatchObject({
@@ -89,6 +157,53 @@ describe("ShareMachineSection", () => {
 			permission: "write",
 		});
 		await waitFor(() => expect(grantsRequests).toBeGreaterThan(requestsBefore));
+	});
+
+	it("picks with the keyboard without submitting the surrounding form", async () => {
+		const user = await renderWithGrants();
+		await screen.findByTestId("grant-row-u-bob");
+
+		const input = screen.getByLabelText("User");
+		await user.type(input, "carol");
+		await screen.findByTestId("user-picker-listbox");
+		await user.keyboard("{ArrowDown}{Enter}");
+
+		// The selection landed but no grant was sent: Enter belongs to the
+		// picker, not to the form.
+		expect(input).toHaveValue("carol");
+		expect(grantRequests).toBe(0);
+
+		await user.click(screen.getByTestId("grant-access-button"));
+		await waitFor(() => expect(grantRequests).toBe(1));
+		expect(grantPayload).toMatchObject({ userId: "u-carol" });
+	});
+
+	it("clears the picker after a successful grant and hides the new grantee from the choices", async () => {
+		await pickUser("carol", "u-carol");
+		const user = userEvent.setup();
+
+		await user.click(screen.getByTestId("grant-access-button"));
+		await screen.findByTestId("grant-row-u-carol");
+
+		expect(screen.getByLabelText("User")).toHaveValue("");
+		expect(await offeredUsernames()).toEqual(["dave"]);
+	});
+
+	it("renders the error envelope when a grant fails, keeping the pending state during the request", async () => {
+		await pickUser("carol", "u-carol");
+		const user = userEvent.setup();
+		server.use(
+			http.post("*/api/machines/m-1/access", async () => {
+				await new Promise((resolve) => setTimeout(resolve, 50));
+				return errorResponse(404, "USER_NOT_FOUND", "User not found", "req-6");
+			}),
+		);
+
+		await user.click(screen.getByTestId("grant-access-button"));
+
+		expect(screen.getByTestId("grant-access-button")).toBeDisabled();
+		expect(await screen.findByRole("alert")).toBeInTheDocument();
+		expect(screen.getByText("USER_NOT_FOUND")).toBeInTheDocument();
 	});
 
 	it("revokes a user, removing their row and refetching grants", async () => {
@@ -103,23 +218,6 @@ describe("ShareMachineSection", () => {
 		);
 		expect(revokedUserId).toBe("u-bob");
 		await waitFor(() => expect(grantsRequests).toBeGreaterThan(requestsBefore));
-	});
-
-	it("renders the error envelope when a grant fails, keeping the pending state during the request", async () => {
-		await renderWithGrants();
-		await screen.findByTestId("grant-row-u-bob");
-		server.use(
-			http.post("*/api/machines/m-1/access", async () => {
-				await new Promise((resolve) => setTimeout(resolve, 50));
-				return errorResponse(404, "USER_NOT_FOUND", "User not found", "req-6");
-			}),
-		);
-
-		await grantAccess("read");
-
-		expect(screen.getByTestId("grant-access-button")).toBeDisabled();
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("USER_NOT_FOUND")).toBeInTheDocument();
 	});
 
 	it("renders the error envelope when a revoke fails", async () => {

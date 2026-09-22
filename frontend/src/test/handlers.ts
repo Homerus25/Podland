@@ -9,7 +9,11 @@ export const loginSuccessHandler = http.post(
 	"*/api/auth/login",
 	async ({ request }) => {
 		const { username } = (await request.json()) as { username: string };
-		return HttpResponse.json({ token: "test-access-token", username });
+		return HttpResponse.json({
+			token: "test-access-token",
+			username,
+			role: "user",
+		});
 	},
 );
 

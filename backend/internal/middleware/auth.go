@@ -56,10 +56,13 @@ func OptionalJWTMiddleware(authService *auth.AuthService) func(http.Handler) htt
 // against the auth service. On any failure it writes the error response
 // and returns nil; on success it returns the token claims.
 func bearerClaims(w http.ResponseWriter, r *http.Request, authService *auth.AuthService) *auth.TokenClaims {
-	// Get token from Authorization header
+	// Get token from Authorization header. A missing header is its own
+	// code (TOKEN_MISSING): no credentials were presented, unlike a
+	// malformed header or an invalid token, where credentials were
+	// presented and rejected (TOKEN_INVALID).
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		errors.RespondWithError(w, errors.ErrTokenInvalid, contextutils.GetRequestID(r.Context()))
+		errors.RespondWithError(w, errors.ErrTokenMissing, contextutils.GetRequestID(r.Context()))
 		return nil
 	}
 

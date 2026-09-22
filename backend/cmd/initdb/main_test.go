@@ -13,7 +13,7 @@ import (
 // newBootstrapDB opens a temp SQLite database with all migrations
 // applied, mirroring what cmd/initdb's main() does before creating the
 // bootstrap user.
-func newBootstrapDB(t *testing.T) *models.UserRepository {
+func newBootstrapDB(t *testing.T) (*models.UserRepository, *models.SessionRepository) {
 	t.Helper()
 
 	// migrations.Run reads SQL files from a "migrations/" directory
@@ -26,16 +26,16 @@ func newBootstrapDB(t *testing.T) *models.UserRepository {
 	require.NoError(t, migrations.Run(db), "Should run migrations")
 	t.Cleanup(func() { _ = db.Close() })
 
-	return models.NewUserRepository(db)
+	return models.NewUserRepository(db), models.NewSessionRepository(db)
 }
 
 // TestCreateAdminUser_GrantsAdminRole asserts the bootstrap tool creates
 // its user with the admin role — this is what lets the bootstrap user
 // later exercise admin-only endpoints.
 func TestCreateAdminUser_GrantsAdminRole(t *testing.T) {
-	repo := newBootstrapDB(t)
+	repo, sessionRepo := newBootstrapDB(t)
 
-	err := createAdminUser(repo, "bootstrap-admin", "bootstrap-password")
+	err := createAdminUser(repo, sessionRepo, "bootstrap-admin", "bootstrap-password")
 	require.NoError(t, err, "Should create bootstrap admin without error")
 
 	user, err := repo.GetByUsername("bootstrap-admin")
@@ -49,15 +49,15 @@ func TestCreateAdminUser_GrantsAdminRole(t *testing.T) {
 // tool against an already-created admin leaves the user untouched: no
 // error, no duplicate row, role and password hash unchanged.
 func TestCreateAdminUser_IdempotentRerun(t *testing.T) {
-	repo := newBootstrapDB(t)
+	repo, sessionRepo := newBootstrapDB(t)
 
-	require.NoError(t, createAdminUser(repo, "bootstrap-admin", "first-password"), "First run should succeed")
+	require.NoError(t, createAdminUser(repo, sessionRepo, "bootstrap-admin", "first-password"), "First run should succeed")
 
 	before, err := repo.GetByUsername("bootstrap-admin")
 	require.NoError(t, err, "Should look up bootstrap user after first run")
 	require.NotNil(t, before, "Bootstrap user should exist after first run")
 
-	require.NoError(t, createAdminUser(repo, "bootstrap-admin", "second-password"), "Re-run against existing admin should be a no-op success")
+	require.NoError(t, createAdminUser(repo, sessionRepo, "bootstrap-admin", "second-password"), "Re-run against existing admin should be a no-op success")
 
 	after, err := repo.GetByUsername("bootstrap-admin")
 	require.NoError(t, err, "Should look up bootstrap user after re-run")

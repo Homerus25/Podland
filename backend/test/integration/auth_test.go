@@ -87,6 +87,41 @@ func TestAuth_Login_UnknownUser(t *testing.T) {
 	assert.NotEmpty(t, errorResp.RequestID, "Should include request ID")
 }
 
+// TestAuth_Login_ResponseCarriesRole asserts the login body reports the
+// authenticated user's role: a regular-seeded user sees "user", a
+// seeded admin sees "admin".
+func TestAuth_Login_ResponseCarriesRole(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+
+	seed := func(role string) (string, string) {
+		t.Helper()
+		username := "it-" + suite.RunID + "-login-" + role + "-" + uuid.New().String()[:8]
+		password := "it-" + suite.RunID + "-pw-" + uuid.New().String()[:8]
+		_, err := suite.SeedUserWithRole(username, password, role)
+		require.NoError(t, err, "Should seed %s-role user", role)
+		return username, password
+	}
+
+	login := func(username, password string) map[string]any {
+		t.Helper()
+		reqBody, err := json.Marshal(map[string]string{"username": username, "password": password})
+		require.NoError(t, err, "Should marshal login request")
+		resp, err := http.Post(suite.ServerURL+"/api/auth/login", "application/json", bytes.NewReader(reqBody))
+		require.NoError(t, err, "Should POST to login endpoint")
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, "Login should succeed with correct credentials")
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&body), "Should decode login response")
+		return body
+	}
+
+	adminUser, adminPass := seed(models.RoleAdmin)
+	assert.Equal(t, "admin", login(adminUser, adminPass)["role"], "Admin login should report the admin role")
+
+	regularUser, regularPass := seed(models.RoleUser)
+	assert.Equal(t, "user", login(regularUser, regularPass)["role"], "Regular-user login should report the user role")
+}
+
 // statusResponseBody is the decoded GET /api/auth/status payload shared
 // by the role tests below.
 type statusResponseBody struct {

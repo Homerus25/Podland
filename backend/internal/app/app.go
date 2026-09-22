@@ -111,8 +111,9 @@ func New(cfg *config.Config) (*App, error) {
 	machineRepo := models.NewMachineRepository(db)
 	accessRepo := models.NewMachineAccessRepository(db)
 
-	// User management shares one creation path with cmd/initdb
-	userService := users.NewUserService(userRepo)
+	// User management shares one creation path with cmd/initdb; the
+	// session repo backs the admin password reset's session revocation
+	userService := users.NewUserService(userRepo, sessionRepo)
 
 	// Initialize connection manager
 	connectionManager := connections.NewConnectionManager(
@@ -201,6 +202,12 @@ func New(cfg *config.Config) (*App, error) {
 		// Status serves anonymous callers too (authenticated: false),
 		// so it validates the token only when one is presented.
 		r.With(appmiddleware.OptionalJWTMiddleware(authService)).Get("/auth/status", authHandler.Status)
+		// Password change is strictly authenticated (the JWT middleware
+		// is the guarantor; authority comes from the current password in
+		// the body) and lives under /api/auth so the fresh refresh cookie
+		// it hands back shares the login/refresh cookie scope. All of the
+		// caller's other sessions die in AuthService.ChangePassword.
+		r.With(appmiddleware.JWTMiddleware(authService)).Post("/auth/password", authHandler.ChangePassword)
 
 		// Protected routes
 		r.Group(func(r chi.Router) {
@@ -315,9 +322,17 @@ func New(cfg *config.Config) (*App, error) {
 				})
 			})
 
-			// Users — admin-only (090-01): creating users is the first
-			// role-enforced endpoint. Sits beside /machines, not inside it.
+			// Users — the list endpoint is available to any authenticated
+			// caller; the response shape depends on the caller's role
+			// (shaped in users.UserService.List). Creating users,
+			// changing roles, and resetting passwords stay admin-only
+			// (090-01, 162, 165), the role change with the self-lockout
+			// guard and the password reset with revoke-all-sessions in
+			// the service. All sit beside /machines, not inside it.
+			r.Get("/users", userHandler.List)
 			r.With(appmiddleware.RequireAdmin(userRepo)).Post("/users", userHandler.Create)
+			r.With(appmiddleware.RequireAdmin(userRepo)).Put("/users/{userId}/role", userHandler.UpdateRole)
+			r.With(appmiddleware.RequireAdmin(userRepo)).Put("/users/{userId}/password", userHandler.ResetPassword)
 		})
 	})
 

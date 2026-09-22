@@ -45,6 +45,10 @@ Object.defineProperty(window, "matchMedia", {
 	}),
 });
 
+// jsdom does not implement scrolling; Chakra's menu scrolls its list into
+// view on open.
+Element.prototype.scrollTo = () => {};
+
 beforeAll(() => {
 	server.listen({ onUnhandledRequest: "error" });
 	relayForeignAbortSignals();

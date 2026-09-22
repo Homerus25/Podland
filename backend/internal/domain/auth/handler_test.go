@@ -6,10 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestAuthHandler_Login_Success(t *testing.T) {
@@ -42,6 +45,45 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 	require.NoError(t, err, "Should decode response without error")
 	assert.NotEmpty(t, loginResp.Token, "Response should contain a token")
 	assert.Equal(t, "testuser", loginResp.Username, "Response should contain the authenticated user's username")
+	assert.Equal(t, models.RoleUser, loginResp.Role, "Response should contain the authenticated user's role")
+}
+
+// TestAuthHandler_Login_AdminRoleCarried asserts the login response
+// reports "admin" for an admin account, so the client can gate admin
+// surfaces straight from the login body without a status round trip.
+func TestAuthHandler_Login_AdminRoleCarried(t *testing.T) {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("test-password-123"), bcrypt.DefaultCost)
+	require.NoError(t, err, "Should hash password without error")
+
+	mockRepo := testutils.NewMockUserRepository()
+	mockRepo.AddUser(&models.User{
+		ID:           "admin-1",
+		Username:     "root",
+		PasswordHash: string(hashedPassword),
+		Role:         models.RoleAdmin,
+		CreatedAt:    time.Now(),
+	})
+
+	service, err := NewTestAuthServiceWithUserRepo(mockRepo)
+	require.NoError(t, err, "Should create auth service without error")
+	handler := NewAuthHandler(service, mockRepo)
+
+	reqBody, err := json.Marshal(LoginRequest{Username: "root", Password: "test-password-123"})
+	require.NoError(t, err, "Should marshal request without error")
+
+	req := httptest.NewRequest("POST", "/api/auth/login", bytes.NewReader(reqBody))
+	w := httptest.NewRecorder()
+
+	handler.Login(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "Should return 200 OK for correct credentials")
+
+	var loginResp LoginResponse
+	err = json.NewDecoder(resp.Body).Decode(&loginResp)
+	require.NoError(t, err, "Should decode response without error")
+	assert.Equal(t, models.RoleAdmin, loginResp.Role, "Response should report the admin role")
 }
 
 func TestAuthHandler_Login_WrongPassword(t *testing.T) {

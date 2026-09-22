@@ -3,6 +3,8 @@ package errors
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/Homerus25/podland/backend/internal/models"
 )
 
 // AppError represents an application error
@@ -71,9 +73,15 @@ var (
 // Auth
 var (
 	ErrInvalidCredentials = NewAppError("INVALID_CREDENTIALS", "Invalid username or password", http.StatusUnauthorized)
-	ErrTokenExpired       = NewAppError("TOKEN_EXPIRED", "Token has expired", http.StatusUnauthorized)
-	ErrTokenInvalid       = NewAppError("TOKEN_INVALID", "Invalid token", http.StatusUnauthorized)
-	ErrUserNotFound       = NewAppError("USER_NOT_FOUND", "User not found", http.StatusNotFound)
+	// ErrTokenMissing is the 401 for a request that presented no
+	// Authorization header at all. Distinct from ErrTokenInvalid: a
+	// malformed header or bad token means credentials were presented
+	// and rejected; a missing header means there were none. See
+	// middleware.bearerClaims for the branch.
+	ErrTokenMissing = NewAppError("TOKEN_MISSING", "No token provided", http.StatusUnauthorized)
+	ErrTokenExpired = NewAppError("TOKEN_EXPIRED", "Token has expired", http.StatusUnauthorized)
+	ErrTokenInvalid = NewAppError("TOKEN_INVALID", "Invalid token", http.StatusUnauthorized)
+	ErrUserNotFound = NewAppError("USER_NOT_FOUND", "User not found", http.StatusNotFound)
 	// ErrAdminRequired backs the admin-only routes (starting with
 	// POST /api/users): the caller is authenticated but lacks the
 	// admin role.
@@ -92,6 +100,26 @@ var (
 	// exists but is past its expiry — the row is deleted on encounter as
 	// lazy cleanup, so the next attempt reports ErrRefreshInvalid.
 	ErrSessionExpired = NewAppError("AUTH_SESSION_EXPIRED", "Session expired", http.StatusUnauthorized)
+	// ErrPasswordTooShort is the password policy's 400: a password
+	// below models.MinPasswordLength. Introduced by the self-service
+	// password change; the series' admin create/reset paths reuse it so
+	// the wire contract — and the UI's field-level mapping — stays
+	// uniform across every password-setting path. The message derives
+	// from the constant, so bumping the policy floor updates the wire
+	// text instead of leaving it lying.
+	ErrPasswordTooShort = NewAppError("PASSWORD_TOO_SHORT",
+		fmt.Sprintf("Password must be at least %d characters", models.MinPasswordLength),
+		http.StatusBadRequest)
+	// ErrInvalidRole is the user-creation path's 400 for a role outside
+	// {user, admin}. Shares VALIDATION_FAILED with
+	// ErrMissingRequiredFields so the wire contract stays uniform; the
+	// message names the offending field.
+	ErrInvalidRole = NewAppError("VALIDATION_FAILED", "Role must be \"user\" or \"admin\"", http.StatusBadRequest)
+	// ErrSelfRoleChange is the role-change endpoint's self-lockout
+	// guard: an admin may not change their own role, so the instance
+	// can never lose its administration by accident. The bootstrap CLI
+	// remains the escape hatch for a genuinely intended self-demotion.
+	ErrSelfRoleChange = NewAppError("SELF_ROLE_CHANGE", "Cannot change your own role", http.StatusBadRequest)
 )
 
 // Rate Limiting

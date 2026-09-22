@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"time"
+	"unicode/utf8"
 
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
@@ -97,22 +98,8 @@ func (s *AuthService) Login(username, password string) (accessToken string, refr
 		return "", "", nil, err
 	}
 
-	refreshToken, tokenHash, err := generateRefreshToken()
+	refreshToken, err = s.mintSession(user.ID)
 	if err != nil {
-		return "", "", nil, err
-	}
-
-	// UTC keeps CreatedAt/ExpiresAt comparable against the UTC clock
-	// the repository's expiry purge uses, whatever the server's zone.
-	now := time.Now().UTC()
-	session := &models.Session{
-		ID:        uuid.New().String(),
-		UserID:    user.ID,
-		TokenHash: tokenHash,
-		CreatedAt: now,
-		ExpiresAt: now.Add(s.sessionTTL),
-	}
-	if err := s.sessionRepo.Create(session); err != nil {
 		return "", "", nil, err
 	}
 
@@ -170,13 +157,7 @@ func (s *AuthService) Refresh(refreshToken string) (accessToken, newRefreshToken
 		return "", "", nil, err
 	}
 
-	replacement := &models.Session{
-		ID:        uuid.New().String(),
-		UserID:    session.UserID,
-		TokenHash: newTokenHash,
-		CreatedAt: now,
-		ExpiresAt: now.Add(s.sessionTTL),
-	}
+	replacement := s.newSession(session.UserID, newTokenHash)
 	rotated, err := s.sessionRepo.Rotate(tokenHash, replacement)
 	if err != nil {
 		return "", "", nil, err
@@ -196,6 +177,105 @@ func (s *AuthService) Refresh(refreshToken string) (accessToken, newRefreshToken
 // surface to the caller.
 func (s *AuthService) Logout(refreshToken string) error {
 	return s.sessionRepo.DeleteByTokenHash(HashRefreshToken(refreshToken))
+}
+
+// ChangePassword is the self-service path: the authenticated user
+// proves authority with their current password, the new password must
+// meet the length policy, and on success the hash is replaced and every
+// session of the user — the caller's other devices included — is
+// revoked. The returned fresh login (new access JWT + a brand-new
+// refresh token whose session is created after the revocation) keeps
+// the device making the change signed in; every other device must log
+// in again with the new password.
+//
+// Failure mapping: an unknown user record (valid token, deleted user)
+// yields ErrUserNotFound (404); a wrong current password yields
+// ErrInvalidCredentials (401) with a message naming the current
+// password; a new password below models.MinPasswordLength yields
+// ErrPasswordTooShort (400) — in all three cases nothing is written.
+// Storage failures propagate unchanged (mapped to 500 by the handler).
+// There is no transaction across the user and session stores: the write
+// order (revoke-all, hash, fresh session) means a failure between steps
+// leaves the sessions revoked with the password unchanged — the safe
+// side of "signed out but not changed", since a stolen refresh token
+// must never outlive the password change; the retry re-runs the
+// idempotent revocation before the hash write.
+func (s *AuthService) ChangePassword(userID, currentPassword, newPassword string) (accessToken, refreshToken string, user *models.User, err error) {
+	user, err = s.userRepo.GetByID(userID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if user == nil {
+		return "", "", nil, apperrors.ErrUserNotFound
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
+		return "", "", nil, apperrors.ErrInvalidCredentials.WithMessage("Current password is incorrect")
+	}
+
+	if utf8.RuneCountInString(newPassword) < models.MinPasswordLength {
+		return "", "", nil, apperrors.ErrPasswordTooShort
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return "", "", nil, err
+	}
+	user.PasswordHash = string(hash)
+
+	// Revoke before the hash write: a failure here writes nothing, and
+	// no failure ordering can leave the new hash live while the
+	// (possibly stolen) sessions it was meant to revoke still stand.
+	if err := s.sessionRepo.DeleteAllForUser(user.ID); err != nil {
+		return "", "", nil, err
+	}
+
+	if err := s.userRepo.Update(user); err != nil {
+		return "", "", nil, err
+	}
+
+	accessToken, err = s.GenerateToken(user.ID)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	refreshToken, err = s.mintSession(user.ID)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	return accessToken, refreshToken, user, nil
+}
+
+// newSession builds a fresh session row for the user with the session
+// TTL slid from now. UTC keeps CreatedAt/ExpiresAt comparable against
+// the UTC clock the repository's expiry purge uses, whatever the
+// server's zone.
+func (s *AuthService) newSession(userID, tokenHash string) *models.Session {
+	now := time.Now().UTC()
+	return &models.Session{
+		ID:        uuid.New().String(),
+		UserID:    userID,
+		TokenHash: tokenHash,
+		CreatedAt: now,
+		ExpiresAt: now.Add(s.sessionTTL),
+	}
+}
+
+// mintSession starts a brand-new session for the user and stores it:
+// it mints a fresh opaque refresh token (returned, for the cookie —
+// never persisted) and persists its hash as the session row via Create.
+// Refresh is the Rotate variant of the same act and builds its
+// replacement through newSession instead.
+func (s *AuthService) mintSession(userID string) (string, error) {
+	refreshToken, tokenHash, err := generateRefreshToken()
+	if err != nil {
+		return "", err
+	}
+	if err := s.sessionRepo.Create(s.newSession(userID, tokenHash)); err != nil {
+		return "", err
+	}
+	return refreshToken, nil
 }
 
 // generateRefreshToken mints a new opaque refresh token: 256 bits of

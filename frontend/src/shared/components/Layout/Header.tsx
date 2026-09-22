@@ -1,18 +1,12 @@
-import { Button, Flex, Heading, HStack, Spacer, Text } from "@chakra-ui/react";
+import { Flex, Heading, HStack, Spacer } from "@chakra-ui/react";
+import { AccountMenu } from "@features/auth/components/AccountMenu";
 import { useAuth } from "@features/auth/hooks/useAuth";
 import { ColorModeToggle } from "@shared/components/ColorModeToggle";
-import { useNavigate } from "react-router-dom";
 
 const appName = import.meta.env.VITE_APP_NAME || "Podland";
 
 export function Header() {
-	const { user, logout } = useAuth();
-	const navigate = useNavigate();
-
-	const handleLogout = async () => {
-		await logout();
-		navigate("/login", { replace: true });
-	};
+	const { user } = useAuth();
 
 	return (
 		<Flex as="header" p={4} pl={6} borderBottomWidth="1px" align="center">
@@ -20,12 +14,7 @@ export function Header() {
 			<Spacer />
 			<HStack spacing={4}>
 				<ColorModeToggle />
-				{user && (
-					<>
-						<Text>{user.username}</Text>
-						<Button onClick={handleLogout}>Log out</Button>
-					</>
-				)}
+				{user && <AccountMenu username={user.username} />}
 			</HStack>
 		</Flex>
 	);

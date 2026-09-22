@@ -123,6 +123,47 @@ func TestSessionRepository_DeleteExpiredForUser(t *testing.T) {
 	}
 }
 
+// TestSessionRepository_DeleteAllForUser asserts the revoke-all
+// primitive removes every live row belonging to the given user and
+// leaves other users' sessions alone.
+func TestSessionRepository_DeleteAllForUser(t *testing.T) {
+	db := newTestUserDB(t)
+	repo := NewSessionRepository(db)
+	users := NewUserRepository(db)
+
+	alice := &User{ID: "session-user-alice", Username: "alice", PasswordHash: "hash", CreatedAt: time.Now().UTC()}
+	bob := &User{ID: "session-user-bob", Username: "bob", PasswordHash: "hash", CreatedAt: time.Now().UTC()}
+	require.NoError(t, users.Create(alice), "Should create alice")
+	require.NoError(t, users.Create(bob), "Should create bob")
+
+	future := time.Now().UTC().Add(24 * time.Hour)
+	require.NoError(t, repo.Create(newSession("alice-1", alice.ID, "alice-hash-1", future)))
+	require.NoError(t, repo.Create(newSession("alice-2", alice.ID, "alice-hash-2", future)))
+	require.NoError(t, repo.Create(newSession("bob-1", bob.ID, "bob-hash-1", future)))
+
+	require.NoError(t, repo.DeleteAllForUser(alice.ID), "Should delete alice's sessions")
+
+	for _, hash := range []string{"alice-hash-1", "alice-hash-2"} {
+		stored, err := repo.GetByTokenHash(hash)
+		require.NoError(t, err, "Lookup for %s should not error", hash)
+		assert.Nil(t, stored, "Alice's session %s should be revoked", hash)
+	}
+	stored, err := repo.GetByTokenHash("bob-hash-1")
+	require.NoError(t, err, "Bob lookup should not error")
+	assert.NotNil(t, stored, "Bob's session must survive alice's revocation")
+
+	assert.Empty(t, sessionRowsForUser(t, db, alice.ID), "No alice rows should remain")
+}
+
+// TestSessionRepository_DeleteAllForUserUnknownUserIsNoOp asserts
+// revoking a user with no sessions succeeds without effect.
+func TestSessionRepository_DeleteAllForUserUnknownUserIsNoOp(t *testing.T) {
+	db := newTestUserDB(t)
+	repo := NewSessionRepository(db)
+
+	require.NoError(t, repo.DeleteAllForUser("no-such-user"), "Revoking an unknown user is not an error")
+}
+
 // TestSessionRepository_RotateReplacesSession asserts rotation is a
 // swap: the row addressed by the old token hash disappears, the new
 // session row takes its place, and sibling sessions are untouched.

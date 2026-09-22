@@ -29,7 +29,7 @@ function machinesHandler(body: Machine[], status = 200) {
 
 function renderMachinesPage() {
 	return renderApp("/machines", {
-		resolveInitialState: async () => ({ username: "alice" }),
+		resolveInitialState: async () => ({ username: "alice", role: "user" }),
 	});
 }
 
@@ -95,7 +95,7 @@ describe("MachinesPage", () => {
 				),
 			);
 			renderApp("/machines", {
-				resolveInitialState: async () => ({ username: "alice" }),
+				resolveInitialState: async () => ({ username: "alice", role: "user" }),
 			});
 
 			const card = await screen.findByTestId("machine-card");

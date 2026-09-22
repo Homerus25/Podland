@@ -254,6 +254,7 @@ describe("streamNdjson 401 policy", () => {
 			return HttpResponse.json({
 				token: "fresh-access-token",
 				username: "alice",
+				role: "user",
 			});
 		});
 	}

@@ -15,6 +15,9 @@ export type MachineResource =
 
 export const machinesQueryKey = ["machines"] as const;
 
+// App-wide resources are bare constants too (no machine id to embed).
+export const usersQueryKey = ["users"] as const;
+
 export function containersQueryKey(machineId: string) {
 	return ["machines", machineId, "containers"] as const;
 }

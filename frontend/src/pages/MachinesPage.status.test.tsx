@@ -38,7 +38,7 @@ function statusHandler(
 
 function renderMachinesPage() {
 	return renderApp("/machines", {
-		resolveInitialState: async () => ({ username: "alice" }),
+		resolveInitialState: async () => ({ username: "alice", role: "user" }),
 	});
 }
 

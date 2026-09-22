@@ -13,7 +13,8 @@ import (
 )
 
 // seedLoginUser adds a user with a bcrypt-hashed password to the mock
-// repository and returns the repository.
+// repository and returns the repository. The user carries the regular
+// role, mirroring what the repository's Create normalization guarantees.
 func seedLoginUser(t *testing.T, username, password string) *testutils.MockUserRepository {
 	t.Helper()
 
@@ -25,6 +26,7 @@ func seedLoginUser(t *testing.T, username, password string) *testutils.MockUserR
 		ID:           "user-" + username,
 		Username:     username,
 		PasswordHash: string(hashedPassword),
+		Role:         models.RoleUser,
 		CreatedAt:    time.Now(),
 	})
 	return repo

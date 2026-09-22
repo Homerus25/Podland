@@ -12,6 +12,11 @@ const (
 	RoleAdmin = "admin"
 )
 
+// MinPasswordLength is the password policy's minimum. The self-service
+// password change enforces it; the series' admin create/reset paths
+// enforce the same floor.
+const MinPasswordLength = 8
+
 // User represents a user in the system
 type User struct {
 	ID           string    `json:"id"`
@@ -21,10 +26,10 @@ type User struct {
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
-// validRole reports whether role is one of the known role values.
+// ValidRole reports whether role is one of the known role values.
 // The users.role column has no DB-level CHECK (SQLite cannot ALTER a
-// constraint onto an existing table), so the repository enforces this
-// at the application boundary.
-func validRole(role string) bool {
+// constraint onto an existing table), so the repository and the user
+// service enforce this at the application boundary.
+func ValidRole(role string) bool {
 	return role == RoleUser || role == RoleAdmin
 }

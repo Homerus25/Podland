@@ -32,7 +32,7 @@ const emptySecretsHandler = http.get("*/api/machines/m-1/secrets", () =>
 
 function renderMachineDetailPage(id = "m-1") {
 	return renderApp(`/machines/${id}`, {
-		resolveInitialState: async () => ({ username: "alice" }),
+		resolveInitialState: async () => ({ username: "alice", role: "user" }),
 	});
 }
 
@@ -47,7 +47,7 @@ describe("MachineDetailPage", () => {
 			emptyQuadletsHandler,
 		);
 		renderApp("/machines", {
-			resolveInitialState: async () => ({ username: "alice" }),
+			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
 
 		await userEvent.click(await screen.findByTestId("machine-card"));
@@ -252,7 +252,7 @@ describe("page-level permission gating on the machine detail page", () => {
 			http.get("*/api/machines/m-1/secrets", () => HttpResponse.json([])),
 		);
 		renderApp("/machines/m-1", {
-			resolveInitialState: async () => ({ username: "alice" }),
+			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
 		await screen.findByText(machineFixture().name);
 		await userEvent.click(screen.getByRole("tab", { name: /secrets/i }));

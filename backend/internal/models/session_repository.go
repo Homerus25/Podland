@@ -20,6 +20,11 @@ type SessionRepositoryInterface interface {
 	GetByTokenHash(tokenHash string) (*Session, error)
 	DeleteByTokenHash(tokenHash string) error
 	DeleteExpiredForUser(userID string) error
+	// DeleteAllForUser revokes every session belonging to the user —
+	// the primitive behind "sign out everywhere" (self-service password
+	// change, admin password reset). Hashed tokens only, like every
+	// sessions-table operation.
+	DeleteAllForUser(userID string) error
 	// Rotate atomically swaps the session addressed by oldTokenHash for
 	// newSession: one transaction deletes the old row and inserts the
 	// new one. It reports whether the swap happened — false (with a nil
@@ -118,6 +123,20 @@ func (r *SessionRepository) DeleteExpiredForUser(userID string) error {
 	_, err := r.db.Exec(query, userID, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("failed to delete expired sessions: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteAllForUser revokes every session row belonging to the given
+// user, live or expired — the "sign out everywhere" primitive. A user
+// with no sessions is a no-op.
+func (r *SessionRepository) DeleteAllForUser(userID string) error {
+	query := `DELETE FROM sessions WHERE user_id = ?`
+
+	_, err := r.db.Exec(query, userID)
+	if err != nil {
+		return fmt.Errorf("failed to delete sessions for user: %w", err)
 	}
 
 	return nil

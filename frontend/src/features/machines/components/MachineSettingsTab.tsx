@@ -89,7 +89,10 @@ export function MachineSettingsTab({ machine }: { machine: Machine }) {
 			{canShareMachine(permission) ? (
 				<>
 					<Text fontWeight="bold">Sharing</Text>
-					<ShareMachineSection machineId={machine.id} />
+					<ShareMachineSection
+						machineId={machine.id}
+						ownerId={machine.ownerId}
+					/>
 				</>
 			) : null}
 			{canDeleteMachine(permission) ? (

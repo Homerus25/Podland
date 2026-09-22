@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,6 +19,55 @@ func observedUserIDHandler(observed *string) http.Handler {
 		*observed = contextutils.GetUserIDFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	})
+}
+
+// TestJWTMiddleware_RejectionCodes pins the required chain's 401
+// vocabulary: a missing Authorization header answers TOKEN_MISSING
+// (no credentials were presented at all), while a malformed header or
+// an invalid token answers TOKEN_INVALID — credentials were presented
+// and they are bad. Expired tokens answer TOKEN_EXPIRED further down
+// in token validation. These are the codes the domain doku files'
+// 401 lines document.
+func TestJWTMiddleware_RejectionCodes(t *testing.T) {
+	service, err := auth.NewTestAuthService()
+	require.NoError(t, err, "Should create auth service without error")
+
+	var observed string
+	handler := JWTMiddleware(service)(observedUserIDHandler(&observed))
+
+	cases := map[string]struct {
+		authHeader string
+		wantCode   string
+	}{
+		"missing header":   {authHeader: "", wantCode: "TOKEN_MISSING"},
+		"malformed header": {authHeader: "Token abc", wantCode: "TOKEN_INVALID"},
+		"invalid token":    {authHeader: "Bearer not-a-real-token", wantCode: "TOKEN_INVALID"},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			observed = ""
+			req := httptest.NewRequest("GET", "/api/machines", nil)
+			if tc.authHeader != "" {
+				req.Header.Set("Authorization", tc.authHeader)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			resp := w.Result()
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "Unauthenticated request should be rejected with 401")
+
+			var envelope struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&envelope), "Should decode the error envelope")
+			assert.Equal(t, tc.wantCode, envelope.Error.Code, "The rejection code should match the documented vocabulary")
+			assert.Empty(t, observed, "Handler must not run for a rejected request")
+		})
+	}
 }
 
 // TestOptionalJWTMiddleware_NoHeader_PassesThroughUnauthenticated

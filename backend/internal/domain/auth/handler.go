@@ -30,10 +30,13 @@ type LoginRequest struct {
 	Password string `json:"password" validate:"required"`
 }
 
-// LoginResponse represents a login response
+// LoginResponse represents a login response. Role mirrors
+// StatusResponse's: read from the user record, so the client can gate
+// admin surfaces without a second round trip.
 type LoginResponse struct {
 	Token    string `json:"token"`
 	Username string `json:"username"`
+	Role     string `json:"role"`
 }
 
 // refreshTokenCookieName is the httpOnly cookie login sets to carry the
@@ -87,13 +90,13 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		// cross-site sending and plaintext transport.
 		setRefreshCookie(w, refreshToken)
 
-		return LoginResponse{Token: token, Username: user.Username}, nil
+		return LoginResponse{Token: token, Username: user.Username, Role: user.Role}, nil
 	})
 }
 
 // RefreshResponse represents a refresh response. It intentionally
-// matches the login body: the new access JWT and the username it
-// belongs to — the refresh token lives only in the rotated cookie.
+// matches the login body: the new access JWT and the username and role
+// it belongs to — the refresh token lives only in the rotated cookie.
 type RefreshResponse = LoginResponse
 
 // Refresh handles the unauthenticated renewal path: it exchanges the
@@ -116,7 +119,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 		setRefreshCookie(w, refreshToken)
 
-		return RefreshResponse{Token: token, Username: user.Username}, nil
+		return RefreshResponse{Token: token, Username: user.Username, Role: user.Role}, nil
 	})
 }
 
@@ -150,6 +153,44 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 		}
 
 		return map[string]string{"message": "Logged out successfully"}, nil
+	})
+}
+
+// ChangePasswordRequest represents a self-service password change: the
+// current password proves the caller's authority, the new one replaces
+// the hash. Policy (length) and verification live in the service.
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword" validate:"required"`
+	NewPassword     string `json:"newPassword" validate:"required"`
+}
+
+// ChangePasswordResponse represents a password change response. It
+// matches the login body: the caller's fresh access JWT and username
+// and role — the fresh session travels only in the rotated cookie.
+type ChangePasswordResponse = LoginResponse
+
+// ChangePassword handles POST /api/auth/password: the authenticated
+// caller changes their own password. The service verifies the current
+// password, enforces the length policy, revokes every session of the
+// user, and issues the fresh login this handler hands back (body +
+// refresh cookie) so the changing device stays signed in. Route
+// registration sits behind JWTMiddleware in internal/app — the envelope
+// passes the caller's user ID through.
+func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (ChangePasswordResponse, error) {
+		var req ChangePasswordRequest
+		if appErr := web.Decode(r, &req); appErr != nil {
+			return ChangePasswordResponse{}, appErr
+		}
+
+		token, refreshToken, user, err := h.service.ChangePassword(userID, req.CurrentPassword, req.NewPassword)
+		if err != nil {
+			return ChangePasswordResponse{}, err
+		}
+
+		setRefreshCookie(w, refreshToken)
+
+		return ChangePasswordResponse{Token: token, Username: user.Username, Role: user.Role}, nil
 	})
 }
 

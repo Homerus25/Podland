@@ -2,7 +2,11 @@ import { useAuth } from "@features/auth/hooks/useAuth";
 import { AuthProvider } from "@shared/context/AuthContext";
 import { machinesQueryKey } from "@shared/queries/queryKeys";
 import type { User } from "@shared/types/api";
-import { handleUnauthorized, setBearerToken } from "@shared/utils/api";
+import {
+	getBearerToken,
+	handleUnauthorized,
+	setBearerToken,
+} from "@shared/utils/api";
 import { act, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
@@ -47,7 +51,7 @@ afterEach(() => {
 describe("logout and the query cache", () => {
 	it("clears the query cache alongside the local state drop", async () => {
 		const { result, queryClient } = renderAuth({
-			resolveInitialState: async () => ({ username: "alice" }),
+			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
 		queryClient.setQueryData(machinesQueryKey, [
 			machineFixture({ name: "alice-machine" }),
@@ -78,6 +82,39 @@ describe("logout and the query cache", () => {
 	});
 });
 
+describe("adoptSession", () => {
+	it("installs the re-issued token and user without any request or cache clear", async () => {
+		let refreshCalled = false;
+		server.use(
+			http.post("*/api/auth/refresh", () => {
+				refreshCalled = true;
+				return HttpResponse.json({ token: "x", username: "ada" });
+			}),
+		);
+		const { result, queryClient } = renderAuth({
+			resolveInitialState: async () => ({ username: "alice", role: "user" }),
+		});
+		queryClient.setQueryData(machinesQueryKey, [machineFixture()]);
+		await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+		expect(queryClient.getQueryCache().getAll()).toHaveLength(1);
+
+		await act(async () => {
+			result.current.adoptSession({
+				token: "re-issued-access-token",
+				username: "alice",
+				role: "user",
+			});
+		});
+
+		// The re-issued login is adopted in place: fresh token installed,
+		// user taken from the payload, query cache untouched, no request.
+		expect(result.current.user?.username).toBe("alice");
+		expect(getBearerToken()).toBe("re-issued-access-token");
+		expect(queryClient.getQueryCache().getAll()).toHaveLength(1);
+		expect(refreshCalled).toBe(false);
+	});
+});
+
 describe("session-expired seam", () => {
 	function logoutCountingHandler(logoutCalls: string[]) {
 		return http.post("*/api/auth/logout", () => {
@@ -101,7 +138,7 @@ describe("session-expired seam", () => {
 		const logoutCalls: string[] = [];
 		server.use(logoutCountingHandler(logoutCalls), rejectedRefreshHandler());
 		const { result } = renderAuth({
-			resolveInitialState: async () => ({ username: "alice" }),
+			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
 		await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
 		// A live session holds a token; installing one also re-arms the
@@ -122,7 +159,7 @@ describe("session-expired seam", () => {
 		const logoutCalls: string[] = [];
 		server.use(logoutCountingHandler(logoutCalls), rejectedRefreshHandler());
 		const { result, unmount } = renderAuth({
-			resolveInitialState: async () => ({ username: "alice" }),
+			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
 		await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
 		unmount();

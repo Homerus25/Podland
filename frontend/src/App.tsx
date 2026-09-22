@@ -1,3 +1,4 @@
+import { AdminRoute } from "@shared/components/AdminRoute";
 import { Layout } from "@shared/components/Layout";
 import { ProtectedRoute } from "@shared/components/ProtectedRoute";
 import { Navigate, Route, Routes } from "react-router-dom";
@@ -6,6 +7,7 @@ import { LoginPage } from "@/pages/LoginPage";
 import { LogsPage } from "@/pages/LogsPage";
 import { MachineDetailPage } from "@/pages/MachineDetailPage";
 import { MachinesPage } from "@/pages/MachinesPage";
+import { UsersPage } from "@/pages/UsersPage";
 
 export function App() {
 	return (
@@ -25,6 +27,14 @@ export function App() {
 				<Route
 					path="machines/:machineId/logs/:kind/:targetId"
 					element={<LogsPage />}
+				/>
+				<Route
+					path="users"
+					element={
+						<AdminRoute>
+							<UsersPage />
+						</AdminRoute>
+					}
 				/>
 			</Route>
 			<Route path="*" element={<Navigate to="/" replace />} />

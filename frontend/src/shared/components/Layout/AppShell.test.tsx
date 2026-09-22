@@ -1,12 +1,13 @@
+import type { UserRole } from "@shared/types/api";
 import { setBearerToken } from "@shared/utils/api";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
 
-function renderShell(at = "/", username = "alice") {
+function renderShell(at = "/", username = "alice", role: UserRole = "user") {
 	return renderApp(at, {
-		resolveInitialState: async () => ({ username }),
+		resolveInitialState: async () => ({ username, role }),
 		usernameProbe: false,
 	});
 }

@@ -3,7 +3,6 @@ import {
 	FormControl,
 	FormLabel,
 	HStack,
-	Input,
 	Select,
 	Text,
 	VStack,
@@ -14,27 +13,63 @@ import {
 	useMachineAccess,
 	useRevokeMachineAccess,
 } from "@features/machines/hooks/useMachines";
+import { UserPicker } from "@features/users/components/UserPicker";
+import { useUsers } from "@features/users/hooks/useUsers";
+import type { UserSummary } from "@features/users/services/usersApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import type { MachinePermission } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 function formatGrantedAt(iso: string): string {
 	return new Date(iso).toLocaleString();
 }
 
 // Sharing management for one machine: the current grants plus grant/revoke
-// actions. The backend identifies users by id, so grants are shown by user id.
-export function ShareMachineSection({ machineId }: { machineId: string }) {
+// actions. The backend identifies users by id, so rows resolve the username
+// through the users list query and fall back to the raw id for users the
+// directory does not know. The grant form picks its target from the same
+// directory; `ownerId` keeps the owner out of the choices because ownership
+// is not a grant (the owner row can never be revoked or re-granted).
+export function ShareMachineSection({
+	machineId,
+	ownerId,
+}: {
+	machineId: string;
+	ownerId: string;
+}) {
 	const { data: grants, isPending, error } = useMachineAccess(machineId);
 	const grantAccess = useGrantMachineAccess(machineId);
 	const revokeAccess = useRevokeMachineAccess(machineId);
-	const [userId, setUserId] = useState("");
+	// One directory fetch serves both the row resolution and the picker
+	// (the picker consumes the same shared users query).
+	const { data: users } = useUsers();
+	const usernameById = useMemo(
+		() => new Map((users ?? []).map((user) => [user.id, user.username])),
+		[users],
+	);
+	const [selectedUser, setSelectedUser] = useState<UserSummary | null>(null);
 	const [permission, setPermission] = useState<MachinePermission>("read");
 
+	// Only people who can actually receive a grant: not the owner and not
+	// anyone who already holds one (the backend rejects duplicate grants).
+	const excludedUserIds = useMemo(
+		() => [ownerId, ...(grants ?? []).map((grant) => grant.userId)],
+		[ownerId, grants],
+	);
+
 	const submitGrant = () => {
+		if (!selectedUser) {
+			return;
+		}
 		grantAccess.reset();
-		grantAccess.mutate({ userId: userId.trim(), permission });
+		grantAccess.mutate(
+			{ userId: selectedUser.id, permission },
+			// A successful grant moves the user into the grants list, where
+			// the exclusion above hides them anyway — clear the stale
+			// selection at the call site.
+			{ onSuccess: () => setSelectedUser(null) },
+		);
 	};
 
 	return (
@@ -51,7 +86,9 @@ export function ShareMachineSection({ machineId }: { machineId: string }) {
 							data-testid={`grant-row-${grant.userId}`}
 						>
 							<HStack spacing={4}>
-								<Text fontFamily="mono">{grant.userId}</Text>
+								<Text fontFamily="mono">
+									{usernameById.get(grant.userId) ?? grant.userId}
+								</Text>
 								<PermissionBadge permission={grant.permission} />
 								<Text color="gray.500" fontSize="sm">
 									granted {formatGrantedAt(grant.grantedAt)}
@@ -88,15 +125,11 @@ export function ShareMachineSection({ machineId }: { machineId: string }) {
 					submitGrant();
 				}}
 			>
-				<FormControl>
-					<FormLabel htmlFor="grant-user-id">User id</FormLabel>
-					<Input
-						id="grant-user-id"
-						value={userId}
-						onChange={(event) => setUserId(event.target.value)}
-						placeholder="u-…"
-					/>
-				</FormControl>
+				<UserPicker
+					value={selectedUser}
+					onChange={setSelectedUser}
+					excludeUserIds={excludedUserIds}
+				/>
 				<FormControl>
 					<FormLabel htmlFor="grant-permission">Permission</FormLabel>
 					<Select
@@ -115,6 +148,7 @@ export function ShareMachineSection({ machineId }: { machineId: string }) {
 					type="submit"
 					colorScheme="blue"
 					isLoading={grantAccess.isPending}
+					isDisabled={!selectedUser}
 					data-testid="grant-access-button"
 				>
 					Grant access
