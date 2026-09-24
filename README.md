@@ -61,13 +61,19 @@ podman build \
   --build-context podman=$HOME/repos/podman \
   -t podland .
 
-podman run -p 8080:8080 podland
+podman run -p 8080:8080 -v podland-data:/app/data podland
 ```
 
 `--build-context podman` points at a local checkout of the patched Podman
 bindings fork ([github.com/Homerus25/podman](https://github.com/Homerus25/podman))
 that `backend/go.mod` carries as a `replace` directive. See the root
 [Containerfile](Containerfile) for the build stages.
+
+A fresh image ships **no database and no default credentials**: on first
+boot the browser opens the setup page where you create the first admin.
+The SQLite database lives in `/app/data` — mount that directory as a
+volume (as above) so the created admin and all data survive container
+recreation.
 
 ## Podman Integration
 

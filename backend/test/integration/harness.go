@@ -198,9 +198,9 @@ func (s *Suite) CookieJarClient() *http.Client {
 
 // SeedUserWithRole seeds a user with an explicit role through the
 // in-process app's seeding seam and returns the new user's ID. It lets
-// slices mint, e.g., an admin-role user (mirroring the cmd/initdb
-// bootstrap) without bypassing the real login path — the caller still
-// has to POST /api/auth/login to act as that user.
+// slices mint, e.g., an admin-role user, without bypassing the real
+// login path — the caller still has to POST /api/auth/login to act as
+// that user.
 func (s *Suite) SeedUserWithRole(username, password, role string) (string, error) {
 	return s.application.SeedUserWithRole(username, password, role)
 }

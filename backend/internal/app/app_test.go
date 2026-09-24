@@ -34,9 +34,8 @@ import (
 func newTestConfig(t *testing.T) *config.Config {
 	t.Helper()
 
-	// migrations.Run reads SQL files from a relative "migrations/"
-	// directory (mirroring cmd/initdb/main.go, which chdirs to backend
-	// root for the same reason). Tests run with cwd = the test package's
+	// migrations.Run reads SQL files from a "migrations/" directory
+	// relative to cwd. Tests run with cwd = the test package's
 	// directory, so chdir to the backend root.
 	t.Chdir("../..")
 
@@ -61,7 +60,13 @@ func newTestConfig(t *testing.T) *config.Config {
 			MaxConcurrent:         10,
 			TestTimeoutSeconds:    10,
 		},
-		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 60},
+		// The auth budget is raised well above the 10/min production
+		// default because every app test's boot probe (GET /auth/status)
+		// draws from the shared per-IP auth group — dozens of renders in
+		// one suite would otherwise 429 on the production budget. The
+		// rate-limit behavior itself is pinned in setup_test.go, which
+		// overrides this field per test.
+		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 60, AuthRequestsPerMinute: 1000},
 		AllowedOrigins: []string{},
 		Log:            config.LogConfig{Level: "info", Format: "json"},
 		Encryption:     config.EncryptionConfig{Key: encKey},

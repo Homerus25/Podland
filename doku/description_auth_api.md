@@ -87,27 +87,92 @@ expiry) and sets the rotated cookie.
 
 ---
 
+#### POST /api/setup/user
+
+First-run bootstrap for a fresh instance. An instance with **zero
+users** creates its first user here — always with the admin role — and
+the caller is signed in on the spot: the response is the login payload
+plus the httpOnly refresh cookie, exactly as at login. No Authorization
+header; the endpoint is unauthenticated by design. Once any user
+exists, the one-time offer is gone: every further call answers **409
+`SETUP_COMPLETED`** with no side effects. The emptiness check and the
+insert ride one SQLite write transaction, so of two concurrent setup
+requests exactly one succeeds and the other receives the 409. Rate-
+limited in the same per-IP auth group as login and refresh.
+
+**Request:**
+```json
+Content-Type: application/json
+
+{
+  "username": "string",
+  "password": "string"
+}
+```
+
+**Response (Success - 200):**
+- Same body as login; sets a fresh refresh cookie (Path=/api/auth)
+```json
+{
+  "token": "string (jwt)",
+  "username": "string",
+  "role": "string ('admin')"
+}
+```
+
+**Response (Error):**
+- 409 Conflict: the instance already has a user (`SETUP_COMPLETED`)
+- 400 Bad Request: password below the 8-character policy (`PASSWORD_TOO_SHORT`, "Password must be at least 8 characters"); malformed JSON body (`INVALID_REQUEST`, "Invalid request body"); missing or empty username/password (`VALIDATION_FAILED`, carrying the validator's message)
+
+**Scripted setup (headless deployment):** the endpoint works with any
+plain HTTP client — no special CLI tool is needed.
+
+```bash
+# 1. Probe: is this instance still fresh?
+curl -s http://localhost:8080/api/auth/status
+# -> {"authenticated":false,"needsSetup":true}
+
+# 2. Create the first admin; save the access token from the response.
+curl -s http://localhost:8080/api/setup/user \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"choose-a-strong-password"}'
+
+# 3. The instance is configured: needsSetup is now false, and the
+#    credentials log in at POST /api/auth/login as on any instance.
+```
+
+---
+
 #### GET /api/auth/status
 
 **Request:**
-- Requires Authorization: Bearer header with valid token
+- Optional Authorization: Bearer header. Served without a token too
+  (an invalid *presented* token still gets 401).
 
 **Response (Success - 200):**
-- Reports whether the caller is authenticated, and if so their ID and role
-- Served without a token too: `{"authenticated": false}` with 200 (an invalid *presented* token still gets 401)
+- Reports whether the caller is authenticated, and if so their ID and
+  role; for anonymous callers it also reports whether the instance
+  still needs first-run setup (users table empty, evaluated per
+  request):
 ```json
 {
   "authenticated": true,
   "userId": "string (uuid)",
-  "role": "string ('user' | 'admin')"
+  "role": "string ('user' | 'admin')",
+  "needsSetup": false
 }
 ```
 
 **Fields:**
-- `role`: The authenticated user's role. `"user"` is the default for all users; `"admin"` is granted to the bootstrap user created by `cmd/initdb`. Role changes take effect immediately (the role is read from the database per request, not embedded in the JWT).
+- `role`: The authenticated user's role. `"user"` is the default for all users; `"admin"` is granted to the first admin created through first-run setup (POST /api/setup/user). Role changes take effect immediately (the role is read from the database per request, not embedded in the JWT).
+- `needsSetup`: `true` only for an **unauthenticated** caller on an instance whose users table is empty — the signal to route to the setup page (see POST /api/setup/user). It flips to `false` the moment setup completes. Authenticated callers always see `false`.
 
 **Response (Error):**
-- 401 Unauthorized: Invalid or missing token (`TOKEN_MISSING` or `TOKEN_INVALID`)
+- 401 Unauthorized: Invalid token (`TOKEN_INVALID`) — a *missing* token is not an error; the endpoint answers the anonymous shape above.
+
+**Rate limiting:** login, refresh, this status probe, and the setup
+endpoint share one per-IP budget (`RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE`,
+default 10/min). Exceeding it answers 429 `RATE_LIMIT_EXCEEDED`.
 
 ---
 

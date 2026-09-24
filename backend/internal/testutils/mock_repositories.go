@@ -140,6 +140,23 @@ func (m *MockUserRepository) UsernameExists(username string) (bool, error) {
 	return false, nil
 }
 
+// Count returns the number of stored users, mirroring the real
+// repository's contract (first-run setup derives "needs setup" from it).
+func (m *MockUserRepository) Count() (int, error) {
+	return len(m.users), nil
+}
+
+// CreateFirstUser inserts user only when the mock is empty, mirroring
+// the real repository's atomic first-user guard: it reports whether the
+// insert happened, and false (nil error) means a user already existed.
+func (m *MockUserRepository) CreateFirstUser(user *models.User) (bool, error) {
+	if len(m.users) > 0 {
+		return false, nil
+	}
+	m.users[user.ID] = user
+	return true, nil
+}
+
 // MockMachineRepository implements a mock machine repository for testing
 type MockMachineRepository struct {
 	machines    map[string]*models.Machine

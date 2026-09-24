@@ -5,8 +5,8 @@ import (
 )
 
 // User roles. RoleUser is the default for every user; RoleAdmin is
-// granted to the bootstrap user created by cmd/initdb and (later) by
-// admin-only user management endpoints.
+// granted to the first admin created through the first-run setup
+// endpoint and by admin-only user management endpoints.
 const (
 	RoleUser  = "user"
 	RoleAdmin = "admin"

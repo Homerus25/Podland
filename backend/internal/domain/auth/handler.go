@@ -201,19 +201,32 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 // take effect immediately rather than at token expiry. It is omitted
 // when the user record can no longer be found (e.g. deleted while a
 // token was still valid).
+//
+// NeedsSetup reports a fresh instance: true only for an unauthenticated
+// caller on an instance whose users table is empty — evaluated per
+// request, so it flips to false the moment setup completes. The
+// frontend's boot probe steers routing on it (login → setup while
+// setup is needed); authenticated callers always get false, because a
+// configured instance is the only state they can exist in.
 type StatusResponse struct {
 	Authenticated bool   `json:"authenticated"`
+	NeedsSetup    bool   `json:"needsSetup"`
 	UserID        string `json:"userId,omitempty"`
 	Role          string `json:"role,omitempty"`
 }
 
 // Status handles authentication status check. The caller's user ID
 // passes through as-is: empty means an anonymous caller (the route is
-// served without a token too) and answers {authenticated: false}.
+// served without a token too) and answers {authenticated: false} plus
+// whether the instance still needs first-run setup.
 func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (StatusResponse, error) {
 		if userID == "" {
-			return StatusResponse{Authenticated: false}, nil
+			count, err := h.userRepo.Count()
+			if err != nil {
+				return StatusResponse{}, err
+			}
+			return StatusResponse{Authenticated: false, NeedsSetup: count == 0}, nil
 		}
 
 		user, err := h.userRepo.GetByID(userID)
@@ -229,5 +242,46 @@ func (h *AuthHandler) Status(w http.ResponseWriter, r *http.Request) {
 			resp.Role = user.Role
 		}
 		return resp, nil
+	})
+}
+
+// SetupRequest represents a first-run setup request: the credentials of
+// the instance's first user. Validation mirrors login (required
+// fields); the password policy lives in the creation service.
+type SetupRequest struct {
+	Username string `json:"username" validate:"required"`
+	Password string `json:"password" validate:"required"`
+}
+
+// SetupResponse represents a setup response. It matches the login
+// body — setup signs the caller in on the spot — and the refresh
+// session travels only in the cookie, as at login.
+type SetupResponse = LoginResponse
+
+// Setup handles POST /api/setup/user, the unauthenticated first-run
+// bootstrap: on a fresh instance (zero users) it creates the first user
+// with the admin role and responds with the login payload plus the
+// refresh cookie, so the setup page adopts the session without a second
+// round trip. The first-user guard lives in the creation service and is
+// atomic: exactly one concurrent caller wins; every other caller — and
+// any call on an already-configured instance — receives 409
+// SETUP_COMPLETED with nothing written. Route registration sits in the
+// per-IP auth rate-limit group in internal/app; the closure's user ID
+// is unused (no caller exists during setup).
+func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
+	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (SetupResponse, error) {
+		var req SetupRequest
+		if appErr := web.Decode(r, &req); appErr != nil {
+			return SetupResponse{}, appErr
+		}
+
+		token, refreshToken, user, err := h.service.Setup(req.Username, req.Password)
+		if err != nil {
+			return SetupResponse{}, err
+		}
+
+		setRefreshCookie(w, refreshToken)
+
+		return SetupResponse{Token: token, Username: user.Username, Role: user.Role}, nil
 	})
 }

@@ -52,7 +52,7 @@ func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 		// Missing/empty required fields and an unknown role are rejected
 		// by the service (400) — the same validation every other creation
-		// path (cmd/initdb, seeding) goes through.
+		// path (setup endpoint, seeding) goes through.
 		user, err := h.service.CreateUserWithRole(req.Username, req.Password, req.Role)
 		if err != nil {
 			return UserResponse{}, err

@@ -26,6 +26,17 @@ type JWTConfig struct {
 	Issuer         string
 }
 
+// FirstUserCreator is the seam Setup needs: the shared user-creation
+// service's first-admin path (validation + hash + the atomic first-user
+// guard). Declared here consumer-side — auth never imports the users
+// package; internal/app wires users.UserService in. The returned user
+// is the freshly created admin, or an AppError: the creation path's
+// validation codes, or ErrSetupCompleted when the instance already has
+// a user.
+type FirstUserCreator interface {
+	CreateFirstAdmin(username, password string) (*models.User, error)
+}
+
 // AuthService handles authentication
 type AuthService struct {
 	privateKey  *rsa.PrivateKey
@@ -35,11 +46,14 @@ type AuthService struct {
 	userRepo    models.UserRepositoryInterface
 	sessionRepo models.SessionRepositoryInterface
 	sessionTTL  time.Duration
+	firstUsers  FirstUserCreator
 }
 
 // NewAuthService creates a new AuthService. sessionTTL is how long a
 // refresh session (and its cookie's server-side row) stays redeemable.
-func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, sessionTTL time.Duration) (*AuthService, error) {
+// firstUsers backs Setup; Login, Refresh, Logout, and ChangePassword
+// never touch it.
+func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, sessionTTL time.Duration, firstUsers FirstUserCreator) (*AuthService, error) {
 	// Load private key
 	privateKey, err := loadPrivateKey(config.PrivateKeyPath)
 	if err != nil {
@@ -60,6 +74,7 @@ func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, s
 		userRepo:    userRepo,
 		sessionRepo: sessionRepo,
 		sessionTTL:  sessionTTL,
+		firstUsers:  firstUsers,
 	}, nil
 }
 
@@ -95,6 +110,38 @@ func (s *AuthService) Login(username, password string) (accessToken string, refr
 	}
 
 	if err := s.sessionRepo.DeleteExpiredForUser(user.ID); err != nil {
+		return "", "", nil, err
+	}
+
+	refreshToken, err = s.mintSession(user.ID)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	return accessToken, refreshToken, user, nil
+}
+
+// Setup is the first-run bootstrap path: on an instance with no users,
+// it creates the first user — always an admin, via the shared
+// user-creation service's guarded path (FirstUserCreator) — and issues
+// the fresh login (access JWT + refresh session) the caller adopts on
+// the spot, exactly as at login. Session minting rides the same
+// GenerateToken + mintSession primitives ChangePassword uses.
+//
+// Failure mapping: the creation path's validation failures (missing
+// fields, password too short) pass through unchanged, and a losing
+// concurrent setup — the winner's transaction committed first — yields
+// ErrSetupCompleted (409); in every failure case nothing was written.
+// Storage and token-signing failures propagate as-is (the handler maps
+// them to a generic 500).
+func (s *AuthService) Setup(username, password string) (accessToken, refreshToken string, user *models.User, err error) {
+	user, err = s.firstUsers.CreateFirstAdmin(username, password)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	accessToken, err = s.GenerateToken(user.ID)
+	if err != nil {
 		return "", "", nil, err
 	}
 

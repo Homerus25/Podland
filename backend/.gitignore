@@ -6,6 +6,7 @@ podland
 
 # Go workspace
 go.work
+go.work.sum
 
 # Dependency directories
 go.sum

@@ -28,7 +28,9 @@ export async function loginViaForm(
 	username = "alice",
 	password = "wonderland",
 ) {
-	await userEvent.type(screen.getByLabelText(/username/i), username);
+	// The form renders only after the boot resolution (restore + probe)
+	// completes, so waiting for it is part of driving it.
+	await userEvent.type(await screen.findByLabelText(/username/i), username);
 	await userEvent.type(screen.getByLabelText(/password/i), password);
 	await userEvent.click(screen.getByRole("button", { name: /log in/i }));
 }

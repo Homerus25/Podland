@@ -8,7 +8,7 @@ serves the embedded UI and API on :8080.
 ## Documentation map
 
 - `docs/architecture-decisions.md` — all system-level decisions, §-numbered
-  (§1 podman integration … §16 machine registration). Code comments cite
+  (§1 podman integration … §17 first-run bootstrap). Code comments cite
   these numbers; keep them stable.
 - `docs/backend-conventions.md` — read before touching `backend/`:
   endpoint envelopes, streaming kit, connection seam, testing expectations.
@@ -38,6 +38,7 @@ One line each; full detail in `docs/architecture-decisions.md`.
 14. **Rate limiting** — fixed window; per-user 60/min, auth endpoints per-IP 10/min
 15. **File handling** — no uploads; images pulled from registries only
 16. **Machine registration** — dedicated endpoint, synchronous connection test
+17. **First-run bootstrap** — setup landing page creates the first admin (one-time endpoint); no baked-in credentials; container DB in the mounted `/app/data` volume
 
 ## Glossary
 

@@ -154,7 +154,7 @@ func TestAuth_Status_DefaultUserSeesUserRole(t *testing.T) {
 }
 
 // TestAuth_Status_AdminSeesAdminRole asserts that a user seeded with the
-// admin role — the same role cmd/initdb grants its bootstrap user — sees
+// admin role — the same role the first-run setup endpoint grants — sees
 // "admin" in the status response after a real login (090-00).
 func TestAuth_Status_AdminSeesAdminRole(t *testing.T) {
 	suite.SkipIfUnavailable(t)

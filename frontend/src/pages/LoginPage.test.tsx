@@ -97,7 +97,9 @@ describe("LoginPage", () => {
 	it("shows inline validation errors and never submits when fields are empty", async () => {
 		renderApp("/login");
 
-		await userEvent.click(screen.getByRole("button", { name: /log in/i }));
+		await userEvent.click(
+			await screen.findByRole("button", { name: /log in/i }),
+		);
 
 		expect(await screen.findByText("Username is required")).toBeInTheDocument();
 		expect(screen.getByText("Password is required")).toBeInTheDocument();

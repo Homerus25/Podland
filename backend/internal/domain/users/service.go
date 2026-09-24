@@ -1,11 +1,13 @@
 // Package users owns user management: creating users (hash + exists
 // check + insert) behind one service path shared by the admin-only
-// POST /api/users endpoint, the cmd/initdb bootstrap tool, and the
-// integration-test seeding seam, listing users with a role-dependent
-// response shape behind GET /api/users, setting a user's role behind
-// the admin-only PUT /api/users/{id}/role (with the self-lockout
-// guard), and resetting a user's password behind the admin-only
-// PUT /api/users/{id}/password (with revoke-all-sessions).
+// POST /api/users endpoint and the integration-test seeding seam,
+// creating the first admin (same
+// validation and hashing, plus the atomic first-user guard) behind the
+// unauthenticated first-run setup endpoint, listing users with a
+// role-dependent response shape behind GET /api/users, setting a user's
+// role behind the admin-only PUT /api/users/{id}/role (with the
+// self-lockout guard), and resetting a user's password behind the
+// admin-only PUT /api/users/{id}/password (with revoke-all-sessions).
 package users
 
 import (
@@ -38,6 +40,31 @@ func (s *UserService) CreateUser(username, password string) (*models.User, error
 	return s.CreateUserWithRole(username, password, models.RoleUser)
 }
 
+// requirePresent enforces the two fields every creation path requires:
+// username and password must be non-empty. Missing/empty fields are
+// ErrMissingRequiredFields, the same code the endpoint validator uses.
+func requirePresent(username, password string) error {
+	if username == "" || password == "" {
+		return apperrors.ErrMissingRequiredFields
+	}
+	return nil
+}
+
+// hashPassword enforces the length policy (ErrPasswordTooShort below
+// models.MinPasswordLength) and bcrypt-hashes the password. The
+// plaintext never leaves the caller; only the hash is returned.
+func hashPassword(password string) (string, error) {
+	if utf8.RuneCountInString(password) < models.MinPasswordLength {
+		return "", apperrors.ErrPasswordTooShort
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
 // CreateUserWithRole creates a user with the given role, bcrypt-hashing
 // the password before it is persisted. The plaintext password never
 // reaches the repository.
@@ -46,12 +73,12 @@ func (s *UserService) CreateUser(username, password string) (*models.User, error
 // must be non-empty (ErrMissingRequiredFields); the password must meet
 // the length policy (ErrPasswordTooShort); the role must be empty —
 // meaning the regular "user" default — or one of the known roles
-// (ErrInvalidRole). Bootstrap callers (cmd/initdb, the integration
-// seeding seam) cross the same path, so endpoint, tool, and harness
-// cannot drift.
+// (ErrInvalidRole). All creation callers (the endpoint, the first-run
+// setup endpoint, the integration seeding seam) cross the same path, so
+// they cannot drift.
 func (s *UserService) CreateUserWithRole(username, password, role string) (*models.User, error) {
-	if username == "" || password == "" {
-		return nil, apperrors.ErrMissingRequiredFields
+	if err := requirePresent(username, password); err != nil {
+		return nil, err
 	}
 
 	if role == "" {
@@ -60,8 +87,9 @@ func (s *UserService) CreateUserWithRole(username, password, role string) (*mode
 		return nil, apperrors.ErrInvalidRole
 	}
 
-	if utf8.RuneCountInString(password) < models.MinPasswordLength {
-		return nil, apperrors.ErrPasswordTooShort
+	hash, err := hashPassword(password)
+	if err != nil {
+		return nil, err
 	}
 
 	exists, err := s.userRepo.UsernameExists(username)
@@ -70,11 +98,6 @@ func (s *UserService) CreateUserWithRole(username, password, role string) (*mode
 	}
 	if exists {
 		return nil, apperrors.ErrUsernameTaken
-	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
 	}
 
 	user := &models.User{
@@ -95,6 +118,50 @@ func (s *UserService) CreateUserWithRole(username, password, role string) (*mode
 			return nil, apperrors.ErrUsernameTaken
 		}
 		return nil, err
+	}
+
+	return user, nil
+}
+
+// CreateFirstAdmin creates the first user of a fresh instance, always
+// with the admin role — the first-run setup path. It rides the same
+// validation (requirePresent) and hashing (hashPassword) as
+// CreateUserWithRole; only the exists-check differs, replaced by the
+// atomic first-user guard: the emptiness check and the insert share one
+// write transaction in the repository (models.UserRepository.
+// CreateFirstUser), so exactly one of two concurrent setup requests can
+// win. The loser learns ErrSetupCompleted (409); a winner is returned
+// for the caller to mint a session for. Validation failures reuse the
+// creation path's codes — VALIDATION_FAILED for missing fields,
+// PASSWORD_TOO_SHORT for a short password — but USERNAME_TAKEN cannot
+// fire here, by design: with zero users no username can collide, so the
+// first-user guard subsumes the exists-check the creation path runs.
+// Nothing is written when validation fails or the guard reports the
+// instance already configured.
+func (s *UserService) CreateFirstAdmin(username, password string) (*models.User, error) {
+	if err := requirePresent(username, password); err != nil {
+		return nil, err
+	}
+
+	hash, err := hashPassword(password)
+	if err != nil {
+		return nil, err
+	}
+
+	user := &models.User{
+		ID:           uuid.New().String(),
+		Username:     username,
+		PasswordHash: hash,
+		Role:         models.RoleAdmin,
+		CreatedAt:    time.Now().UTC(),
+	}
+
+	created, err := s.userRepo.CreateFirstUser(user)
+	if err != nil {
+		return nil, err
+	}
+	if !created {
+		return nil, apperrors.ErrSetupCompleted
 	}
 
 	return user, nil

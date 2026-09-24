@@ -19,6 +19,12 @@ type UserRepositoryInterface interface {
 	Update(user *User) error
 	Delete(id string) error
 	UsernameExists(username string) (bool, error)
+	Count() (int, error)
+	// CreateFirstUser inserts user only when the users table is empty —
+	// the atomic first-run setup guard. It reports whether the insert
+	// happened; false (with a nil error) means the instance already has
+	// a user and nothing was written.
+	CreateFirstUser(user *User) (bool, error)
 }
 
 // NewUserRepository creates a new UserRepository
@@ -166,4 +172,65 @@ func (r *UserRepository) UsernameExists(username string) (bool, error) {
 	}
 
 	return count > 0, nil
+}
+
+// countUsers runs the users-table count through the given queryer
+// (*sql.DB or an in-flight *sql.Tx), so Count() and CreateFirstUser's
+// in-transaction guard share one query instead of drifting.
+func countUsers(q interface{ QueryRow(query string, args ...any) *sql.Row }) (int, error) {
+	var count int
+	if err := q.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("failed to count users: %w", err)
+	}
+
+	return count, nil
+}
+
+// Count returns the number of users. The first-run setup probe derives
+// "needs setup" from it: the users table being empty is the whole
+// condition, evaluated per request.
+func (r *UserRepository) Count() (int, error) {
+	return countUsers(r.db)
+}
+
+// CreateFirstUser inserts user only when the users table is empty,
+// atomically: the emptiness check and the insert share one transaction,
+// and transactions on this database open with BEGIN IMMEDIATE (see
+// NewDatabase), so the check-then-write rides SQLite's single-writer
+// serialization — a concurrent caller blocks until the first commits,
+// then sees a non-empty table. It reports whether the insert happened;
+// false (with a nil error) means the instance already has a user and
+// nothing was written. The role is validated like Create.
+func (r *UserRepository) CreateFirstUser(user *User) (bool, error) {
+	role, err := normalizeRole(user.Role)
+	if err != nil {
+		return false, fmt.Errorf("failed to create first user: %w", err)
+	}
+	user.Role = role
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return false, fmt.Errorf("failed to begin first-user creation: %w", err)
+	}
+	defer tx.Rollback()
+
+	count, err := countUsers(tx)
+	if err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return false, nil
+	}
+
+	_, err = tx.Exec(`INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)`,
+		user.ID, user.Username, user.PasswordHash, user.Role, user.CreatedAt)
+	if err != nil {
+		return false, fmt.Errorf("failed to create first user: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("failed to commit first-user creation: %w", err)
+	}
+
+	return true, nil
 }

@@ -7,12 +7,14 @@ import { LoginPage } from "@/pages/LoginPage";
 import { LogsPage } from "@/pages/LogsPage";
 import { MachineDetailPage } from "@/pages/MachineDetailPage";
 import { MachinesPage } from "@/pages/MachinesPage";
+import { SetupPage } from "@/pages/SetupPage";
 import { UsersPage } from "@/pages/UsersPage";
 
 export function App() {
 	return (
 		<Routes>
 			<Route path="/login" element={<LoginPage />} />
+			<Route path="/setup" element={<SetupPage />} />
 			<Route
 				path="/"
 				element={

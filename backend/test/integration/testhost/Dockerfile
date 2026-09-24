@@ -64,12 +64,6 @@ RUN useradd --create-home --uid 1000 --user-group core \
 # `podman run` dies at userns setup with EPERM.
 RUN chmod 4755 /usr/bin/newuidmap /usr/bin/newgidmap
 
-# Rootless podman config for core: force fuse-overlayfs. Events and
-# container logs go to files — there is no journald to receive them
-# here, and `podman logs --follow` refuses the journald log driver over
-# a non-journald events backend.
-
-# --------- custom stuff
 # Linger: core's user systemd manager must exist from boot without a
 # login session. No systemd runs during build, so create the marker
 # directly instead of invoking a live `loginctl enable-linger`.
@@ -82,17 +76,15 @@ RUN mkdir -p /etc/systemd/user/sockets.target.wants \
     && ln -s /usr/lib/systemd/user/podman.socket \
         /etc/systemd/user/sockets.target.wants/podman.socket
 
-USER core
+# Deliberately no USER directive: the container stays root because the
+# entrypoint's boot steps need it — ssh-keygen -A into /etc/ssh,
+# /run/sshd, sshd binding :22, runuser — and drops to core only for the
+# `podman system service` it backgrounds (see entrypoint.sh).
 
-# Rootless podman config for core: force fuse-overlayfs. Events go to
-# journald — the same backend a podman machine's Fedora defaults pick —
-# because `podman logs --follow` refuses to run with the journald
-# log-driver over a non-journald events backend, and journald works
-# here (systemd is PID 1; rootless container-root maps to core's uid,
-# so the entries are readable without extra group membership).
-
-# --------
-
+# Rootless podman config for core: force fuse-overlayfs. Events and
+# container logs go to files — there is no journald to receive them
+# here, and `podman logs --follow` refuses the journald log driver over
+# a non-journald events backend.
 RUN mkdir -p /home/core/.config/containers \
     && printf '[storage]\ndriver = "overlay"\nmount_program = "/usr/bin/fuse-overlayfs"\n\n[engine]\nevents_logger = "file"\n\n[containers]\nlog_driver = "json-file"\n' \
         > /home/core/.config/containers/containers.conf \

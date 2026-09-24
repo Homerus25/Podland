@@ -19,12 +19,22 @@ interface AuthContextType {
 	user: User | null;
 	isAuthenticated: boolean;
 	isResolving: boolean;
+	// First-run steering: true only when the boot landed logged-out and
+	// the anonymous status probe reported a user-less instance. Routing
+	// reads it — login redirects to setup while it stands, setup
+	// redirects into the app when it does not.
+	needsSetup: boolean;
 	login: (credentials: LoginCredentials) => Promise<void>;
 	// Installs an already-issued session payload (the response of an
 	// endpoint that re-issues the login, e.g. self-service password
 	// change): fresh access token in, user replaced. No request, no cache
 	// clear — the session continues, only its credentials rotate.
 	adoptSession: (payload: LoginResponse) => void;
+	// Records the server's word that the instance is configured — the
+	// setup endpoint's SETUP_COMPLETED answer to a parked form — so the
+	// boot probe's stale flag cannot bounce the redirected visitor back
+	// to the dead setup page.
+	markConfigured: () => void;
 	logout: () => Promise<void>;
 }
 
@@ -55,13 +65,29 @@ export function AuthProvider({
 }) {
 	const [user, setUser] = useState<User | null>(null);
 	const [isResolving, setIsResolving] = useState(true);
+	const [needsSetup, setNeedsSetup] = useState(false);
 	const queryClient = useQueryClient();
 
 	useEffect(() => {
 		let cancelled = false;
-		resolveInitialState().then((resolvedUser) => {
+		resolveInitialState().then(async (resolvedUser) => {
 			if (cancelled) return;
 			setUser(resolvedUser);
+			// The boot probe is the logged-out branch only: a restored
+			// session proves a configured instance, so exactly one
+			// anonymous status call resolves the flag for everyone else.
+			// Its failure is an unreachable instance — normal login — not
+			// an error state. isResolving covers the probe too, so routing
+			// reads it only after it has an answer.
+			if (resolvedUser === null) {
+				try {
+					const status = await authApi.status();
+					if (cancelled) return;
+					setNeedsSetup(status.needsSetup);
+				} catch {
+					if (cancelled) return;
+				}
+			}
 			setIsResolving(false);
 		});
 		return () => {
@@ -71,10 +97,20 @@ export function AuthProvider({
 
 	// The one owner of "install a fresh session": every entry into the
 	// signed-in state (login, adoptSession) rides it, so the token and user
-	// state move together in exactly one vocabulary.
+	// state move together in exactly one vocabulary. A session also settles
+	// the setup question — an instance someone is signed into is configured.
 	const adoptSession = useCallback((payload: LoginResponse) => {
 		setBearerToken(payload.token);
 		setUser({ username: payload.username, role: payload.role });
+		setNeedsSetup(false);
+	}, []);
+
+	// The 409 a parked setup form receives is authoritative: the flag the
+	// boot probe resolved no longer holds, and without this correction the
+	// login page the form redirects to would bounce the visitor straight
+	// back to the dead setup page.
+	const markConfigured = useCallback(() => {
+		setNeedsSetup(false);
 	}, []);
 
 	const login = useCallback(
@@ -119,11 +155,21 @@ export function AuthProvider({
 			user,
 			isAuthenticated: user !== null,
 			isResolving,
+			needsSetup,
 			login,
 			adoptSession,
+			markConfigured,
 			logout,
 		}),
-		[user, isResolving, login, adoptSession, logout],
+		[
+			user,
+			isResolving,
+			needsSetup,
+			login,
+			adoptSession,
+			markConfigured,
+			logout,
+		],
 	);
 
 	return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

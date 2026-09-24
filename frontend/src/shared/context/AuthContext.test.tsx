@@ -11,7 +11,7 @@ import { act, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { machineFixture } from "@/test/factories";
+import { authStatusFixture, machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -112,6 +112,93 @@ describe("adoptSession", () => {
 		expect(getBearerToken()).toBe("re-issued-access-token");
 		expect(queryClient.getQueryCache().getAll()).toHaveLength(1);
 		expect(refreshCalled).toBe(false);
+	});
+});
+
+describe("boot probe", () => {
+	function statusProbe(needsSetup: boolean, calls: string[] = []) {
+		return http.get("*/api/auth/status", ({ request }) => {
+			calls.push(request.headers.get("authorization") ?? "no-header");
+			return HttpResponse.json(authStatusFixture({ needsSetup }));
+		});
+	}
+
+	it("asks the status endpoint once when the restore lands logged-out and reports the flag", async () => {
+		const statusCalls: string[] = [];
+		server.use(statusProbe(true, statusCalls));
+		const { result } = renderAuth();
+
+		await waitFor(() => expect(result.current.isResolving).toBe(false));
+
+		expect(result.current.needsSetup).toBe(true);
+		expect(statusCalls).toEqual(["no-header"]);
+	});
+
+	it("reads a configured instance as not needing setup", async () => {
+		const statusCalls: string[] = [];
+		server.use(statusProbe(false, statusCalls));
+		const { result } = renderAuth();
+
+		await waitFor(() => expect(result.current.isResolving).toBe(false));
+
+		expect(result.current.needsSetup).toBe(false);
+		expect(statusCalls).toHaveLength(1);
+	});
+
+	it("skips the probe when the restore resolves a session", async () => {
+		const statusCalls: string[] = [];
+		server.use(statusProbe(true, statusCalls));
+		const { result } = renderAuth({
+			resolveInitialState: async () => ({ username: "alice", role: "user" }),
+		});
+
+		await waitFor(() => expect(result.current.isResolving).toBe(false));
+
+		expect(result.current.needsSetup).toBe(false);
+		expect(statusCalls).toHaveLength(0);
+	});
+
+	it("treats a failed probe as a configured instance, not an error", async () => {
+		server.use(
+			http.get("*/api/auth/status", () =>
+				errorResponse(500, "INTERNAL_ERROR", "database unreachable"),
+			),
+		);
+		const { result } = renderAuth();
+
+		await waitFor(() => expect(result.current.isResolving).toBe(false));
+
+		expect(result.current.needsSetup).toBe(false);
+		expect(result.current.isAuthenticated).toBe(false);
+	});
+
+	it("clears the flag when a session is adopted", async () => {
+		server.use(statusProbe(true));
+		const { result } = renderAuth();
+		await waitFor(() => expect(result.current.needsSetup).toBe(true));
+
+		await act(async () => {
+			result.current.adoptSession({
+				token: "setup-access-token",
+				username: "admin",
+				role: "admin",
+			});
+		});
+
+		expect(result.current.needsSetup).toBe(false);
+		expect(result.current.isAuthenticated).toBe(true);
+	});
+
+	it("clears the flag when the parked form's 409 reports setup completed", async () => {
+		server.use(statusProbe(true));
+		const { result } = renderAuth();
+		await waitFor(() => expect(result.current.needsSetup).toBe(true));
+
+		act(() => {
+			result.current.markConfigured();
+		});
+
+		expect(result.current.needsSetup).toBe(false);
 	});
 });
 

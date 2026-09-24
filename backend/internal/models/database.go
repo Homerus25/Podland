@@ -9,7 +9,15 @@ import (
 
 // NewDatabase creates a new database connection
 func NewDatabase(path string) (*sql.DB, error) {
-	db, err := sql.Open("sqlite3", path)
+	// _txlock=immediate makes every transaction on this database open
+	// with BEGIN IMMEDIATE, so a transaction takes SQLite's single
+	// writer lock at BEGIN instead of at its first write. Check-then-
+	// write transactions (session Rotate, the first-user creation guard)
+	// are then serialized: the loser waits on busy_timeout and re-reads
+	// committed state, instead of racing a stale snapshot into a
+	// SQLITE_BUSY error the caller cannot distinguish from a storage
+	// failure.
+	db, err := sql.Open("sqlite3", path+"?_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}

@@ -6,7 +6,7 @@ import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 import { loginViaForm, renderApp } from "@/test/auth";
 import { errorResponse } from "@/test/errors";
-import { machineFixture } from "@/test/factories";
+import { authStatusFixture, machineFixture } from "@/test/factories";
 import { server } from "@/test/server";
 
 function deferred<T>() {
@@ -15,6 +15,24 @@ function deferred<T>() {
 		resolve = res;
 	});
 	return { promise, resolve };
+}
+
+// A fresh instance: the probe answers needs-setup, so every logged-out
+// route steers to /setup.
+function freshInstanceHandler() {
+	return http.get("*/api/auth/status", () =>
+		HttpResponse.json(authStatusFixture({ needsSetup: true })),
+	);
+}
+
+// Drives the setup form the way the first visitor would.
+async function fillSetupForm(
+	username = "admin",
+	password = "first-admin-password",
+) {
+	await userEvent.type(await screen.findByLabelText("Username"), username);
+	await userEvent.type(screen.getByLabelText("Password"), password);
+	await userEvent.type(screen.getByLabelText("Confirm password"), password);
 }
 
 afterEach(() => {
@@ -202,6 +220,134 @@ describe("app routing guard", () => {
 			).toBeInTheDocument();
 			expect(screen.getByTestId("location")).toHaveTextContent("/machines");
 			expect(screen.getByTestId("auth-user")).toHaveTextContent("alice");
+		});
+	});
+
+	describe("first-run setup", () => {
+		it("lands the root route on setup when the instance is fresh", async () => {
+			server.use(freshInstanceHandler());
+			renderApp("/");
+
+			expect(
+				await screen.findByText(
+					"Create the first admin account for this instance.",
+				),
+			).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/setup");
+		});
+
+		it("lands a logged-out deep link on setup when the instance is fresh", async () => {
+			server.use(freshInstanceHandler());
+			renderApp("/machines?tab=running");
+
+			expect(
+				await screen.findByText(
+					"Create the first admin account for this instance.",
+				),
+			).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/setup");
+			expect(screen.getByTestId("auth-user")).toHaveTextContent("anonymous");
+			expect(
+				screen.queryByRole("heading", { name: "Machines" }),
+			).not.toBeInTheDocument();
+		});
+
+		it("redirects the login page to setup while setup is needed", async () => {
+			server.use(freshInstanceHandler());
+			renderApp("/login");
+
+			expect(
+				await screen.findByLabelText("Confirm password"),
+			).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/setup");
+		});
+
+		it("creates the first admin, adopts the returned session, and opens the dashboard without a second login", async () => {
+			let setupBody: unknown;
+			let loginCalls = 0;
+			server.use(
+				freshInstanceHandler(),
+				http.post("*/api/setup/user", async ({ request }) => {
+					setupBody = await request.json();
+					return HttpResponse.json({
+						token: "setup-access-token",
+						username: "admin",
+						role: "admin",
+					});
+				}),
+				http.post("*/api/auth/login", () => {
+					loginCalls++;
+					return HttpResponse.json({ token: "x", username: "x", role: "user" });
+				}),
+			);
+			renderApp("/setup");
+
+			await fillSetupForm();
+			await userEvent.click(
+				screen.getByRole("button", { name: /create admin account/i }),
+			);
+
+			expect(
+				await screen.findByRole("heading", { name: "Dashboard" }),
+			).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/");
+			expect(screen.getByTestId("auth-user")).toHaveTextContent("admin");
+			expect(setupBody).toEqual({
+				username: "admin",
+				password: "first-admin-password",
+			});
+			expect(loginCalls).toBe(0);
+		});
+
+		it("redirects the setup page of a configured instance into the app", async () => {
+			renderApp("/setup");
+
+			expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/login");
+			expect(
+				screen.queryByRole("button", { name: /create admin account/i }),
+			).not.toBeInTheDocument();
+		});
+
+		it("never shows the setup page to an authenticated user", async () => {
+			renderApp("/setup", {
+				resolveInitialState: async () => ({
+					username: "alice",
+					role: "admin",
+				}),
+			});
+
+			expect(
+				await screen.findByRole("heading", { name: "Dashboard" }),
+			).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/");
+			expect(
+				screen.queryByRole("button", { name: /create admin account/i }),
+			).not.toBeInTheDocument();
+		});
+
+		it("sends a parked setup page to login when setup was completed elsewhere", async () => {
+			server.use(
+				freshInstanceHandler(),
+				http.post("*/api/setup/user", () =>
+					errorResponse(409, "SETUP_COMPLETED", "Setup already completed"),
+				),
+			);
+			renderApp("/setup");
+
+			await fillSetupForm();
+			await userEvent.click(
+				screen.getByRole("button", { name: /create admin account/i }),
+			);
+
+			// The login form itself must render: the stale needs-setup flag
+			// is corrected, so the visitor is not bounced back to the dead
+			// setup page.
+			expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
+			expect(screen.getByTestId("location")).toHaveTextContent("/login");
+			expect(
+				screen.queryByRole("button", { name: /create admin account/i }),
+			).not.toBeInTheDocument();
 		});
 	});
 });

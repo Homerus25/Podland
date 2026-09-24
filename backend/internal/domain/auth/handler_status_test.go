@@ -17,8 +17,9 @@ import (
 // TestAuthHandler_Status_AnonymousGetsUnauthenticated pins the
 // anonymous branch through the real handler: no user ID in the request
 // context is a legal state (the route is served without a token too),
-// and the endpoint answers {authenticated: false} with 200 — the
-// frontend's first-load probe.
+// and the endpoint answers {authenticated: false, needsSetup: true}
+// with 200 — the frontend's first-load probe against a fresh instance
+// (the mock repository holds no users).
 func TestAuthHandler_Status_AnonymousGetsUnauthenticated(t *testing.T) {
 	service, err := NewTestAuthService()
 	require.NoError(t, err, "Should create auth service without error")
@@ -40,6 +41,7 @@ func TestAuthHandler_Status_AnonymousGetsUnauthenticated(t *testing.T) {
 	require.NoError(t, err, "Should decode status response")
 
 	assert.False(t, statusResp.Authenticated, "A caller with no user ID must report unauthenticated")
+	assert.True(t, statusResp.NeedsSetup, "A user-less instance must report setup as needed to an anonymous caller")
 	assert.Empty(t, statusResp.UserID, "An anonymous status response carries no user ID")
 	assert.Empty(t, statusResp.Role, "An anonymous status response carries no role")
 }
@@ -78,6 +80,7 @@ func TestAuthHandler_Status_IncludesUserRole(t *testing.T) {
 	require.NoError(t, err, "Should decode status response")
 
 	assert.True(t, statusResp.Authenticated, "Should report authenticated")
+	assert.False(t, statusResp.NeedsSetup, "An authenticated caller never sees the setup flag")
 	assert.Equal(t, "user-status-1", statusResp.UserID, "Should report the caller's user ID")
 	assert.Equal(t, models.RoleAdmin, statusResp.Role, "Should report the stored role for an admin user")
 }

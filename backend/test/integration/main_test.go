@@ -57,7 +57,7 @@ var logf = log.Printf
 //  4. Bring the backend up in-process: app.New(testCfg) wrapped in
 //     httptest.NewServer. Temp SQLite file, temp JWT PEMs, random
 //     ENCRYPTION_KEY — fully isolated from the dev DB.
-//  5. Seed one user (bcrypt, mirroring cmd/initdb) and exercise the real
+//  5. Seed one user via the seeding seam (bcrypt) and exercise the real
 //     POST /api/auth/login; capture the token from the JSON body.
 //  6. Register the test host once via POST /api/machines — the same
 //     public path any machine takes; the backend never learns the

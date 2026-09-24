@@ -1,6 +1,6 @@
 // Role of a Podland account (backend/internal/domain/users/dto.go): the
 // auth responses carry it so the UI can gate admin surfaces. "admin" is
-// granted to the bootstrap user created by cmd/initdb.
+// granted to the first admin created through first-run setup.
 export type UserRole = "user" | "admin";
 
 // The password policy's floor (backend/internal/models MinPasswordLength,

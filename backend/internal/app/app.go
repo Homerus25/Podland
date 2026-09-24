@@ -51,8 +51,8 @@ type App struct {
 	sshExecService    *sshexec.Service
 
 	// userSvc is the single user-creation path (hash + exists-check +
-	// insert). The POST /api/users endpoint, cmd/initdb, and the
-	// SeedUserWithRole test seam all go through it.
+	// insert). The POST /api/users endpoint, the first-run setup
+	// endpoint, and the SeedUserWithRole test seam all go through it.
 	userSvc *users.UserService
 
 	router http.Handler
@@ -95,25 +95,29 @@ func New(cfg *config.Config) (*App, error) {
 
 	// Initialize JWT (load or generate keys)
 	sessionRepo := models.NewSessionRepository(db)
+
+	// User management and the first-run setup endpoint share one
+	// creation path; the session repo backs the admin password reset's
+	// session revocation. The service is also the auth service's
+	// FirstUserCreator: the first-run setup endpoint rides the same
+	// creation path (hash + validation + the atomic first-user guard).
+	userRepo := models.NewUserRepository(db)
+	userService := users.NewUserService(userRepo, sessionRepo)
+
 	authService, err := auth.NewAuthService(auth.JWTConfig{
 		PrivateKeyPath: cfg.JWT.PrivateKeyPath,
 		PublicKeyPath:  cfg.JWT.PublicKeyPath,
 		Expiration:     time.Duration(cfg.JWT.ExpirationMinutes) * time.Minute,
 		Issuer:         cfg.JWT.Issuer,
-	}, models.NewUserRepository(db), sessionRepo, time.Duration(cfg.Session.TTLDays)*24*time.Hour)
+	}, userRepo, sessionRepo, time.Duration(cfg.Session.TTLDays)*24*time.Hour, userService)
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("app: failed to initialize auth: %w", err)
 	}
 
 	// Initialize repositories
-	userRepo := models.NewUserRepository(db)
 	machineRepo := models.NewMachineRepository(db)
 	accessRepo := models.NewMachineAccessRepository(db)
-
-	// User management shares one creation path with cmd/initdb; the
-	// session repo backs the admin password reset's session revocation
-	userService := users.NewUserService(userRepo, sessionRepo)
 
 	// Initialize connection manager
 	connectionManager := connections.NewConnectionManager(
@@ -184,9 +188,10 @@ func New(cfg *config.Config) (*App, error) {
 	router.Route("/api", func(r chi.Router) {
 		// Auth
 		//
-		// Login and refresh are the unauthenticated entry points of the
-		// auth surface, so they share an IP-keyed rate-limit group —
-		// brute-force protection that needs no user to key on. Logout
+		// Login, refresh, the anonymous status probe, and first-run setup
+		// are the unauthenticated entry points of the auth surface, so
+		// they share an IP-keyed rate-limit group — brute-force and
+		// enumeration protection that needs no user to key on. Logout
 		// stays outside the group: it is idempotent and revokes only the
 		// cookie it is handed, so there is nothing to brute-force.
 		r.Group(func(r chi.Router) {
@@ -197,11 +202,20 @@ func New(cfg *config.Config) (*App, error) {
 			// a JWT-gated route would be a contradiction (the whole point is
 			// minting a new JWT). Rotation lives inside AuthService.Refresh.
 			r.Post("/auth/refresh", authHandler.Refresh)
+			// Status serves anonymous callers too (authenticated: false,
+			// plus whether a fresh instance still needs setup), so it
+			// validates the token only when one is presented — and rides
+			// the same per-IP group: the needs-setup flag is exactly what
+			// a fresh-instance enumerator wants.
+			r.With(appmiddleware.OptionalJWTMiddleware(authService)).Get("/auth/status", authHandler.Status)
+			// First-run setup is the bootstrap entry point (issue 179):
+			// on a user-less instance it creates the first admin and signs
+			// the caller in (login payload + refresh cookie). The atomic
+			// zero-user guard lives in the creation service; a configured
+			// instance answers 409 SETUP_COMPLETED with no side effects.
+			r.Post("/setup/user", authHandler.Setup)
 		})
 		r.Post("/auth/logout", authHandler.Logout)
-		// Status serves anonymous callers too (authenticated: false),
-		// so it validates the token only when one is presented.
-		r.With(appmiddleware.OptionalJWTMiddleware(authService)).Get("/auth/status", authHandler.Status)
 		// Password change is strictly authenticated (the JWT middleware
 		// is the guarantor; authority comes from the current password in
 		// the body) and lives under /api/auth so the fresh refresh cookie
@@ -389,11 +403,10 @@ func (a *App) Close() error {
 }
 
 // SeedUser inserts a user with the given username and plaintext password
-// (bcrypt-hashed with bcrypt.DefaultCost, matching cmd/initdb) into the
-// App's database, returning the new user's ID. It is intended for the
-// in-process integration harness (PRD 080-01), which needs a seeded user
-// before the first real POST /api/auth/login can fly; production gets
-// the same effect from cmd/initdb.
+// (bcrypt-hashed with bcrypt.DefaultCost) into the App's database,
+// returning the new user's ID. It is intended for the in-process
+// integration harness (PRD 080-01), which needs a seeded user before the
+// first real POST /api/auth/login can fly.
 //
 // Returning the ID lets the harness seed additional users and reference
 // them by ID downstream — e.g. the machines CRUD/access slice (080-04)
@@ -408,9 +421,8 @@ func (a *App) SeedUser(username, password string) (string, error) {
 }
 
 // SeedUserWithRole is SeedUser with an explicit role, so harness tests
-// can mint users of any role (e.g. an admin mirroring the cmd/initdb
-// bootstrap user) without a backdoor around login. It rides the same
-// user-creation service as the endpoint and the bootstrap tool, so
+// can mint users of any role (e.g. an admin) without a backdoor around
+// login. It rides the same user-creation service as the endpoints, so
 // hashing and duplicate detection cannot drift between them.
 func (a *App) SeedUserWithRole(username, password, role string) (string, error) {
 	if a.db == nil {

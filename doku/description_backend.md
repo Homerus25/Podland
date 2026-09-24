@@ -348,7 +348,8 @@ func GetUserIDFromContext(ctx context.Context) (string, error)
 |--------|----------|-------------|---------------|
 | POST | `/api/auth/login` | Authenticate user, return JWT in JSON response body | No |
 | POST | `/api/auth/logout` | Client-side token removal | No |
-| GET | `/api/auth/status` | Check if user is authenticated, return user info | No |
+| GET | `/api/auth/status` | Check if user is authenticated, return user info. For an anonymous caller it also reports `needsSetup` (`true` while the users table is empty) | No |
+| POST | `/api/setup/user` | First-run setup: create the instance's first admin and sign the caller in; 409 `SETUP_COMPLETED` once a user exists | No |
 
 ### Machines
 

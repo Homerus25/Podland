@@ -117,6 +117,26 @@ candidate number. API contracts live in `doku/`.
 - Connection details stored encrypted in SQLite database
 - **Owner-based access**: Machine accessible by owner and shared users
 
+### 17. First-Run Bootstrap
+- **Setup flow creates the first admin** — the only bootstrap path. A fresh
+  instance (users table empty) serves a setup landing page; the first admin
+  is created through `POST /api/setup/user` (or the UI form riding it), and
+  the creator is signed in on the spot. Afterwards the endpoint answers 409
+  forever
+- **No baked-in credentials**: the container image ships no database file and
+  creates no default admin at build time; a fresh image has no default
+  credentials of any kind
+- **Database lives in `/app/data` inside the container** (`DATABASE_PATH`
+  env in the Containerfile); that directory is the volume to mount
+  (`-v podland-data:/app/data`) so a created admin survives container
+  recreation. Host/dev default stays `./podland.db`
+- **Self-lockout escape hatch**: the role self-lockout guard is worked
+  around by editing the SQLite database directly, not by a tool
+- **Admin-only user management rides the same creation path** (hash +
+  validation + exists-check), so setup and later user creation cannot
+  drift; the in-process test seeding seam (`App.SeedUserWithRole`) is a
+  test-only adapter over the same path
+
 ## Technical Stack
 
 ### Backend (Go)
@@ -159,7 +179,6 @@ Podland/
 ├── doku/                    # API contracts (description_*_api.md)
 ├── backend/
 │   ├── cmd/server/          # entrypoint
-│   ├── cmd/initdb/          # DB schema bootstrap
 │   └── internal/
 │       ├── app/             # router + wiring
 │       ├── config/          # env-var configuration

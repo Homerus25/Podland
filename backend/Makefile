@@ -1,6 +1,6 @@
 # Makefile for Podland Backend
 
-.PHONY: all build run clean deps lint test test-integration testhost-build migrate generate-keys init-db ui ui-clean
+.PHONY: all build run clean deps lint test test-integration testhost-build migrate generate-keys ui ui-clean
 
 # Go parameters
 GOCMD=go
@@ -24,9 +24,6 @@ DATABASE_PATH=./podland.db
 # real UI from one process without the Caddy container. Needs node/npm.
 FRONTEND_DIR := ../frontend
 UI_DIST_DIR := internal/webui/dist
-
-# Default admin password for initialization
-ADMIN_PASSWORD=admin123
 
 all: build
 
@@ -139,9 +136,6 @@ migrate:
 	@cd migrations && go run .
 	@echo "Migrations complete"
 
-initDB:
-	cd cmd/initdb && go run .
-
 # Generate JWT keys
 keys:
 	chmod +x scripts/generate-keys.sh
@@ -158,12 +152,6 @@ init:
 	cp .env.example .env
 	./scripts/generate-keys.sh
 	@echo "Project initialized. Edit .env with your settings."
-
-# Initialize database with admin user
-init-db:
-	@echo "Initializing database with admin user..."
-	@cd cmd/initdb && go run . -username admin -password $(ADMIN_PASSWORD) -db $(DATABASE_PATH)
-	@echo "Database initialization complete"
 
 # Container commands — the one-container app image is defined by the
 # root Containerfile (backend=. , frontend=../frontend, fork via

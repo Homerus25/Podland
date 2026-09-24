@@ -15,8 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// adminLoginForUsers seeds an admin user — the same role cmd/initdb
-// grants its bootstrap user — and returns a bearer token obtained
+// adminLoginForUsers seeds an admin user — the same role the first-run
+// setup endpoint grants — and returns a bearer token obtained
 // through the real login endpoint (plus the username, for tests that
 // need to find the admin in a list), so user-management tests exercise
 // the full auth path.

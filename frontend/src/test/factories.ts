@@ -1,3 +1,4 @@
+import type { AuthStatusResponse } from "@features/auth/services/authApi";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import type { ImageSummary } from "@features/images/services/imagesApi";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
@@ -84,6 +85,16 @@ export function userFixture(overrides: Partial<UserSummary> = {}): UserSummary {
 	return {
 		id: "u-1",
 		username: "alice",
+		...overrides,
+	};
+}
+
+export function authStatusFixture(
+	overrides: Partial<AuthStatusResponse> = {},
+): AuthStatusResponse {
+	return {
+		authenticated: false,
+		needsSetup: false,
 		...overrides,
 	};
 }

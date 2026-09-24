@@ -120,6 +120,12 @@ var (
 	// can never lose its administration by accident. The bootstrap CLI
 	// remains the escape hatch for a genuinely intended self-demotion.
 	ErrSelfRoleChange = NewAppError("SELF_ROLE_CHANGE", "Cannot change your own role", http.StatusBadRequest)
+	// ErrSetupCompleted is the first-run setup endpoint's 409: the
+	// instance already has a user, so the one-time setup offer is gone.
+	// It answers both a losing concurrent setup request (the winner's
+	// transaction committed first) and any later call on a configured
+	// instance — in both cases nothing was written.
+	ErrSetupCompleted = NewAppError("SETUP_COMPLETED", "Setup has already been completed", http.StatusConflict)
 )
 
 // Rate Limiting

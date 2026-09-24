@@ -54,7 +54,10 @@ func NewTestAuthServiceWithUserRepo(userRepo models.UserRepositoryInterface) (*A
 // NewTestAuthServiceWithSessionRepo creates a test auth service with
 // explicit session dependencies, so session-focused tests can inject a
 // pre-seeded session repository, session-repository errors, or a
-// non-default TTL.
+// non-default TTL. The first-user creator is a loud stub: no auth-level
+// test exercises Setup (the first-run contract is pinned at the app
+// wiring seam over the real users service), and this helper cannot wire
+// that service without an import cycle.
 func NewTestAuthServiceWithSessionRepo(userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, sessionTTL time.Duration) (*AuthService, error) {
 	// Create temporary files for test keys
 	privateKeyPEM := testutils.GenerateValidPEMKey()
@@ -89,7 +92,16 @@ func NewTestAuthServiceWithSessionRepo(userRepo models.UserRepositoryInterface, 
 		Issuer:         "test-issuer",
 	}
 
-	return NewAuthService(config, userRepo, sessionRepo, sessionTTL)
+	return NewAuthService(config, userRepo, sessionRepo, sessionTTL, unimplementedFirstUsers{})
+}
+
+// unimplementedFirstUsers is the test helpers' stand-in FirstUserCreator.
+// Any accidental Setup call through a helper-built service fails loudly
+// instead of half-working.
+type unimplementedFirstUsers struct{}
+
+func (unimplementedFirstUsers) CreateFirstAdmin(username, password string) (*models.User, error) {
+	return nil, fmt.Errorf("auth test service: Setup needs a real FirstUserCreator; wire users.NewUserService as app.go does")
 }
 
 // Helper function to write string to file

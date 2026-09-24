@@ -114,7 +114,7 @@ Authorization: Bearer <admin token>
 
 **Fields:**
 - `role`: Required. The target user's new role; any other value than `"user"` or `"admin"` — an empty or omitted one included — is rejected (`VALIDATION_FAILED`).
-- **Self-lockout guard:** an admin cannot change their own role (`SELF_ROLE_CHANGE`) — one misclick must never strip the instance of its administration. The bootstrap CLI (`cmd/initdb`) remains the escape hatch for a genuinely intended self-demotion.
+- **Self-lockout guard:** an admin cannot change their own role (`SELF_ROLE_CHANGE`) — one misclick must never strip the instance of its administration. Editing the users table in the SQLite database directly remains the escape hatch for a genuinely intended self-demotion.
 - The caller's role is irrelevant to the target: any existing user may be promoted or demoted, admins included.
 
 **Response (Success - 200):** the updated user.

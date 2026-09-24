@@ -35,7 +35,6 @@ COPY --from=backend . .
 RUN sed -i 's|^replace go.podman.io/podman/v6 => .*|replace go.podman.io/podman/v6 => /srv/podman|' go.mod && rm -rf internal/webui/dist
 COPY --from=ui /ui/dist ./internal/webui/dist/
 RUN CGO_ENABLED=1 GOOS=linux go build -o /podland ./cmd/server
-RUN cd ./cmd/initdb && go run . -username admin -password admin123 -db /podland.db
 
 # --- Stage 3: runtime -------------------------------------------------------
 FROM alpine:latest
@@ -45,11 +44,16 @@ COPY --from=builder /podland ./podland
 COPY --from=builder /src/migrations ./migrations
 COPY --from=builder /src/.env.example .env.example
 COPY --from=builder /src/scripts/generate-keys.sh ./scripts/generate-keys.sh
-COPY --from=builder /podland.db ./podland.db 
 RUN mkdir -p /app/data /.ssh
+# The database lives in /app/data so a created admin (and every other
+# row) survives container recreation when that directory is mounted as
+# a volume: podman run -v podland-data:/app/data ...
+ENV DATABASE_PATH=/app/data/podland.db
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1
-# A fresh boot generates the JWT signing keys unless they are mounted in;
-# the SQLite database is created and migrated on first start.
+# A fresh image ships no database and no credentials: first boot creates
+# and migrates the SQLite database, generates the JWT signing keys unless
+# they are mounted in, and serves the setup landing page — the first
+# admin is created through the UI (POST /api/setup/user).
 ENTRYPOINT ["/bin/sh", "-c", "[ -f jwt-private.pem ] || ./scripts/generate-keys.sh; exec ./podland"]
