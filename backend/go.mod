@@ -126,7 +126,6 @@ require (
 	github.com/spf13/cobra v1.10.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stefanberger/go-pkcs11uri v0.0.0-20230803200340-78284954bff6 // indirect
-	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/sylabs/sif/v2 v2.24.1 // indirect
 	github.com/tchap/go-patricia/v2 v2.3.3 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
