@@ -107,14 +107,16 @@ func TestQuadletHandler_GetLogs_QueryErrorWithFollowRidesJSONEnvelope(t *testing
 }
 
 // TestQuadletHandler_GetLogs_StreamingHappyPath tests successful streaming
-// logs with follow=true through the real service: podman's timestamped log
-// lines are decoded into events, cross with their levels, and a clean end
-// fires exactly one INFO STREAM_ENDED terminal event.
+// logs with follow=true through the real service: follow=true crosses the
+// streaming envelope and dispatches to the service (the dispatch pin —
+// the kit owns the options build and pins it once), podman's log lines
+// are decoded into events, cross with their levels, and a clean end fires
+// exactly one INFO STREAM_ENDED terminal event.
 func TestQuadletHandler_GetLogs_StreamingHappyPath(t *testing.T) {
-	var gotOpts entities.ContainerLogsOptions
 	engine := &fakeQuadletEngine{}
 	handler := logsHandler(engine, func(containerName string, opts entities.ContainerLogsOptions) error {
-		gotOpts = opts
+		// Simulate podman's follow-mode delivery: each line arrives
+		// with a podman timestamp prefix.
 		_, _ = opts.StdoutWriter.Write([]byte("2024-01-01T00:00:00Z Starting application\n"))
 		_, _ = opts.StdoutWriter.Write([]byte("2024-01-01T00:00:01Z Application started successfully\n"))
 		return nil
@@ -124,7 +126,6 @@ func TestQuadletHandler_GetLogs_StreamingHappyPath(t *testing.T) {
 	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?follow=true&tail=0"))
 
 	require.Equal(t, http.StatusOK, w.Code, "Should return 200 on streaming success")
-	assert.True(t, gotOpts.Follow, "follow=true must reach the machine as a follow request")
 	output := w.Body.String()
 	assert.Contains(t, output, `"message":"Starting application"`, "Response should contain first log")
 	assert.Contains(t, output, `"message":"Application started successfully"`, "Response should contain second log")

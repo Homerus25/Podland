@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -133,6 +134,30 @@ func TestImageService_PullWithProgress_MapsFailureToPullFailed(t *testing.T) {
 
 	require.ErrorIs(t, err, appErrors.ErrImagePullFailed)
 	assert.Nil(t, got)
+}
+
+// TestImageService_PullWithProgress_ReturnsPromptlyOnCancel pins the
+// release regression: a blocking engine Pull call plus a cancelled
+// context must return the operation-cancelled sentinel promptly (the
+// shared promptness harness owns the ritual). The pull itself keeps
+// running on the machine (remote outcome unchanged); the service just
+// stops waiting on it.
+func TestImageService_PullWithProgress_ReturnsPromptlyOnCancel(t *testing.T) {
+	started, block := testutils.CancelStubs(t)
+	engine := &fakeImageEngine{
+		pullFn: func(string, entities.ImagePullOptions) (*entities.ImagePullReport, error) {
+			close(started)
+			<-block
+			return nil, nil
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
+
+	testutils.RequirePromptReturnOnCancel(t, "PullWithProgress", started,
+		func(ctx context.Context) error {
+			_, err := service.PullWithProgress(ctx, "user", "machine", "nginx:latest", entities.ImagePullOptions{}, nil)
+			return err
+		})
 }
 
 // TestImageService_PullWithProgress_ArmsTheProgressWriter pins the progress

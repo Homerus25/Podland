@@ -8,6 +8,7 @@ import (
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -16,8 +17,9 @@ import (
 
 // Service behaviour tests for the two logs modes: one-shot (the kit's
 // FetchLogs owns the buffered ritual, so only the domain-owned mapping
-// and validation are pinned here) and follow (GetLogsWithStream converts
-// each line to an event via the writers it hands the engine).
+// and validation are pinned here) and follow (the kit's FollowLogs owns
+// the follow ritual, so only validation, dispatch, and the promptness of
+// the cancellation release are pinned here).
 
 func TestContainerService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
 	engine := &fakeContainerEngine{
@@ -70,4 +72,26 @@ func TestContainerService_GetLogsWithStream_MapsMissingContainerTo404(t *testing
 		func(streaming.LogEvent) {})
 
 	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
+}
+
+// TestContainerService_GetLogsWithStream_ReturnsPromptlyOnCancel pins
+// the release regression: a blocking engine Logs call plus a cancelled
+// context must return the operation-cancelled sentinel promptly (the
+// shared promptness harness owns the ritual).
+func TestContainerService_GetLogsWithStream_ReturnsPromptlyOnCancel(t *testing.T) {
+	started, block := testutils.CancelStubs(t)
+	engine := &fakeContainerEngine{
+		logsFn: func(string, entities.ContainerLogsOptions) error {
+			close(started)
+			<-block
+			return nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	testutils.RequirePromptReturnOnCancel(t, "GetLogsWithStream", started,
+		func(ctx context.Context) error {
+			return service.GetLogsWithStream(ctx, "user", "machine", "container-123", time.Time{}, 0,
+				func(streaming.LogEvent) {})
+		})
 }

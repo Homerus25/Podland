@@ -3,6 +3,7 @@ package streaming
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -151,7 +152,9 @@ type FetchLogsOp struct {
 	// ErrQuadletNotFound) maps to it.
 	NotFound *appErrors.AppError
 	// Logs runs the domain's log fetch through the options FetchLogs
-	// builds. It must honour ctx cancellation.
+	// builds. Cancellation is the kit's job: Cancellable abandons the
+	// call when the context is cancelled, so the function needs no
+	// context of its own.
 	Logs func(name string, opts entities.ContainerLogsOptions) error
 }
 
@@ -160,12 +163,12 @@ type FetchLogsOp struct {
 // options itself (Follow=false, Timestamps=false, the Since/Tail window
 // passed through), installs the stdout/stderr writer pair, combines the
 // captured output (stdout first, stderr appended, exactly one trailing
-// newline trimmed), and maps the failure mirroring Run's terminal
-// mapping: a cancelled context answers ErrOperationCancelled (logs can be
-// very long, so a buffered fetch being fast was never a guarantee),
-// podman's not-found answer maps to the op's NotFound sentinel, and any
-// other cause carries one kit-owned "failed to get logs" wrap whose text
-// is log-only, never a wire payload.
+// newline trimmed), and runs the fetch through Cancellable: a cancelled
+// context answers ErrOperationCancelled without waiting for the fetch
+// (logs can be very long, so a buffered fetch being fast was never a
+// guarantee), podman's not-found answer maps to the op's NotFound
+// sentinel, and any other cause carries one kit-owned "failed to get
+// logs" wrap whose text is log-only, never a wire payload.
 func FetchLogs(ctx context.Context, op FetchLogsOp) (string, error) {
 	var stdout, stderr bytes.Buffer
 	opts := entities.ContainerLogsOptions{
@@ -177,9 +180,10 @@ func FetchLogs(ctx context.Context, op FetchLogsOp) (string, error) {
 		StderrWriter: &stderr,
 	}
 
-	if err := op.Logs(op.Target, opts); err != nil {
-		if ctx.Err() == context.Canceled {
-			return "", appErrors.ErrOperationCancelled
+	err := Cancellable(ctx, func() error { return op.Logs(op.Target, opts) })
+	if err != nil {
+		if errors.Is(err, appErrors.ErrOperationCancelled) {
+			return "", err
 		}
 		if podmanerr.IsNotFound(err) {
 			return "", op.NotFound
@@ -197,6 +201,62 @@ func FetchLogs(ctx context.Context, op FetchLogsOp) (string, error) {
 		}
 	}
 	return combined, nil
+}
+
+// FollowLogsOp is the follow-fetch kit's input: the already-resolved
+// target (the container id to log from; quadlet name resolution stays
+// domain work), the parsed query window, the domain's not-found sentinel,
+// the domain's Logs function, and the event callback.
+type FollowLogsOp struct {
+	Target string
+	Since  time.Time
+	Tail   int64
+	// NotFound is the caller's not-found sentinel: podman's not-found
+	// answer (containers → ErrContainerNotFound, quadlets →
+	// ErrQuadletNotFound) maps to it.
+	NotFound *appErrors.AppError
+	// Logs runs the domain's follow-mode fetch through the options
+	// FollowLogs builds. Cancellation is the kit's job: Cancellable
+	// abandons the call when the context is cancelled, so the function
+	// needs no context of its own.
+	Logs func(name string, opts entities.ContainerLogsOptions) error
+	// OnEvent receives one LogEvent per podman log line, stdout lines at
+	// INFO, stderr lines at ERROR.
+	OnEvent func(LogEvent)
+}
+
+// FollowLogs is the entry point for follow-mode (follow=true) log
+// fetches: one call that owns that ritual end to end. It builds the
+// podman logs options itself (Follow=true, Timestamps=true — the one
+// intentional divergence from FetchLogs, because the event writer parses
+// the timestamps back out — and the Since/Tail window passed through),
+// installs the stdout-INFO / stderr-ERROR event-writer pair, and runs the
+// fetch through Cancellable: a cancelled context answers
+// ErrOperationCancelled without waiting for the follow to end (it never
+// does on its own), podman's not-found answer maps to the op's NotFound
+// sentinel, and any other cause carries one kit-owned "failed to get
+// logs" wrap whose text is log-only, never a wire payload.
+func FollowLogs(ctx context.Context, op FollowLogsOp) error {
+	opts := entities.ContainerLogsOptions{
+		Follow:       true,
+		Since:        op.Since,
+		Tail:         op.Tail,
+		Timestamps:   true,
+		StdoutWriter: NewLogEventWriter("INFO", op.OnEvent),
+		StderrWriter: NewLogEventWriter("ERROR", op.OnEvent),
+	}
+
+	err := Cancellable(ctx, func() error { return op.Logs(op.Target, opts) })
+	if err != nil {
+		if errors.Is(err, appErrors.ErrOperationCancelled) {
+			return err
+		}
+		if podmanerr.IsNotFound(err) {
+			return op.NotFound
+		}
+		return fmt.Errorf("failed to get logs: %w", err)
+	}
+	return nil
 }
 
 // Compile-time proof the kit writer satisfies the io.Writer seam the

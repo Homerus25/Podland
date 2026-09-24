@@ -80,10 +80,43 @@ closest sibling that already exists. Rulings so far:
   op's caller-supplied sentinel, else one kit-owned
   `failed to get logs` wrap. A buffered log service is validate +
   engine acquisition + target resolution + the `FetchLogsOp`
-  (containers and quadlets `GetLogs` are the references). Cancellation
+  (containers and quadlets `GetLogs` are the references). The kit
+  owns the follow fetch too: `streaming.FollowLogs` (same file)
+  mirrors `FetchLogs` — podman logs options built once (`Follow=true`,
+  `Timestamps=true` — the one intentional divergence, because the
+  event writer parses the timestamps back out — with the `Since`/`Tail`
+  window through), the stdout-INFO / stderr-ERROR event-writer pair
+  installed, podman's not-found answer mapped to the op's
+  caller-supplied sentinel, and any other cause carried by the same
+  kit-owned log-only wrap. A follow log service is validate + engine
+  acquisition + target resolution + the `FollowLogsOp` (containers
+  and quadlets `GetLogsWithStream` are the references). Cancellation
   mapping lives nowhere below the kit: no service hand-copies
   `ctx.Err() == context.Canceled` — `Run`'s cancelled-wins decides for
-  every streaming call, `FetchLogs` for every buffered log fetch. The
+  every streaming call, `FetchLogs` and `FollowLogs` for every log
+  fetch. Under both sits the kit's abandonment contract,
+  `streaming.Cancellable` (`internal/streaming/cancellable.go`): the
+  engine runs on the connection cache's detached context (§4), so
+  per-call cancellation is impossible below the streaming loop and the
+  caller's only cancellation is abandoning the call — a pre-cancelled
+  context answers `OPERATION_CANCELLED` without starting the work, a
+  mid-call cancellation abandons the goroutine, which keeps running
+  untracked on the detached context until it ends naturally or the
+  connection is reaped (idle cleanup, LRU eviction, machine removal;
+  release-while-in-use is the design, not a leak). Placement rule:
+  `Cancellable` is called inside the `WithEngine` closure —
+  abandonment only helps if it makes that closure return, and the
+  closure returning is what releases the connection lease; abandoning
+  at `Run`'s level would leave the closure blocked on the engine call
+  with the lease pinned. `FetchLogs` and `FollowLogs` route their
+  fetch through it, and images pull wraps exactly the engine pull call
+  in it inside the closure (`PullWithProgress` in
+  `internal/domain/images/service.go` is the reference — a real pull
+  failure still maps to the image-pull-failed sentinel, the helper's
+  sentinel passes through for `Run` to map). Quadlet auto-update is
+  deliberately outside the contract: its seam is the SSH-exec stream,
+  which takes the request context directly, so its own transport
+  already honours cancellation. The
   kit's DTO vocabulary — the shared `LogEvent` and the
   `LogEventWriter` (RFC3339Nano parse, RFC3339 UTC re-emit,
   spaceless-line guard) — is pinned in `internal/streaming/logs.go`,
@@ -91,7 +124,9 @@ closest sibling that already exists. Rulings so far:
   (issue 340's dispatch ruling). The
   images pull handler remains the reference for progress streams.
   Settled 2026-09-13 (architecture-review candidate C7); the buffered
-  fetch settled 2026-09-18 (candidate C16).
+  fetch settled 2026-09-18 (candidate C16); the follow fetch and the
+  `Cancellable` abandonment contract settled 2026-09-22 (candidate
+  C21).
 - **Binary endpoints (the binary envelope)** — `web.HandleStream`
   (`internal/web`) is the seam every machine-scoped endpoint whose
   success is a byte stream or multipart upload rather than a DTO
@@ -233,7 +268,14 @@ is incomplete.
   `MockConnectionManager` for the machines domain, which still crosses
   the manager directly (its `RemoveMachine` records calls so service
   tests can pin deletion teardown), and
-  `MockSSHExec` for the quadlets lifecycle's systemctl-over-SSH seam.
+  `MockSSHExec` for the quadlets lifecycle's systemctl-over-SSH seam,
+  plus the cancellation-promptness harness (`CancelStubs` +
+  `RequirePromptReturnOnCancel`) — the third-copy extraction of the
+  per-domain "returns promptly on cancel" regression tests (containers
+  and quadlets logs follow, images pull). A domain pins only that its
+  service releases the `WithEngine` closure on cancellation, through
+  the harness; the abandonment contract itself stays pinned once in
+  `internal/streaming`'s `Cancellable` suite.
 - Integration tests live in `test/integration/` behind the
   `integration` build tag and follow the run-scoped-tag isolation
   model (see the header comment of `test/integration/images_test.go`).

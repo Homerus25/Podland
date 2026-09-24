@@ -413,9 +413,10 @@ func (s *QuadletService) GetLogs(ctx context.Context, userID, machineID, quadlet
 
 // GetLogsWithStream retrieves logs for the managed container of a quadlet
 // with streaming callback. When follow=true, this method streams log lines
-// one at a time via the logCallback function.
-// The kit's LogEventWriter converts each podman log line to a LogEvent:
-// stdout at INFO, stderr at ERROR.
+// one at a time via the logCallback function. The follow ritual (options
+// build, writer pair, not-found and cancellation mapping) belongs to the
+// kit's FollowLogs; the service keeps engine acquisition and the
+// quadlet-to-container resolution.
 func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineID, quadletName string, since time.Time, tail int64, logCallback func(event streaming.LogEvent)) error {
 	return s.engines.WithEngine(ctx, userID, machineID, "quadlets.GetLogsWithStream", func(e QuadletEngine) error {
 		containerName, err := s.resolveForLogs(e, quadletName)
@@ -423,25 +424,14 @@ func (s *QuadletService) GetLogsWithStream(ctx context.Context, userID, machineI
 			return err
 		}
 
-		logsOpts := entities.ContainerLogsOptions{
-			Follow:     true,
-			Since:      since,
-			Tail:       tail,
-			Timestamps: true,
-		}
-
-		logsOpts.StdoutWriter = streaming.NewLogEventWriter("INFO", logCallback)
-		logsOpts.StderrWriter = streaming.NewLogEventWriter("ERROR", logCallback)
-
-		err = e.Logs(containerName, logsOpts)
-		if err != nil {
-			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrQuadletNotFound
-			}
-			return fmt.Errorf("failed to get quadlet logs: %w", err)
-		}
-
-		return nil
+		return streaming.FollowLogs(ctx, streaming.FollowLogsOp{
+			Target:   containerName,
+			Since:    since,
+			Tail:     tail,
+			NotFound: appErrors.ErrQuadletNotFound,
+			Logs:     e.Logs,
+			OnEvent:  logCallback,
+		})
 	})
 }
 

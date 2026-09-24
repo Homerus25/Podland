@@ -7,11 +7,20 @@ import (
 	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/streaming"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
+
+// Service behaviour tests for the two logs modes: one-shot (the kit's
+// FetchLogs owns the buffered ritual, so only the quadlet-to-container
+// resolution and the not-found mapping are pinned here) and follow (the
+// kit's FollowLogs owns the follow ritual, so only the resolution, the
+// not-found mapping, and the promptness of the cancellation release are
+// pinned here).
 
 // TestQuadletService_GetLogs_ResolvesSystemdContainerName pins the payoff
 // behaviour of the engine seam: for a container-type quadlet without an
@@ -133,6 +142,54 @@ func TestQuadletService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	assert.Nil(t, got)
+}
+
+func TestQuadletService_GetLogsWithStream_MapsMissingContainerTo404(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{Name: "web.container"}}, nil
+		},
+		printFn: func(string) (string, error) {
+			return "[Container]\n", nil
+		},
+		logsFn: func(string, entities.ContainerLogsOptions) error {
+			return &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	err := service.GetLogsWithStream(context.Background(), "user", "machine", "web.container", time.Time{}, 0,
+		func(streaming.LogEvent) {})
+
+	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+}
+
+// TestQuadletService_GetLogsWithStream_ReturnsPromptlyOnCancel pins the
+// release regression: a blocking engine Logs call plus a cancelled
+// context must return the operation-cancelled sentinel promptly (the
+// shared promptness harness owns the ritual).
+func TestQuadletService_GetLogsWithStream_ReturnsPromptlyOnCancel(t *testing.T) {
+	started, block := testutils.CancelStubs(t)
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{Name: "web.container"}}, nil
+		},
+		printFn: func(string) (string, error) {
+			return "[Container]\nImage=nginx\n", nil
+		},
+		logsFn: func(string, entities.ContainerLogsOptions) error {
+			close(started)
+			<-block
+			return nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	testutils.RequirePromptReturnOnCancel(t, "GetLogsWithStream", started,
+		func(ctx context.Context) error {
+			return service.GetLogsWithStream(ctx, "user", "machine", "web.container", time.Time{}, 0,
+				func(streaming.LogEvent) {})
+		})
 }
 
 // TestQuadletService_GetLogs_ResolveContainerName tests container name resolution

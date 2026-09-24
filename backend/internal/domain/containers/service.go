@@ -17,7 +17,7 @@ import (
 // ContainerService provides business logic for containers. Every
 // machine-scoped podman call crosses the ContainerEngineProvider (the
 // connection seam); the service itself owns only domain mapping,
-// composition, and the log-line event conversion.
+// composition, and dispatch to the streaming kit's log rituals.
 type ContainerService struct {
 	engines ContainerEngineProvider
 }
@@ -274,37 +274,23 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 	return response, err
 }
 
-// GetLogsWithStream retrieves logs for a specific container with streaming callback
-// When follow=true, this method streams log lines one at a time via the logCallback function.
-// The kit's LogEventWriter converts each podman log line to a LogEvent:
-// stdout at INFO, stderr at ERROR.
+// GetLogsWithStream retrieves logs for a specific container with
+// streaming callback. The follow ritual (options build, writer pair,
+// not-found and cancellation mapping) belongs to the kit's FollowLogs;
+// the service keeps validation, engine acquisition, and target dispatch.
 func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64, logCallback func(event streaming.LogEvent)) error {
 	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
 		return err
 	}
 
 	return s.engines.WithEngine(ctx, userID, machineID, "containers.GetLogsWithStream", func(e ContainerEngine) error {
-		// Set up container logs options for streaming
-		logsOpts := entities.ContainerLogsOptions{
-			Follow:     true,
-			Since:      since,
-			Tail:       tail,
-			Timestamps: true,
-		}
-
-		// Set writers to capture streaming output
-		logsOpts.StdoutWriter = streaming.NewLogEventWriter("INFO", logCallback)
-		logsOpts.StderrWriter = streaming.NewLogEventWriter("ERROR", logCallback)
-
-		// Fetch logs from container (this will block until follow ends or context is cancelled)
-		err := e.Logs(containerID, logsOpts)
-		if err != nil {
-			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrContainerNotFound
-			}
-			return fmt.Errorf("failed to get container logs: %w", err)
-		}
-
-		return nil
+		return streaming.FollowLogs(ctx, streaming.FollowLogsOp{
+			Target:   containerID,
+			Since:    since,
+			Tail:     tail,
+			NotFound: appErrors.ErrContainerNotFound,
+			Logs:     e.Logs,
+			OnEvent:  logCallback,
+		})
 	})
 }

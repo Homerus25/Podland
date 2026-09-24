@@ -17,8 +17,8 @@ import (
 
 // Kit suite for the buffered log fetch: FetchLogs pins the follow=false
 // ritual once (the podman logs options, the stdout/stderr writer pair,
-// the combine, and the terminal mapping: cancelled wins, then the
-// caller's not-found sentinel, then one kit-owned wrap).
+// the combine, and the terminal mapping: Cancellable's cancelled-wins,
+// then the caller's not-found sentinel, then one kit-owned wrap).
 
 func fetchOp(logs func(name string, opts entities.ContainerLogsOptions) error) FetchLogsOp {
 	return FetchLogsOp{
@@ -103,7 +103,7 @@ func TestFetchLogsMapsNotFoundToCallerSentinel(t *testing.T) {
 	assert.Empty(t, got)
 }
 
-func TestFetchLogsCancelledContextWinsOverGenericError(t *testing.T) {
+func TestFetchLogsCancelledContextAnswersCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	op := fetchOp(func(name string, opts entities.ContainerLogsOptions) error {
@@ -113,7 +113,9 @@ func TestFetchLogsCancelledContextWinsOverGenericError(t *testing.T) {
 	got, err := FetchLogs(ctx, op)
 
 	require.ErrorIs(t, err, appErrors.ErrOperationCancelled,
-		"a cancelled buffered fetch answers OPERATION_CANCELLED even when the engine returns a generic error")
+		"a cancelled buffered fetch answers OPERATION_CANCELLED deterministically, through Cancellable")
+	assert.Same(t, appErrors.ErrOperationCancelled, err,
+		"cancelled-wins: the sentinel rides bare, ahead of the not-found mapping and the wrap")
 	assert.Empty(t, got)
 }
 

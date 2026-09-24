@@ -80,14 +80,14 @@ func TestContainerHandler_Logs_BufferedCancellationAnswers504(t *testing.T) {
 }
 
 // TestContainerHandler_Logs_StreamingHappyPath tests successful streaming
-// logs with follow=true through the real service: podman's log lines are
-// decoded into events, cross byte-identical, and a clean end fires exactly
-// one INFO STREAM_ENDED terminal event.
+// logs with follow=true through the real service: follow=true crosses the
+// streaming envelope and dispatches to the service (the dispatch pin —
+// the kit owns the options build and pins it once), podman's log lines
+// are decoded into events, cross byte-identical, and a clean end fires
+// exactly one INFO STREAM_ENDED terminal event.
 func TestContainerHandler_Logs_StreamingHappyPath(t *testing.T) {
-	var gotOpts entities.ContainerLogsOptions
 	engine := &fakeContainerEngine{
 		logsFn: func(name string, opts entities.ContainerLogsOptions) error {
-			gotOpts = opts
 			// Simulate podman's follow-mode delivery: each line arrives
 			// with a podman timestamp prefix.
 			writeLogsInto(opts, "2024-01-01T00:00:00.000000000Z Starting application\n", "")
@@ -105,7 +105,6 @@ func TestContainerHandler_Logs_StreamingHappyPath(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on streaming success")
-	assert.True(t, gotOpts.Follow, "follow=true must reach the machine as a follow request")
 	output := w.Body.String()
 	assert.Contains(t, output, `"message":"Starting application"`, "Response should contain first log")
 	assert.Contains(t, output, `"message":"Application started successfully"`, "Response should contain second log")

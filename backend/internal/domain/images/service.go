@@ -2,10 +2,12 @@ package images
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/streaming"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
@@ -76,14 +78,34 @@ func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, 
 
 	var report *entities.ImagePullReport
 	err := s.engines.WithEngine(ctx, userID, machineID, "images.Pull", func(e ImageEngine) error {
-		// Cancellation is not mapped here: the call crosses streaming
-		// Run, whose cancelled-wins rule answers OPERATION_CANCELLED
-		// whatever the operation returns.
-		pullReport, err := e.Pull(rawImage, opts)
-		if err != nil {
+		// Cancellation is passed through, not mapped: the errors.Is
+		// check below returns Cancellable's sentinel untouched — the
+		// kit owns cancellation, and streaming Run's cancelled-wins
+		// rule answers OPERATION_CANCELLED whatever the operation
+		// returns. A real pull failure still maps to
+		// ErrImagePullFailed. Cancellable abandons the
+		// pull goroutine inside this closure: the closure (and with it
+		// the connection lease) returns promptly on a disconnect while
+		// the pull keeps running untracked on the engine's detached
+		// context until it ends naturally or the connection is reaped.
+		// The abandoned goroutine's outcome lands in the helper's
+		// buffered channel and is dropped; the report is propagated
+		// only when the pull actually completed.
+		var pullReport *entities.ImagePullReport
+		pullErr := streaming.Cancellable(ctx, func() error {
+			r, err := e.Pull(rawImage, opts)
+			if err != nil {
+				return err
+			}
+			pullReport = r
+			return nil
+		})
+		if pullErr != nil {
+			if errors.Is(pullErr, appErrors.ErrOperationCancelled) {
+				return pullErr
+			}
 			return appErrors.ErrImagePullFailed
 		}
-
 		report = pullReport
 		return nil
 	})
