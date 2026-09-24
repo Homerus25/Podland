@@ -37,11 +37,7 @@ func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
 			return ContainerListResult{}, err
 		}
 
-		containersAny := make([]any, len(containers))
-		for i, c := range containers {
-			containersAny[i] = c
-		}
-		return ToContainerListResult(containersAny), nil
+		return ToContainerListResult(containers), nil
 	})
 }
 

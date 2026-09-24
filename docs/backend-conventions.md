@@ -151,6 +151,21 @@ closest sibling that already exists. Rulings so far:
   in `internal/web/web_test.go` (and `internal/streaming` for the
   streaming envelope), not per domain; a handler test whose only value
   was re-pinning that mapping is deleted, not ported.
+- **Typed entity→DTO list mapping** — list mappers are typed at both
+  ends: a singular `From*` function takes the podman entity the engine
+  returns and produces the DTO, a plural `To*` wrapper takes the entity
+  slice the service returns and builds the list envelope, and the
+  handler calls it directly with the service's return value. Volumes
+  (`FromPodmanVolume` + `ToVolumeListResponse`) and images
+  (`FromImageSummary` + `ToImageListResponse`) are the references; the
+  containers list mapper (`FromPodmanListContainer` +
+  `ToContainerListResult` in `internal/domain/containers/dto.go`)
+  conforms since this ruling. A typed → `any` → type-assert-back chain
+  is banned: erasing the element type only to assert it back
+  downstream re-opens the mapping at runtime, and a missed assertion
+  must never fabricate placeholder rows for API clients — a typed
+  interface turns the miss into a compile error. Settled 2026-09-24
+  (architecture-review candidate C22).
 - **Prune endpoints** — volumes prune is the reference pattern:
   `internal/domain/volumes/service.go` (`Prune`), `handler.go`
   (`Prune`), `dto.go` (`FromPodmanPruneReports`), and

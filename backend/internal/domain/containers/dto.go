@@ -6,7 +6,6 @@ import (
 
 	netTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/domain/entities"
-	containerTypes "go.podman.io/podman/v6/pkg/domain/entities/types"
 	define "go.podman.io/podman/v6/pkg/ps/define"
 )
 
@@ -226,56 +225,39 @@ func FromPodmanInspectContainer(containerReport *entities.ContainerInspectReport
 	return response
 }
 
-// Helper function to get container name
-
-// FromPodmanContainer converts a podman ListContainer entity to ContainerListResponse
-// This mapping function handles the transformation from podman internal representation
-// to our API DTO format
-type ListContainer = any // Placeholder for the actual type
-
-func FromPodmanContainer(container any) ContainerListResponse {
-	// Try to convert to the actual type
-	if listContainer, ok := container.(containerTypes.ListContainer); ok {
-		return ContainerListResponse{
-			ID:        listContainer.ID,
-			Names:     listContainer.Names,
-			Image:     listContainer.Image,
-			ImageID:   listContainer.ImageID,
-			Command:   listContainer.Command,
-			CreatedAt: listContainer.CreatedAt,
-			State:     listContainer.State,
-			Status:    listContainer.Status,
-			Restarts:  listContainer.Restarts,
-			Exited:    listContainer.Exited,
-			ExitCode: func() *int32 {
-				if listContainer.ExitCode != 0 {
-					v := listContainer.ExitCode
-					return &v
-				}
-				return nil
-			}(),
-			Labels:   listContainer.Labels,
-			Ports:    mapPortMappings(listContainer.Ports),
-			Size:     mapContainerSize(listContainer.Size),
-			Networks: listContainer.Networks,
-			Mounts:   listContainer.Mounts,
-		}
-	}
-
-	// Fallback for testing
+// FromPodmanListContainer converts a podman ListContainer entity to
+// ContainerListResponse. Typed at both ends, mirroring the volumes and
+// images list mappers (backend-conventions, candidate C22).
+func FromPodmanListContainer(listContainer entities.ListContainer) ContainerListResponse {
 	return ContainerListResponse{
-		ID:        "placeholder-id",
-		Names:     []string{"placeholder-name"},
-		Image:     "placeholder-image",
-		State:     "unknown",
-		Status:    "Unknown status",
-		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+		ID:        listContainer.ID,
+		Names:     listContainer.Names,
+		Image:     listContainer.Image,
+		ImageID:   listContainer.ImageID,
+		Command:   listContainer.Command,
+		CreatedAt: listContainer.CreatedAt,
+		State:     listContainer.State,
+		Status:    listContainer.Status,
+		Restarts:  listContainer.Restarts,
+		Exited:    listContainer.Exited,
+		ExitCode: func() *int32 {
+			if listContainer.ExitCode != 0 {
+				v := listContainer.ExitCode
+				return &v
+			}
+			return nil
+		}(),
+		Labels:   listContainer.Labels,
+		Ports:    mapPortMappings(listContainer.Ports),
+		Size:     mapContainerSize(listContainer.Size),
+		Networks: listContainer.Networks,
+		Mounts:   listContainer.Mounts,
 	}
 }
 
 // ToContainerListResult converts a list of podman containers to ContainerListResult
 // This function handles the complete transformation from service layer to API response
-func ToContainerListResult(containers []any) ContainerListResult {
+func ToContainerListResult(containers []entities.ListContainer) ContainerListResult {
 	result := ContainerListResult{
 		Containers: make([]ContainerListResponse, len(containers)),
 		Total:      len(containers),
@@ -283,7 +265,7 @@ func ToContainerListResult(containers []any) ContainerListResult {
 	}
 
 	for i, container := range containers {
-		result.Containers[i] = FromPodmanContainer(container)
+		result.Containers[i] = FromPodmanListContainer(container)
 	}
 
 	return result
