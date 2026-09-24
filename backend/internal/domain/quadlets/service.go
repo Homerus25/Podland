@@ -119,6 +119,13 @@ func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string
 // with systemd reload enabled so systemd picks up the new unit (the tar
 // framing podman requires is the engine adapter's job). A name collision in
 // the install report is mapped to ErrQuadletAlreadyExists.
+//
+// After a successful install the service also reloads the SSH user's user
+// manager (reloadUserSystemd): podman's internal reload reaches the manager
+// the podman service sees, not necessarily the one the lifecycle's
+// `systemctl --user` calls address. A reload failure fails the create with
+// ErrConnectionFailed even though the file is installed — the quadlet would
+// not be startable otherwise.
 func (s *QuadletService) Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
 	var response *QuadletCreateResponse
 	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Create", func(e QuadletEngine) error {
@@ -157,7 +164,14 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 		}
 		return nil
 	})
-	return response, err
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.reloadUserSystemd(ctx, machineID, userID); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 // Update replaces an existing quadlet's content on the specified machine.
@@ -182,6 +196,11 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 // The response reuses the Get shape (doku/description_quadlets_api.md:128). State is
 // reported as "unknown" immediately after the reinstall because systemd has not
 // yet reloaded to report a fresh status — matching the Create slice's behaviour.
+//
+// Like Create, a successful reinstall is followed by a user-manager reload
+// (reloadUserSystemd) so the rebuilt unit is visible to the lifecycle's
+// `systemctl --user` calls. A reload failure fails the update with
+// ErrConnectionFailed even though the reinstall itself succeeded.
 func (s *QuadletService) Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
 	var response *QuadletGetResponse
 	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Update", func(e QuadletEngine) error {
@@ -235,7 +254,14 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 		response = buildUpdateResponse(name, target.UnitName, resource, installedPath, req.Content)
 		return nil
 	})
-	return response, err
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.reloadUserSystemd(ctx, machineID, userID); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 // Delete removes a quadlet by name on the specified machine.
@@ -650,6 +676,11 @@ func generatePodQuadlet(inspect *entities.PodInspectReport) (string, error) {
 // Each entry is installed by name+resource with systemd reload enabled (the tar
 // framing is the engine adapter's job). The method handles partial failures by
 // collecting successful and failed imports separately.
+//
+// After the batch, one user-manager reload (reloadUserSystemd) covers every
+// installed entry — the same manager-visibility guarantee Create gives a
+// single quadlet. A reload failure fails the import with ErrConnectionFailed
+// even though the installs themselves succeeded.
 func (s *QuadletService) Import(ctx context.Context, userID, machineID string, req QuadletImportRequest) (*QuadletImportResponse, error) {
 	var response *QuadletImportResponse
 	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Import", func(e QuadletEngine) error {
@@ -672,7 +703,18 @@ func (s *QuadletService) Import(ctx context.Context, userID, machineID string, r
 
 		return nil
 	})
-	return response, err
+	if err != nil {
+		return nil, err
+	}
+
+	// One reload covers the whole batch — but only when something was
+	// actually installed (an empty import touches nothing).
+	if len(response.Imported) > 0 {
+		if err := s.reloadUserSystemd(ctx, machineID, userID); err != nil {
+			return nil, err
+		}
+	}
+	return response, nil
 }
 
 // importSingleQuadlet imports a single quadlet entry.

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -120,7 +121,9 @@ func TestQuadletService_Create_InstallsUnderResourceExtension(t *testing.T) {
 			}, nil
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	// A successful install is followed by the user-manager daemon-reload,
+	// so the service needs a (succeeding) SSH exec wired.
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec())
 
 	got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
 		Name:     "web",
@@ -179,6 +182,121 @@ func TestQuadletService_Create_MapsAlreadyExists(t *testing.T) {
 	})
 }
 
+// TestQuadletService_Create_ReloadsUserSystemdOverSSH pins the daemon-reload
+// contract: every successful install is followed by exactly one
+// `systemctl --user daemon-reload` over the machine's SSH exec, against the
+// same user manager the lifecycle actions address. Without it, a quadlet
+// created against a podman socket whose service reloads a different systemd
+// manager (e.g. the system manager for a rootful socket) lists fine but
+// Start answers QUADLET_NOT_FOUND.
+func TestQuadletService_Create_ReloadsUserSystemdOverSSH(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		installFn: func(string, []byte, bool) (*entities.QuadletInstallReport, error) {
+			return &entities.QuadletInstallReport{}, nil
+		},
+	}
+	sshExec := testutils.NewMockSSHExec()
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec)
+
+	got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+		Name: "web", Resource: "container", Content: "c",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Len(t, sshExec.Calls(), 1, "a successful create must reload the user manager exactly once")
+	call := sshExec.Calls()[0]
+	assert.Equal(t, "systemctl", call.Command)
+	assert.Equal(t, []string{"--user", "daemon-reload"}, call.Opts.Args)
+	assert.Equal(t, "machine", call.MachineID)
+	assert.Equal(t, "user", call.UserID)
+}
+
+// TestQuadletService_Create_ReloadFailureFailsCreate pins that a reload
+// failure surfaces as CONNECTION_FAILED instead of a silent success: a
+// quadlet whose user manager was never reloaded is not startable, so
+// pretending the create fully succeeded would resurface as the confusing
+// start-time QUADLET_NOT_FOUND this reload exists to prevent.
+func TestQuadletService_Create_ReloadFailureFailsCreate(t *testing.T) {
+	installingEngine := &fakeQuadletEngine{
+		installFn: func(string, []byte, bool) (*entities.QuadletInstallReport, error) {
+			return &entities.QuadletInstallReport{}, nil
+		},
+	}
+
+	t.Run("SSH-layer failure", func(t *testing.T) {
+		service := NewQuadletService(
+			fakeEngineProvider{engine: installingEngine},
+			testutils.NewMockSSHExecWithError(errors.New("dial tcp: refused")),
+		)
+
+		got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+			Name: "web", Resource: "container", Content: "c",
+		})
+
+		require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
+		assert.Nil(t, got)
+	})
+
+	t.Run("non-zero systemctl exit", func(t *testing.T) {
+		service := NewQuadletService(
+			fakeEngineProvider{engine: installingEngine},
+			testutils.NewMockSSHExecWithResult(sshexec.ExecResult{
+				ExitCode: 1,
+				Stderr:   "Failed to connect to bus: No such file or directory",
+			}),
+		)
+
+		got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+			Name: "web", Resource: "container", Content: "c",
+		})
+
+		require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
+		assert.Nil(t, got)
+		assert.Contains(t, err.Error(), "daemon-reload", "the wrap names the failed command for logs")
+	})
+}
+
+// TestQuadletService_Create_InstallFailureSkipsReload pins that the reload
+// only follows a successful install: a refused install must not spend an
+// SSH round trip.
+func TestQuadletService_Create_InstallFailureSkipsReload(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		installFn: func(string, []byte, bool) (*entities.QuadletInstallReport, error) {
+			return nil, errors.New("failed to install quadlet")
+		},
+	}
+	sshExec := testutils.NewMockSSHExec()
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec)
+
+	got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+		Name: "web", Resource: "container", Content: "c",
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Empty(t, sshExec.Calls(), "a failed install must not reload the user manager")
+}
+
+// TestQuadletService_Create_NilSSHExec pins the defensive nil check in
+// reloadUserSystemd, mirroring the lifecycle's runSystemctl contract: a nil
+// sshExec is a programming error and answers INTERNAL_ERROR, not a panic.
+func TestQuadletService_Create_NilSSHExec(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		installFn: func(string, []byte, bool) (*entities.QuadletInstallReport, error) {
+			return &entities.QuadletInstallReport{}, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+
+	got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+		Name: "web", Resource: "container", Content: "c",
+	})
+
+	require.ErrorIs(t, err, appErrors.ErrInternalError)
+	assert.Nil(t, got)
+}
+
 func TestQuadletService_Update_ReplacesViaRemoveThenInstall(t *testing.T) {
 	var order []string
 	var removedName string
@@ -208,14 +326,20 @@ func TestQuadletService_Update_ReplacesViaRemoveThenInstall(t *testing.T) {
 			}, nil
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	// The SSH exec records the daemon-reload into the same order slice, so
+	// the test pins that the reload runs after the install.
+	sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions) (sshexec.ExecResult, error) {
+		order = append(order, "reload")
+		return sshexec.ExecResult{ExitCode: 0}, nil
+	})
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec)
 
 	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
 		Content: "[Container]\nImage=nginx:1.25\n",
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, []string{"list", "remove", "install"}, order, "update must locate, remove, then install")
+	assert.Equal(t, []string{"list", "remove", "install", "reload"}, order, "update must locate, remove, install, then reload the user manager")
 	assert.Equal(t, "web.container", removedName)
 	assert.True(t, removedForce, "the remove half of an update must be forced (PUT has no running-conflict answer)")
 	assert.Equal(t, "web.container", installedFile, "the rebuilt file must keep the original resource extension")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,7 +34,9 @@ func TestServiceImport_ImportsAndCollectsFailures(t *testing.T) {
 			}, nil
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	// A successful per-entry install is followed by the user-manager
+	// daemon-reload, so the service needs a (succeeding) SSH exec wired.
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec())
 
 	req := QuadletImportRequest{
 		Quadlets: []QuadletImportEntry{
@@ -66,7 +69,10 @@ func TestServiceImport_InstallFailureIsCollected(t *testing.T) {
 			return nil, errors.New("systemd reload failed")
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	// The batch completes with collected per-entry failures, so the
+	// post-batch daemon-reload still runs — a (succeeding) SSH exec is
+	// wired for it.
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec())
 
 	response, err := service.Import(context.Background(), "user-1", "machine-1", QuadletImportRequest{
 		Quadlets: []QuadletImportEntry{

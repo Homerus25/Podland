@@ -238,6 +238,42 @@ func buildLifecycleArgs(action string, unit string, opts LifecycleOptions) []str
 	return args
 }
 
+// reloadUserSystemd runs `systemctl --user daemon-reload` over the SSH seam,
+// against the same user manager the lifecycle actions act on.
+//
+// Podman's install/remove primitives reload systemd themselves, but over DBus
+// from the podman service process — which reaches whichever manager that
+// process can see (the system manager for a rootful socket, the service
+// user's manager otherwise), not necessarily the manager `systemctl --user`
+// over SSH addresses. Without an explicit reload, a freshly installed
+// quadlet still lists (podman reads the files from disk) but its unit was
+// never generated into the user manager, so Start fails with
+// QUADLET_NOT_FOUND. The install paths (Create/Update/Import) call this
+// after a successful install to close that gap.
+//
+// An SSH-layer failure and a non-zero systemctl exit both map to
+// ErrConnectionFailed: either way the user manager the lifecycle depends on
+// could not be reached.
+func (s *QuadletService) reloadUserSystemd(ctx context.Context, machineID, userID string) error {
+	if s.sshExec == nil {
+		// Defensive: production wiring always supplies an SSHExecInterface
+		// (cmd/server/main.go). A nil dependency is a programming error.
+		return appErrors.ErrInternalError
+	}
+
+	result, err := s.sshExec.Exec(ctx, machineID, userID, "systemctl", sshexec.ExecOptions{
+		Args: []string{"--user", "daemon-reload"},
+	})
+	if err != nil {
+		return appErrors.ErrConnectionFailed
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf("%w: systemctl --user daemon-reload failed (exit %d): %s",
+			appErrors.ErrConnectionFailed, result.ExitCode, result.Stderr)
+	}
+	return nil
+}
+
 // --- Pure lifecycle helpers ---
 //
 // These carry the real domain logic for the lifecycle slice and are unit-tested
