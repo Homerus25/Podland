@@ -21,9 +21,12 @@ import (
 //
 //   - resolveUnitName — unit-name resolution (prefer UnitName, derive fallback)
 //   - checkLifecyclePrecondition — wrong-state guard per action
-//   - buildLifecycleArgs — systemctl command/arg construction (force/timeout)
 //   - interpretLifecycleResult — non-zero exit-code → AppError mapping
 //   - buildLifecycleResponse — success-response shape per action
+//
+// The systemctl argv grammar is pinned once at the applyUnitAction seam (the
+// action × options table below); the Start/Stop/Restart flow tests cover
+// resolution, guards, and response shape without re-asserting argv.
 
 func TestResolveUnitName(t *testing.T) {
 	t.Run("prefers UnitName when present", func(t *testing.T) {
@@ -109,46 +112,93 @@ func TestCheckLifecyclePrecondition(t *testing.T) {
 	})
 }
 
-func TestBuildLifecycleArgs(t *testing.T) {
-	t.Run("start has no force/timeout flags", func(t *testing.T) {
-		got := buildLifecycleArgs("start", "web.service", LifecycleOptions{})
-		assert.Equal(t, []string{"--user", "start", "web.service"}, got)
-	})
+// TestQuadletService_ApplyUnitAction_ArgvTable pins the systemctl argv
+// grammar exactly once, at the applyUnitAction seam, through the mock SSH
+// exec: one row per action × options combination. Nothing below this seam
+// (handler tests included) re-asserts argv.
+func TestQuadletService_ApplyUnitAction_ArgvTable(t *testing.T) {
+	tests := []struct {
+		name        string
+		action      lifecycleAction
+		unit        string
+		opts        LifecycleOptions
+		wantCommand string
+		wantArgs    []string
+	}{
+		{
+			name:        "start has no force/timeout flags",
+			action:      actionStart, unit: "web.service",
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--user", "start", "web.service"},
+		},
+		{
+			name:        "stop without options",
+			action:      actionStop, unit: "web.service",
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--user", "stop", "web.service"},
+		},
+		{
+			name:        "stop with force",
+			action:      actionStop, unit: "web.service",
+			opts:        LifecycleOptions{Force: true},
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--force", "--user", "stop", "web.service"},
+		},
+		{
+			name:        "stop with timeout",
+			action:      actionStop, unit: "web.service",
+			opts:        LifecycleOptions{Timeout: 10},
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--kill-seconds=10", "--user", "stop", "web.service"},
+		},
+		{
+			name:        "stop with force and timeout",
+			action:      actionStop, unit: "web.service",
+			opts:        LifecycleOptions{Force: true, Timeout: 5},
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--force", "--kill-seconds=5", "--user", "stop", "web.service"},
+		},
+		{
+			name:        "restart with force and timeout",
+			action:      actionRestart, unit: "grp.service",
+			opts:        LifecycleOptions{Force: true, Timeout: 30},
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--force", "--kill-seconds=30", "--user", "restart", "grp.service"},
+		},
+		{
+			name:        "zero timeout is omitted",
+			action:      actionStop, unit: "web.service",
+			opts:        LifecycleOptions{Timeout: 0},
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--user", "stop", "web.service"},
+		},
+		{
+			name:        "negative timeout is omitted",
+			action:      actionStop, unit: "web.service",
+			opts:        LifecycleOptions{Timeout: -1},
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--user", "stop", "web.service"},
+		},
+	}
 
-	t.Run("stop without options", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{})
-		assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
-	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotCommand string
+			var gotArgs []string
+			sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+				gotCommand, gotArgs = command, opts.Args
+				return sshexec.ExecResult{ExitCode: 0}, nil
+			})
+			// The engine stays unarmed: applyUnitAction crosses only the SSH seam.
+			service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, sshExec)
 
-	t.Run("stop with force", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true})
-		assert.Equal(t, []string{"--force", "--user", "stop", "web.service"}, got)
-	})
+			_, err := service.applyUnitAction(context.Background(), "user", "machine", tt.action, tt.unit, tt.opts)
 
-	t.Run("stop with timeout", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 10})
-		assert.Equal(t, []string{"--kill-seconds=10", "--user", "stop", "web.service"}, got)
-	})
-
-	t.Run("stop with force and timeout", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true, Timeout: 5})
-		assert.Equal(t, []string{"--force", "--kill-seconds=5", "--user", "stop", "web.service"}, got)
-	})
-
-	t.Run("restart with force and timeout", func(t *testing.T) {
-		got := buildLifecycleArgs("restart", "grp.service", LifecycleOptions{Force: true, Timeout: 30})
-		assert.Equal(t, []string{"--force", "--kill-seconds=30", "--user", "restart", "grp.service"}, got)
-	})
-
-	t.Run("zero timeout is omitted", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 0})
-		assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
-	})
-
-	t.Run("negative timeout is omitted", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: -1})
-		assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
-	})
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCommand, gotCommand)
+			assert.Equal(t, tt.wantArgs, gotArgs)
+		})
+	}
 }
 
 func TestInterpretLifecycleResult(t *testing.T) {
@@ -251,8 +301,8 @@ func TestBuildLifecycleResponse(t *testing.T) {
 // The domain logic this slice introduces (unit-name resolution, the wrong-state
 // guard, systemctl command construction, exit-code interpretation) is covered
 // directly on the pure functions above. An SSH-exec mock is still wired into
-// the service so that, if resolveForLifecycle ever does return, runSystemctl is
-// exercised — but under the mock connection that path is not reached.
+// the service so that, if resolveForLifecycle ever does return, applyUnitAction
+// is exercised — but under the mock connection that path is not reached.
 
 // TestQuadletService_Start_ResolvesUnitThenRunsSystemctl pins the lifecycle
 // flow end to end: the quadlet lookup runs through the engine provider, the
@@ -319,16 +369,16 @@ func TestQuadletService_Restart_NonRunningRefused(t *testing.T) {
 }
 
 // TestQuadletService_Lifecycle_NilSSHExec tests the defensive nil-check in
-// runSystemctl. When a nil sshExec is configured, the service should return
-// ErrInternalError rather than panic.
+// execSystemctl (shared by applyUnitAction and reloadUserSystemd). When a nil
+// sshExec is configured, the service should return ErrInternalError rather
+// than panic.
 func TestQuadletService_Lifecycle_NilSSHExec(t *testing.T) {
 	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil)
 	ctx := context.Background()
 
-	result, err := service.runSystemctl(ctx, "test-machine", "test-user", "start", "test.service", LifecycleOptions{})
+	_, err := service.applyUnitAction(ctx, "test-machine", "test-user", actionStart, "test.service", LifecycleOptions{})
 	assert.Error(t, err, "Should return error when sshExec is nil")
 	assert.Equal(t, appErrors.ErrInternalError, err, "Should map to ErrInternalError")
-	assert.Equal(t, sshexec.ExecResult{}, result, "Should return empty result")
 }
 
 // TestQuadletService_Lifecycle_ServiceConstruction tests that a service can

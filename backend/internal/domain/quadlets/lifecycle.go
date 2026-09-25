@@ -99,12 +99,7 @@ func (s *QuadletService) Start(ctx context.Context, userID, machineID, name stri
 		return nil, err
 	}
 
-	result, err := s.runSystemctl(ctx, machineID, userID, string(actionStart), unit, LifecycleOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	if err := actionStart.interpretResult(result); err != nil {
+	if _, err := s.applyUnitAction(ctx, userID, machineID, actionStart, unit, LifecycleOptions{}); err != nil {
 		return nil, err
 	}
 
@@ -125,12 +120,7 @@ func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name strin
 		return nil, err
 	}
 
-	result, err := s.runSystemctl(ctx, machineID, userID, string(actionStop), unit, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := actionStop.interpretResult(result); err != nil {
+	if _, err := s.applyUnitAction(ctx, userID, machineID, actionStop, unit, opts); err != nil {
 		return nil, err
 	}
 
@@ -150,12 +140,7 @@ func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name st
 		return nil, err
 	}
 
-	result, err := s.runSystemctl(ctx, machineID, userID, string(actionRestart), unit, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := actionRestart.interpretResult(result); err != nil {
+	if _, err := s.applyUnitAction(ctx, userID, machineID, actionRestart, unit, opts); err != nil {
 		return nil, err
 	}
 
@@ -202,23 +187,20 @@ func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.
 	return target, nil
 }
 
-// runSystemctl executes `systemctl <action> [flags] <unit>` over SSH via the
-// SSHExecInterface. An SSH-layer failure (dial, session, network) maps to
-// ErrConnectionFailed — fail-fast, no retry, per docs/architecture-decisions.md §4.
-func (s *QuadletService) runSystemctl(ctx context.Context, machineID, userID, action, unit string, opts LifecycleOptions) (sshexec.ExecResult, error) {
-	if s.sshExec == nil {
-		// Defensive: production wiring always supplies an SSHExecInterface
-		// (cmd/server/main.go). A nil dependency is a programming error.
-		return sshexec.ExecResult{}, appErrors.ErrInternalError
-	}
-
-	result, err := s.sshExec.Exec(ctx, machineID, userID, "systemctl", sshexec.ExecOptions{
-		Args: buildLifecycleArgs(action, unit, opts),
-	})
+// applyUnitAction is the service's systemctl seam for one lifecycle action:
+// it builds the argv from the typed action and options (the action × options
+// table lives here and nowhere else), executes it over SSH, and interprets a
+// non-zero exit into the domain's error vocabulary. Callers supply a resolved
+// unit (resolveUnitNameForLifecycle) and finish with buildResponse.
+//
+// An SSH-layer failure (dial, session, network) maps to ErrConnectionFailed —
+// fail-fast, no retry, per docs/architecture-decisions.md §4.
+func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID string, action lifecycleAction, unit string, opts LifecycleOptions) (sshexec.ExecResult, error) {
+	result, err := s.execSystemctl(ctx, machineID, userID, "systemctl", buildLifecycleArgs(action, unit, opts))
 	if err != nil {
-		return sshexec.ExecResult{}, appErrors.ErrConnectionFailed
+		return sshexec.ExecResult{}, err
 	}
-	return result, nil
+	return result, action.interpretResult(result)
 }
 
 // buildLifecycleArgs builds the systemctl argument vector for a lifecycle
@@ -226,7 +208,7 @@ func (s *QuadletService) runSystemctl(ctx context.Context, machineID, userID, ac
 // `--kill-seconds=<n>` (per the issue's resolved mechanism decision). The
 // action verb and unit are always appended last so the result reads as
 // `systemctl [--force] [--kill-seconds=N] <action> <unit>`.
-func buildLifecycleArgs(action string, unit string, opts LifecycleOptions) []string {
+func buildLifecycleArgs(action lifecycleAction, unit string, opts LifecycleOptions) []string {
 	var args []string
 	if opts.Force {
 		args = append(args, "--force")
@@ -234,8 +216,28 @@ func buildLifecycleArgs(action string, unit string, opts LifecycleOptions) []str
 	if opts.Timeout > 0 {
 		args = append(args, fmt.Sprintf("--kill-seconds=%d", opts.Timeout))
 	}
-	args = append(args, "--user", action, unit)
+	args = append(args, "--user", string(action), unit)
 	return args
+}
+
+// execSystemctl executes a command with its argument vector over SSH via the
+// SSHExecInterface. It owns the nil-check and the ErrConnectionFailed mapping
+// so every caller (the lifecycle actions and reloadUserSystemd) shares one
+// connection-failure contract.
+func (s *QuadletService) execSystemctl(ctx context.Context, machineID, userID, command string, args []string) (sshexec.ExecResult, error) {
+	if s.sshExec == nil {
+		// Defensive: production wiring always supplies an SSHExecInterface
+		// (cmd/server/main.go). A nil dependency is a programming error.
+		return sshexec.ExecResult{}, appErrors.ErrInternalError
+	}
+
+	result, err := s.sshExec.Exec(ctx, machineID, userID, command, sshexec.ExecOptions{
+		Args: args,
+	})
+	if err != nil {
+		return sshexec.ExecResult{}, appErrors.ErrConnectionFailed
+	}
+	return result, nil
 }
 
 // reloadUserSystemd runs `systemctl --user daemon-reload` over the SSH seam,
@@ -255,17 +257,9 @@ func buildLifecycleArgs(action string, unit string, opts LifecycleOptions) []str
 // ErrConnectionFailed: either way the user manager the lifecycle depends on
 // could not be reached.
 func (s *QuadletService) reloadUserSystemd(ctx context.Context, machineID, userID string) error {
-	if s.sshExec == nil {
-		// Defensive: production wiring always supplies an SSHExecInterface
-		// (cmd/server/main.go). A nil dependency is a programming error.
-		return appErrors.ErrInternalError
-	}
-
-	result, err := s.sshExec.Exec(ctx, machineID, userID, "systemctl", sshexec.ExecOptions{
-		Args: []string{"--user", "daemon-reload"},
-	})
+	result, err := s.execSystemctl(ctx, machineID, userID, "systemctl", []string{"--user", "daemon-reload"})
 	if err != nil {
-		return appErrors.ErrConnectionFailed
+		return err
 	}
 	if result.ExitCode != 0 {
 		return fmt.Errorf("%w: systemctl --user daemon-reload failed (exit %d): %s",
