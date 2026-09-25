@@ -51,12 +51,8 @@ import (
 //   - DELETE on a running quadlet without `force` returns
 //     QUADLET_RESOURCE_RUNNING (400) because Delete never wires the
 //     `stop` param (the 080-08 gap this slice hosts).
-//   - stop/restart with a `timeout` param fails because the service maps
-//     timeout to `systemctl --kill-seconds=<n>`, which is not a systemctl
-//     option at all (it's a podman-run flag) — systemctl exits 1 with
-//     "unrecognized option" and the API surfaces a 500.
 //
-// If either tripwire assertion starts failing, the corresponding backend
+// If the tripwire assertion starts failing, the corresponding backend
 // gap was fixed — update the test to assert the fixed behavior.
 //
 // Isolation/cleanup model (matching the CRUD slice): the quadlet is
@@ -102,6 +98,24 @@ func Test_Integration_Quadlets_Lifecycle(t *testing.T) {
 		Name:     quadletName,
 		Resource: "container",
 		Content:  runnableContainerQuadletContent,
+	})
+
+	// The slow-stopping fixture: same busybox image, but the container's
+	// PID 1 traps SIGTERM and StopTimeout=30 makes the stop job take ~30s —
+	// long enough for a timeout=1 stop to give up waiting (504).
+	slowQuadletName := "it-" + suite.RunID + "-slow"
+	t.Cleanup(func() {
+		forceDeleteQuadlet(t, machineID, slowQuadletName+".container")
+		removeSpawnedContainer(t, slowQuadletName)
+	})
+	createQuadlet(t, machineID, quadletCreateBody{
+		Name:     slowQuadletName,
+		Resource: "container",
+		Content: `[Container]
+Image=busybox
+Exec=sh -c "trap '' TERM; sleep 3600"
+StopTimeout=30
+`,
 	})
 
 	// --- AC: lifecycle on a missing quadlet returns 404 --------------
@@ -160,20 +174,43 @@ func Test_Integration_Quadlets_Lifecycle(t *testing.T) {
 		return
 	}
 
-	// --- AC (gap tripwire): stop with a `timeout` param fails ---------
+	// --- AC: stop of the slow-stopping fixture with timeout=1 gives up
+	// at 504 ----------------------------------------------
 	//
-	// GAP: LifecycleOptions.Timeout maps to `systemctl
-	// --kill-seconds=<n>` (lifecycle.go buildLifecycleArgs), but
-	// --kill-seconds is not a systemctl option on any systemd version
-	// (it is a podman-run flag). systemctl exits 1 with "unrecognized
-	// option" and the API surfaces a 500 INTERNAL_ERROR. Pinned here on
-	// purpose: if this assertion starts failing, the timeout mechanism
-	// was fixed — replace it with the agreed working behavior.
-	t.Run("StopWithTimeoutParamFailsGap", func(t *testing.T) {
-		quadletLifecycleExpectError(t, machineID, quadletName+".container", "stop",
-			url.Values{"timeout": {"10"}},
-			http.StatusInternalServerError, "INTERNAL_ERROR",
-			"stop with timeout param (pinned gap: --kill-seconds is not a systemctl option)")
+	// The stop runs as `timeout 1 systemctl --user stop <unit>`: the
+	// wrapper expires (exit 124) long before the fixture's ~30s stop job
+	// finishes and the API answers 504. The stop job itself keeps running
+	// in systemd — the error says the WAIT was given up, not that the
+	// stop failed. The envelope rewrites every 5xx body to
+	// INTERNAL_ERROR with a generic message (pinned once in
+	// internal/web), so the status line is the only wire-distinguishing
+	// part; the QUADLET_STOP_TIMED_OUT sentinel is pinned at the service
+	// seam (internal/domain/quadlets).
+	t.Run("StopTimeoutExpiryReturns504", func(t *testing.T) {
+		startQuadlet(t, machineID, slowQuadletName+".container")
+		waitForQuadletRunning(t, machineID, slowQuadletName+".container",
+			"the slow-stopping fixture must reach running before the timed stop")
+
+		resp, raw := doQuadletLifecycle(t, machineID, slowQuadletName+".container", "stop",
+			url.Values{"timeout": {"1"}})
+		require.Equalf(t, http.StatusGatewayTimeout, resp.StatusCode,
+			"slow-stopping fixture stopped with timeout=1: expected 504, got %d. body: %s",
+			resp.StatusCode, string(raw))
+
+		var errResp quadletErrorEnvelope
+		require.NoErrorf(t, json.Unmarshal(raw, &errResp),
+			"timed-out stop: response must decode as an error envelope. body: %s", string(raw))
+	})
+	if t.Failed() {
+		return
+	}
+
+	// --- AC: a normal unit stopped with a timeout stops and answers 200
+	t.Run("StopWithTimeoutReturns200", func(t *testing.T) {
+		quadletLifecycleAction(t, machineID, quadletName+".container", "stop",
+			url.Values{"timeout": {"30"}})
+		waitForQuadletNotRunning(t, machineID, quadletName+".container",
+			"a normal-unit stop with a timeout param must still transition out of running")
 	})
 	if t.Failed() {
 		return
@@ -181,6 +218,12 @@ func Test_Integration_Quadlets_Lifecycle(t *testing.T) {
 
 	// --- AC: restart returns the quadlet to running; force accepted ---
 	t.Run("RestartReturnsToRunning", func(t *testing.T) {
+		// The timeout stop above left the unit stopped; restart preconditions
+		// on running, so bring it back first.
+		startQuadlet(t, machineID, quadletName+".container")
+		waitForQuadletRunning(t, machineID, quadletName+".container",
+			"re-start after the timeout stop must reach running")
+
 		restarted := quadletLifecycleAction(t, machineID, quadletName+".container", "restart",
 			url.Values{"force": {"true"}})
 		require.NotEmpty(t, restarted.RestartedAt,

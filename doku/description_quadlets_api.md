@@ -193,7 +193,11 @@ Stop a running quadlet-managed resource.
 
 **Query Parameters:**
 - `force` (boolean, optional): Force stop
-- `timeout` (integer, optional): Stop timeout in seconds
+- `timeout` (integer, optional): Seconds to wait for the stop to finish. The
+  backend wraps the systemctl call in the coreutils `timeout` command; when
+  the wait expires the request answers 504 (the stop job may still complete
+  in systemd afterwards — the error says the wait was given up, not that the
+  stop failed).
 
 **Response (Success - 200):**
 ```json
@@ -211,6 +215,7 @@ Stop a running quadlet-managed resource.
 - 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
+- 504: `QUADLET_STOP_TIMED_OUT` (the timeout expired before the unit stopped)
 
 ---
 
@@ -222,7 +227,9 @@ Restart a quadlet-managed resource.
 
 **Query Parameters:**
 - `force` (boolean, optional): Force restart
-- `timeout` (integer, optional): Stop timeout in seconds before restart
+- `timeout` (integer, optional): Seconds to wait for the whole restart to
+  finish (one wrapped call — the restart is not split into a bounded stop
+  followed by an unbounded start). Expiry answers 504.
 
 **Response (Success - 200):**
 ```json
@@ -241,6 +248,7 @@ Restart a quadlet-managed resource.
 - 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
+- 504: `QUADLET_STOP_TIMED_OUT` (the timeout expired before the restart finished)
 
 ---
 

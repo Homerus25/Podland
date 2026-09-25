@@ -89,7 +89,9 @@ type LifecycleOptions struct {
 	// Force requests an aggressive stop/restart. Maps to `systemctl --force`.
 	Force bool
 	// Timeout is the stop/restart grace period in seconds. 0 means unset.
-	// Maps to `systemctl --kill-seconds=<n>`.
+	// Maps to the coreutils `timeout <n>` wrapper around the systemctl call
+	// (no systemd version has a per-stop-call timeout flag); expiry answers
+	// QUADLET_STOP_TIMED_OUT (504).
 	Timeout int
 }
 

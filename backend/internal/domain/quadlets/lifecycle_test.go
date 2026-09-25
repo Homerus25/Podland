@@ -2,6 +2,8 @@ package quadlets
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -126,55 +128,55 @@ func TestQuadletService_ApplyUnitAction_ArgvTable(t *testing.T) {
 		wantArgs    []string
 	}{
 		{
-			name:        "start has no force/timeout flags",
-			action:      actionStart, unit: "web.service",
+			name:   "start has no force/timeout flags",
+			action: actionStart, unit: "web.service",
 			wantCommand: "systemctl",
 			wantArgs:    []string{"--user", "start", "web.service"},
 		},
 		{
-			name:        "stop without options",
-			action:      actionStop, unit: "web.service",
+			name:   "stop without options",
+			action: actionStop, unit: "web.service",
 			wantCommand: "systemctl",
 			wantArgs:    []string{"--user", "stop", "web.service"},
 		},
 		{
-			name:        "stop with force",
-			action:      actionStop, unit: "web.service",
+			name:   "stop with force",
+			action: actionStop, unit: "web.service",
 			opts:        LifecycleOptions{Force: true},
 			wantCommand: "systemctl",
 			wantArgs:    []string{"--force", "--user", "stop", "web.service"},
 		},
 		{
-			name:        "stop with timeout",
-			action:      actionStop, unit: "web.service",
+			name:   "stop with timeout wraps in the coreutils timeout",
+			action: actionStop, unit: "web.service",
 			opts:        LifecycleOptions{Timeout: 10},
-			wantCommand: "systemctl",
-			wantArgs:    []string{"--kill-seconds=10", "--user", "stop", "web.service"},
+			wantCommand: "timeout",
+			wantArgs:    []string{"10", "systemctl", "--user", "stop", "web.service"},
 		},
 		{
-			name:        "stop with force and timeout",
-			action:      actionStop, unit: "web.service",
+			name:   "stop with force and timeout wraps the whole call",
+			action: actionStop, unit: "web.service",
 			opts:        LifecycleOptions{Force: true, Timeout: 5},
-			wantCommand: "systemctl",
-			wantArgs:    []string{"--force", "--kill-seconds=5", "--user", "stop", "web.service"},
+			wantCommand: "timeout",
+			wantArgs:    []string{"5", "systemctl", "--force", "--user", "stop", "web.service"},
 		},
 		{
-			name:        "restart with force and timeout",
-			action:      actionRestart, unit: "grp.service",
+			name:   "restart with force and timeout is one wrapped call",
+			action: actionRestart, unit: "grp.service",
 			opts:        LifecycleOptions{Force: true, Timeout: 30},
-			wantCommand: "systemctl",
-			wantArgs:    []string{"--force", "--kill-seconds=30", "--user", "restart", "grp.service"},
+			wantCommand: "timeout",
+			wantArgs:    []string{"30", "systemctl", "--force", "--user", "restart", "grp.service"},
 		},
 		{
-			name:        "zero timeout is omitted",
-			action:      actionStop, unit: "web.service",
+			name:   "zero timeout is omitted",
+			action: actionStop, unit: "web.service",
 			opts:        LifecycleOptions{Timeout: 0},
 			wantCommand: "systemctl",
 			wantArgs:    []string{"--user", "stop", "web.service"},
 		},
 		{
-			name:        "negative timeout is omitted",
-			action:      actionStop, unit: "web.service",
+			name:   "negative timeout is omitted",
+			action: actionStop, unit: "web.service",
 			opts:        LifecycleOptions{Timeout: -1},
 			wantCommand: "systemctl",
 			wantArgs:    []string{"--user", "stop", "web.service"},
@@ -197,6 +199,106 @@ func TestQuadletService_ApplyUnitAction_ArgvTable(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantCommand, gotCommand)
 			assert.Equal(t, tt.wantArgs, gotArgs)
+		})
+	}
+}
+
+// TestQuadletService_ApplyUnitAction_WrapperExitCodes pins the interpretation
+// of the coreutils timeout wrapper's exit codes: expiry (124) answers the
+// QUADLET_STOP_TIMED_OUT sentinel, the wrapper's own failures (125/126/127)
+// keep the generic 500 mapping, and a real systemctl exit code (5: unit not
+// loaded) still routes through the stderr heuristics even under the wrapper.
+// Without a timeout no wrapper ran, so 124 is NOT the sentinel.
+func TestQuadletService_ApplyUnitAction_WrapperExitCodes(t *testing.T) {
+	tests := []struct {
+		name      string
+		opts      LifecycleOptions
+		exitCode  int
+		stderr    string
+		assertErr func(t *testing.T, err error)
+	}{
+		{
+			name:     "expiry 124 maps to the stop-timed-out sentinel",
+			opts:     LifecycleOptions{Timeout: 1},
+			exitCode: 124,
+			assertErr: func(t *testing.T, err error) {
+				require.ErrorIs(t, err, appErrors.ErrQuadletStopTimedOut)
+				var appErr *appErrors.AppError
+				require.ErrorAs(t, err, &appErr)
+				assert.Equal(t, http.StatusGatewayTimeout, appErr.Status)
+			},
+		},
+		{
+			name:     "restart expiry 124 maps to the same sentinel",
+			opts:     LifecycleOptions{Timeout: 3},
+			exitCode: 124,
+			assertErr: func(t *testing.T, err error) {
+				require.ErrorIs(t, err, appErrors.ErrQuadletStopTimedOut)
+			},
+		},
+		{
+			name:     "wrapper failure 125 keeps the generic mapping",
+			opts:     LifecycleOptions{Timeout: 1},
+			exitCode: 125,
+			stderr:   "timeout: failed to run command",
+			assertErr: func(t *testing.T, err error) {
+				require.Error(t, err)
+				var appErr *appErrors.AppError
+				assert.False(t, errors.As(err, &appErr),
+					"wrapper failures must stay generic (500), not map to a domain sentinel")
+			},
+		},
+		{
+			name:     "wrapper failure 126 keeps the generic mapping",
+			opts:     LifecycleOptions{Timeout: 1},
+			exitCode: 126,
+			stderr:   "timeout: failed to run command 'systemctl': Permission denied",
+			assertErr: func(t *testing.T, err error) {
+				var appErr *appErrors.AppError
+				assert.False(t, errors.As(err, &appErr))
+			},
+		},
+		{
+			name:     "wrapper failure 127 keeps the generic mapping",
+			opts:     LifecycleOptions{Timeout: 1},
+			exitCode: 127,
+			stderr:   "timeout: failed to run command 'systemctl': No such file or directory",
+			assertErr: func(t *testing.T, err error) {
+				var appErr *appErrors.AppError
+				assert.False(t, errors.As(err, &appErr),
+					"the shell's 'no such' wording must not leak into the not-found heuristic")
+			},
+		},
+		{
+			name:     "systemctl exit 5 under the wrapper still maps to not found",
+			opts:     LifecycleOptions{Timeout: 10},
+			exitCode: 5,
+			stderr:   "Failed to stop web.service: Unit web.service not loaded.",
+			assertErr: func(t *testing.T, err error) {
+				require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+			},
+		},
+		{
+			name:     "exit 124 without the wrapper is not the sentinel",
+			opts:     LifecycleOptions{},
+			exitCode: 124,
+			assertErr: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.NotErrorIs(t, err, appErrors.ErrQuadletStopTimedOut)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions) (sshexec.ExecResult, error) {
+				return sshexec.ExecResult{ExitCode: tt.exitCode, Stderr: tt.stderr}, nil
+			})
+			service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, sshExec)
+
+			_, err := service.applyUnitAction(context.Background(), "user", "machine", actionStop, "web.service", tt.opts)
+
+			tt.assertErr(t, err)
 		})
 	}
 }

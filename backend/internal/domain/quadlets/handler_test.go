@@ -421,12 +421,11 @@ func TestQuadletHandler_Delete(t *testing.T) {
 	})
 }
 
-// TestQuadletHandler_Start pins the start contract through the real
-// service: the resolved unit name drives systemctl over SSH and the
-// response reports the running state.
+// TestQuadletHandler_Start pins the start HTTP contract through the real
+// service: a stopped quadlet starts and the response reports the running
+// state (the resolved-unit argv is pinned at the applyUnitAction seam).
 func TestQuadletHandler_Start(t *testing.T) {
 	t.Run("successful start returns 200 with running state", func(t *testing.T) {
-		var gotArgs []string
 		engine := &fakeQuadletEngine{
 			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
 				return []*entities.ListQuadlet{{
@@ -437,8 +436,7 @@ func TestQuadletHandler_Start(t *testing.T) {
 				}}, nil
 			},
 		}
-		sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
-			gotArgs = opts.Args
+		sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions) (sshexec.ExecResult, error) {
 			return sshexec.ExecResult{ExitCode: 0}, nil
 		})
 
@@ -448,8 +446,6 @@ func TestQuadletHandler_Start(t *testing.T) {
 		newLifecycleTestHandler(engine, sshExec).Start(rr, req)
 
 		require.Equal(t, http.StatusOK, rr.Code)
-		assert.Equal(t, []string{"--user", "start", "my-container.service"}, gotArgs,
-			"the resolved unit name must drive the systemctl invocation")
 		assert.JSONEq(t, `{"id":"my-container.container","state":"running","unit":"my-container.service"}`, rr.Body.String())
 	})
 
@@ -476,58 +472,64 @@ func runningContainerFixture() []*entities.ListQuadlet {
 	}}
 }
 
-// TestQuadletHandler_Stop pins the stop contract through the real service:
-// force and timeout are decoded from the query into the systemctl
-// invocation, and the response reports the stopped state.
+// TestQuadletHandler_Stop pins the stop HTTP contract through the real
+// service: force and timeout are accepted from the query, success answers
+// 200 with the stopped state, and a timeout expiry answers 504. The argv
+// grammar is pinned once at the applyUnitAction seam (lifecycle_test.go).
 func TestQuadletHandler_Stop(t *testing.T) {
 	tests := []struct {
 		name        string
 		queryParams string
-		wantArgs    []string
+		execResult  sshexec.ExecResult
+		wantStatus  int
 	}{
 		{
 			name:        "successful stop returns 200 with stopped state",
 			queryParams: "",
-			wantArgs:    []string{"--user", "stop", "my-container.service"},
+			wantStatus:  http.StatusOK,
 		},
 		{
 			name:        "force=true query honoured",
 			queryParams: "?force=true",
-			wantArgs:    []string{"--force", "--user", "stop", "my-container.service"},
+			wantStatus:  http.StatusOK,
 		},
 		{
-			name:        "timeout=10 query honoured",
+			name:        "timeout query reaches the wrapper and stops",
 			queryParams: "?timeout=10",
-			wantArgs:    []string{"--kill-seconds=10", "--user", "stop", "my-container.service"},
+			wantStatus:  http.StatusOK,
 		},
 		{
 			name:        "force and timeout combined",
 			queryParams: "?force=true&timeout=5",
-			wantArgs:    []string{"--force", "--kill-seconds=5", "--user", "stop", "my-container.service"},
+			wantStatus:  http.StatusOK,
 		},
 		{
 			name:        "invalid timeout is ignored",
 			queryParams: "?timeout=notanint",
-			wantArgs:    []string{"--user", "stop", "my-container.service"},
+			wantStatus:  http.StatusOK,
 		},
 		{
 			name:        "negative timeout is ignored",
 			queryParams: "?timeout=-1",
-			wantArgs:    []string{"--user", "stop", "my-container.service"},
+			wantStatus:  http.StatusOK,
+		},
+		{
+			name:        "timeout expiry answers 504 (the wait was given up)",
+			queryParams: "?timeout=1",
+			execResult:  sshexec.ExecResult{ExitCode: 124},
+			wantStatus:  http.StatusGatewayTimeout,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var gotArgs []string
 			engine := &fakeQuadletEngine{
 				listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
 					return runningContainerFixture(), nil
 				},
 			}
-			sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
-				gotArgs = opts.Args
-				return sshexec.ExecResult{ExitCode: 0}, nil
+			sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions) (sshexec.ExecResult, error) {
+				return tt.execResult, nil
 			})
 
 			req := quadletRequest("POST", "/api/machines/machine123/quadlets/my-container.container/stop"+tt.queryParams, "user123", "machine123", "my-container.container", nil)
@@ -535,9 +537,10 @@ func TestQuadletHandler_Stop(t *testing.T) {
 			rr := httptest.NewRecorder()
 			newLifecycleTestHandler(engine, sshExec).Stop(rr, req)
 
-			require.Equal(t, http.StatusOK, rr.Code)
-			assert.Equal(t, tt.wantArgs, gotArgs, "the decoded force/timeout flags must drive the systemctl invocation")
-			assert.JSONEq(t, `{"id":"my-container.container","state":"stopped","unit":"my-container.service"}`, rr.Body.String())
+			require.Equal(t, tt.wantStatus, rr.Code)
+			if tt.wantStatus == http.StatusOK {
+				assert.JSONEq(t, `{"id":"my-container.container","state":"stopped","unit":"my-container.service"}`, rr.Body.String())
+			}
 		})
 	}
 
@@ -553,9 +556,11 @@ func TestQuadletHandler_Stop(t *testing.T) {
 	})
 }
 
-// TestQuadletHandler_Restart pins the restart contract through the real
-// service: the response carries the running state and a restartedAt
-// timestamp, and force/timeout reach the systemctl invocation.
+// TestQuadletHandler_Restart pins the restart HTTP contract through the
+// real service: the response carries the running state and a restartedAt
+// timestamp, and force/timeout are accepted from the query (the timeout
+// bounds the wait for the whole restart; its argv is pinned at the
+// applyUnitAction seam).
 func TestQuadletHandler_Restart(t *testing.T) {
 	t.Run("successful restart returns 200 with running state and restartedAt", func(t *testing.T) {
 		engine := &fakeQuadletEngine{
@@ -577,15 +582,13 @@ func TestQuadletHandler_Restart(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), "restartedAt", "restart response must include restartedAt")
 	})
 
-	t.Run("force and timeout honoured", func(t *testing.T) {
-		var gotArgs []string
+	t.Run("force and timeout accepted from the query", func(t *testing.T) {
 		engine := &fakeQuadletEngine{
 			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
 				return runningContainerFixture(), nil
 			},
 		}
-		sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
-			gotArgs = opts.Args
+		sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions) (sshexec.ExecResult, error) {
 			return sshexec.ExecResult{ExitCode: 0}, nil
 		})
 
@@ -595,7 +598,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 		newLifecycleTestHandler(engine, sshExec).Restart(rr, req)
 
 		require.Equal(t, http.StatusOK, rr.Code)
-		assert.Equal(t, []string{"--force", "--kill-seconds=20", "--user", "restart", "my-container.service"}, gotArgs)
+		assert.Contains(t, rr.Body.String(), `"state":"running"`)
 	})
 
 	t.Run("missing quadlet ID", func(t *testing.T) {

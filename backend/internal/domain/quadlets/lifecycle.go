@@ -3,6 +3,7 @@ package quadlets
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -110,7 +111,8 @@ func (s *QuadletService) Start(ctx context.Context, userID, machineID, name stri
 // `systemctl stop <unit>` over SSH (doku/description_quadlets_api.md:188-215).
 //
 // Honours the contract's `force` and `timeout` query params: force maps to
-// `systemctl --force`, timeout maps to `--kill-seconds=<n>`. Refuses a
+// `systemctl --force`, timeout bounds the wait via the coreutils timeout
+// wrapper (expiry answers QUADLET_STOP_TIMED_OUT, 504). Refuses a
 // non-running resource with QUADLET_NOT_RUNNING (400).
 //
 // Returns `{id, state: stopped, unit}` on success.
@@ -130,7 +132,8 @@ func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name strin
 // Restart restarts a quadlet-managed resource by running
 // `systemctl restart <unit>` over SSH (doku/description_quadlets_api.md:217-244).
 //
-// Supports the same `force`/`timeout` options as Stop. Refuses a non-running
+// Supports the same `force`/`timeout` options as Stop — the timeout bounds
+// the wait for the whole restart (one wrapped call). Refuses a non-running
 // resource with QUADLET_NOT_RUNNING (400).
 //
 // Returns `{id, state: running, unit, restartedAt}` on success.
@@ -193,28 +196,50 @@ func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.
 // non-zero exit into the domain's error vocabulary. Callers supply a resolved
 // unit (resolveUnitNameForLifecycle) and finish with buildResponse.
 //
+// A positive timeout wraps the whole call in the coreutils `timeout` wrapper —
+// `timeout <n> systemctl --user <action> <unit>` — because no systemd version
+// has a per-stop-call timeout flag. Expiry exits 124 and maps to
+// ErrQuadletStopTimedOut (the WAIT was given up; the stop job may still
+// complete in systemd). The wrapper's own failures (125/126/127: timeout
+// itself failed, command not executable / not found) keep the generic 500
+// mapping — they are transport problems, not quadlet states.
+//
 // An SSH-layer failure (dial, session, network) maps to ErrConnectionFailed —
 // fail-fast, no retry, per docs/architecture-decisions.md §4.
 func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID string, action lifecycleAction, unit string, opts LifecycleOptions) (sshexec.ExecResult, error) {
-	result, err := s.execSystemctl(ctx, machineID, userID, "systemctl", buildLifecycleArgs(action, unit, opts))
+	command, args := "systemctl", buildLifecycleArgs(action, unit, opts)
+	if opts.Timeout > 0 {
+		command, args = "timeout", append([]string{strconv.Itoa(opts.Timeout), command}, args...)
+	}
+
+	result, err := s.execSystemctl(ctx, machineID, userID, command, args)
 	if err != nil {
 		return sshexec.ExecResult{}, err
 	}
+
+	if opts.Timeout > 0 {
+		switch result.ExitCode {
+		case 124:
+			return result, appErrors.ErrQuadletStopTimedOut
+		case 125, 126, 127:
+			return result, fmt.Errorf("timeout wrapper failed for systemctl %s (exit %d): %s",
+				action, result.ExitCode, result.Stderr)
+		}
+	}
+
 	return result, action.interpretResult(result)
 }
 
 // buildLifecycleArgs builds the systemctl argument vector for a lifecycle
-// action. force prepends the global `--force` flag; a positive timeout adds
-// `--kill-seconds=<n>` (per the issue's resolved mechanism decision). The
-// action verb and unit are always appended last so the result reads as
-// `systemctl [--force] [--kill-seconds=N] <action> <unit>`.
+// action. force prepends the global `--force` flag; the action verb and unit
+// are always appended last so the result reads as
+// `systemctl [--force] <action> <unit>`. The timeout is not a systemctl
+// option — applyUnitAction wraps the whole call in the coreutils timeout
+// wrapper instead.
 func buildLifecycleArgs(action lifecycleAction, unit string, opts LifecycleOptions) []string {
 	var args []string
 	if opts.Force {
 		args = append(args, "--force")
-	}
-	if opts.Timeout > 0 {
-		args = append(args, fmt.Sprintf("--kill-seconds=%d", opts.Timeout))
 	}
 	args = append(args, "--user", string(action), unit)
 	return args
