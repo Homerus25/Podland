@@ -79,19 +79,12 @@ func (h *MachineHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 // List handles listing the machines the caller can access
 func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
-	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) ([]MachineResponse, error) {
+	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) ([]MachineListResponse, error) {
 		machines, err := h.service.ListAllMachines(userID)
 		if err != nil {
 			return nil, err
 		}
-
-		// Convert to responses, carrying the caller's permission on each
-		responses := make([]MachineResponse, len(machines))
-		for i, machine := range machines {
-			responses[i] = FromModel(machine.Machine)
-			responses[i].Permission = machine.Permission
-		}
-		return responses, nil
+		return ToMachineListResponse(machines, userID), nil
 	})
 }
 

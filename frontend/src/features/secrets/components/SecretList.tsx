@@ -1,8 +1,5 @@
 import { Button, Td, Text, Tr } from "@chakra-ui/react";
-import {
-	canManageSecrets,
-	type EffectivePermission,
-} from "@features/machines/permissions";
+import { can } from "@features/machines/permissions";
 import { CreateSecretDialog } from "@features/secrets/components/CreateSecretDialog";
 import { SecretDetailModal } from "@features/secrets/components/SecretDetailModal";
 import {
@@ -13,6 +10,7 @@ import {
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
+import type { Machine } from "@shared/types/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 
@@ -24,16 +22,15 @@ import { useState } from "react";
 // hint. There are no delete options in v1: the backend exposes no force
 // parameter.
 function SecretRow({
-	machineId,
+	machine,
 	secret,
-	permission,
 	canDelete,
 }: {
-	machineId: string;
+	machine: Machine;
 	secret: SecretSummary;
-	permission: EffectivePermission;
 	canDelete: boolean;
 }) {
+	const machineId = machine.id;
 	const deleteSecret = useDeleteSecret(machineId);
 	const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 	const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -70,9 +67,8 @@ function SecretRow({
 			</Tr>
 			{isDetailOpen ? (
 				<SecretDetailModal
-					machineId={machineId}
+					machine={machine}
 					secret={secret}
-					permission={permission}
 					onClose={() => setIsDetailOpen(false)}
 				/>
 			) : null}
@@ -91,22 +87,17 @@ function SecretRow({
 }
 
 // The Secrets tab body. Metadata is visible to any grantee (the backend's
-// read level); write affordances are gated on `permission`, which the page
-// derives from the machine (effectivePermission) and passes down. The
-// toolbar/triad/table machinery and the hint swap are ResourceList's; this
-// adapter owns only the columns, the row, and the create modal (below write,
-// the hint replaces the controls — never bait users with disabled buttons).
-export function SecretList({
-	machineId,
-	permission,
-}: {
-	machineId: string;
-	permission: EffectivePermission;
-}) {
+// read level); write affordances are gated on the machine's per-caller
+// facts. The toolbar/triad/table machinery and the hint swap are
+// ResourceList's; this adapter owns only the columns, the row, and the
+// create modal (below the manage capability, the hint replaces the
+// controls — never bait users with disabled buttons).
+export function SecretList({ machine }: { machine: Machine }) {
+	const machineId = machine.id;
 	const { data: secrets, isPending, error } = useSecrets(machineId);
 	const createSecret = useCreateSecret(machineId);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
-	const canManage = canManageSecrets(permission);
+	const canManage = can(machine, "manage-secrets");
 
 	return (
 		<>
@@ -124,9 +115,8 @@ export function SecretList({
 				renderRow={(secret) => (
 					<SecretRow
 						key={secret.id}
-						machineId={machineId}
+						machine={machine}
 						secret={secret}
-						permission={permission}
 						canDelete={canManage}
 					/>
 				)}

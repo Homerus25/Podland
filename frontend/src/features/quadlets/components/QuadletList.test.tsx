@@ -4,7 +4,7 @@ import { quadletsQueryKey } from "@shared/queries/queryKeys";
 import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { quadletFixture } from "@/test/factories";
+import { machineFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -15,7 +15,7 @@ function mockQuadlets(quadlets: QuadletSummary[]) {
 }
 
 function renderQuadletList() {
-	return renderWithQuery(<QuadletList machineId="m-1" permission="admin" />, {
+	return renderWithQuery(<QuadletList machine={machineFixture()} />, {
 		router: true,
 	});
 }

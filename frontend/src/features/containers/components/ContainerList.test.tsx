@@ -1,10 +1,11 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { containersQueryKey } from "@shared/queries/queryKeys";
-import { screen, waitFor } from "@testing-library/react";
+import type { Machine, MachinePermission } from "@shared/types/api";
+import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { containerFixture } from "@/test/factories";
+import { containerFixture, machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -24,9 +25,72 @@ function mockContainers(containers: ContainerSummary[]) {
 	);
 }
 
-function renderContainerList() {
-	return renderWithQuery(<ContainerList machineId="m-1" />, { router: true });
+// Default fixture is the owner's own view, so the ungated suites below
+// exercise the toolbar-on path; grantee fixtures override permission and
+// isOwner together.
+function renderContainerList(machine: Machine = machineFixture()) {
+	return renderWithQuery(<ContainerList machine={machine} />, {
+		router: true,
+	});
 }
+
+function granteeWith(permission: MachinePermission): Machine {
+	return machineFixture({ permission, isOwner: false });
+}
+
+describe("ContainerList permission gating", () => {
+	it("hides write controls from read users and explains the access level instead", async () => {
+		mockContainers([containerFixture()]);
+		renderContainerList(granteeWith("read"));
+
+		const row = await screen.findByTestId("container-row");
+		expect(
+			screen.queryByTestId("create-container-button"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("start-container-button"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("stop-container-button"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: /delete/i }),
+		).not.toBeInTheDocument();
+		expect(
+			within(row).getByRole("button", { name: /logs/i }),
+		).toBeInTheDocument();
+		const hint = screen.getByTestId("containers-permission-hint");
+		expect(hint).toHaveAttribute("data-requirement", "write");
+		expect(hint.textContent).toMatch(/read-only/i);
+	});
+
+	it.each(["write", "admin"] as const)(
+		"shows the create affordance to %s users",
+		async (permission) => {
+			mockContainers([containerFixture()]);
+			renderContainerList(granteeWith(permission));
+
+			expect(
+				await screen.findByTestId("create-container-button"),
+			).toBeInTheDocument();
+			expect(
+				screen.queryByTestId("containers-permission-hint"),
+			).not.toBeInTheDocument();
+		},
+	);
+
+	it("shows the toolbar to the machine's owner", async () => {
+		mockContainers([containerFixture()]);
+		renderContainerList();
+
+		expect(
+			await screen.findByTestId("create-container-button"),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByTestId("containers-permission-hint"),
+		).not.toBeInTheDocument();
+	});
+});
 
 describe("ContainerList", () => {
 	it("renders one row per container with name, image, and a state badge", async () => {
@@ -97,7 +161,7 @@ describe("ContainerList", () => {
 		expect(cached?.[0].id).toBe("abc123def4567890");
 	});
 
-	it("shows a loading state before containers arrive", async () => {
+	it("shows a loading state before containers arrive, with the toolbar still above it", async () => {
 		server.use(
 			http.get("*/api/machines/m-1/containers", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
@@ -107,5 +171,6 @@ describe("ContainerList", () => {
 		renderContainerList();
 
 		expect(screen.getByTestId("containers-loading")).toBeInTheDocument();
+		expect(screen.getByTestId("create-container-button")).toBeInTheDocument();
 	});
 });

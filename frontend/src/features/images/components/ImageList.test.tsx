@@ -2,7 +2,7 @@ import { ImageList } from "@features/images/components/ImageList";
 import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { imageFixture } from "@/test/factories";
+import { imageFixture, machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -13,7 +13,7 @@ const imagesFixture = [
 ];
 
 function renderImageList() {
-	return renderWithQuery(<ImageList machineId="m-1" permission="admin" />);
+	return renderWithQuery(<ImageList machine={machineFixture()} />);
 }
 
 describe("ImageList", () => {

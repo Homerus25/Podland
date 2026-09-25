@@ -6,14 +6,12 @@ import {
 	usePruneImages,
 } from "@features/images/hooks/useImages";
 import type { ImageSummary } from "@features/images/services/imagesApi";
-import {
-	canManageImages,
-	type EffectivePermission,
-} from "@features/machines/permissions";
+import { can } from "@features/machines/permissions";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
+import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import {
 	formatBytes,
@@ -131,21 +129,16 @@ function PruneImagesModal({
 // and the hint swap are ResourceList's; this adapter owns only the columns,
 // the row, and the pull/prune/delete feature code. The pull form is a write,
 // so it rides the gated toolbar: a flex box first keeps it left-aligned with
-// the prune button right-aligned, and below manage level the module swaps the
-// whole toolbar for the canonical read hint.
-export function ImageList({
-	machineId,
-	permission,
-}: {
-	machineId: string;
-	permission: EffectivePermission;
-}) {
+// the prune button right-aligned, and below the write-gated manage capability
+// the module swaps the whole toolbar for the canonical read hint.
+export function ImageList({ machine }: { machine: Machine }) {
+	const machineId = machine.id;
 	const { data: images, isPending, error } = useImages(machineId);
 	const deleteImage = useDeleteImage(machineId);
 	const pruneImages = usePruneImages(machineId);
 	const [pendingDelete, setPendingDelete] = useState<ImageSummary | null>(null);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
-	const canManage = canManageImages(permission);
+	const canManage = can(machine, "manage-images");
 
 	return (
 		<>

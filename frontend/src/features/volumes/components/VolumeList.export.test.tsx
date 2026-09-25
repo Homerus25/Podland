@@ -4,7 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { volumeFixture } from "@/test/factories";
+import { machineFixture, volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -50,7 +50,7 @@ function installHandlers(
 }
 
 function renderVolumeList(permission: "read" | "write" | "admin" = "read") {
-	renderWithQuery(<VolumeList machineId="m-1" permission={permission} />, {
+	renderWithQuery(<VolumeList machine={machineFixture({ permission })} />, {
 		chakra: true,
 	});
 }

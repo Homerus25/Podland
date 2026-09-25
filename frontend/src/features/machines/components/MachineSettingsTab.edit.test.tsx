@@ -12,7 +12,7 @@ import { server } from "@/test/server";
 let updatePayload: Record<string, unknown> | undefined;
 
 function grantsHandler() {
-	// The admin fixture mounts the sharing section; pin its queries so its
+	// The owner fixture mounts the sharing section; pin its queries so its
 	// error alerts (access list, and the picker's user directory) cannot
 	// race the form's own error envelope.
 	return [

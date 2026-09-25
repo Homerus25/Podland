@@ -160,6 +160,7 @@ func (m *MockUserRepository) CreateFirstUser(user *models.User) (bool, error) {
 // MockMachineRepository implements a mock machine repository for testing
 type MockMachineRepository struct {
 	machines    map[string]*models.Machine
+	grants      []models.AccessibleMachine
 	listErr     error
 	getErr      error
 	createErr   error
@@ -236,19 +237,28 @@ func (m *MockMachineRepository) Delete(id string) error {
 	return nil
 }
 
+// AddAccessibleMachine registers a machine the caller reaches through a
+// grant rather than ownership; ListAccessible returns it verbatim (the
+// granted permission included) after the owned machines.
+func (m *MockMachineRepository) AddAccessibleMachine(accessible models.AccessibleMachine) {
+	m.grants = append(m.grants, accessible)
+}
+
 func (m *MockMachineRepository) ListAccessible(userID string) ([]models.AccessibleMachine, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
-	// For simplicity, return all machines - in real tests you can customize this behavior.
-	// Owners are granted admin, mirroring the access row Create grants.
+	// Owned machines carry the admin permission, mirroring the access
+	// row Create grants; machines registered through
+	// AddAccessibleMachine stand in for the granted rows the real JOIN
+	// also returns.
 	var result []models.AccessibleMachine
 	for _, machine := range m.machines {
 		if machine.OwnerID == userID {
 			result = append(result, models.AccessibleMachine{Machine: machine, Permission: models.PermissionAdmin})
 		}
 	}
-	return result, nil
+	return append(result, m.grants...), nil
 }
 
 func (m *MockMachineRepository) NameExistsForUser(userID, name string) (bool, error) {

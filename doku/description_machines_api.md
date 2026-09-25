@@ -78,11 +78,15 @@ List all machines the user has access to.
     "podmanSocketPath": "/run/podman/podman.sock",
     "ownerId": "string (uuid)",
     "permission": "read|write|admin",
+    "isOwner": true,
     "createdAt": "ISO8601 timestamp",
     "updatedAt": "ISO8601 timestamp"
   }
 ]
 ```
+
+- `permission`: the caller's own permission level on the machine
+- `isOwner`: `true` exactly when the caller is the machine's owner; present on every row, so a grantee reads an explicit `false`
 
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
@@ -108,15 +112,12 @@ Get details of a specific machine.
   "sshKeyFingerprint": "string",
   "podmanSocketPath": "/run/podman/podman.sock",
   "ownerId": "string (uuid)",
-  "owner": {
-    "id": "string",
-    "username": "string"
-  },
-  "mission": "read|write|admin",
   "createdAt": "ISO8601 timestamp",
   "updatedAt": "ISO8601 timestamp"
 }
 ```
+
+The detail response carries no per-caller fields: `permission` and `isOwner` ride the list endpoint (`GET /api/machines`) only.
 
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`

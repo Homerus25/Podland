@@ -5,7 +5,7 @@ import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
-import { containerFixture } from "@/test/factories";
+import { containerFixture, machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -14,7 +14,7 @@ function renderContainerList() {
 		<Routes>
 			<Route
 				path="/machines/:machineId"
-				element={<ContainerList machineId="m-1" />}
+				element={<ContainerList machine={machineFixture()} />}
 			/>
 			<Route
 				path="/machines/:machineId/logs/:kind/:targetId"

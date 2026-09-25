@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { quadletFixture } from "@/test/factories";
+import { machineFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -15,7 +15,7 @@ function renderQuadletList(permission: Permission = "admin") {
 	server.use(
 		http.get("*/api/machines/m-1/quadlets", () => HttpResponse.json([web])),
 	);
-	renderWithQuery(<QuadletList machineId="m-1" permission={permission} />, {
+	renderWithQuery(<QuadletList machine={machineFixture({ permission })} />, {
 		router: true,
 	});
 }
@@ -127,7 +127,7 @@ describe("QuadletList auto-update", () => {
 		renderQuadletList("read");
 
 		const hint = await screen.findByTestId("quadlets-permission-hint");
-		expect(hint).toHaveAttribute("data-permission", "read");
+		expect(hint).toHaveAttribute("data-requirement", "write");
 		expect(hint).toHaveTextContent(
 			"You have read-only access to this machine. Ask an owner or admin for write access to manage its quadlets.",
 		);

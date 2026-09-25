@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { containerFixture } from "@/test/factories";
+import { containerFixture, machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -35,7 +35,9 @@ function lifecycleHandler(
 }
 
 function renderContainerList() {
-	renderWithQuery(<ContainerList machineId="m-1" />, { router: true });
+	renderWithQuery(<ContainerList machine={machineFixture()} />, {
+		router: true,
+	});
 }
 
 describe("ContainerList lifecycle", () => {

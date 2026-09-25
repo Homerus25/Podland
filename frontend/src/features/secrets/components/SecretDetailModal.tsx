@@ -1,12 +1,11 @@
 import { Box, Button, HStack, Stack, Text } from "@chakra-ui/react";
-import {
-	canRevealSecrets,
-	type EffectivePermission,
-} from "@features/machines/permissions";
+import { can } from "@features/machines/permissions";
 import { useRevealSecret, useSecret } from "@features/secrets/hooks/useSecrets";
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import { PermissionHint } from "@shared/components/PermissionHint";
+import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
@@ -36,20 +35,19 @@ function DetailField({
 // through a mutation, so React Query never caches it and it dies with the
 // modal. On screen the value stays masked until a second click on the eye.
 export function SecretDetailModal({
-	machineId,
+	machine,
 	secret,
-	permission,
 	onClose,
 }: {
-	machineId: string;
+	machine: Machine;
 	secret: SecretSummary;
-	permission: EffectivePermission;
 	onClose: () => void;
 }) {
+	const machineId = machine.id;
 	const detail = useSecret(machineId, secret.name);
 	const reveal = useRevealSecret(machineId);
 	const [isVisible, setIsVisible] = useState(false);
-	const canReveal = canRevealSecrets(permission);
+	const canReveal = can(machine, "reveal-secrets");
 
 	const close = () => {
 		reveal.reset();
@@ -139,13 +137,11 @@ export function SecretDetailModal({
 								</Button>
 							)
 						) : (
-							<Text
-								color="gray.500"
+							<PermissionHint
+								scope="reveal"
+								requirement="admin"
 								fontSize="sm"
-								data-testid="reveal-permission-hint"
-							>
-								Revealing the secret&apos;s value requires admin access.
-							</Text>
+							/>
 						)}
 					</Box>
 				</Stack>

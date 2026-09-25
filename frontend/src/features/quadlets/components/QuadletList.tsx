@@ -1,6 +1,5 @@
 import { Button, Checkbox, Text, VStack } from "@chakra-ui/react";
-import type { EffectivePermission } from "@features/machines/permissions";
-import { canEditMachine } from "@features/machines/permissions";
+import { can } from "@features/machines/permissions";
 import { AutoUpdateModal } from "@features/quadlets/components/AutoUpdateModal";
 import {
 	CreateQuadletDialog,
@@ -17,6 +16,7 @@ import {
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { ActionDialog, ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
+import type { Machine } from "@shared/types/api";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -89,19 +89,14 @@ function DeleteQuadletModal({
 // The row and its lifecycle options modal live in QuadletRow. Create is a
 // write like every other toolbar action, so below manage level the module
 // swaps the whole toolbar for the canonical read hint.
-export function QuadletList({
-	machineId,
-	permission,
-}: {
-	machineId: string;
-	permission: EffectivePermission;
-}) {
+export function QuadletList({ machine }: { machine: Machine }) {
+	const machineId = machine.id;
 	const { data: quadlets, isPending, error } = useQuadlets(machineId);
 	const createQuadlet = useCreateQuadlet(machineId);
 	const updateQuadlet = useUpdateQuadlet(machineId);
 	const deleteQuadlet = useDeleteQuadlet(machineId);
 	const autoUpdate = useQuadletAutoUpdate(machineId);
-	const canManage = canEditMachine(permission);
+	const canManage = can(machine, "manage-quadlets");
 	const [isConfirmUpdateOpen, setIsConfirmUpdateOpen] = useState(false);
 	const [isAutoUpdateOpen, setIsAutoUpdateOpen] = useState(false);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);

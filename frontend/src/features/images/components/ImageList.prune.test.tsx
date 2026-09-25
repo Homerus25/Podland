@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
-import { imageFixture } from "@/test/factories";
+import { imageFixture, machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -48,7 +48,7 @@ function installHandlers(
 }
 
 function renderImageList(permission: "read" | "write" | "admin" = "admin") {
-	renderWithQuery(<ImageList machineId="m-1" permission={permission} />, {
+	renderWithQuery(<ImageList machine={machineFixture({ permission })} />, {
 		chakra: true,
 	});
 }
@@ -76,7 +76,7 @@ describe("ImageList prune", () => {
 		expect(screen.queryByTestId("prune-images-button")).not.toBeInTheDocument();
 		expect(screen.queryByTestId("pull-image-form")).not.toBeInTheDocument();
 		const hint = screen.getByTestId("images-permission-hint");
-		expect(hint).toHaveAttribute("data-permission", "read");
+		expect(hint).toHaveAttribute("data-requirement", "write");
 		expect(pruneRequests.count).toBe(0);
 	});
 

@@ -4,6 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
+import { machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import {
@@ -38,7 +39,7 @@ function renderForm() {
 // The pull form lives inside the Images tab's toolbar in every list state,
 // next to the list it refreshes.
 function renderTab() {
-	renderWithQuery(<ImageList machineId="m-1" permission="admin" />);
+	renderWithQuery(<ImageList machine={machineFixture()} />);
 }
 
 async function startPull(imageRef = "nginx:latest") {

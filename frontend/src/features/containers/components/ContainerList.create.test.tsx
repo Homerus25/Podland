@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
-import { containerFixture } from "@/test/factories";
+import { containerFixture, machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -46,7 +46,9 @@ function createHandler(status = 201, body?: JsonBodyType) {
 }
 
 function renderContainerList() {
-	renderWithQuery(<ContainerList machineId="m-1" />, { router: true });
+	renderWithQuery(<ContainerList machine={machineFixture()} />, {
+		router: true,
+	});
 }
 
 async function openCreateModal() {

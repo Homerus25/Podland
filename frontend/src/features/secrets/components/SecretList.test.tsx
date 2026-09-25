@@ -4,7 +4,7 @@ import { secretsQueryKey } from "@shared/queries/queryKeys";
 import { screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { secretFixture } from "@/test/factories";
+import { machineFixture, secretFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -16,7 +16,7 @@ function mockSecrets(secrets: SecretSummary[]) {
 
 function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
 	return renderWithQuery(
-		<SecretList machineId="m-1" permission={permission} />,
+		<SecretList machine={machineFixture({ permission })} />,
 	);
 }
 
@@ -30,7 +30,7 @@ describe("SecretList permission gating", () => {
 			screen.queryByTestId("create-secret-button"),
 		).not.toBeInTheDocument();
 		const hint = screen.getByTestId("secrets-permission-hint");
-		expect(hint).toHaveAttribute("data-permission", "read");
+		expect(hint).toHaveAttribute("data-requirement", "write");
 		expect(hint.textContent).toMatch(/read-only/i);
 	});
 

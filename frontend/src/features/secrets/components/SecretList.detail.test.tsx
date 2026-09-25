@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { secretFixture } from "@/test/factories";
+import { machineFixture, secretFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -39,7 +39,7 @@ async function openDetail() {
 
 function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
 	return renderWithQuery(
-		<SecretList machineId="m-1" permission={permission} />,
+		<SecretList machine={machineFixture({ permission })} />,
 	);
 }
 

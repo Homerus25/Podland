@@ -40,10 +40,11 @@ export function useMachineStatus(machineId: string) {
 	});
 }
 
-// The backend populates the caller's `permission` only on the list endpoint
-// (backend/internal/domain/machines/service.go MachineResponse); the detail
-// response omits it. So the list query is consulted to fill in the
-// permission for the detail page's gating (badges, secrets, settings).
+// The backend populates the caller's per-caller facts — `permission` and
+// `isOwner` — only on the list endpoint (backend/internal/domain/machines
+// /service.go MachineListResponse); the detail response omits both. So the
+// list query is consulted to fill in the facts the detail page's gating
+// reads (badges, resource tabs, settings).
 export function useMachine(id: string) {
 	const detail = useQuery({
 		queryKey: machineDetailKey(id),
@@ -56,7 +57,11 @@ export function useMachine(id: string) {
 		if (!detail.data || !listed?.permission) return detail;
 		return {
 			...detail,
-			data: { ...detail.data, permission: listed.permission },
+			data: {
+				...detail.data,
+				permission: listed.permission,
+				isOwner: listed.isOwner,
+			},
 		};
 	}, [detail, machines, id]);
 }

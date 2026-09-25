@@ -9,6 +9,7 @@ import {
 	Tr,
 } from "@chakra-ui/react";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
+import { PermissionHint } from "@shared/components/PermissionHint";
 import { getApiError } from "@shared/utils/api";
 import type { ReactNode } from "react";
 
@@ -53,15 +54,12 @@ export function ResourceList<T>({
 	return (
 		<>
 			{canManage === false ? (
-				<Text
-					color="gray.500"
+				<PermissionHint
+					scope={plural}
+					requirement="write"
+					resource={resource}
 					mb={2}
-					data-testid={`${plural}-permission-hint`}
-					data-permission="read"
-				>
-					You have read-only access to this machine. Ask an owner or admin for
-					write access to manage its {plural}.
-				</Text>
+				/>
 			) : (
 				toolbar && (
 					<HStack justify="flex-end" mb={2}>

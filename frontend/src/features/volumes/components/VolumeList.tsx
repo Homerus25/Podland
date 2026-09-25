@@ -10,10 +10,7 @@ import {
 	Tr,
 	useToast,
 } from "@chakra-ui/react";
-import {
-	canManageVolumes,
-	type EffectivePermission,
-} from "@features/machines/permissions";
+import { can } from "@features/machines/permissions";
 import { CreateVolumeDialog } from "@features/volumes/components/CreateVolumeDialog";
 import {
 	useCreateVolume,
@@ -34,6 +31,7 @@ import {
 } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
+import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { downloadFile } from "@shared/utils/download";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
@@ -352,13 +350,8 @@ function PopulateVolumeModal({
 // testids, and the hint swap are ResourceList's; this adapter owns only the
 // columns, the clickable row with its inspect drawer, and the create,
 // export, populate, delete, and prune feature code.
-export function VolumeList({
-	machineId,
-	permission,
-}: {
-	machineId: string;
-	permission: EffectivePermission;
-}) {
+export function VolumeList({ machine }: { machine: Machine }) {
+	const machineId = machine.id;
 	const [selectedVolume, setSelectedVolume] = useState<string | null>(null);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const { data: volumes, isPending, error } = useVolumes(machineId);
@@ -395,7 +388,7 @@ export function VolumeList({
 		}
 	};
 
-	const canManage = canManageVolumes(permission);
+	const canManage = can(machine, "manage-volumes");
 
 	return (
 		<>

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { axiosError } from "@/test/errors";
-import { volumeFixture } from "@/test/factories";
+import { machineFixture, volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -47,7 +47,7 @@ function installHandlers() {
 }
 
 function renderVolumeList(permission: "read" | "write" | "admin" = "admin") {
-	renderWithQuery(<VolumeList machineId="m-1" permission={permission} />, {
+	renderWithQuery(<VolumeList machine={machineFixture({ permission })} />, {
 		chakra: true,
 	});
 }

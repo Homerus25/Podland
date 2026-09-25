@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson, errorResponse } from "@/test/errors";
-import { quadletFixture } from "@/test/factories";
+import { machineFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -57,7 +57,7 @@ function updateHandler(
 }
 
 function renderQuadletList() {
-	renderWithQuery(<QuadletList machineId="m-1" permission="admin" />, {
+	renderWithQuery(<QuadletList machine={machineFixture()} />, {
 		router: true,
 	});
 }

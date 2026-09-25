@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorJson, errorResponse } from "@/test/errors";
-import { imageFixture } from "@/test/factories";
+import { imageFixture, machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -37,7 +37,7 @@ function deleteHandler(status = 204, body?: Record<string, unknown>) {
 }
 
 async function renderImageList() {
-	renderWithQuery(<ImageList machineId="m-1" permission="admin" />);
+	renderWithQuery(<ImageList machine={machineFixture()} />);
 	await screen.findByText("docker.io/library/nginx:1.27");
 }
 

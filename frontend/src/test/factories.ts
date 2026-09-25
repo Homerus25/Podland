@@ -100,6 +100,9 @@ export function authStatusFixture(
 }
 
 export function machineFixture(overrides: Partial<Machine> = {}): Machine {
+	// Default shape: the owner's own view — the backend seeds the owner an
+	// admin access row and the list endpoint reports isOwner true. Grantee
+	// fixtures override `permission` and `isOwner` together.
 	return {
 		id: "m-1",
 		name: "prod-web-01",
@@ -111,6 +114,7 @@ export function machineFixture(overrides: Partial<Machine> = {}): Machine {
 		podmanSocketPath: "/run/podman/podman.sock",
 		ownerId: "u-owner",
 		permission: "admin",
+		isOwner: true,
 		createdAt: "2026-08-01T10:00:00Z",
 		updatedAt: "2026-08-01T10:00:00Z",
 		...overrides,

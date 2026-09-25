@@ -106,10 +106,7 @@ describe("ResourceList permission hint", () => {
 		renderResourceList({ canManage: false });
 
 		const hint = screen.getByTestId("gadgets-permission-hint");
-		expect(hint).toHaveAttribute("data-permission", "read");
-		expect(hint).toHaveTextContent(
-			"You have read-only access to this machine. Ask an owner or admin for write access to manage its gadgets.",
-		);
+		expect(hint).toHaveAttribute("data-requirement", "write");
 		expect(
 			screen.queryByTestId("gadgets-toolbar-action"),
 		).not.toBeInTheDocument();

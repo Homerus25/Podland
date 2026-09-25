@@ -8,10 +8,12 @@ import {
 	useStopContainer,
 } from "@features/containers/hooks/useContainers";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
+import { can } from "@features/machines/permissions";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
+import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { shortImageId } from "@shared/utils/format";
 import { useState } from "react";
@@ -72,11 +74,13 @@ function useOpenContainerLogs(machineId: string) {
 function ContainerRow({
 	machineId,
 	container,
+	canManage,
 	onDelete,
 	onShowLogs,
 }: {
 	machineId: string;
 	container: ContainerSummary;
+	canManage: boolean;
 	onDelete: (container: ContainerSummary) => void;
 	onShowLogs: (container: ContainerSummary) => void;
 }) {
@@ -108,16 +112,18 @@ function ContainerRow({
 				</Td>
 				<Td>
 					<HStack spacing={2}>
-						<Button
-							size="xs"
-							variant="outline"
-							colorScheme={action.colorScheme}
-							onClick={() => action.lifecycle.mutate(container.id)}
-							isLoading={action.lifecycle.isPending}
-							data-testid={action.testId}
-						>
-							{action.label}
-						</Button>
+						{canManage ? (
+							<Button
+								size="xs"
+								variant="outline"
+								colorScheme={action.colorScheme}
+								onClick={() => action.lifecycle.mutate(container.id)}
+								isLoading={action.lifecycle.isPending}
+								data-testid={action.testId}
+							>
+								{action.label}
+							</Button>
+						) : null}
 						<Button
 							size="xs"
 							variant="outline"
@@ -128,21 +134,23 @@ function ContainerRow({
 						</Button>
 					</HStack>
 				</Td>
-				<Td>
-					<Button
-						size="xs"
-						colorScheme="red"
-						variant="outline"
-						aria-label={`Delete ${name}`}
-						onClick={() => onDelete(container)}
-					>
-						Delete
-					</Button>
-				</Td>
+				{canManage ? (
+					<Td>
+						<Button
+							size="xs"
+							colorScheme="red"
+							variant="outline"
+							aria-label={`Delete ${name}`}
+							onClick={() => onDelete(container)}
+						>
+							Delete
+						</Button>
+					</Td>
+				) : null}
 			</Tr>
 			{action.lifecycle.error ? (
 				<Tr>
-					<Td colSpan={5}>
+					<Td colSpan={canManage ? 5 : 4}>
 						<ErrorDisplay error={getApiError(action.lifecycle.error)} />
 					</Td>
 				</Tr>
@@ -151,14 +159,19 @@ function ContainerRow({
 	);
 }
 
-// The Containers tab body. Containers have no permission concept: every
-// user sees the toolbar in every list state and no hint ever renders. The
-// toolbar/triad/table machinery and the derived testids are ResourceList's;
-// this adapter owns only the columns, the row, and the create/delete modals.
-export function ContainerList({ machineId }: { machineId: string }) {
+// The Containers tab body. Create, start, stop, and delete are write-gated
+// backend routes, so below manage level the module swaps the whole toolbar
+// for the canonical read hint and the rows drop their start/stop/delete
+// affordances; logs reads at read level, so the row keeps its logs button.
+// The toolbar/triad/table machinery and the derived testids are
+// ResourceList's; this adapter owns only the columns, the row, and the
+// create/delete modals.
+export function ContainerList({ machine }: { machine: Machine }) {
+	const machineId = machine.id;
 	const { data: containers, isPending, error } = useContainers(machineId);
 	const deleteContainer = useDeleteContainer(machineId);
 	const createContainer = useCreateContainer(machineId);
+	const canManage = can(machine, "manage-containers");
 	const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(
 		null,
 	);
@@ -177,13 +190,14 @@ export function ContainerList({ machineId }: { machineId: string }) {
 					{ label: "Image" },
 					{ label: "State" },
 					{},
-					{},
+					...(canManage ? [{}] : []),
 				]}
 				renderRow={(container) => (
 					<ContainerRow
 						key={container.id}
 						machineId={machineId}
 						container={container}
+						canManage={canManage}
 						onDelete={setPendingDelete}
 						onShowLogs={openLogs}
 					/>
@@ -198,6 +212,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
 						Create container
 					</Button>
 				}
+				canManage={canManage}
 			/>
 			{pendingDelete ? (
 				<DeleteContainerModal

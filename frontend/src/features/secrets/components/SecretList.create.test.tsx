@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
-import { secretFixture } from "@/test/factories";
+import { machineFixture, secretFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -38,7 +38,7 @@ function createHandler(
 }
 
 function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
-	renderWithQuery(<SecretList machineId="m-1" permission={permission} />);
+	renderWithQuery(<SecretList machine={machineFixture({ permission })} />);
 }
 
 async function openCreateModal() {

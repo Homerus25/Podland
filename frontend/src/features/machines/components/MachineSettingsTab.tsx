@@ -5,13 +5,9 @@ import {
 	useDeleteMachine,
 	useUpdateMachine,
 } from "@features/machines/hooks/useMachines";
-import {
-	canDeleteMachine,
-	canEditMachine,
-	canShareMachine,
-	effectivePermission,
-} from "@features/machines/permissions";
+import { can } from "@features/machines/permissions";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
+import { PermissionHint } from "@shared/components/PermissionHint";
 import type { Machine } from "@shared/types/api";
 import { mutationToPromise } from "@shared/utils/mutationPromise";
 import { useState } from "react";
@@ -58,24 +54,22 @@ function DeleteMachineSection({ machine }: { machine: Machine }) {
 
 export function MachineSettingsTab({ machine }: { machine: Machine }) {
 	const updateMachine = useUpdateMachine(machine.id);
-	const permission = effectivePermission(machine);
 	// A cancelled save still runs to completion on the server; this flag
 	// suppresses that late settle so neither the saved banner nor the error
 	// envelope resurrects over the reverted fields. The next save clears it.
 	const [cancelledSave, setCancelledSave] = useState(false);
 
-	if (!canEditMachine(permission)) {
+	// The tab gates once, here. Every act it renders — metadata edit,
+	// sharing, deletion — is an owner capability on the backend, so a
+	// non-owner (read, write, or admin grantee) gets exactly one truthful
+	// hint instead of a form whose every save is a 403.
+	if (!can(machine, "edit-machine")) {
 		return (
-			<Text
-				color="gray.500"
-				data-testid="permission-hint"
-				data-permission="read"
-			>
-				You have read-only access to this machine. Ask an owner or admin for
-				write access to edit it.
-			</Text>
+			<PermissionHint scope="settings" requirement="owner" phrase="edit" />
 		);
 	}
+	// Invariant: only the machine's owner renders below — the share and
+	// delete sections need no further gating.
 	return (
 		<VStack spacing={4} align="stretch">
 			{updateMachine.isSuccess && !cancelledSave && (
@@ -101,26 +95,9 @@ export function MachineSettingsTab({ machine }: { machine: Machine }) {
 				submitError={cancelledSave ? null : updateMachine.error}
 				pending={updateMachine.isPending}
 			/>
-			{canShareMachine(permission) ? (
-				<>
-					<Text fontWeight="bold">Sharing</Text>
-					<ShareMachineSection
-						machineId={machine.id}
-						ownerId={machine.ownerId}
-					/>
-				</>
-			) : null}
-			{canDeleteMachine(permission) ? (
-				<DeleteMachineSection machine={machine} />
-			) : (
-				<Text
-					color="gray.500"
-					data-testid="permission-hint"
-					data-permission="write"
-				>
-					Only the owner or an admin can share or delete this machine.
-				</Text>
-			)}
+			<Text fontWeight="bold">Sharing</Text>
+			<ShareMachineSection machineId={machine.id} ownerId={machine.ownerId} />
+			<DeleteMachineSection machine={machine} />
 		</VStack>
 	);
 }

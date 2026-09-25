@@ -14,7 +14,6 @@ import { ImageList } from "@features/images/components/ImageList";
 import { MachineSettingsTab } from "@features/machines/components/MachineSettingsTab";
 import { PermissionBadge } from "@features/machines/components/PermissionBadge";
 import { useMachine } from "@features/machines/hooks/useMachines";
-import { effectivePermission } from "@features/machines/permissions";
 import { QuadletList } from "@features/quadlets/components/QuadletList";
 import { SecretList } from "@features/secrets/components/SecretList";
 import { VolumeList } from "@features/volumes/components/VolumeList";
@@ -35,7 +34,6 @@ export function MachineDetailPage() {
 	if (!machine) {
 		return null;
 	}
-	const permission = effectivePermission(machine);
 
 	return (
 		<VStack spacing={4} align="stretch">
@@ -62,19 +60,19 @@ export function MachineDetailPage() {
 				</TabList>
 				<TabPanels>
 					<TabPanel>
-						<ContainerList machineId={machine.id} />
+						<ContainerList machine={machine} />
 					</TabPanel>
 					<TabPanel>
-						<VolumeList machineId={machine.id} permission={permission} />
+						<VolumeList machine={machine} />
 					</TabPanel>
 					<TabPanel>
-						<ImageList machineId={machine.id} permission={permission} />
+						<ImageList machine={machine} />
 					</TabPanel>
 					<TabPanel>
-						<QuadletList machineId={machine.id} permission={permission} />
+						<QuadletList machine={machine} />
 					</TabPanel>
 					<TabPanel>
-						<SecretList machineId={machine.id} permission={permission} />
+						<SecretList machine={machine} />
 					</TabPanel>
 					<TabPanel>
 						<MachineSettingsTab machine={machine} />

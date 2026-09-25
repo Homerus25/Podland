@@ -89,6 +89,37 @@ func FromModel(machine *models.Machine) MachineResponse {
 	}
 }
 
+// MachineListResponse is one element of the list endpoint's response:
+// the machine fields plus the per-caller enrichment (the caller's
+// permission and ownership). IsOwner is a plain bool, never omitted —
+// a grantee must read an explicit false. The single-machine endpoints
+// answer MachineResponse and stay untouched.
+type MachineListResponse struct {
+	MachineResponse
+	IsOwner bool `json:"isOwner"`
+}
+
+// FromAccessibleMachine builds the list endpoint's element for one
+// accessible machine: the machine fields, the caller's permission, and
+// the caller-owns-it fact computed for the requesting user.
+func FromAccessibleMachine(machine models.AccessibleMachine, callerID string) MachineListResponse {
+	response := MachineListResponse{MachineResponse: FromModel(machine.Machine)}
+	response.Permission = machine.Permission
+	response.IsOwner = machine.OwnerID == callerID
+	return response
+}
+
+// ToMachineListResponse builds the list endpoint's response from the
+// machines the service returns, computing every row's per-caller facts
+// for the requesting user.
+func ToMachineListResponse(machines []models.AccessibleMachine, callerID string) []MachineListResponse {
+	responses := make([]MachineListResponse, len(machines))
+	for i, machine := range machines {
+		responses[i] = FromAccessibleMachine(machine, callerID)
+	}
+	return responses
+}
+
 // Create creates a new machine after validating the request and testing
 // that the target is reachable over SSH + podman (description_backend.md
 // §Machine Registration). The synchronous connection probe runs BEFORE

@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { volumeFixture } from "@/test/factories";
+import { machineFixture, volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -19,7 +19,7 @@ function renderVolumeList(
 	permission: "read" | "write" | "admin" = "admin" as const,
 ) {
 	return renderWithQuery(
-		<VolumeList machineId="m-1" permission={permission} />,
+		<VolumeList machine={machineFixture({ permission })} />,
 	);
 }
 

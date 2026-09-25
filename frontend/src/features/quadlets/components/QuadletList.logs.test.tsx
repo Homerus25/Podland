@@ -5,7 +5,7 @@ import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
-import { quadletFixture } from "@/test/factories";
+import { machineFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -14,7 +14,7 @@ function renderQuadletList() {
 		<Routes>
 			<Route
 				path="/machines/:machineId"
-				element={<QuadletList machineId="m-1" permission="admin" />}
+				element={<QuadletList machine={machineFixture()} />}
 			/>
 			<Route
 				path="/machines/:machineId/logs/:kind/:targetId"
