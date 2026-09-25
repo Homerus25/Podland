@@ -83,7 +83,9 @@ func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles deleting a quadlet. force defaults to false and stop
 // defaults to true (doku/description_quadlets_api.md); unparseable
-// values leave the defaults in place.
+// values leave the defaults in place. A running resource is stopped
+// through the lifecycle seam before remove unless force is set; with
+// stop=false a running resource is refused (400).
 func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
 		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")

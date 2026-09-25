@@ -46,14 +46,9 @@ import (
 // waiting for a literal "stopped" value that parseStateFromStatus never
 // produces for a plain stopped service.
 //
-// TRIPWIRES (pinned gaps, clearly commented at the assertion sites):
-//
-//   - DELETE on a running quadlet without `force` returns
-//     QUADLET_RESOURCE_RUNNING (400) because Delete never wires the
-//     `stop` param (the 080-08 gap this slice hosts).
-//
-// If the tripwire assertion starts failing, the corresponding backend
-// gap was fixed — update the test to assert the fixed behavior.
+// TRIPWIRES: none — the two 080-09 gaps this slice hosted (delete's
+// unwired `stop` param, the broken timeout flag) are fixed; the slice
+// now asserts the agreed behavior directly.
 //
 // Isolation/cleanup model (matching the CRUD slice): the quadlet is
 // created with a run-scoped name (it-<runID>-life); t.Cleanup force-stops
@@ -148,32 +143,6 @@ StopTimeout=30
 		return
 	}
 
-	// --- AC (gap tripwire): DELETE on a running quadlet without force
-	// returns QUADLET_RESOURCE_RUNNING (400) --------------------------
-	//
-	// GAP: the DELETE `stop` query param is a no-op — QuadletService.Delete
-	// ignores it (see service.go), so the "stop-then-remove" path the
-	// param was meant to trigger does not exist. Consequence: deleting a
-	// running quadlet without `force` is refused with 400. Pinned here on
-	// purpose (080-08 deferred the gap to this slice): if this assertion
-	// starts failing, the stop-wiring was added — replace it with the
-	// agreed stop-then-delete behavior.
-	t.Run("DeleteOnRunningWithoutForceReturns400", func(t *testing.T) {
-		status, raw := deleteQuadletWithQuery(t, machineID, quadletName+".container", nil)
-		require.Equalf(t, http.StatusBadRequest, status,
-			"delete running quadlet without force (pinned gap): expected 400, got %d. body: %s",
-			status, string(raw))
-
-		var errResp quadletErrorEnvelope
-		require.NoErrorf(t, json.Unmarshal(raw, &errResp),
-			"delete running quadlet (pinned gap): error response must decode. body: %s", string(raw))
-		require.Equal(t, "QUADLET_RESOURCE_RUNNING", errResp.Error.Code,
-			"delete running quadlet (pinned gap): error code must be QUADLET_RESOURCE_RUNNING")
-	})
-	if t.Failed() {
-		return
-	}
-
 	// --- AC: stop of the slow-stopping fixture with timeout=1 gives up
 	// at 504 ----------------------------------------------
 	//
@@ -256,11 +225,56 @@ StopTimeout=30
 		return
 	}
 
+	// --- AC: DELETE on a running quadlet with stop=false is refused ---
+	// Re-start first so the refusal is doing real work (a stopped quadlet
+	// deletes without force regardless of stop).
+	t.Run("DeleteOnRunningWithStopFalseReturns400", func(t *testing.T) {
+		startQuadlet(t, machineID, quadletName+".container")
+		waitForQuadletRunning(t, machineID, quadletName+".container",
+			"re-start before the stop=false delete must reach running")
+
+		status, raw := deleteQuadletWithQuery(t, machineID, quadletName+".container",
+			url.Values{"stop": {"false"}})
+		require.Equalf(t, http.StatusBadRequest, status,
+			"delete running quadlet with stop=false: expected 400, got %d. body: %s",
+			status, string(raw))
+
+		var errResp quadletErrorEnvelope
+		require.NoErrorf(t, json.Unmarshal(raw, &errResp),
+			"delete running quadlet (stop=false): error response must decode. body: %s", string(raw))
+		require.Equal(t, "QUADLET_RESOURCE_RUNNING", errResp.Error.Code,
+			"delete running quadlet (stop=false): error code must be QUADLET_RESOURCE_RUNNING")
+	})
+	if t.Failed() {
+		return
+	}
+
+	// --- AC: DELETE on a running quadlet with the default stop stops
+	// through the seam then removes (204) ------------------------------
+	t.Run("DeleteOnRunningWithDefaultStopReturns204", func(t *testing.T) {
+		status, raw := deleteQuadletWithQuery(t, machineID, quadletName+".container", nil)
+		require.Equalf(t, http.StatusNoContent, status,
+			"delete running quadlet with default stop: expected 204, got %d. body: %s",
+			status, string(raw))
+
+		requireQuadletNotListed(t, machineID, quadletName+".container",
+			"stop-then-remove must take the quadlet out of the quadlet list")
+	})
+	if t.Failed() {
+		return
+	}
+
 	// --- AC: DELETE on a running quadlet with force=true returns 204 --
 	//
-	// Re-start first so the force is doing real work (deleting a stopped
-	// quadlet would succeed without force too).
+	// The default-stop delete above already consumed the quadlet, so
+	// re-create it and bring it back to running first — the force must
+	// remove over a genuinely running resource.
 	t.Run("DeleteOnRunningWithForceReturns204", func(t *testing.T) {
+		createQuadlet(t, machineID, quadletCreateBody{
+			Name:     quadletName,
+			Resource: "container",
+			Content:  runnableContainerQuadletContent,
+		})
 		startQuadlet(t, machineID, quadletName+".container")
 		waitForQuadletRunning(t, machineID, quadletName+".container",
 			"re-start before force delete must reach running")

@@ -144,14 +144,19 @@ Remove a quadlet from a machine.
 **Authentication:** Required
 
 **Query Parameters:**
-- `stop` (boolean, optional): Stop the resource before removing (default: true)
-- `force` (boolean, optional): Force remove even if resource is running
+- `stop` (boolean, optional): Stop the resource before removing (default: true).
+  When the resource is running and `force` is not set, the resource is stopped
+  through the lifecycle's systemctl stop before the removal (a stop failure
+  propagates and nothing is removed); with `stop=false` a running resource is
+  refused with 400.
+- `force` (boolean, optional): Force remove even if the resource is running
+  (no explicit stop is performed).
 
 **Response (Success - 204):**
 - No body
 
 **Response (Error):**
-- 400: `QUADLET_RESOURCE_RUNNING` (if running and force/stop not set)
+- 400: `QUADLET_RESOURCE_RUNNING` (if running and neither `force` nor `stop` is set)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
 - 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`

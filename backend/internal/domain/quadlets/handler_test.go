@@ -409,6 +409,41 @@ func TestQuadletHandler_Delete(t *testing.T) {
 		})
 	}
 
+	t.Run("running quadlet with stop=false is refused with 400", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return runningContainerFixture(), nil
+			},
+			// removeFn stays unarmed: a refused delete must not remove.
+		}
+
+		req := quadletRequest("DELETE", "/api/machines/machine123/quadlets/my-container.container?stop=false", "user123", "machine123", "my-container.container", nil)
+
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Delete(rr, req)
+
+		require.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("running quadlet with the default stop deletes with 204", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return runningContainerFixture(), nil
+			},
+			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
+				return &entities.QuadletRemoveReport{}, nil
+			},
+		}
+
+		req := quadletRequest("DELETE", "/api/machines/machine123/quadlets/my-container.container", "user123", "machine123", "my-container.container", nil)
+
+		rr := httptest.NewRecorder()
+		newTestHandler(engine).Delete(rr, req)
+
+		require.Equal(t, http.StatusNoContent, rr.Code)
+		assert.Empty(t, rr.Body.String(), "a 204 must carry no body")
+	})
+
 	t.Run("missing quadlet ID", func(t *testing.T) {
 		engine := &fakeQuadletEngine{}
 
