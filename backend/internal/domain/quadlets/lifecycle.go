@@ -196,7 +196,9 @@ func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.
 // non-zero exit into the domain's error vocabulary. Callers supply a resolved
 // unit (resolveUnitNameForLifecycle) and finish with buildResponse.
 //
-// A positive timeout wraps the whole call in the coreutils `timeout` wrapper —
+// The argv reads `systemctl [--force] <action> <unit>`: force prepends the
+// global flag, the action verb and unit come last. A positive timeout wraps
+// the whole call in the coreutils `timeout` wrapper —
 // `timeout <n> systemctl --user <action> <unit>` — because no systemd version
 // has a per-stop-call timeout flag. Expiry exits 124 and maps to
 // ErrQuadletStopTimedOut (the WAIT was given up; the stop job may still
@@ -207,7 +209,12 @@ func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.
 // An SSH-layer failure (dial, session, network) maps to ErrConnectionFailed —
 // fail-fast, no retry, per docs/architecture-decisions.md §4.
 func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID string, action lifecycleAction, unit string, opts LifecycleOptions) (sshexec.ExecResult, error) {
-	command, args := "systemctl", buildLifecycleArgs(action, unit, opts)
+	command := "systemctl"
+	var args []string
+	if opts.Force {
+		args = append(args, "--force")
+	}
+	args = append(args, "--user", string(action), unit)
 	if opts.Timeout > 0 {
 		command, args = "timeout", append([]string{strconv.Itoa(opts.Timeout), command}, args...)
 	}
@@ -228,21 +235,6 @@ func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID 
 	}
 
 	return result, action.interpretResult(result)
-}
-
-// buildLifecycleArgs builds the systemctl argument vector for a lifecycle
-// action. force prepends the global `--force` flag; the action verb and unit
-// are always appended last so the result reads as
-// `systemctl [--force] <action> <unit>`. The timeout is not a systemctl
-// option — applyUnitAction wraps the whole call in the coreutils timeout
-// wrapper instead.
-func buildLifecycleArgs(action lifecycleAction, unit string, opts LifecycleOptions) []string {
-	var args []string
-	if opts.Force {
-		args = append(args, "--force")
-	}
-	args = append(args, "--user", string(action), unit)
-	return args
 }
 
 // execSystemctl executes a command with its argument vector over SSH via the
