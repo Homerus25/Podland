@@ -235,25 +235,32 @@ func TestMachineService_ListAccess(t *testing.T) {
 func TestMachineService_AccessCheckPropagatesDBErrors(t *testing.T) {
 	dbErr := fmt.Errorf("disk I/O error")
 
-	newBrokenAccessService := func() *MachineService {
+	// GetMachineByID decides access through the permission-level lookup
+	// (GetPermission); ListAccess still probes row existence (HasAccess).
+	newBrokenAccessService := func(broken func(*MachineService)) *MachineService {
 		service, _, _ := newAccessTestService()
-		service.accessRepo = testutils.NewMockMachineAccessRepositoryWithErrors(nil, nil, nil, nil, nil, nil, dbErr)
+		broken(service)
 		return service
 	}
 
 	t.Run("GetMachineByID surfaces the lookup failure", func(t *testing.T) {
-		service := newBrokenAccessService()
+		service := newBrokenAccessService(func(s *MachineService) {
+			s.accessRepo = testutils.NewMockMachineAccessRepository().WithGetPermissionError(dbErr)
+		})
 
 		machine, err := service.GetMachineByID("owner-1", "machine-1")
 
 		require.Error(t, err)
-		require.ErrorIs(t, err, dbErr)
+		require.ErrorIs(t, err, errors.ErrInternalError,
+			"a failing level lookup answers INTERNAL_ERROR, never a silent denial")
 		require.NotErrorIs(t, err, errors.ErrAccessDenied)
 		assert.Nil(t, machine)
 	})
 
 	t.Run("ListAccess surfaces the lookup failure", func(t *testing.T) {
-		service := newBrokenAccessService()
+		service := newBrokenAccessService(func(s *MachineService) {
+			s.accessRepo = testutils.NewMockMachineAccessRepositoryWithErrors(nil, nil, nil, nil, nil, nil, dbErr)
+		})
 
 		accesses, err := service.ListAccess("owner-1", "machine-1")
 
@@ -264,12 +271,14 @@ func TestMachineService_AccessCheckPropagatesDBErrors(t *testing.T) {
 	})
 
 	t.Run("GetMachineStatus surfaces the lookup failure before probing", func(t *testing.T) {
-		service := newBrokenAccessService()
+		service := newBrokenAccessService(func(s *MachineService) {
+			s.accessRepo = testutils.NewMockMachineAccessRepository().WithGetPermissionError(dbErr)
+		})
 
 		status, checkedAt, err := service.GetMachineStatus(context.Background(), "owner-1", "machine-1")
 
 		require.Error(t, err)
-		require.ErrorIs(t, err, dbErr)
+		require.ErrorIs(t, err, errors.ErrInternalError)
 		require.NotErrorIs(t, err, errors.ErrAccessDenied)
 		assert.Empty(t, status)
 		assert.True(t, checkedAt.IsZero(), "no probe must run when the access check fails")

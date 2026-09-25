@@ -19,12 +19,6 @@ const ownerCapabilities: readonly Capability[] = [
 	"delete-machine",
 ];
 
-const allCapabilities: readonly Capability[] = [
-	...manageCapabilities,
-	revealCapability,
-	...ownerCapabilities,
-];
-
 function callerWith(facts: Partial<Machine>): Machine {
 	return machineFixture(facts);
 }
@@ -53,31 +47,6 @@ describe("can() capability matrix", () => {
 			expect(can(write, capability)).toBe(false);
 			expect(can(admin, capability)).toBe(false);
 			expect(can(owner, capability)).toBe(true);
-		}
-	});
-
-	it("fails closed on a missing permission fact: every level capability is denied", () => {
-		const noPermission = callerWith({ permission: undefined, isOwner: false });
-
-		for (const capability of allCapabilities) {
-			expect(can(noPermission, capability)).toBe(false);
-		}
-	});
-
-	it("fails closed on a missing isOwner fact: every owner capability is denied, level capabilities answered by rank", () => {
-		const grantsManage = { read: false, write: true, admin: true } as const;
-		const grantsReveal = { read: false, write: false, admin: true } as const;
-
-		for (const permission of ["read", "write", "admin"] as const) {
-			const noOwnership = callerWith({ permission, isOwner: undefined });
-
-			for (const capability of manageCapabilities) {
-				expect(can(noOwnership, capability)).toBe(grantsManage[permission]);
-			}
-			expect(can(noOwnership, revealCapability)).toBe(grantsReveal[permission]);
-			for (const capability of ownerCapabilities) {
-				expect(can(noOwnership, capability)).toBe(false);
-			}
 		}
 	});
 });

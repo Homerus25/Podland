@@ -19,7 +19,6 @@ import {
 } from "@shared/queries/queryKeys";
 import type { MachinePermission } from "@shared/types/api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
 
 export function useMachines() {
 	return useQuery({
@@ -40,30 +39,11 @@ export function useMachineStatus(machineId: string) {
 	});
 }
 
-// The backend populates the caller's per-caller facts — `permission` and
-// `isOwner` — only on the list endpoint (backend/internal/domain/machines
-// /service.go MachineListResponse); the detail response omits both. So the
-// list query is consulted to fill in the facts the detail page's gating
-// reads (badges, resource tabs, settings).
 export function useMachine(id: string) {
-	const detail = useQuery({
+	return useQuery({
 		queryKey: machineDetailKey(id),
 		queryFn: () => getMachine(id),
 	});
-	const { data: machines } = useMachines();
-
-	return useMemo(() => {
-		const listed = machines?.find((machine) => machine.id === id);
-		if (!detail.data || !listed?.permission) return detail;
-		return {
-			...detail,
-			data: {
-				...detail.data,
-				permission: listed.permission,
-				isOwner: listed.isOwner,
-			},
-		};
-	}, [detail, machines, id]);
 }
 
 // A machine change touches every query under the machines prefix, so these

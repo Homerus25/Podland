@@ -2,6 +2,7 @@ import type {
 	AccessGrant,
 	Machine,
 	MachinePermission,
+	MachineResponse,
 } from "@shared/types/api";
 import { api, machineApiPath } from "@shared/utils/api";
 
@@ -44,8 +45,8 @@ export async function getMachine(id: string): Promise<Machine> {
 export async function updateMachine(
 	id: string,
 	input: UpdateMachineInput,
-): Promise<Machine> {
-	const response = await api.put<Machine>(machineApiPath(id), input);
+): Promise<MachineResponse> {
+	const response = await api.put<MachineResponse>(machineApiPath(id), input);
 	return response.data;
 }
 
@@ -102,7 +103,7 @@ export async function getMachineStatus(
 
 export async function createMachine(
 	input: CreateMachineInput,
-): Promise<Machine> {
-	const response = await api.post<Machine>("/machines", input);
+): Promise<MachineResponse> {
+	const response = await api.post<MachineResponse>("/machines", input);
 	return response.data;
 }

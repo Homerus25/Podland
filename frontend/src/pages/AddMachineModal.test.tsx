@@ -18,6 +18,7 @@ const existingMachine: Machine = {
 	podmanSocketPath: "/run/podman/podman.sock",
 	ownerId: "u-owner",
 	permission: "admin",
+	isOwner: true,
 	createdAt: "2026-08-01T10:00:00Z",
 	updatedAt: "2026-08-01T10:00:00Z",
 };

@@ -46,18 +46,14 @@ const CAPABILITY_TABLE = {
 
 export type Capability = keyof typeof CAPABILITY_TABLE;
 
-// True when the machine's per-caller facts grant the capability. A
-// missing fact denies everything it feeds (undefined `permission`
-// fails every level capability; undefined `isOwner` fails every owner
-// capability) — the detail response can lack both until the list query
-// fills them in.
+// True when the machine's per-caller facts grant the capability. Both
+// facts are always present on a machine the UI holds — the list and the
+// detail responses enrich alike (backend AccessibleMachineResponse) —
+// so the predicate reads them directly.
 export function can(machine: Machine, capability: Capability): boolean {
 	const requirement = CAPABILITY_TABLE[capability];
 	if (requirement === "owner") {
-		return machine.isOwner === true;
-	}
-	if (machine.permission === undefined) {
-		return false;
+		return machine.isOwner;
 	}
 	return LEVEL_RANK[machine.permission] >= LEVEL_RANK[requirement];
 }

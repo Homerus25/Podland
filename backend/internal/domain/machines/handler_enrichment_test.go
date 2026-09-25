@@ -13,11 +13,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// listRow mirrors the wire shape of one GET /api/machines element.
+// enrichedRow mirrors the wire shape of the enrichment endpoints' body:
+// one GET /api/machines element, or the GET /api/machines/{id} body.
 // IsOwner is a pointer so the decode distinguishes "present, false"
-// from "absent": the field must be present on every row, with an
+// from "absent": the field must be present on every response, with an
 // explicit false for grantees.
-type listRow struct {
+type enrichedRow struct {
 	MachineResponse
 	IsOwner *bool `json:"isOwner"`
 }
@@ -51,11 +52,69 @@ func newListedMachine(id, ownerID string) *models.Machine {
 	}
 }
 
-func decodeListRows(t *testing.T, body string) []listRow {
+func decodeListRows(t *testing.T, body string) []enrichedRow {
 	t.Helper()
-	var rows []listRow
+	var rows []enrichedRow
 	require.NoError(t, json.Unmarshal([]byte(body), &rows))
 	return rows
+}
+
+// getRequest serves GET /api/machines/{id} as userID over the real get
+// handler and service, with mock repositories seeded by seed.
+func getRequest(t *testing.T, userID string, seed func(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository)) *httptest.ResponseRecorder {
+	t.Helper()
+
+	machineRepo := testutils.NewMockMachineRepository()
+	accessRepo := testutils.NewMockMachineAccessRepository()
+	if seed != nil {
+		seed(machineRepo, accessRepo)
+	}
+	service := NewMachineService(machineRepo, accessRepo, testutils.NewMockConnectionManager(), testutils.NewMockEncryptionService(), newFakeSSHInvalidator())
+
+	return testutils.Perform(NewMachineHandler(service).Get, testutils.Request{
+		Method:    http.MethodGet,
+		Path:      "/api/machines/machine-1",
+		UserID:    userID,
+		URLParams: map[string]string{"id": "machine-1"},
+	})
+}
+
+// TestMachineHandler_Get_CallerFacts pins the detail endpoint's
+// per-caller enrichment: the response carries the caller's stored
+// permission and isOwner exactly as the list rows do, so gating facts
+// are always present on the machine object.
+func TestMachineHandler_Get_CallerFacts(t *testing.T) {
+	t.Run("owner reads their admin row and isOwner true", func(t *testing.T) {
+		w := getRequest(t, "owner-1", func(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository) {
+			machineRepo.AddMachine(newListedMachine("machine-1", "owner-1"))
+			accessRepo.AddAccess("machine-1", "owner-1", models.PermissionAdmin, time.Now().UTC())
+		})
+
+		require.Equal(t, http.StatusOK, w.Result().StatusCode)
+		var row enrichedRow
+		require.NoError(t, json.Unmarshal([]byte(w.Body.String()), &row))
+		require.NotNil(t, row.IsOwner, "isOwner must be present on the detail response")
+		assert.True(t, *row.IsOwner)
+		assert.Equal(t, models.PermissionAdmin, row.Permission)
+	})
+
+	t.Run("grantees read the granted level and an explicit isOwner false", func(t *testing.T) {
+		for _, level := range []string{models.PermissionRead, models.PermissionWrite, models.PermissionAdmin} {
+			t.Run(level, func(t *testing.T) {
+				w := getRequest(t, "grantee-1", func(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository) {
+					machineRepo.AddMachine(newListedMachine("machine-1", "owner-1"))
+					accessRepo.AddAccess("machine-1", "grantee-1", level, time.Now().UTC())
+				})
+
+				require.Equal(t, http.StatusOK, w.Result().StatusCode)
+				var row enrichedRow
+				require.NoError(t, json.Unmarshal([]byte(w.Body.String()), &row))
+				require.NotNil(t, row.IsOwner, "isOwner must be present on the detail response")
+				assert.False(t, *row.IsOwner)
+				assert.Equal(t, level, row.Permission)
+			})
+		}
+	})
 }
 
 // TestMachineHandler_List_IsOwner pins the list endpoint's ownership
@@ -107,7 +166,7 @@ func TestMachineHandler_List_IsOwner(t *testing.T) {
 		rows := decodeListRows(t, w.Body.String())
 		require.Len(t, rows, 2)
 
-		byID := make(map[string]listRow, len(rows))
+		byID := make(map[string]enrichedRow, len(rows))
 		for _, row := range rows {
 			byID[row.ID] = row
 		}

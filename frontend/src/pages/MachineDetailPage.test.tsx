@@ -240,27 +240,33 @@ describe("MachineDetailPage", () => {
 });
 
 describe("page-level permission gating on the machine detail page", () => {
-	it("derives write access from the machines list when the detail response omits permission", async () => {
-		// The backend only populates `permission` on GET /api/machines; the
-		// detail response omits it, so the page must merge the list's level in.
+	it("gates from the detail response's own per-caller facts, never the machines list", async () => {
+		// The list answers owner-admin for the same machine while the
+		// detail answers read-grantee. Only the detail facts may drive
+		// the page: the list query is not part of the detail page's data.
 		server.use(
-			http.get("*/api/machines", () => HttpResponse.json([machineFixture()])),
-			http.get("*/api/machines/m-1", () => {
-				const { permission: _permission, ...detail } = machineFixture();
-				return HttpResponse.json(detail);
-			}),
+			http.get("*/api/machines", () =>
+				HttpResponse.json([
+					machineFixture({ permission: "admin", isOwner: true }),
+				]),
+			),
+			http.get("*/api/machines/m-1", () =>
+				HttpResponse.json(
+					machineFixture({ permission: "read", isOwner: false }),
+				),
+			),
 			http.get("*/api/machines/m-1/secrets", () => HttpResponse.json([])),
 		);
 		renderApp("/machines/m-1", {
 			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
 		await screen.findByText(machineFixture().name);
-		await userEvent.click(screen.getByRole("tab", { name: /secrets/i }));
+		expect(screen.getByTestId("machine-permission")).toHaveTextContent("read");
 
-		await screen.findByTestId("create-secret-button");
+		await userEvent.click(screen.getByRole("tab", { name: /secrets/i }));
+		await screen.findByTestId("secrets-permission-hint");
 		expect(
-			screen.queryByTestId("secrets-permission-hint"),
+			screen.queryByTestId("create-secret-button"),
 		).not.toBeInTheDocument();
-		expect(screen.getByTestId("machine-permission")).toHaveTextContent("admin");
 	});
 });

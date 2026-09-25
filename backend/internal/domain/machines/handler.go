@@ -42,14 +42,17 @@ func (h *MachineHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Get handles getting a machine by ID
+// Get handles getting a machine by ID. The service returns the machine
+// with the caller's stored permission; the response carries the same
+// per-caller enrichment as the list (FromAccessibleMachine), so the
+// client's gating facts are always present on the machine object.
 func (h *MachineHandler) Get(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (MachineResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (AccessibleMachineResponse, error) {
 		machine, err := h.service.GetMachineByID(userID, machineID)
 		if err != nil {
-			return MachineResponse{}, err
+			return AccessibleMachineResponse{}, err
 		}
-		return FromModel(machine), nil
+		return FromAccessibleMachine(*machine, userID), nil
 	})
 }
 
@@ -79,7 +82,7 @@ func (h *MachineHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 // List handles listing the machines the caller can access
 func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
-	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) ([]MachineListResponse, error) {
+	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) ([]AccessibleMachineResponse, error) {
 		machines, err := h.service.ListAllMachines(userID)
 		if err != nil {
 			return nil, err

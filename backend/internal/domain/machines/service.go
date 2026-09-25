@@ -13,6 +13,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/google/uuid"
 )
 
@@ -56,7 +57,9 @@ type CreateMachineRequest struct {
 }
 
 // MachineResponse represents a machine in API responses. Permission is
-// the caller's permission and is only populated by the list endpoint.
+// the caller's permission; it stays empty on the shapes this type is
+// built for directly (Create, Update) and is populated by the enriched
+// responses the list and detail endpoints answer (AccessibleMachineResponse).
 type MachineResponse struct {
 	ID                string `json:"id"`
 	Name              string `json:"name"`
@@ -89,21 +92,23 @@ func FromModel(machine *models.Machine) MachineResponse {
 	}
 }
 
-// MachineListResponse is one element of the list endpoint's response:
-// the machine fields plus the per-caller enrichment (the caller's
-// permission and ownership). IsOwner is a plain bool, never omitted —
-// a grantee must read an explicit false. The single-machine endpoints
-// answer MachineResponse and stay untouched.
-type MachineListResponse struct {
+// AccessibleMachineResponse is a machine DTO carrying the per-caller
+// enrichment: the machine fields plus the caller's permission and
+// ownership. IsOwner is a plain bool, never omitted — a grantee must
+// read an explicit false. Both enrichment endpoints answer it: the list
+// endpoint one per accessible machine, the detail endpoint for the
+// requested machine — so gating facts are always present on a machine
+// object the client holds.
+type AccessibleMachineResponse struct {
 	MachineResponse
 	IsOwner bool `json:"isOwner"`
 }
 
-// FromAccessibleMachine builds the list endpoint's element for one
-// accessible machine: the machine fields, the caller's permission, and
-// the caller-owns-it fact computed for the requesting user.
-func FromAccessibleMachine(machine models.AccessibleMachine, callerID string) MachineListResponse {
-	response := MachineListResponse{MachineResponse: FromModel(machine.Machine)}
+// FromAccessibleMachine builds the enriched DTO for one accessible
+// machine: the machine fields, the caller's permission, and the
+// caller-owns-it fact computed for the requesting user.
+func FromAccessibleMachine(machine models.AccessibleMachine, callerID string) AccessibleMachineResponse {
+	response := AccessibleMachineResponse{MachineResponse: FromModel(machine.Machine)}
 	response.Permission = machine.Permission
 	response.IsOwner = machine.OwnerID == callerID
 	return response
@@ -112,8 +117,8 @@ func FromAccessibleMachine(machine models.AccessibleMachine, callerID string) Ma
 // ToMachineListResponse builds the list endpoint's response from the
 // machines the service returns, computing every row's per-caller facts
 // for the requesting user.
-func ToMachineListResponse(machines []models.AccessibleMachine, callerID string) []MachineListResponse {
-	responses := make([]MachineListResponse, len(machines))
+func ToMachineListResponse(machines []models.AccessibleMachine, callerID string) []AccessibleMachineResponse {
+	responses := make([]AccessibleMachineResponse, len(machines))
 	for i, machine := range machines {
 		responses[i] = FromAccessibleMachine(machine, callerID)
 	}
@@ -241,8 +246,17 @@ func (s *MachineService) UserHasAccess(userID, machineID string) (bool, error) {
 	return s.accessRepo.HasAccess(machineID, userID)
 }
 
-// GetMachineByID retrieves a machine by ID if the user has access
-func (s *MachineService) GetMachineByID(userID, machineID string) (*models.Machine, error) {
+// GetMachineByID retrieves a machine by ID together with the caller's
+// per-caller facts: the stored permission level rides the returned
+// AccessibleMachine so the detail endpoint enriches its response the
+// same way the list does. Access is the level contract at read floor
+// through its single owner (permission.RequireLevel): a failing lookup
+// answers ErrInternalError (500 via the envelope), a level below read —
+// an empty row included — is ErrAccessDenied, and the re-read keeps
+// grant changes effective immediately. The level is then looked up once
+// more for the response, so the value the machine carries is the one
+// the gate just passed.
+func (s *MachineService) GetMachineByID(userID, machineID string) (*models.AccessibleMachine, error) {
 	machine, err := s.machineRepo.GetByID(machineID)
 	if err != nil {
 		return nil, err
@@ -251,17 +265,15 @@ func (s *MachineService) GetMachineByID(userID, machineID string) (*models.Machi
 		return nil, errors.ErrMachineNotFound
 	}
 
-	// Check if user has access to the machine. A failing lookup is a
-	// storage error (500), not a denial.
-	hasAccess, err := s.UserHasAccess(userID, machineID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check machine access: %w", err)
+	if err := permission.RequireLevel(s.accessRepo, machineID, userID, models.PermissionRead); err != nil {
+		return nil, err
 	}
-	if !hasAccess {
-		return nil, errors.ErrAccessDenied
+	level, err := s.accessRepo.GetPermission(machineID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get machine permission: %w", err)
 	}
 
-	return machine, nil
+	return &models.AccessibleMachine{Machine: machine, Permission: level}, nil
 }
 
 // Machine status values returned by GetMachineStatus. There is no third

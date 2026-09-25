@@ -31,13 +31,9 @@ export interface LoginResponse {
 
 export type MachinePermission = "read" | "write" | "admin";
 
-// Machine as returned by GET /api/machines and /api/machines/{id}
-// (backend/internal/domain/machines/service.go). The two per-caller
-// enrichment facts are list-only: MachineListResponse populates
-// `permission` and `isOwner`, the single-machine MachineResponse omits
-// both, so they are optional here and gating reads a missing fact as
-// denial (never a silent allow).
-export interface Machine {
+// Machine fields every machines endpoint returns — the bare shape the
+// backend calls MachineResponse (Create and Update answer it).
+export interface MachineResponse {
 	id: string;
 	name: string;
 	description: string;
@@ -47,10 +43,18 @@ export interface Machine {
 	sshKeyFingerprint: string;
 	podmanSocketPath: string;
 	ownerId: string;
-	permission?: MachinePermission;
-	isOwner?: boolean;
 	createdAt: string;
 	updatedAt: string;
+}
+
+// Machine as the enrichment endpoints return it — GET /api/machines and
+// GET /api/machines/{id} both enrich every response with the caller's
+// own permission and ownership (backend/internal/domain/machines
+// /service.go AccessibleMachineResponse), so gating reads the facts
+// straight off the machine object.
+export interface Machine extends MachineResponse {
+	permission: MachinePermission;
+	isOwner: boolean;
 }
 
 // Access grant as returned by GET /api/machines/{id}/access

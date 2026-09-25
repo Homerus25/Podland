@@ -112,12 +112,16 @@ Get details of a specific machine.
   "sshKeyFingerprint": "string",
   "podmanSocketPath": "/run/podman/podman.sock",
   "ownerId": "string (uuid)",
+  "permission": "read|write|admin",
+  "isOwner": true,
   "createdAt": "ISO8601 timestamp",
   "updatedAt": "ISO8601 timestamp"
 }
 ```
 
-The detail response carries no per-caller fields: `permission` and `isOwner` ride the list endpoint (`GET /api/machines`) only.
+The detail response carries the same per-caller enrichment as the list endpoint:
+- `permission`: the caller's own permission level on the machine
+- `isOwner`: `true` exactly when the caller is the machine's owner; never omitted, so a grantee reads an explicit `false`
 
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
@@ -176,7 +180,7 @@ Only the owner may update a machine; any other user with an access row (read or 
 **Note:** If `sshPrivateKey` is provided, the backend will test the new connection before persisting: the probe targets the resulting merged connection configuration (request fields override stored ones), a failure answers 400 `CONNECTION_FAILED`, and a probe timeout answers 400 `CONNECTION_TEST_TIMEOUT`. Updates that do not change the key skip the probe.
 
 **Response (Success - 200):**
-- Same as GET /api/machines/{id}
+- The machine fields of GET /api/machines/{id} without the per-caller `permission` and `isOwner` fields (only the list and detail GET responses carry the enrichment)
 
 **Response (Error):**
 - 400: `INVALID_REQUEST`, `INVALID_SSH_KEY`, `CONNECTION_FAILED`, `CONNECTION_TEST_TIMEOUT`

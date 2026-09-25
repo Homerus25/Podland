@@ -324,14 +324,48 @@ func TestMachineService_GetMachineByID(t *testing.T) {
 		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
 
 		// Call GetMachineByID
-		machine, err := service.GetMachineByID(userID, machineID)
+		accessible, err := service.GetMachineByID(userID, machineID)
 
 		// Verify results
 		require.NoError(t, err)
-		require.NotNil(t, machine)
+		require.NotNil(t, accessible)
+		machine := accessible.Machine
 		assert.Equal(t, machineID, machine.ID)
 		assert.Equal(t, "test-machine", machine.Name)
 		assert.Equal(t, userID, machine.OwnerID)
+		// The caller's stored level rides the answer: the detail
+		// endpoint enriches its response from it.
+		assert.Equal(t, models.PermissionAdmin, accessible.Permission)
+	})
+
+	t.Run("grant retrieval carries the granted level", func(t *testing.T) {
+		// Setup mocks
+		mockMachineRepo := testutils.NewMockMachineRepository()
+		mockAccessRepo := testutils.NewMockMachineAccessRepository()
+		mockConnManager := testutils.NewMockConnectionManager()
+		mockEncryption := testutils.NewMockEncryptionService()
+
+		// A machine owned by someone else, granted to our user at read.
+		testMachine := &models.Machine{
+			ID:        machineID,
+			Name:      "shared-machine",
+			OwnerID:   "other-user",
+			Hostname:  "example.com",
+			Port:      22,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+		mockMachineRepo.AddMachine(testMachine)
+		mockAccessRepo.AddAccess(machineID, userID, models.PermissionRead, time.Now())
+
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
+
+		accessible, err := service.GetMachineByID(userID, machineID)
+
+		require.NoError(t, err)
+		require.NotNil(t, accessible)
+		assert.Equal(t, models.PermissionRead, accessible.Permission)
+		assert.NotEqual(t, userID, accessible.OwnerID, "a grantee is not the owner")
 	})
 
 	t.Run("machine not found", func(t *testing.T) {

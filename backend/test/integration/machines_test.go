@@ -289,8 +289,14 @@ func updateMachineCRUD(t *testing.T, machineID string) {
 		// fields actually changed, not just that GET returns the new
 		// values. A test that doesn't compare against the prior state
 		// would pass vacuously if PUT were a no-op and GET returned
-		// whatever it was handed.
+		// whatever it was handed. The GET detail response carries the
+		// per-caller enrichment (issue 198): the owner caller reads
+		// their admin row and isOwner true.
 		before := getMachine(t, machineID)
+		assert.Equal(t, "admin", before.Permission,
+			"the owner's GET detail response must carry the caller's permission")
+		assert.True(t, before.IsOwner,
+			"the owner's GET detail response must carry isOwner true")
 
 		req := updateMachineRequest{
 			Name:        "it-" + suite.RunID + "-crud-renamed",
@@ -322,8 +328,12 @@ func updateMachineCRUD(t *testing.T, machineID string) {
 		assert.NotEqual(t, before.Hostname, updated.Hostname, "hostname must differ from before update")
 
 		// Re-GET to prove the update was persisted, not just echoed
-		// in the PUT response.
+		// in the PUT response. The PUT body carries no per-caller
+		// facts, so they are cleared off the GET response before the
+		// field-equal comparison — the enrichment is pinned above.
 		refetched := getMachine(t, machineID)
+		refetched.Permission = ""
+		refetched.IsOwner = false
 		assert.Equal(t, updated, refetched, "GET after PUT must reflect the persisted state")
 	})
 }
@@ -522,10 +532,12 @@ func findAccess(entries []accessResponse, userID string) *accessResponse {
 // HTTP helpers — shared across the subtests
 // ---------------------------------------------------------------------------
 
-// machineDTO mirrors the fields of machines.MachineResponse that this
-// slice consumes. Kept as a local type so the integration package
-// doesn't import the machines domain package (matching the
-// images/containers slice style).
+// machineDTO mirrors the fields of the machines endpoints' responses
+// that this slice consumes. Kept as a local type so the integration
+// package doesn't import the machines domain package (matching the
+// images/containers slice style). Permission and IsOwner ride the list
+// and GET detail responses (the per-caller enrichment); the PUT
+// response stays bare.
 type machineDTO struct {
 	ID                string `json:"id"`
 	Name              string `json:"name"`
@@ -537,6 +549,7 @@ type machineDTO struct {
 	PodmanSocketPath  string `json:"podmanSocketPath"`
 	OwnerID           string `json:"ownerId"`
 	Permission        string `json:"permission"`
+	IsOwner           bool   `json:"isOwner"`
 	CreatedAt         string `json:"createdAt"`
 	UpdatedAt         string `json:"updatedAt"`
 }
