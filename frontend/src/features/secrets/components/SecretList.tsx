@@ -3,18 +3,15 @@ import {
 	canManageSecrets,
 	type EffectivePermission,
 } from "@features/machines/permissions";
+import { CreateSecretDialog } from "@features/secrets/components/CreateSecretDialog";
 import { SecretDetailModal } from "@features/secrets/components/SecretDetailModal";
-import { SecretForm } from "@features/secrets/components/SecretForm";
 import {
 	useCreateSecret,
 	useDeleteSecret,
 	useSecrets,
 } from "@features/secrets/hooks/useSecrets";
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
-import {
-	ConfirmDialog,
-	MutationDialog,
-} from "@shared/components/MutationDialog";
+import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
@@ -146,16 +143,9 @@ export function SecretList({
 				canManage={canManage}
 			/>
 			{isCreateOpen ? (
-				<MutationDialog
+				<CreateSecretDialog
 					mutation={createSecret}
-					title="Create secret"
 					onClose={() => setIsCreateOpen(false)}
-					body={
-						<SecretForm
-							onSubmit={(input) => createSecret.mutate(input)}
-							isSubmitting={createSecret.isPending}
-						/>
-					}
 				/>
 			) : null}
 		</>

@@ -1,6 +1,11 @@
 import { Button, Text } from "@chakra-ui/react";
 import {
+	ActionDialog,
 	ConfirmDialog,
+	FormDialog,
+	FormFooter,
+	type FormStateSlice,
+	FormValidityScope,
 	MutationDialog,
 	type MutationSlice,
 } from "@shared/components/MutationDialog";
@@ -8,6 +13,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { axiosError } from "@/test/errors";
+import { renderWithQuery } from "@/test/render";
 
 // The module drives the mutation result the caller hands it, never
 // react-query itself: the stub below is the whole interface under test.
@@ -26,6 +32,55 @@ function makeMutation(
 
 function stubBody() {
 	return <Text data-testid="stub-body">Stub body</Text>;
+}
+
+// The body side of the form-id association: a form carrying the id the
+// footer's submit button associates to. The submit handler stands in for
+// the react-hook-form handleSubmit the real bodies own; it calls mutate
+// the same way.
+function stubForm(formId: string, onSubmit: () => void) {
+	return (
+		<form
+			id={formId}
+			data-testid="stub-form"
+			noValidate
+			onSubmit={(event) => {
+				event.preventDefault();
+				onSubmit();
+			}}
+		>
+			<input data-testid="stub-input" />
+		</form>
+	);
+}
+
+// Chakra compiles colorScheme into the emotion class's stylesheet rule;
+// jsdom does not resolve the CSS variables onto the element itself, so the
+// pin reads the palette out of the background rule the button's class
+// carries (base, hover, and active all set it in the button's own palette).
+function colorSchemeOf(button: HTMLElement): string | null {
+	const token = button.className
+		.split(/\s+/)
+		.find((className) => className.startsWith("css-"));
+	if (!token) return null;
+	for (const sheet of Array.from(document.styleSheets)) {
+		let rules: CSSRuleList;
+		try {
+			rules = sheet.cssRules;
+		} catch {
+			continue;
+		}
+		for (const rule of Array.from(rules)) {
+			if (!(rule instanceof CSSStyleRule)) continue;
+			const palette = rule.cssText.match(
+				/background: var\(--chakra-colors-([a-z]+)-\d+\)/,
+			);
+			if (rule.selectorText?.includes(token) && palette) {
+				return palette[1];
+			}
+		}
+	}
+	return null;
 }
 
 describe("MutationDialog lifecycle", () => {
@@ -348,5 +403,364 @@ describe("ConfirmDialog danger footer", () => {
 			renderConfirm.mock.calls[renderConfirm.mock.calls.length - 1][0];
 		expect(latestCall.error).toBe(error);
 		expect(latestCall.isPending).toBe(false);
+	});
+});
+
+describe("ConfirmDialog confirm knobs", () => {
+	it("keeps the destructive defaults when both knobs are absent: red confirm under confirm-delete-button labeled Delete", () => {
+		renderWithQuery(
+			<ConfirmDialog
+				mutation={makeMutation()}
+				title="Delete secret"
+				confirm={() => "db-password"}
+				onClose={vi.fn()}
+				body={stubBody()}
+			/>,
+			{ chakra: true },
+		);
+
+		const confirmButton = screen.getByTestId("confirm-delete-button");
+		expect(confirmButton).toHaveTextContent("Delete");
+		expect(colorSchemeOf(confirmButton)).toBe("red");
+	});
+
+	it("routes confirmTestId and confirmColorScheme into the confirm button, keeping the confirmLabel seam", () => {
+		renderWithQuery(
+			<ConfirmDialog
+				mutation={makeMutation()}
+				title="Restart quadlet"
+				confirm={() => "db-backup"}
+				onClose={vi.fn()}
+				body={stubBody()}
+				confirmTestId="confirm-lifecycle-button"
+				confirmColorScheme="gray"
+				confirmLabel="Restart quadlet"
+			/>,
+			{ chakra: true },
+		);
+
+		const confirmButton = screen.getByTestId("confirm-lifecycle-button");
+		expect(confirmButton).toHaveTextContent("Restart quadlet");
+		expect(
+			screen.queryByTestId("confirm-delete-button"),
+		).not.toBeInTheDocument();
+		expect(colorSchemeOf(confirmButton)).toBe("gray");
+	});
+});
+
+describe("ActionDialog action footer", () => {
+	it("renders the shell with ghost Cancel and the required confirm, and cancel closes without firing onConfirm", async () => {
+		const user = userEvent.setup();
+		const onConfirm = vi.fn();
+		const onClose = vi.fn();
+
+		render(
+			<ActionDialog
+				title="Update all quadlets"
+				body={stubBody()}
+				confirmLabel="Update all"
+				confirmTestId="confirm-auto-update-button"
+				onConfirm={onConfirm}
+				onClose={onClose}
+			/>,
+		);
+
+		expect(screen.getByTestId("modal")).toBeInTheDocument();
+		expect(screen.getByText("Update all quadlets")).toBeInTheDocument();
+		expect(screen.getByTestId("stub-body")).toBeInTheDocument();
+		expect(screen.getByTestId("confirm-auto-update-button")).toHaveTextContent(
+			"Update all",
+		);
+
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+		expect(onClose).toHaveBeenCalledTimes(1);
+		expect(onConfirm).not.toHaveBeenCalled();
+	});
+
+	it("fires onConfirm without closing, renders no error region, and carries confirmColorScheme into the confirm button", async () => {
+		const user = userEvent.setup();
+		const onConfirm = vi.fn();
+		const onClose = vi.fn();
+
+		renderWithQuery(
+			<ActionDialog
+				title="Update all quadlets"
+				body={stubBody()}
+				confirmLabel="Update all"
+				confirmTestId="confirm-auto-update-button"
+				confirmColorScheme="orange"
+				onConfirm={onConfirm}
+				onClose={onClose}
+			/>,
+			{ chakra: true },
+		);
+
+		await user.click(screen.getByTestId("confirm-auto-update-button"));
+
+		expect(onConfirm).toHaveBeenCalledTimes(1);
+		expect(onClose).not.toHaveBeenCalled();
+		expect(screen.getByTestId("modal")).toBeInTheDocument();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+		expect(
+			colorSchemeOf(screen.getByTestId("confirm-auto-update-button")),
+		).toBe("orange");
+	});
+});
+
+describe("FormDialog form preset", () => {
+	it("submits through the body's form via the native form-id association from the footer button", async () => {
+		const user = userEvent.setup();
+		const mutation = makeMutation();
+		const onClose = vi.fn();
+		const submitForm = vi.fn(() => mutation.mutate("gadget-values"));
+
+		renderWithQuery(
+			// The scope sits above the dialog: the form owner renders it, and
+			// React context — not DOM nesting — is what reaches the footer
+			// through the modal portal.
+			<FormValidityScope formState={{ isValid: true, isSubmitting: false }}>
+				<FormDialog
+					mutation={mutation}
+					title="Create gadget"
+					onClose={onClose}
+					formId="gadget-form"
+					submitLabel="Create gadget"
+					submitTestId="gadget-submit"
+					body={stubForm("gadget-form", submitForm)}
+				/>
+			</FormValidityScope>,
+			{ chakra: true },
+		);
+
+		const submit = screen.getByTestId("gadget-submit");
+		expect(submit).toHaveTextContent("Create gadget");
+		expect(submit).toBeEnabled();
+		// The submit lives in the modal footer, outside the body's form:
+		// association is by native form id, not nesting.
+		expect(screen.getByTestId("stub-form").contains(submit)).toBe(false);
+		expect(colorSchemeOf(submit)).toBe("blue");
+
+		await user.click(submit);
+
+		expect(submitForm).toHaveBeenCalledTimes(1);
+		expect(mutation.mutate).toHaveBeenCalledWith("gadget-values");
+		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	it("submits on Enter in a field through the same association", async () => {
+		const user = userEvent.setup();
+		const mutation = makeMutation();
+		const submitForm = vi.fn(() => mutation.mutate("gadget-values"));
+
+		render(
+			<FormValidityScope formState={{ isValid: true, isSubmitting: false }}>
+				<FormDialog
+					mutation={mutation}
+					title="Create gadget"
+					onClose={vi.fn()}
+					formId="gadget-form"
+					submitLabel="Create gadget"
+					submitTestId="gadget-submit"
+					body={stubForm("gadget-form", submitForm)}
+				/>
+			</FormValidityScope>,
+		);
+
+		await user.type(screen.getByTestId("stub-input"), "{enter}");
+
+		expect(submitForm).toHaveBeenCalledTimes(1);
+		expect(mutation.mutate).toHaveBeenCalledWith("gadget-values");
+	});
+
+	it("canceling closes without sending anything from the form footer", async () => {
+		const user = userEvent.setup();
+		const mutation = makeMutation();
+		const onClose = vi.fn();
+		const submitForm = vi.fn(() => mutation.mutate("gadget-values"));
+
+		render(
+			<FormValidityScope formState={{ isValid: true, isSubmitting: false }}>
+				<FormDialog
+					mutation={mutation}
+					title="Create gadget"
+					onClose={onClose}
+					formId="gadget-form"
+					submitLabel="Create gadget"
+					submitTestId="gadget-submit"
+					body={stubForm("gadget-form", submitForm)}
+				/>
+			</FormValidityScope>,
+		);
+
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+		expect(onClose).toHaveBeenCalledTimes(1);
+		expect(submitForm).not.toHaveBeenCalled();
+		expect(mutation.mutate).not.toHaveBeenCalled();
+	});
+
+	it("disables submit while the published state is invalid or submitting or the mutation is pending, keeping cancel enabled", () => {
+		const dialog = (props: {
+			isPending: boolean;
+			formState: FormStateSlice;
+		}) => (
+			<FormValidityScope formState={props.formState}>
+				<FormDialog
+					mutation={makeMutation({ isPending: props.isPending })}
+					title="Create gadget"
+					onClose={vi.fn()}
+					formId="gadget-form"
+					submitLabel="Create gadget"
+					submitTestId="gadget-submit"
+					body={stubForm("gadget-form", vi.fn())}
+				/>
+			</FormValidityScope>
+		);
+		const view = render(
+			dialog({
+				isPending: true,
+				formState: { isValid: true, isSubmitting: false },
+			}),
+		);
+		expect(screen.getByTestId("gadget-submit")).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+
+		view.rerender(
+			dialog({
+				isPending: false,
+				formState: { isValid: false, isSubmitting: false },
+			}),
+		);
+		expect(screen.getByTestId("gadget-submit")).toBeDisabled();
+
+		view.rerender(
+			dialog({
+				isPending: false,
+				formState: { isValid: true, isSubmitting: true },
+			}),
+		);
+		expect(screen.getByTestId("gadget-submit")).toBeDisabled();
+
+		view.rerender(
+			dialog({
+				isPending: false,
+				formState: { isValid: true, isSubmitting: false },
+			}),
+		);
+		expect(screen.getByTestId("gadget-submit")).toBeEnabled();
+	});
+});
+
+describe("FormFooter standalone", () => {
+	it("renders the footer shape: submit fires the associated form, cancel fires onCancel", async () => {
+		const user = userEvent.setup();
+		const onSubmit = vi.fn();
+		const onCancel = vi.fn();
+
+		render(
+			<>
+				<form
+					id="solo-form"
+					noValidate
+					onSubmit={(event) => {
+						event.preventDefault();
+						onSubmit();
+					}}
+				>
+					<input data-testid="solo-input" />
+				</form>
+				<FormFooter
+					formId="solo-form"
+					submitLabel="Save machine"
+					submitTestId="machine-form-save"
+					pending={false}
+					onCancel={onCancel}
+				/>
+			</>,
+		);
+
+		const submit = screen.getByTestId("machine-form-save");
+		expect(submit).toHaveTextContent("Save machine");
+		expect(submit).toBeEnabled();
+
+		await user.click(submit);
+		expect(onSubmit).toHaveBeenCalledTimes(1);
+
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+		expect(onCancel).toHaveBeenCalledTimes(1);
+	});
+
+	it("names the cancel button when given a cancelTestId", () => {
+		const onCancel = vi.fn();
+		render(
+			<>
+				<form id="solo-form" />
+				<FormFooter
+					formId="solo-form"
+					submitLabel="Save machine"
+					submitTestId="machine-form-save"
+					pending={false}
+					onCancel={onCancel}
+					cancelTestId="machine-form-cancel"
+				/>
+			</>,
+		);
+
+		expect(screen.getByTestId("machine-form-cancel")).toBeEnabled();
+	});
+
+	it("applies the one submit policy and drops cancel without an onCancel", () => {
+		const footer = (props: { pending: boolean; onCancel?: boolean }) => (
+			<FormFooter
+				formId="solo-form"
+				submitLabel="Save machine"
+				submitTestId="machine-form-save"
+				pending={props.pending}
+				onCancel={props.onCancel ? vi.fn() : undefined}
+			/>
+		);
+		const view = render(
+			<>
+				<form id="solo-form" />
+				{footer({ pending: true, onCancel: true })}
+			</>,
+		);
+		expect(screen.getByTestId("machine-form-save")).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+
+		view.rerender(
+			<>
+				<form id="solo-form" />
+				{footer({ pending: false, onCancel: true })}
+			</>,
+		);
+		expect(screen.getByTestId("machine-form-save")).toBeEnabled();
+
+		view.rerender(
+			<FormValidityScope formState={{ isValid: false, isSubmitting: false }}>
+				<form id="solo-form" />
+				{footer({ pending: false, onCancel: true })}
+			</FormValidityScope>,
+		);
+		expect(screen.getByTestId("machine-form-save")).toBeDisabled();
+
+		view.rerender(
+			<FormValidityScope formState={{ isValid: true, isSubmitting: true }}>
+				<form id="solo-form" />
+				{footer({ pending: false, onCancel: true })}
+			</FormValidityScope>,
+		);
+		expect(screen.getByTestId("machine-form-save")).toBeDisabled();
+
+		view.rerender(
+			<>
+				<form id="solo-form" />
+				{footer({ pending: false, onCancel: false })}
+			</>,
+		);
+		expect(
+			screen.queryByRole("button", { name: "Cancel" }),
+		).not.toBeInTheDocument();
 	});
 });

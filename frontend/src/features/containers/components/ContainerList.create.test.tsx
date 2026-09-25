@@ -70,9 +70,12 @@ describe("ContainerList create", () => {
 		expect(screen.getByLabelText(/image/i)).toBeRequired();
 		expect(screen.getByLabelText(/name/i)).not.toBeRequired();
 		expect(screen.getByLabelText(/command/i)).not.toBeRequired();
+		// The empty form is invalid, so the module footer's submit starts
+		// disabled and enables only once the image is filled.
+		expect(screen.getByTestId("container-form-submit")).toBeDisabled();
 	});
 
-	it("blocks submit with an empty image and sends no request", async () => {
+	it("starts with the submit disabled on an empty form and sends no request", async () => {
 		resetCounters();
 		server.use(
 			containersHandler(() => [existing]),
@@ -82,12 +85,11 @@ describe("ContainerList create", () => {
 
 		await user.click(screen.getByTestId("container-form-submit"));
 
-		expect(await screen.findByText("Image is required")).toBeInTheDocument();
 		expect(createRequests.count).toBe(0);
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 	});
 
-	it("blocks submit with a whitespace-only image and sends no request", async () => {
+	it("shows the image error while typing a whitespace-only value and sends no request", async () => {
 		resetCounters();
 		server.use(
 			containersHandler(() => [existing]),
@@ -96,9 +98,10 @@ describe("ContainerList create", () => {
 		const user = await openCreateModal();
 
 		await user.type(screen.getByLabelText(/image/i), "   ");
+		expect(await screen.findByText("Image is required")).toBeInTheDocument();
+		expect(screen.getByTestId("container-form-submit")).toBeDisabled();
 		await user.click(screen.getByTestId("container-form-submit"));
 
-		expect(await screen.findByText("Image is required")).toBeInTheDocument();
 		expect(createRequests.count).toBe(0);
 	});
 

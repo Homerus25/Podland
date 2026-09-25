@@ -217,22 +217,6 @@ describe("QuadletList lifecycle", () => {
 		await waitFor(() => expect(lifecycleRequests).toHaveLength(1));
 	});
 
-	it("shows the confirm button as pending while a stop runs", async () => {
-		server.use(
-			quadletsHandler(() => [quadletFixture()]),
-			captureLifecycle("stop", 100),
-		);
-		const user = await openOptionsModal("stop");
-
-		const confirm = screen.getByTestId("confirm-lifecycle-button");
-		await user.click(confirm);
-
-		await waitFor(() => {
-			expect(confirm).toBeDisabled();
-			expect(confirm).toHaveAttribute("data-loading");
-		});
-	});
-
 	it("refetches the list on success so the state badge shows the new state", async () => {
 		let stopped = false;
 		server.use(
@@ -292,10 +276,14 @@ describe("QuadletList lifecycle", () => {
 
 		await user.click(screen.getByTestId("confirm-lifecycle-button"));
 
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("QUADLET_NOT_FOUND")).toBeInTheDocument();
-		expect(screen.getByText("Quadlet not found")).toBeInTheDocument();
-		expect(screen.getByTestId("modal")).toBeInTheDocument();
-		expect(screen.getByTestId("confirm-lifecycle-button")).toBeEnabled();
+		// The envelope renders inside the still-open modal, in the module's
+		// error region above the body; stay-open and button state are the
+		// module suite's pins.
+		const modal = screen.getByTestId("modal");
+		expect(
+			await within(modal).findByTestId("mutation-dialog-error"),
+		).toBeInTheDocument();
+		expect(within(modal).getByText("QUADLET_NOT_FOUND")).toBeInTheDocument();
+		expect(within(modal).getByText("Quadlet not found")).toBeInTheDocument();
 	});
 });

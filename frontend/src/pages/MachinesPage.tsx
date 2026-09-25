@@ -12,9 +12,7 @@ import {
 	useCreateMachine,
 	useMachines,
 } from "@features/machines/hooks/useMachines";
-import type { CreateMachineInput } from "@features/machines/services/machinesApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { MutationDialog } from "@shared/components/MutationDialog";
 import { getApiError } from "@shared/utils/api";
 import { useState } from "react";
 
@@ -54,18 +52,10 @@ export function MachinesPage() {
 					</SimpleGrid>
 				))}
 			{isAddOpen ? (
-				<MutationDialog
+				<MachineForm
+					mode="create"
 					mutation={createMachine}
-					title="Add Machine"
 					onClose={() => setIsAddOpen(false)}
-					body={
-						<MachineForm
-							onSubmit={(input) =>
-								createMachine.mutate(input as CreateMachineInput)
-							}
-							isSubmitting={createMachine.isPending}
-						/>
-					}
 				/>
 			) : null}
 		</VStack>

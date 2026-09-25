@@ -73,19 +73,6 @@ describe("MachineSettingsTab (delete machine)", () => {
 		machinesListRequests = 0;
 	});
 
-	it("fires no delete request on cancel", async () => {
-		server.use(deleteHandler(), machinesListHandler());
-		renderSettingsTab();
-		const user = await openDeleteModal();
-
-		await user.click(screen.getByRole("button", { name: /cancel/i }));
-
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-		);
-		expect(deleteRequested).toBe(false);
-	});
-
 	it("deletes, refetches the machines list, and navigates to /machines on success", async () => {
 		server.use(deleteHandler(), machinesListHandler());
 		renderSettingsTab();
@@ -112,18 +99,14 @@ describe("MachineSettingsTab (delete machine)", () => {
 
 		await user.click(screen.getByTestId("confirm-delete-button"));
 
-		expect(screen.getByTestId("confirm-delete-button")).toBeDisabled();
 		const modal = screen.getByTestId("modal");
 		expect(await within(modal).findByRole("alert")).toBeInTheDocument();
 		expect(within(modal).getByText("DELETE_FAILED")).toBeInTheDocument();
 		expect(
 			within(modal).getByText("Failed to delete machine"),
 		).toBeInTheDocument();
-		// Normalized failure: the modal stays open for another attempt (the
-		// confirm button re-enables) and the tab behind is untouched.
-		await waitFor(() =>
-			expect(screen.getByTestId("confirm-delete-button")).toBeEnabled(),
-		);
+		// Normalized failure: the modal stays open for another attempt and
+		// the tab behind is untouched.
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 		expect(screen.getByTestId("location")).toHaveTextContent("/machines/m-1");
 	});

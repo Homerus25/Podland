@@ -14,7 +14,7 @@ import {
 	canManageVolumes,
 	type EffectivePermission,
 } from "@features/machines/permissions";
-import { VolumeForm } from "@features/volumes/components/VolumeForm";
+import { CreateVolumeDialog } from "@features/volumes/components/CreateVolumeDialog";
 import {
 	useCreateVolume,
 	useDeleteVolume,
@@ -474,9 +474,8 @@ export function VolumeList({
 				/>
 			) : null}
 			{isCreateOpen ? (
-				<MutationDialog
+				<CreateVolumeDialog
 					mutation={createVolume}
-					title="Create volume"
 					onClose={() => setIsCreateOpen(false)}
 					// The created volume arrives through the live mutation result by
 					// the time the module's onSuccess seam fires.
@@ -492,12 +491,6 @@ export function VolumeList({
 							});
 						}
 					}}
-					body={
-						<VolumeForm
-							onSubmit={(input) => createVolume.mutate(input)}
-							isSubmitting={createVolume.isPending}
-						/>
-					}
 				/>
 			) : null}
 		</>

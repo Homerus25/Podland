@@ -1,328 +1,24 @@
-import {
-	Box,
-	Button,
-	Checkbox,
-	FormControl,
-	FormLabel,
-	HStack,
-	Input,
-	Td,
-	Text,
-	Tr,
-	VStack,
-} from "@chakra-ui/react";
+import { Button, Checkbox, Text, VStack } from "@chakra-ui/react";
 import type { EffectivePermission } from "@features/machines/permissions";
 import { canEditMachine } from "@features/machines/permissions";
 import { AutoUpdateModal } from "@features/quadlets/components/AutoUpdateModal";
-import { QuadletForm } from "@features/quadlets/components/QuadletForm";
+import {
+	CreateQuadletDialog,
+	EditQuadletDialog,
+} from "@features/quadlets/components/QuadletDialog";
+import { QuadletRow } from "@features/quadlets/components/QuadletRow";
 import { useQuadletAutoUpdate } from "@features/quadlets/hooks/useQuadletAutoUpdate";
 import {
 	useCreateQuadlet,
 	useDeleteQuadlet,
-	useQuadlet,
 	useQuadlets,
-	useRestartQuadlet,
-	useStartQuadlet,
-	useStopQuadlet,
 	useUpdateQuadlet,
 } from "@features/quadlets/hooks/useQuadlets";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { Modal } from "@shared/components/Modal";
-import {
-	ConfirmDialog,
-	MutationDialog,
-} from "@shared/components/MutationDialog";
+import { ActionDialog, ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
-import { StateBadge } from "@shared/components/StateBadge";
-import { getApiError } from "@shared/utils/api";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-// Stop and restart share the backend's option set (force, timeout), so one
-// modal serves both: the caller names the action and owns the mutation.
-// Defaults mirror the backend's own (force off, timeout unset and therefore
-// omitted from the request), so confirming untouched sends the defaults.
-function LifecycleOptionsModal({
-	quadlet,
-	actionLabel,
-	lifecycle,
-	onClose,
-}: {
-	quadlet: QuadletSummary;
-	actionLabel: string;
-	lifecycle:
-		| ReturnType<typeof useStopQuadlet>
-		| ReturnType<typeof useRestartQuadlet>;
-	onClose: () => void;
-}) {
-	const [force, setForce] = useState(false);
-	const [timeoutSeconds, setTimeoutSeconds] = useState("");
-
-	const confirm = () => {
-		const timeout = Number(timeoutSeconds);
-		lifecycle.mutate(
-			{
-				quadletId: quadlet.id,
-				force,
-				// An empty input means "systemd default", so no timeout parameter
-				// travels; a non-positive or otherwise unparsable value is dropped
-				// for the same reason the backend drops it.
-				timeout: timeout > 0 ? timeout : undefined,
-			},
-			{ onSuccess: onClose },
-		);
-	};
-
-	return (
-		<Modal
-			isOpen
-			onClose={onClose}
-			title={`${actionLabel} quadlet`}
-			footer={
-				<>
-					<Button variant="ghost" onClick={onClose}>
-						Cancel
-					</Button>
-					<Button
-						onClick={confirm}
-						isLoading={lifecycle.isPending}
-						data-testid="confirm-lifecycle-button"
-					>
-						{actionLabel} quadlet
-					</Button>
-				</>
-			}
-		>
-			<Text>
-				{actionLabel} “{quadlet.name}”?
-			</Text>
-			<VStack align="flex-start" mt={3} spacing={2}>
-				<Checkbox
-					isChecked={force}
-					onChange={(event) => setForce(event.target.checked)}
-					data-testid="lifecycle-force-option"
-				>
-					Force
-				</Checkbox>
-				<FormControl>
-					<FormLabel htmlFor="lifecycle-timeout">Timeout (seconds)</FormLabel>
-					<Input
-						id="lifecycle-timeout"
-						type="number"
-						min={1}
-						value={timeoutSeconds}
-						onChange={(event) => setTimeoutSeconds(event.target.value)}
-						placeholder="systemd default"
-						data-testid="lifecycle-timeout-input"
-					/>
-				</FormControl>
-			</VStack>
-			{lifecycle.error ? (
-				<Box mt={2}>
-					<ErrorDisplay error={getApiError(lifecycle.error)} />
-				</Box>
-			) : null}
-		</Modal>
-	);
-}
-
-// Each row owns its lifecycle mutation instances, so pending state and
-// errors are scoped to the affected quadlet and other rows stay usable.
-function QuadletRow({
-	machineId,
-	quadlet,
-	onEdit,
-	onDelete,
-	onShowLogs,
-}: {
-	machineId: string;
-	quadlet: QuadletSummary;
-	onEdit: (quadlet: QuadletSummary) => void;
-	onDelete: (quadlet: QuadletSummary) => void;
-	onShowLogs: (quadlet: QuadletSummary) => void;
-}) {
-	const startQuadlet = useStartQuadlet(machineId);
-	const stopQuadlet = useStopQuadlet(machineId);
-	const restartQuadlet = useRestartQuadlet(machineId);
-	// Stop and restart both run through the options modal; this remembers
-	// which one is open (null = none).
-	const [pendingAction, setPendingAction] = useState<"stop" | "restart" | null>(
-		null,
-	);
-	// Any in-flight lifecycle action takes the row's other lifecycle buttons
-	// with it, so slow systemd operations don't invite double clicks. Other
-	// rows keep their own mutation instances and stay usable.
-	const lifecyclePending =
-		startQuadlet.isPending || stopQuadlet.isPending || restartQuadlet.isPending;
-
-	const actions = {
-		stop: { label: "Stop", mutation: stopQuadlet },
-		restart: { label: "Restart", mutation: restartQuadlet },
-	};
-	const openAction = pendingAction ? actions[pendingAction] : null;
-
-	const openLifecycleOptions = (action: "stop" | "restart") => {
-		actions[action].mutation.reset();
-		setPendingAction(action);
-	};
-
-	const closeLifecycleOptions = () => {
-		openAction?.mutation.reset();
-		setPendingAction(null);
-	};
-
-	const isRunning = quadlet.state === "running";
-	return (
-		<>
-			<Tr data-testid="quadlet-row">
-				<Td fontFamily="mono">{quadlet.name}</Td>
-				<Td fontFamily="mono">{quadlet.resource}</Td>
-				<Td>
-					<StateBadge state={quadlet.state} />
-				</Td>
-				<Td>
-					<HStack spacing={2}>
-						{!isRunning ? (
-							<Button
-								size="xs"
-								variant="outline"
-								colorScheme="green"
-								aria-label={`Start ${quadlet.name}`}
-								onClick={() => startQuadlet.mutate(quadlet.id)}
-								isLoading={startQuadlet.isPending}
-								isDisabled={lifecyclePending}
-								data-testid="start-quadlet-button"
-							>
-								Start
-							</Button>
-						) : null}
-						{isRunning ? (
-							<Button
-								size="xs"
-								variant="outline"
-								aria-label={`Stop ${quadlet.name}`}
-								onClick={() => openLifecycleOptions("stop")}
-								isDisabled={lifecyclePending}
-								data-testid="stop-quadlet-button"
-							>
-								Stop
-							</Button>
-						) : null}
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Restart ${quadlet.name}`}
-							onClick={() => openLifecycleOptions("restart")}
-							isDisabled={lifecyclePending}
-							data-testid="restart-quadlet-button"
-						>
-							Restart
-						</Button>
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Logs ${quadlet.name}`}
-							onClick={() => onShowLogs(quadlet)}
-						>
-							Logs
-						</Button>
-					</HStack>
-				</Td>
-				<Td>
-					<Button
-						size="xs"
-						variant="outline"
-						aria-label={`Edit ${quadlet.name}`}
-						onClick={() => onEdit(quadlet)}
-						data-testid="edit-quadlet-button"
-					>
-						Edit
-					</Button>
-				</Td>
-				<Td>
-					<Button
-						size="xs"
-						colorScheme="red"
-						variant="outline"
-						aria-label={`Delete ${quadlet.name}`}
-						onClick={() => onDelete(quadlet)}
-						data-testid="delete-quadlet-button"
-					>
-						Delete
-					</Button>
-				</Td>
-			</Tr>
-			{startQuadlet.error ? (
-				<Tr>
-					<Td colSpan={6}>
-						<ErrorDisplay error={getApiError(startQuadlet.error)} />
-					</Td>
-				</Tr>
-			) : null}
-			{openAction ? (
-				<LifecycleOptionsModal
-					quadlet={quadlet}
-					actionLabel={openAction.label}
-					lifecycle={openAction.mutation}
-					onClose={closeLifecycleOptions}
-				/>
-			) : null}
-		</>
-	);
-}
-
-// The edit adapter over the core. The mutation machinery - error region,
-// close-on-success, and the reset lifecycle - is MutationDialog's; the body
-// keeps the in-modal entity loading because the detail query's loading and
-// error states are the body's own (the core has no query knowledge). The
-// editor seeds the shared form from the get endpoint; that query drops its
-// cache on unmount (gcTime 0), so reopening after a save never serves the
-// pre-edit file.
-function EditQuadletModal({
-	machineId,
-	quadlet,
-	updateQuadlet,
-	onClose,
-}: {
-	machineId: string;
-	quadlet: QuadletSummary;
-	updateQuadlet: ReturnType<typeof useUpdateQuadlet>;
-	onClose: () => void;
-}) {
-	const { data, isPending, error } = useQuadlet(machineId, quadlet.id);
-
-	return (
-		<MutationDialog
-			mutation={updateQuadlet}
-			title={`Edit quadlet — ${quadlet.name}`}
-			onClose={onClose}
-			body={
-				isPending ? (
-					<Text data-testid="quadlet-edit-loading">Loading content…</Text>
-				) : error ? (
-					<ErrorDisplay error={getApiError(error)} />
-				) : data ? (
-					<QuadletForm
-						mode="edit"
-						seed={{
-							name: data.name,
-							resource: data.resource,
-							content: data.content,
-						}}
-						onSubmit={({ content }) =>
-							updateQuadlet.mutate({
-								quadletId: quadlet.id,
-								content,
-							})
-						}
-						isSubmitting={updateQuadlet.isPending}
-					/>
-				) : null
-			}
-		/>
-	);
-}
 
 // Opens the full-page logs view; the page itself bridges the LogViewer onto
 // this quadlet's journalctl endpoint.
@@ -387,8 +83,10 @@ function DeleteQuadletModal({
 
 // The toolbar/triad/table machinery, the plural testids, and the hint swap
 // are ResourceList's; this adapter owns the busiest toolbar of the five
-// (create plus the two auto-update buttons), the row with its lifecycle
-// sub-rows, and the edit/delete/logs/auto-update feature code. Create is a
+// (create plus the two auto-update buttons), the edit/delete/logs/auto-update
+// feature code, and the now-tiny update-all pre-flight (an ActionDialog: the
+// confirm gates the caller-owned stream, so no mutation machinery applies).
+// The row and its lifecycle options modal live in QuadletRow. Create is a
 // write like every other toolbar action, so below manage level the module
 // swaps the whole toolbar for the canonical read hint.
 export function QuadletList({
@@ -470,10 +168,10 @@ export function QuadletList({
 				canManage={canManage}
 			/>
 			{editTarget ? (
-				<EditQuadletModal
+				<EditQuadletDialog
 					machineId={machineId}
 					quadlet={editTarget}
-					updateQuadlet={updateQuadlet}
+					mutation={updateQuadlet}
 					onClose={() => setEditTarget(null)}
 				/>
 			) : null}
@@ -485,37 +183,24 @@ export function QuadletList({
 				/>
 			) : null}
 			{isConfirmUpdateOpen ? (
-				<Modal
-					isOpen
-					onClose={() => setIsConfirmUpdateOpen(false)}
+				<ActionDialog
 					title="Update all"
-					footer={
-						<>
-							<Button
-								variant="ghost"
-								onClick={() => setIsConfirmUpdateOpen(false)}
-							>
-								Cancel
-							</Button>
-							<Button
-								colorScheme="orange"
-								onClick={() => {
-									setIsConfirmUpdateOpen(false);
-									autoUpdate.run(false);
-									setIsAutoUpdateOpen(true);
-								}}
-								data-testid="confirm-auto-update-button"
-							>
-								Update all
-							</Button>
-						</>
+					confirmLabel="Update all"
+					confirmTestId="confirm-auto-update-button"
+					confirmColorScheme="orange"
+					onConfirm={() => {
+						setIsConfirmUpdateOpen(false);
+						autoUpdate.run(false);
+						setIsAutoUpdateOpen(true);
+					}}
+					onClose={() => setIsConfirmUpdateOpen(false)}
+					body={
+						<Text>
+							Containers with an auto-update policy will be updated and
+							restarted. Continue?
+						</Text>
 					}
-				>
-					<Text>
-						Containers with an auto-update policy will be updated and restarted.
-						Continue?
-					</Text>
-				</Modal>
+				/>
 			) : null}
 			{isAutoUpdateOpen ? (
 				<AutoUpdateModal
@@ -528,16 +213,9 @@ export function QuadletList({
 				/>
 			) : null}
 			{isCreateOpen ? (
-				<MutationDialog
+				<CreateQuadletDialog
 					mutation={createQuadlet}
-					title="Create quadlet"
 					onClose={() => setIsCreateOpen(false)}
-					body={
-						<QuadletForm
-							onSubmit={(input) => createQuadlet.mutate(input)}
-							isSubmitting={createQuadlet.isPending}
-						/>
-					}
 				/>
 			) : null}
 		</>

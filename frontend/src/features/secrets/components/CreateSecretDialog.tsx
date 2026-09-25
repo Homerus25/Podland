@@ -1,0 +1,138 @@
+import { ViewIcon, ViewOffIcon } from "@chakra-ui/icons";
+import {
+	Button,
+	FormControl,
+	FormErrorMessage,
+	FormLabel,
+	Input,
+	InputGroup,
+	InputRightElement,
+	VStack,
+} from "@chakra-ui/react";
+import type { CreateSecretInput } from "@features/secrets/services/secretsApi";
+import {
+	FormDialog,
+	FormValidityScope,
+	type MutationSlice,
+} from "@shared/components/MutationDialog";
+import { useState } from "react";
+import { useForm } from "react-hook-form";
+
+interface SecretFormValues {
+	name: string;
+	value: string;
+}
+
+// Podman's secret name rules (backend SecretCreateRequest validation):
+// letter-or-digit first, then letters, digits, underscores, dots, dashes.
+const SECRET_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
+
+const SECRET_NAME_MESSAGE =
+	"Name must start with a letter or digit and contain only letters, digits, underscores, dots, or dashes";
+
+interface CreateSecretDialogProps {
+	mutation: MutationSlice<CreateSecretInput>;
+	onClose: () => void;
+}
+
+// Create-secret dialog: a name field and a masked value input with an eye
+// toggle, so shoulder-surfers cannot read the value. The name is trimmed
+// before submit (the backend trims it too); the value is sent byte-identical
+// and never trimmed — only validation looks at its trimmed form, because a
+// masked input makes an accidental whitespace-only value undetectable. This
+// component is the form owner, so it mounts with the dialog (fields start
+// empty on every open) and publishes its validity through the scope for the
+// module footer; failure renders in the module's error region, success
+// closes through it.
+export function CreateSecretDialog({
+	mutation,
+	onClose,
+}: CreateSecretDialogProps) {
+	const [showValue, setShowValue] = useState(false);
+	const { register, handleSubmit, formState } = useForm<SecretFormValues>({
+		defaultValues: { name: "", value: "" },
+		// onChange so the footer submit's disabled state tracks validity as
+		// the user types, not only after a failed submit attempt.
+		mode: "onChange",
+	});
+	const { errors } = formState;
+
+	const submit = handleSubmit((values) => {
+		mutation.mutate({ name: values.name.trim(), value: values.value });
+	});
+
+	return (
+		<FormValidityScope formState={formState}>
+			<FormDialog
+				mutation={mutation}
+				title="Create secret"
+				onClose={onClose}
+				formId="create-secret-form"
+				submitLabel="Create secret"
+				submitTestId="secret-form-submit"
+				body={
+					<form id="create-secret-form" onSubmit={submit} noValidate>
+						<VStack spacing={4} align="stretch">
+							<FormControl isInvalid={!!errors.name} isRequired>
+								<FormLabel htmlFor="secret-name">Name</FormLabel>
+								<Input
+									id="secret-name"
+									fontFamily="mono"
+									placeholder="db-password"
+									{...register("name", {
+										required: "Name is required",
+										// All name rules apply to the TRIMMED name — submit trims it,
+										// so a padded-but-valid name must not be rejected for its
+										// padding.
+										validate: (value) => {
+											const name = value.trim();
+											if (name.length === 0) return "Name is required";
+											if (name.length > 255)
+												return "Name must be at most 255 characters";
+											if (!SECRET_NAME_PATTERN.test(name))
+												return SECRET_NAME_MESSAGE;
+											return true;
+										},
+									})}
+								/>
+								<FormErrorMessage>{errors.name?.message}</FormErrorMessage>
+							</FormControl>
+							<FormControl isInvalid={!!errors.value} isRequired>
+								<FormLabel htmlFor="secret-value">Value</FormLabel>
+								<InputGroup>
+									<Input
+										id="secret-value"
+										fontFamily="mono"
+										type={showValue ? "text" : "password"}
+										autoComplete="off"
+										{...register("value", {
+											required: "Value is required",
+											validate: (value) =>
+												value.trim().length > 0 || "Value is required",
+										})}
+									/>
+									<InputRightElement width="2.75rem">
+										<Button
+											type="button"
+											h="1.5rem"
+											size="xs"
+											p={0}
+											aria-label={
+												showValue ? "Hide secret value" : "Show secret value"
+											}
+											onClick={() => setShowValue((visible) => !visible)}
+											data-testid="toggle-value-visibility"
+										>
+											{showValue ? <ViewOffIcon /> : <ViewIcon />}
+										</Button>
+									</InputRightElement>
+								</InputGroup>
+								<FormErrorMessage>{errors.value?.message}</FormErrorMessage>
+							</FormControl>
+						</VStack>
+					</form>
+				}
+			/>
+		</FormValidityScope>
+	);
+}

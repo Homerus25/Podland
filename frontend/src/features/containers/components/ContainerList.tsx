@@ -1,5 +1,5 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
-import { CreateContainerForm } from "@features/containers/components/CreateContainerForm";
+import { CreateContainerDialog } from "@features/containers/components/CreateContainerDialog";
 import {
 	useContainers,
 	useCreateContainer,
@@ -9,10 +9,7 @@ import {
 } from "@features/containers/hooks/useContainers";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import {
-	ConfirmDialog,
-	MutationDialog,
-} from "@shared/components/MutationDialog";
+import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
@@ -210,16 +207,9 @@ export function ContainerList({ machineId }: { machineId: string }) {
 				/>
 			) : null}
 			{isCreateOpen ? (
-				<MutationDialog
+				<CreateContainerDialog
 					mutation={createContainer}
-					title="Create container"
 					onClose={() => setIsCreateOpen(false)}
-					body={
-						<CreateContainerForm
-							onSubmit={(input) => createContainer.mutate(input)}
-							isSubmitting={createContainer.isPending}
-						/>
-					}
 				/>
 			) : null}
 		</>

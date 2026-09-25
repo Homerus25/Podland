@@ -13,6 +13,11 @@ import {
 	VStack,
 } from "@chakra-ui/react";
 import type { VolumeCreateInput } from "@features/volumes/services/volumesApi";
+import {
+	FormDialog,
+	FormValidityScope,
+	type MutationSlice,
+} from "@shared/components/MutationDialog";
 import { useState } from "react";
 import {
 	type UseFieldArrayReturn,
@@ -32,11 +37,12 @@ interface VolumeFormValues {
 	options: KeyValueEntry[];
 }
 
-interface VolumeFormProps {
-	// Fire-and-forget: the host dialog's MutationDialog closes on success and
-	// renders the failure, so the form only forwards the payload.
-	onSubmit: (input: VolumeCreateInput) => void;
-	isSubmitting: boolean;
+interface CreateVolumeDialogProps {
+	mutation: MutationSlice<VolumeCreateInput>;
+	onClose: () => void;
+	// Fired once on success, before the module closes: the host toasts the
+	// created volume's name from the mutation result here.
+	onSuccess?: () => void;
 }
 
 // Maps filled key/value rows to a record, skipping rows with an empty key
@@ -50,22 +56,25 @@ function entriesToRecord(
 	return Object.fromEntries(filled.map((row) => [row.key.trim(), row.value]));
 }
 
-// Create-volume form: an optional name (empty means podman generates one
+// Create-volume dialog: an optional name (empty means podman generates one
 // for an anonymous volume) and a labels editor up front; driver and driver
 // options sit behind a collapsed "Advanced" section because they are only
-// relevant for specialized storage backends.
-export function VolumeForm({ onSubmit, isSubmitting }: VolumeFormProps) {
+// relevant for specialized storage backends. This component is the form
+// owner, so it mounts with the dialog (fields start empty on every open)
+// and publishes its validity through the scope for the module footer;
+// failure renders in the module's error region, success closes through it.
+export function CreateVolumeDialog({
+	mutation,
+	onClose,
+	onSuccess,
+}: CreateVolumeDialogProps) {
 	const [advancedOpen, setAdvancedOpen] = useState(false);
-	const {
-		register,
-		control,
-		getValues,
-		handleSubmit,
-		formState: { errors, isSubmitting: isSubmittingForm, isValid },
-	} = useForm<VolumeFormValues>({
-		defaultValues: { name: "", labels: [], driver: "", options: [] },
-		mode: "onChange",
-	});
+	const { register, control, getValues, handleSubmit, formState } =
+		useForm<VolumeFormValues>({
+			defaultValues: { name: "", labels: [], driver: "", options: [] },
+			mode: "onChange",
+		});
+	const { errors } = formState;
 	const labels = useFieldArray({ control, name: "labels" });
 	const options = useFieldArray({ control, name: "options" });
 
@@ -78,7 +87,7 @@ export function VolumeForm({ onSubmit, isSubmitting }: VolumeFormProps) {
 	};
 
 	const submit = handleSubmit((values) => {
-		onSubmit({
+		mutation.mutate({
 			name: values.name.trim(),
 			labels: entriesToRecord(values.labels),
 			driver: values.driver.trim() || undefined,
@@ -142,69 +151,72 @@ export function VolumeForm({ onSubmit, isSubmitting }: VolumeFormProps) {
 	);
 
 	return (
-		<form onSubmit={submit} noValidate>
-			<VStack spacing={4} align="stretch">
-				<FormControl isInvalid={!!errors.name}>
-					<FormLabel htmlFor="volume-name">Name (optional)</FormLabel>
-					<Input
-						id="volume-name"
-						fontFamily="mono"
-						placeholder="app-data"
-						{...register("name", {
-							setValueAs: (value) => value.trim(),
-						})}
-					/>
-					<FormHelperText>
-						Leave empty to create an anonymous volume; podman generates its
-						name.
-					</FormHelperText>
-					<FormErrorMessage>{errors.name?.message}</FormErrorMessage>
-				</FormControl>
+		<FormValidityScope formState={formState}>
+			<FormDialog
+				mutation={mutation}
+				title="Create volume"
+				onClose={onClose}
+				onSuccess={onSuccess}
+				formId="create-volume-form"
+				submitLabel="Create volume"
+				submitTestId="volume-form-submit"
+				body={
+					<form id="create-volume-form" onSubmit={submit} noValidate>
+						<VStack spacing={4} align="stretch">
+							<FormControl isInvalid={!!errors.name}>
+								<FormLabel htmlFor="volume-name">Name (optional)</FormLabel>
+								<Input
+									id="volume-name"
+									fontFamily="mono"
+									placeholder="app-data"
+									{...register("name", {
+										setValueAs: (value) => value.trim(),
+									})}
+								/>
+								<FormHelperText>
+									Leave empty to create an anonymous volume; podman generates
+									its name.
+								</FormHelperText>
+								<FormErrorMessage>{errors.name?.message}</FormErrorMessage>
+							</FormControl>
 
-				<FormControl>
-					<FormLabel>Labels</FormLabel>
-					{keyValueEditor("labels", labels, "label")}
-				</FormControl>
+							<FormControl>
+								<FormLabel>Labels</FormLabel>
+								{keyValueEditor("labels", labels, "label")}
+							</FormControl>
 
-				<Button
-					size="sm"
-					variant="link"
-					onClick={() => setAdvancedOpen((open) => !open)}
-					data-testid="volume-advanced-toggle"
-				>
-					{advancedOpen ? "Hide advanced" : "Advanced"}
-				</Button>
-				<Collapse in={advancedOpen}>
-					<Stack spacing={4}>
-						<FormControl>
-							<FormLabel htmlFor="volume-driver">Driver</FormLabel>
-							<Input
-								id="volume-driver"
-								fontFamily="mono"
-								placeholder="local"
-								{...register("driver")}
-							/>
-							<FormHelperText>
-								Defaults to podman's "local" driver.
-							</FormHelperText>
-						</FormControl>
-						<FormControl>
-							<FormLabel>Driver options</FormLabel>
-							{keyValueEditor("options", options, "option")}
-						</FormControl>
-					</Stack>
-				</Collapse>
-
-				<Button
-					type="submit"
-					colorScheme="blue"
-					isLoading={isSubmittingForm || isSubmitting}
-					isDisabled={!isValid || isSubmittingForm || isSubmitting}
-					data-testid="volume-form-submit"
-				>
-					Create volume
-				</Button>
-			</VStack>
-		</form>
+							<Button
+								size="sm"
+								variant="link"
+								onClick={() => setAdvancedOpen((open) => !open)}
+								data-testid="volume-advanced-toggle"
+							>
+								{advancedOpen ? "Hide advanced" : "Advanced"}
+							</Button>
+							<Collapse in={advancedOpen}>
+								<Stack spacing={4}>
+									<FormControl>
+										<FormLabel htmlFor="volume-driver">Driver</FormLabel>
+										<Input
+											id="volume-driver"
+											fontFamily="mono"
+											placeholder="local"
+											{...register("driver")}
+										/>
+										<FormHelperText>
+											Defaults to podman's "local" driver.
+										</FormHelperText>
+									</FormControl>
+									<FormControl>
+										<FormLabel>Driver options</FormLabel>
+										{keyValueEditor("options", options, "option")}
+									</FormControl>
+								</Stack>
+							</Collapse>
+						</VStack>
+					</form>
+				}
+			/>
+		</FormValidityScope>
 	);
 }

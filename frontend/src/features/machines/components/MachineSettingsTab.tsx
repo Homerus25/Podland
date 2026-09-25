@@ -59,6 +59,10 @@ function DeleteMachineSection({ machine }: { machine: Machine }) {
 export function MachineSettingsTab({ machine }: { machine: Machine }) {
 	const updateMachine = useUpdateMachine(machine.id);
 	const permission = effectivePermission(machine);
+	// A cancelled save still runs to completion on the server; this flag
+	// suppresses that late settle so neither the saved banner nor the error
+	// envelope resurrects over the reverted fields. The next save clears it.
+	const [cancelledSave, setCancelledSave] = useState(false);
 
 	if (!canEditMachine(permission)) {
 		return (
@@ -74,7 +78,7 @@ export function MachineSettingsTab({ machine }: { machine: Machine }) {
 	}
 	return (
 		<VStack spacing={4} align="stretch">
-			{updateMachine.isSuccess && (
+			{updateMachine.isSuccess && !cancelledSave && (
 				<Text color="green.500" data-testid="machine-saved">
 					Changes saved.
 				</Text>
@@ -82,9 +86,20 @@ export function MachineSettingsTab({ machine }: { machine: Machine }) {
 			<MachineForm
 				mode="edit"
 				machine={machine}
-				onSubmit={(input) => mutationToPromise(updateMachine.mutate, input)}
-				submitError={updateMachine.error}
-				isSubmitting={updateMachine.isPending}
+				onSubmit={(input) => {
+					setCancelledSave(false);
+					return mutationToPromise(updateMachine.mutate, input);
+				}}
+				// Cancel resets the mutation: isSuccess drops (the saved banner
+				// disappears) and the error envelope clears with the fields
+				// reverted by the form itself. While a save is in flight the
+				// suppression flag also latches, so its late settle stays hidden.
+				onCancel={() => {
+					if (updateMachine.isPending) setCancelledSave(true);
+					updateMachine.reset();
+				}}
+				submitError={cancelledSave ? null : updateMachine.error}
+				pending={updateMachine.isPending}
 			/>
 			{canShareMachine(permission) ? (
 				<>

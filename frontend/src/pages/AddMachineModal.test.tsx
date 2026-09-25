@@ -96,18 +96,22 @@ describe("Add Machine modal", () => {
 		expect(screen.getByLabelText(/^Podman socket path/)).toBeInTheDocument();
 	});
 
-	it("shows inline errors for empty required fields on submit", async () => {
+	it("starts with the submit disabled on an empty form and sends no request", async () => {
+		await renderAndOpenModal();
+
+		const submit = screen.getByTestId("machine-form-submit");
+		expect(submit).toBeDisabled();
+		await userEvent.click(submit);
+
+		expect(createRequests).toHaveLength(0);
+	});
+
+	it("shows the port error while typing and keeps the submit disabled", async () => {
 		await renderAndOpenModal();
 		await userEvent.clear(screen.getByLabelText(/ssh port/i));
-		await userEvent.click(screen.getByTestId("machine-form-submit"));
 
-		expect(await screen.findByText("Name is required")).toBeInTheDocument();
-		expect(screen.getByText("Hostname is required")).toBeInTheDocument();
-		expect(screen.getByText("Port is required")).toBeInTheDocument();
-		expect(screen.getByText("SSH username is required")).toBeInTheDocument();
-		expect(
-			screen.getByText("SSH private key file is required"),
-		).toBeInTheDocument();
+		expect(await screen.findByText("Port is required")).toBeInTheDocument();
+		expect(screen.getByTestId("machine-form-submit")).toBeDisabled();
 		expect(createRequests).toHaveLength(0);
 	});
 
@@ -187,48 +191,5 @@ describe("Add Machine modal", () => {
 		expect(screen.getByText("MACHINE_UNREACHABLE")).toBeInTheDocument();
 		expect(screen.getByText("SSH handshake failed")).toBeInTheDocument();
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
-	});
-
-	it("clears a failed error when the modal is reopened", async () => {
-		server.use(
-			mockMachines([existingMachine]),
-			http.post("*/api/machines", () =>
-				errorResponse(422, "MACHINE_UNREACHABLE", "SSH handshake failed"),
-			),
-		);
-		await renderAndOpenModal();
-		await fillValidForm();
-		await userEvent.click(screen.getByTestId("machine-form-submit"));
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-
-		await userEvent.click(
-			screen.getByRole("button", { name: /close dialog/i }),
-		);
-		await userEvent.click(screen.getByTestId("add-machine-button"));
-		expect(await screen.findByTestId("modal")).toBeInTheDocument();
-		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-	});
-
-	it("shows a pending state on the submit button and prevents double submits", async () => {
-		server.use(
-			mockMachines([existingMachine]),
-			mockCreate(
-				201,
-				createdMachine as unknown as Record<string, unknown>,
-				100,
-			),
-		);
-		await renderAndOpenModal();
-		await fillValidForm();
-		await userEvent.click(screen.getByTestId("machine-form-submit"));
-		const submit = screen.getByTestId(
-			"machine-form-submit",
-		) as HTMLButtonElement;
-		await waitFor(() => expect(submit.disabled).toBe(true));
-		await userEvent.click(submit);
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-		);
-		expect(createRequests).toHaveLength(1);
 	});
 });

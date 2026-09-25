@@ -88,9 +88,12 @@ describe("QuadletList create", () => {
 		expect(content).toBeRequired();
 		expect(content.className).toContain("chakra-textarea");
 		expect((content as HTMLElement).tagName).toBe("TEXTAREA");
+		// The empty form is invalid, so the module footer's submit starts
+		// disabled and enables only once the fields are filled.
+		expect(screen.getByTestId("quadlet-form-submit")).toBeDisabled();
 	});
 
-	it("blocks submit with all fields empty and sends no request", async () => {
+	it("starts with the submit disabled on an empty form and sends no request", async () => {
 		server.use(
 			quadletsHandler(() => [existing]),
 			createHandler(),
@@ -99,14 +102,11 @@ describe("QuadletList create", () => {
 
 		await user.click(screen.getByTestId("quadlet-form-submit"));
 
-		expect(await screen.findByText("Name is required")).toBeInTheDocument();
-		expect(screen.getByText("Resource type is required")).toBeInTheDocument();
-		expect(screen.getByText("Content is required")).toBeInTheDocument();
 		expect(createRequests.count).toBe(0);
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 	});
 
-	it("blocks submit with a whitespace-only name and whitespace-only content", async () => {
+	it("shows the field errors while typing whitespace-only values and sends no request", async () => {
 		server.use(
 			quadletsHandler(() => [existing]),
 			createHandler(),
@@ -115,10 +115,11 @@ describe("QuadletList create", () => {
 
 		await user.type(screen.getByLabelText(/name/i), "   ");
 		await user.type(screen.getByLabelText(/content/i), "   ");
-		await user.click(screen.getByTestId("quadlet-form-submit"));
-
 		expect(await screen.findByText("Name is required")).toBeInTheDocument();
 		expect(screen.getByText("Content is required")).toBeInTheDocument();
+		expect(screen.getByTestId("quadlet-form-submit")).toBeDisabled();
+		await user.click(screen.getByTestId("quadlet-form-submit"));
+
 		expect(createRequests.count).toBe(0);
 	});
 

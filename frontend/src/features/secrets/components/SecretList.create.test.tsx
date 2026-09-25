@@ -93,9 +93,6 @@ describe("SecretList create", () => {
 		// The submit button is disabled while invalid, so the empty-field
 		// errors surface through onChange validation: touch both fields, then
 		// clear them.
-		const submit = screen.getByTestId("secret-form-submit");
-		expect(submit).toBeDisabled();
-
 		await user.type(screen.getByLabelText(/^name/i), "x");
 		await user.type(screen.getByLabelText(/^value/i), "x");
 		await user.clear(screen.getByLabelText(/^name/i));
@@ -103,7 +100,6 @@ describe("SecretList create", () => {
 
 		expect(await screen.findByText("Name is required")).toBeInTheDocument();
 		expect(screen.getByText("Value is required")).toBeInTheDocument();
-		expect(submit).toBeDisabled();
 		expect(createRequests.count).toBe(0);
 	});
 
@@ -146,16 +142,16 @@ describe("SecretList create", () => {
 		},
 	);
 
-	it("disables the submit button while the form is invalid and enables it once valid", async () => {
+	it("never lets the visibility toggle submit the form", async () => {
 		server.use(
 			secretsHandler(() => [existing]),
 			createHandler(),
 		);
 		const user = await openCreateModal();
 
+		// The toggle check only means something once the form is submittable,
+		// hence the wait for the footer to enable.
 		const submit = screen.getByTestId("secret-form-submit");
-		expect(submit).toBeDisabled();
-
 		await user.type(screen.getByLabelText(/^name/i), "db-password");
 		await user.type(screen.getByLabelText(/^value/i), "hunter2");
 		await waitFor(() => expect(submit).toBeEnabled());

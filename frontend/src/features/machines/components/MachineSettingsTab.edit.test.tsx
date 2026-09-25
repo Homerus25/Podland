@@ -130,4 +130,102 @@ describe("MachineSettingsTab (edit machine)", () => {
 		expect(screen.getByText("MACHINE_NAME_TAKEN")).toBeInTheDocument();
 		expect(screen.getByText("Machine name already exists")).toBeInTheDocument();
 	});
+
+	it("cancel reverts the fields to the stored values and clears the saved banner", async () => {
+		const machine = machineFixture();
+		server.use(updateHandler(machine));
+		renderSettingsTab(machine);
+		const user = userEvent.setup();
+		const name = screen.getByLabelText(/^name/i);
+
+		await editAndSave();
+		await waitFor(() =>
+			expect(screen.getByTestId("machine-saved")).toBeInTheDocument(),
+		);
+
+		// The stale-banner scenario: further edits sit under a banner from the
+		// earlier save; cancel must clear both at once.
+		await user.clear(name);
+		await user.type(name, "prod-web-03");
+		await user.click(screen.getByTestId("machine-form-cancel"));
+
+		expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe(
+			"prod-web-01",
+		);
+		expect(screen.queryByTestId("machine-saved")).not.toBeInTheDocument();
+	});
+
+	it("cancel clears the error envelope and reverts the fields", async () => {
+		const machine = machineFixture();
+		server.use(
+			updateHandler(
+				machine,
+				409,
+				errorJson("MACHINE_NAME_TAKEN", "Machine name already exists", "req-5"),
+				50,
+			),
+		);
+		renderSettingsTab(machine);
+		const user = userEvent.setup();
+
+		await editAndSave();
+		expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+		await user.click(screen.getByTestId("machine-form-cancel"));
+
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+		expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe(
+			"prod-web-01",
+		);
+	});
+
+	it("cancel stays enabled mid-save and the late settle never restores the saved banner", async () => {
+		const machine = machineFixture();
+		server.use(updateHandler(machine, 200, undefined, 300));
+		renderSettingsTab(machine);
+		const user = userEvent.setup();
+		updatePayload = undefined;
+
+		await editAndSave();
+
+		expect(screen.getByTestId("machine-form-submit")).toBeDisabled();
+		expect(screen.getByTestId("machine-form-cancel")).toBeEnabled();
+		await user.click(screen.getByTestId("machine-form-cancel"));
+		expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe(
+			"prod-web-01",
+		);
+
+		// The PUT still lands server-side; its success must not resurrect
+		// the banner over the reverted fields.
+		await waitFor(() =>
+			expect(updatePayload).toMatchObject({ name: "prod-web-02" }),
+		);
+		expect(screen.queryByTestId("machine-saved")).not.toBeInTheDocument();
+	});
+
+	it("cancel during a failing save keeps the error envelope from returning", async () => {
+		const machine = machineFixture();
+		server.use(
+			updateHandler(
+				machine,
+				409,
+				errorJson("MACHINE_NAME_TAKEN", "Machine name already exists", "req-6"),
+				300,
+			),
+		);
+		renderSettingsTab(machine);
+		const user = userEvent.setup();
+		updatePayload = undefined;
+
+		await editAndSave();
+		await user.click(screen.getByTestId("machine-form-cancel"));
+
+		await waitFor(() =>
+			expect(updatePayload).toMatchObject({ name: "prod-web-02" }),
+		);
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+		expect((screen.getByLabelText(/^name/i) as HTMLInputElement).value).toBe(
+			"prod-web-01",
+		);
+	});
 });

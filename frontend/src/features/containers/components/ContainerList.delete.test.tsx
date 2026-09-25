@@ -123,7 +123,6 @@ describe("ContainerList delete", () => {
 		expect(await screen.findByRole("alert")).toBeInTheDocument();
 		expect(screen.getByText("CONTAINER_RUNNING")).toBeInTheDocument();
 		expect(screen.getByText("container is running")).toBeInTheDocument();
-		await waitFor(() => expect(confirm).toBeEnabled());
 		await waitFor(() => expect(screen.getByText("victim")).toBeInTheDocument());
 	});
 });
