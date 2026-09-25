@@ -60,13 +60,15 @@ func newTestConfig(t *testing.T) *config.Config {
 			MaxConcurrent:         10,
 			TestTimeoutSeconds:    10,
 		},
-		// The auth budget is raised well above the 10/min production
-		// default because every app test's boot probe (GET /auth/status)
-		// draws from the shared per-IP auth group — dozens of renders in
-		// one suite would otherwise 429 on the production budget. The
+		// The auth budgets are raised well above their production
+		// defaults because every app test's boot probe (GET
+		// /auth/status) draws from the shared per-IP auth group, and
+		// failed-login assertions would otherwise spend the shared
+		// credential-failure budget — dozens of requests in one suite
+		// would otherwise 429 on the production budgets. The
 		// rate-limit behavior itself is pinned in setup_test.go, which
-		// overrides this field per test.
-		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 60, AuthRequestsPerMinute: 1000},
+		// overrides these fields per test.
+		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 60, AuthRequestsPerMinute: 1000, FailureBudget: 1000, FailureWindowMinutes: 15},
 		AllowedOrigins: []string{},
 		Log:            config.LogConfig{Level: "info", Format: "json"},
 		Encryption:     config.EncryptionConfig{Key: encKey},

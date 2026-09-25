@@ -35,7 +35,7 @@ One line each; full detail in `docs/architecture-decisions.md`.
 11. **Validation** — validator struct tags backend; form validation frontend
 12. **Testing** — unit (fake engines), integration (podman test host), E2E (pod)
 13. **Deployment** — one container: Node builds UI, Go embeds it, alpine runtime, :8080
-14. **Rate limiting** — fixed window; per-user 60/min, auth endpoints per-IP 10/min
+14. **Rate limiting** — fixed window; per-user 60/min, auth endpoints per-IP 10/min, credential failures 5 per 15 min (login keyed per username, password change per caller, admin password reset per acting admin)
 15. **File handling** — no uploads; images pulled from registries only
 16. **Machine registration** — dedicated endpoint, synchronous connection test
 17. **First-run bootstrap** — setup landing page creates the first admin (one-time endpoint); no baked-in credentials; container DB in the mounted `/app/data` volume

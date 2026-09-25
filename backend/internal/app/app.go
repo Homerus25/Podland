@@ -103,13 +103,31 @@ func New(cfg *config.Config) (*App, error) {
 	// creation path (hash + validation + the atomic first-user guard).
 	userRepo := models.NewUserRepository(db)
 	userService := users.NewUserService(userRepo, sessionRepo)
+	// The credential-failure budget: keyed not by IP or user ID but by
+	// the identity a request claims — the login body's username, the
+	// password change's caller ID — so it cannot live in middleware.
+	// The auth service checks it before a verification and records
+	// failures; the auth handler advertises its headers on the 429s.
+	failureBudget := appmiddleware.NewRateLimiter(
+		cfg.RateLimit.FailureBudget,
+		time.Duration(cfg.RateLimit.FailureWindowMinutes)*time.Minute,
+	)
+
+	// The users surface's own instance over the same config pair (issue
+	// 187): the admin password reset keys its failures on the acting
+	// admin's ID, and one limiter instance per surface keeps the reset
+	// budget's key space separate from the auth surface's.
+	usersFailureBudget := appmiddleware.NewRateLimiter(
+		cfg.RateLimit.FailureBudget,
+		time.Duration(cfg.RateLimit.FailureWindowMinutes)*time.Minute,
+	)
 
 	authService, err := auth.NewAuthService(auth.JWTConfig{
 		PrivateKeyPath: cfg.JWT.PrivateKeyPath,
 		PublicKeyPath:  cfg.JWT.PublicKeyPath,
 		Expiration:     time.Duration(cfg.JWT.ExpirationMinutes) * time.Minute,
 		Issuer:         cfg.JWT.Issuer,
-	}, userRepo, sessionRepo, time.Duration(cfg.Session.TTLDays)*24*time.Hour, userService)
+	}, userRepo, sessionRepo, time.Duration(cfg.Session.TTLDays)*24*time.Hour, userService, failureBudget)
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("app: failed to initialize auth: %w", err)
@@ -148,8 +166,9 @@ func New(cfg *config.Config) (*App, error) {
 	volumeService := volumes.NewVolumeService(volumes.NewVolumeEngineProvider(connectionManager))
 
 	// Initialize handlers
-	authHandler := auth.NewAuthHandler(authService, userRepo)
-	userHandler := users.NewUserHandler(userService)
+	authHandler := auth.NewAuthHandler(authService, userRepo).WithFailureBudget(failureBudget)
+	userHandler := users.NewUserHandler(userService.WithFailureBudget(usersFailureBudget)).
+		WithFailureBudget(usersFailureBudget)
 	machineHandler := machines.NewMachineHandler(machineService)
 	containerHandler := containers.NewContainerHandler(containerService)
 	imageHandler := images.NewImageHandler(imageService)

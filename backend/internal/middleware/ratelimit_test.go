@@ -154,6 +154,104 @@ func TestAllow_EvictsEntriesIdlePastTwoWindows(t *testing.T) {
 		"the sweep must run at most once per window, not on every Allow")
 }
 
+// TestHasBudget_UnknownKeyHasFullBudgetWithoutSpending pins the pure
+// read behind the failure budgets: an unknown key reports budget, and
+// neither the answer nor repeating the check changes anything — no
+// store entry is created and the reported budget stays full.
+func TestHasBudget_UnknownKeyHasFullBudgetWithoutSpending(t *testing.T) {
+	limiter := NewRateLimiter(5, time.Minute)
+
+	assert.True(t, limiter.HasBudget("user-1"), "an unknown key should have its full budget")
+	assert.Equal(t, 5, limiter.GetRemaining("user-1"), "an unknown key should report the full budget")
+
+	for range 3 {
+		assert.True(t, limiter.HasBudget("user-1"), "the check must never spend budget")
+	}
+
+	assert.Equal(t, 5, limiter.GetRemaining("user-1"), "checks must not change the key's budget")
+	assert.Empty(t, limiter.store.entries, "a check must not create a store entry")
+}
+
+// TestRecord_SpendsOneUnitPerCall pins the spend operation: each
+// record burns one unit of its key's budget, and after the configured
+// count of records within the window the check reports no budget left.
+func TestRecord_SpendsOneUnitPerCall(t *testing.T) {
+	limiter := NewRateLimiter(3, time.Minute)
+
+	limiter.Record("user-1")
+	assert.True(t, limiter.HasBudget("user-1"), "one of three units spent should leave budget")
+	assert.Equal(t, 2, limiter.GetRemaining("user-1"), "one record should have spent one unit")
+
+	limiter.Record("user-1")
+	assert.True(t, limiter.HasBudget("user-1"), "two of three units spent should leave budget")
+
+	limiter.Record("user-1")
+	assert.False(t, limiter.HasBudget("user-1"), "the configured count of records should exhaust the budget")
+	assert.Equal(t, 0, limiter.GetRemaining("user-1"), "an exhausted key should report no budget")
+}
+
+// TestRecord_WindowExpiryIsTheOnlyReset pins the reset semantics: an
+// exhausted budget survives further records — spending past the
+// threshold restores nothing — and only the fixed window's expiry
+// brings the budget back, whereupon the next record opens a fresh
+// window one unit down.
+func TestRecord_WindowExpiryIsTheOnlyReset(t *testing.T) {
+	limiter := NewRateLimiter(2, time.Minute)
+
+	limiter.Record("user-1")
+	limiter.Record("user-1")
+	require.False(t, limiter.HasBudget("user-1"), "the budget should be exhausted")
+
+	limiter.Record("user-1")
+	assert.Equal(t, 0, limiter.GetRemaining("user-1"),
+		"recording past the threshold must not restore or change the budget")
+
+	// Age the entry past its window the way the clock would.
+	limiter.store.mu.Lock()
+	limiter.store.entries["user-1"].windowStart = time.Now().Add(-2 * time.Minute)
+	limiter.store.mu.Unlock()
+
+	assert.True(t, limiter.HasBudget("user-1"), "only window expiry restores the budget")
+	assert.Equal(t, 2, limiter.GetRemaining("user-1"), "an expired window reports the full budget")
+
+	limiter.Record("user-1")
+	assert.Equal(t, 1, limiter.GetRemaining("user-1"),
+		"a record after expiry opens a fresh window one unit down")
+}
+
+// TestRecord_KeysAreIndependent pins the per-key budget: records
+// against one key never touch another key's budget.
+func TestRecord_KeysAreIndependent(t *testing.T) {
+	limiter := NewRateLimiter(2, time.Minute)
+
+	limiter.Record("user-1")
+	limiter.Record("user-1")
+
+	assert.False(t, limiter.HasBudget("user-1"), "user-1's budget should be exhausted")
+	assert.True(t, limiter.HasBudget("user-2"), "user-2 should still have budget")
+	assert.Equal(t, 2, limiter.GetRemaining("user-2"), "user-2's budget should be untouched")
+}
+
+// TestRecord_EmptyKeyIsSkipped pins the empty-key convention Allow
+// sets: an unkeyed record spends nothing and an unkeyed check always
+// has budget — there is no shared "" bucket for keyless callers to
+// contend over.
+func TestRecord_EmptyKeyIsSkipped(t *testing.T) {
+	limiter := NewRateLimiter(2, time.Minute)
+
+	assert.True(t, limiter.HasBudget(""), "an empty key should always have budget")
+
+	limiter.Record("")
+
+	assert.Empty(t, limiter.store.entries, "an unkeyed record must not create a store entry")
+}
+
+// TestLimit_ReportsConfiguredBudget pins the accessor the failure-budget
+// surfaces advertise as X-RateLimit-Limit on their 429 answers.
+func TestLimit_ReportsConfiguredBudget(t *testing.T) {
+	assert.Equal(t, 7, NewRateLimiter(7, time.Minute).Limit(), "Limit should report the configured count")
+}
+
 // TestRateLimitMiddleware_OverLimitAnswersEnvelope pins the per-user
 // 429: the X-RateLimit-* headers, then the same structured
 // RATE_LIMIT_EXCEEDED envelope the auth middleware answers, carrying

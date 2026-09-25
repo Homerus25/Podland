@@ -21,6 +21,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -212,4 +214,16 @@ func Decode(r *http.Request, target any) *appErrors.AppError {
 		return appErrors.ErrValidationFailed.WithMessage(err.Error())
 	}
 	return nil
+}
+
+// SetRateLimitHeaders writes the X-RateLimit-* trio — the budget's
+// configured limit, the key's remaining budget, and the seconds until
+// its window resets — with one owner for the wire format. The rate-limit
+// middlewares advertise it on every response they pass; the
+// failure-budget handlers on their 429 answers (remaining 0). Headers
+// only: the status line and body stay with the caller.
+func SetRateLimitHeaders(w http.ResponseWriter, limit, remaining int, resetIn time.Duration) {
+	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(limit))
+	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(int64(resetIn.Seconds()), 10))
 }

@@ -7,7 +7,9 @@
 // role-dependent response shape behind GET /api/users, setting a user's
 // role behind the admin-only PUT /api/users/{id}/role (with the
 // self-lockout guard), and resetting a user's password behind the
-// admin-only PUT /api/users/{id}/password (with revoke-all-sessions).
+// admin-only PUT /api/users/{id}/password (with the acting-admin
+// re-auth, the caller-keyed credential-failure budget, the
+// self-lockout guard, and revoke-all-sessions).
 package users
 
 import (
@@ -26,12 +28,42 @@ import (
 type UserService struct {
 	userRepo    models.UserRepositoryInterface
 	sessionRepo models.SessionRepositoryInterface
+	failures    FailureBudget
+}
+
+// FailureBudget is the credential-failure brake the admin password
+// reset spends against (issue 187): HasBudget is read before every
+// credential verification and Record spends one unit when one fails —
+// the check/spend pair of the middleware fixed-window limiter (issue
+// 185), keyed by resetBudgetKey. Declared here consumer-side, like the
+// auth package's twin (the auth surface has its own limiter instance
+// over the same config pair, so the two surfaces hold separate key
+// spaces); internal/app wires the users surface's own
+// middleware.NewRateLimiter in, and that instance backs the handler's
+// X-RateLimit advertisement on the budget's 429 answers. A nil budget
+// leaves the brake unwired: every check reports budget and every record
+// is a no-op.
+type FailureBudget interface {
+	HasBudget(key string) bool
+	Record(key string)
+	Limit() int
+	GetResetIn(key string) time.Duration
 }
 
 // NewUserService creates a new UserService. The session repository
 // backs the admin password reset's revoke-all-sessions step.
 func NewUserService(userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface) *UserService {
 	return &UserService{userRepo: userRepo, sessionRepo: sessionRepo}
+}
+
+// WithFailureBudget wires the shared credential-failure budget the
+// reset path spends against. The fluent shape mirrors the auth
+// handler's WithFailureBudget: an optional dependency layered onto the
+// two-argument constructor. Unwired, wrong-password attempts are never
+// throttled.
+func (s *UserService) WithFailureBudget(failures FailureBudget) *UserService {
+	s.failures = failures
+	return s
 }
 
 // CreateUser creates a regular user with role "user". See
@@ -209,18 +241,43 @@ func (s *UserService) SetRole(callerID, targetUserID, role string) (*models.User
 // password. Reusing the revoke-all-sessions primitive keeps both paths
 // on one revocation implementation.
 //
+// Re-auth (issue 187): the request carries the acting admin's own
+// password, verified with the same bcrypt comparison login and
+// change password use — against the acting admin (the JWT subject),
+// never the target. A miss answers ErrInvalidCredentials (401) with
+// the change-password message. The endpoint is otherwise a
+// password-guessing oracle for whoever holds an admin token, so failed
+// verifications spend the caller-keyed credential-failure budget: once
+// spent, further resets answer ErrRateLimitExceeded (429) before any
+// verification runs, even with the correct password, until the window
+// expires. Only failures spend — successes and storage failures never
+// do.
+//
+// Self-lockout: an admin targeting themselves is refused with
+// ErrSelfPasswordReset (400) before the budget is consulted and before
+// any verification runs, so a doomed request burns neither a bcrypt
+// compare nor budget — self-service change password is the only self
+// path.
+//
 // Validation (nothing is written before it passes): the target must
-// exist (ErrUserNotFound) and the new password must meet the length
-// policy (ErrPasswordTooShort). On success the updated user is
-// persisted via read-modify-write, so username and role ride through
-// unchanged. There is no transaction across the user and session
-// stores: the write order (revoke-all, hash) means a failure between
-// steps leaves the sessions revoked with the password unchanged — the
-// safe side of "signed out but not changed", since a stolen refresh
-// token must never outlive the password change; the retry re-runs the
-// idempotent revocation before the hash write. Storage failures
-// propagate unchanged (mapped to 500 by the handler).
-func (s *UserService) ResetPassword(targetUserID, newPassword string) (*models.User, error) {
+// exist (ErrUserNotFound — the lookup runs before the budget check, so
+// an unknown target answers 404 unchanged even for a locked-out
+// caller; the lookup verifies nothing, so it never spends) and the new
+// password must meet the length policy (ErrPasswordTooShort). On
+// success the updated user is persisted via read-modify-write, so
+// username and role ride through unchanged.
+// There is no transaction across the user and session stores: the
+// write order (revoke-all, hash) means a failure between steps leaves
+// the sessions revoked with the password unchanged — the safe side of
+// "signed out but not changed", since a stolen refresh token must
+// never outlive the password change; the retry re-runs the idempotent
+// revocation before the hash write. Storage failures propagate
+// unchanged (mapped to 500 by the handler).
+func (s *UserService) ResetPassword(callerID, targetUserID, adminPassword, newPassword string) (*models.User, error) {
+	if callerID == targetUserID {
+		return nil, apperrors.ErrSelfPasswordReset
+	}
+
 	user, err := s.userRepo.GetByID(targetUserID)
 	if err != nil {
 		return nil, err
@@ -229,15 +286,32 @@ func (s *UserService) ResetPassword(targetUserID, newPassword string) (*models.U
 		return nil, apperrors.ErrUserNotFound
 	}
 
-	if utf8.RuneCountInString(newPassword) < models.MinPasswordLength {
-		return nil, apperrors.ErrPasswordTooShort
+	key := resetBudgetKey(callerID)
+	if !s.hasBudget(key) {
+		return nil, apperrors.ErrRateLimitExceeded
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	admin, err := s.userRepo.GetByID(callerID)
 	if err != nil {
 		return nil, err
 	}
-	user.PasswordHash = string(hash)
+	if admin == nil {
+		// Unreachable behind RequireAdmin (it resolves the caller's row
+		// moments earlier), but a vanished acting admin is the same
+		// unknown-caller state the self-service change answers 404 for.
+		return nil, apperrors.ErrUserNotFound
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(adminPassword)); err != nil {
+		s.recordFailure(key)
+		return nil, apperrors.ErrInvalidCredentials.WithMessage("Current password is incorrect")
+	}
+
+	hash, err := hashPassword(newPassword)
+	if err != nil {
+		return nil, err
+	}
+	user.PasswordHash = hash
 
 	// Revoke before the hash write: a failure here writes nothing, and
 	// no failure ordering can leave the new hash live while the
@@ -251,6 +325,32 @@ func (s *UserService) ResetPassword(targetUserID, newPassword string) (*models.U
 	}
 
 	return user, nil
+}
+
+// resetBudgetKey namespaces the reset surface's budget entries with the
+// endpoint's name: one limiter instance per surface keeps instance key
+// spaces separate, and the prefix keeps this endpoint's keys separate
+// from anything that ever joins the instance (the auth surface's
+// username- and caller-keyed entries live the same way — issue 196
+// review).
+const resetBudgetKeyPrefix = "reset-password:"
+
+func resetBudgetKey(callerID string) string { return resetBudgetKeyPrefix + callerID }
+
+// hasBudget reports whether key may still attempt a credential
+// verification under the failure budget. A nil budget (brake unwired,
+// the default before WithFailureBudget) always reports budget.
+func (s *UserService) hasBudget(key string) bool {
+	return s.failures == nil || s.failures.HasBudget(key)
+}
+
+// recordFailure spends one unit of key's failure budget after a failed
+// credential verification. A nil budget (brake unwired) records
+// nothing.
+func (s *UserService) recordFailure(key string) {
+	if s.failures != nil {
+		s.failures.Record(key)
+	}
 }
 
 // List returns the Podland users plus whether the caller is an admin —

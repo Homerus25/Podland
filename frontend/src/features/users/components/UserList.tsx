@@ -18,6 +18,7 @@ import {
 } from "@features/users/hooks/useUsers";
 import type {
 	ChangeUserRoleInput,
+	ResetUserPasswordInput,
 	UserSummary,
 } from "@features/users/services/usersApi";
 import { MutationDialog } from "@shared/components/MutationDialog";
@@ -77,13 +78,14 @@ function UserRoleForm({
 	);
 }
 
-// One-field form for the reset-password dialog. It mounts with the dialog
-// (the host renders it conditionally), so the field starts empty on every
-// open. Client-side validation mirrors the backend's password policy
-// (PASSWORD_TOO_SHORT, 8 characters) so the obvious mistake never needs a
-// round trip; the reset itself needs no current-password check — the caller
-// is the admin, not the target.
+// Two-field form for the reset-password dialog: the acting admin's own
+// password above the target's new one — the change-password dialog's
+// order. It mounts with the dialog (the host renders it conditionally),
+// so the fields start empty on every open. The length policy applies to
+// the new password only; the admin's own password is just required, and
+// a wrong value comes back as an ordinary in-dialog 401.
 interface UserPasswordFormValues {
+	adminPassword: string;
 	newPassword: string;
 }
 
@@ -93,7 +95,7 @@ function UserPasswordForm({
 	isSubmitting,
 }: {
 	user: UserSummary;
-	onSubmit: (input: { id: string; newPassword: string }) => void;
+	onSubmit: (input: ResetUserPasswordInput) => void;
 	isSubmitting: boolean;
 }) {
 	const {
@@ -101,7 +103,7 @@ function UserPasswordForm({
 		handleSubmit,
 		formState: { errors, isSubmitting: isSubmittingForm, isValid },
 	} = useForm<UserPasswordFormValues>({
-		defaultValues: { newPassword: "" },
+		defaultValues: { adminPassword: "", newPassword: "" },
 		// onChange so the submit button's disabled state tracks validity as
 		// the user types, not only after a failed submit attempt.
 		mode: "onChange",
@@ -110,11 +112,24 @@ function UserPasswordForm({
 	return (
 		<form
 			onSubmit={handleSubmit((values) =>
-				onSubmit({ id: user.id, newPassword: values.newPassword }),
+				onSubmit({
+					id: user.id,
+					adminPassword: values.adminPassword,
+					newPassword: values.newPassword,
+				}),
 			)}
 			noValidate
 		>
 			<VStack spacing={4} align="stretch">
+				<PasswordField
+					id="user-admin-password"
+					label="Your password"
+					autoComplete="current-password"
+					registration={register("adminPassword", {
+						required: "Your password is required",
+					})}
+					error={errors.adminPassword?.message}
+				/>
 				<PasswordField
 					id="user-new-password"
 					label="New password"

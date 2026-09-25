@@ -401,14 +401,16 @@ func buildTestConfig(root string) (*config.Config, error) {
 		// under test for most slices: the per-user limiter sees the
 		// suite authenticate as ONE user and legitimately issue
 		// hundreds of requests per minute (state-transition polls alone
-		// fire ~2/s for up to 30s each), and the per-IP auth limiter
-		// sees every login/refresh in the suite arrive from 127.0.0.1.
-		// Both 60/min-class production defaults would cause spurious
-		// 429s that poison every test after the first poll-heavy slice,
-		// so both ceilings are raised out of the way. The auth limiter
-		// gets its own dedicated coverage from a separate low-limit
-		// app instance in ratelimit_auth_test.go.
-		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 100000, AuthRequestsPerMinute: 100000},
+		// fire ~2/s for up to 30s each), the per-IP auth limiter sees
+		// every login/refresh in the suite arrive from 127.0.0.1, and
+		// the credential-failure budget would otherwise lock any
+		// username whose negative assertions pile up past five. All
+		// three ceilings are raised out of the way — the production
+		// defaults would cause spurious 429s that poison every test
+		// after the first poll-heavy slice. The auth limiters get
+		// their own dedicated coverage from separate low-limit app
+		// instances in ratelimit_auth_test.go.
+		RateLimit:      config.RateLimitConfig{RequestsPerMinute: 100000, AuthRequestsPerMinute: 100000, FailureBudget: 100000, FailureWindowMinutes: 15},
 		AllowedOrigins: []string{},
 		Log:            config.LogConfig{Level: "info", Format: "json"},
 		Encryption:     config.EncryptionConfig{Key: encKey},

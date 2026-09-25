@@ -1,5 +1,5 @@
 import type { UserRole } from "@shared/types/api";
-import { api } from "@shared/utils/api";
+import { api, bareApi, getBearerToken } from "@shared/utils/api";
 
 // User as returned by GET /api/users. The shape depends on the caller's
 // role: every authenticated caller receives the minimal {id, username}
@@ -56,21 +56,29 @@ export async function changeUserRole(
 }
 
 // Body of PUT /api/users/{id}/password (doku/description_users_api.md).
-// Admin reset: no current-password check — the caller is the admin, not the
-// target; the server enforces the 8-character minimum.
+// Admin reset with re-authentication: adminPassword is the acting admin's
+// own password (verified against the caller, not the target), newPassword
+// must satisfy the 8-character minimum enforced server-side.
 export interface ResetUserPasswordInput {
 	id: string;
+	adminPassword: string;
 	newPassword: string;
 }
 
 // Resets a user's password and returns the updated record. Admin-only;
 // every session of the target user is revoked, so the target must log in
-// again with the new password.
+// again with the new password. Authenticated (the bearer rides along from
+// the shared credential holder), but its 401s are input errors — a wrong
+// adminPassword answers "Current password is incorrect", not session
+// death — so it rides the bare transport like the change-password call:
+// no refresh/replay ritual.
 export async function resetUserPassword(
 	input: ResetUserPasswordInput,
 ): Promise<UserSummary> {
-	const response = await api.put<UserSummary>(`/users/${input.id}/password`, {
-		newPassword: input.newPassword,
-	});
+	const response = await bareApi.put<UserSummary>(
+		`/users/${input.id}/password`,
+		{ adminPassword: input.adminPassword, newPassword: input.newPassword },
+		{ headers: { Authorization: `Bearer ${getBearerToken()}` } },
+	);
 	return response.data;
 }

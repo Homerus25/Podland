@@ -37,6 +37,37 @@ type FirstUserCreator interface {
 	CreateFirstAdmin(username, password string) (*models.User, error)
 }
 
+// FailureBudget is the credential-failure brake Login and ChangePassword
+// share (issue 186): HasBudget is read before every credential
+// verification and Record spends one unit when one fails — the
+// check/spend pair of the middleware fixed-window limiter (issue 185),
+// keyed by loginBudgetKey / changeBudgetKey. Declared here
+// consumer-side, like FirstUserCreator; internal/app wires the shared
+// middleware.NewRateLimiter in, and the same instance backs the
+// handler's X-RateLimit advertisement on the budget's 429 answers. A
+// nil budget leaves the brake unwired: every check reports budget and
+// every record is a no-op.
+type FailureBudget interface {
+	HasBudget(key string) bool
+	Record(key string)
+	Limit() int
+	GetResetIn(key string) time.Duration
+}
+
+// Budget-key namespaces: this surface's one limiter instance holds
+// login (username-keyed) and change-password (caller-ID-keyed) entries
+// in a single map, so every key carries its endpoint's name as a prefix
+// — a username and a user ID cannot collide even if one is chosen to
+// look like the other (issue 196 review).
+const (
+	loginBudgetKeyPrefix  = "login:"
+	changeBudgetKeyPrefix = "change-password:"
+)
+
+func loginBudgetKey(username string) string { return loginBudgetKeyPrefix + username }
+
+func changeBudgetKey(userID string) string { return changeBudgetKeyPrefix + userID }
+
 // AuthService handles authentication
 type AuthService struct {
 	privateKey  *rsa.PrivateKey
@@ -47,13 +78,15 @@ type AuthService struct {
 	sessionRepo models.SessionRepositoryInterface
 	sessionTTL  time.Duration
 	firstUsers  FirstUserCreator
+	failures    FailureBudget
 }
 
 // NewAuthService creates a new AuthService. sessionTTL is how long a
 // refresh session (and its cookie's server-side row) stays redeemable.
 // firstUsers backs Setup; Login, Refresh, Logout, and ChangePassword
-// never touch it.
-func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, sessionTTL time.Duration, firstUsers FirstUserCreator) (*AuthService, error) {
+// never touch it. failures is the credential-failure budget Login and
+// ChangePassword spend against (nil disables the brake).
+func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, sessionTTL time.Duration, firstUsers FirstUserCreator, failures FailureBudget) (*AuthService, error) {
 	// Load private key
 	privateKey, err := loadPrivateKey(config.PrivateKeyPath)
 	if err != nil {
@@ -75,6 +108,7 @@ func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, s
 		sessionRepo: sessionRepo,
 		sessionTTL:  sessionTTL,
 		firstUsers:  firstUsers,
+		failures:    failures,
 	}, nil
 }
 
@@ -82,6 +116,15 @@ func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, s
 // on success, returns a fresh access token, a new opaque refresh token
 // (whose SHA-256 hash is persisted as a session row), and the
 // authenticated user.
+//
+// Failure budget: failed verifications — wrong password and unknown
+// username alike — are counted against the username in the request
+// body. Once the budget is spent, further fresh logins for that name
+// answer ErrRateLimitExceeded (429) before any verification runs, even
+// with the correct password; only the window's expiry restores access.
+// The budget bars fresh logins, not sessions: Refresh is untouched, so
+// an active refresh session keeps working while its username is locked
+// out. Successes and storage failures never spend the budget.
 //
 // Failure mapping (HTTP-facing, via the structured error responder):
 // an unknown username and a wrong password both yield
@@ -92,15 +135,22 @@ func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, s
 // Lazy cleanup: login also purges the user's expired session rows —
 // there is no background sweeper.
 func (s *AuthService) Login(username, password string) (accessToken string, refreshToken string, user *models.User, err error) {
+	key := loginBudgetKey(username)
+	if !s.hasBudget(key) {
+		return "", "", nil, apperrors.ErrRateLimitExceeded
+	}
+
 	user, err = s.userRepo.GetByUsername(username)
 	if err != nil {
 		return "", "", nil, err
 	}
 	if user == nil {
+		s.recordFailure(key)
 		return "", "", nil, apperrors.ErrInvalidCredentials
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+		s.recordFailure(key)
 		return "", "", nil, apperrors.ErrInvalidCredentials
 	}
 
@@ -235,6 +285,14 @@ func (s *AuthService) Logout(refreshToken string) error {
 // the device making the change signed in; every other device must log
 // in again with the new password.
 //
+// Failure budget: wrong current-password attempts count against the
+// caller, sharing the one credential-failure budget with login. A
+// single wrong attempt still answers today's 401; once the budget is
+// spent, further attempts answer ErrRateLimitExceeded (429) before any
+// verification runs, until the window expires. Only the wrong-password
+// failure spends — an unknown user record, a too-short new password,
+// and storage failures never do; nor do successes.
+//
 // Failure mapping: an unknown user record (valid token, deleted user)
 // yields ErrUserNotFound (404); a wrong current password yields
 // ErrInvalidCredentials (401) with a message naming the current
@@ -248,6 +306,11 @@ func (s *AuthService) Logout(refreshToken string) error {
 // must never outlive the password change; the retry re-runs the
 // idempotent revocation before the hash write.
 func (s *AuthService) ChangePassword(userID, currentPassword, newPassword string) (accessToken, refreshToken string, user *models.User, err error) {
+	key := changeBudgetKey(userID)
+	if !s.hasBudget(key) {
+		return "", "", nil, apperrors.ErrRateLimitExceeded
+	}
+
 	user, err = s.userRepo.GetByID(userID)
 	if err != nil {
 		return "", "", nil, err
@@ -257,6 +320,7 @@ func (s *AuthService) ChangePassword(userID, currentPassword, newPassword string
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
+		s.recordFailure(key)
 		return "", "", nil, apperrors.ErrInvalidCredentials.WithMessage("Current password is incorrect")
 	}
 
@@ -292,6 +356,22 @@ func (s *AuthService) ChangePassword(userID, currentPassword, newPassword string
 	}
 
 	return accessToken, refreshToken, user, nil
+}
+
+// hasBudget reports whether key may still attempt a credential
+// verification under the failure budget. A nil budget (brake unwired,
+// the test helpers' default) always reports budget.
+func (s *AuthService) hasBudget(key string) bool {
+	return s.failures == nil || s.failures.HasBudget(key)
+}
+
+// recordFailure spends one unit of key's failure budget after a failed
+// credential verification. A nil budget (brake unwired) records
+// nothing.
+func (s *AuthService) recordFailure(key string) {
+	if s.failures != nil {
+		s.failures.Record(key)
+	}
 }
 
 // newSession builds a fresh session row for the user with the session

@@ -120,6 +120,13 @@ var (
 	// can never lose its administration by accident. The bootstrap CLI
 	// remains the escape hatch for a genuinely intended self-demotion.
 	ErrSelfRoleChange = NewAppError("SELF_ROLE_CHANGE", "Cannot change your own role", http.StatusBadRequest)
+	// ErrSelfPasswordReset is the admin password-reset endpoint's
+	// self-lockout guard: an admin may not reset their own password
+	// through the admin flow — self-service change password is the one
+	// self path (and the only one that returns a fresh session). The
+	// guard runs before the acting-admin password verification, so a
+	// doomed request burns neither a bcrypt compare nor failure budget.
+	ErrSelfPasswordReset = NewAppError("SELF_PASSWORD_RESET", "Cannot reset your own password", http.StatusBadRequest)
 	// ErrSetupCompleted is the first-run setup endpoint's 409: the
 	// instance already has a user, so the one-time setup offer is gone.
 	// It answers both a losing concurrent setup request (the winner's

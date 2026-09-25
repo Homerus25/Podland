@@ -60,10 +60,19 @@ type ConnectionConfig struct {
 // RateLimitConfig holds rate limiting configuration. RequestsPerMinute
 // budgets the authenticated API surface per user; AuthRequestsPerMinute
 // budgets the unauthenticated auth surface (login, refresh) per client
-// IP — those routes have no user to key on.
+// IP — those routes have no user to key on. FailureBudget and
+// FailureWindowMinutes are the credential-failure budget pair behind
+// every password-verification surface: the auth surface's limiter
+// instance covers login (keyed per username) and self-service password
+// change (keyed per caller), the users surface's admin password reset
+// holds its own instance over the same pair (keyed per acting admin) —
+// one limiter instance per surface, so the key spaces stay separate.
+// The env names keep their historical AUTH segment.
 type RateLimitConfig struct {
 	RequestsPerMinute     int
 	AuthRequestsPerMinute int
+	FailureBudget         int
+	FailureWindowMinutes  int
 }
 
 // LogConfig holds logging configuration
@@ -113,6 +122,10 @@ func Load() (*Config, error) {
 	cfg.RateLimit.RequestsPerMinute = getEnvInt("RATE_LIMIT_REQUESTS_PER_USER_PER_MINUTE", 60)
 	// Brute-force-hostile default: login+refresh share one per-IP bucket.
 	cfg.RateLimit.AuthRequestsPerMinute = getEnvInt("RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE", 10)
+	// Credential-failure budget: five failures per fifteen minutes is
+	// the classic brake — enough for typos, hostile to guessing.
+	cfg.RateLimit.FailureBudget = getEnvInt("RATE_LIMIT_AUTH_FAILURE_BUDGET", 5)
+	cfg.RateLimit.FailureWindowMinutes = getEnvInt("RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES", 15)
 
 	// CORS
 	if origins := os.Getenv("ALLOWED_ORIGINS"); origins != "" {
@@ -192,6 +205,12 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.Session.TTLDays <= 0 {
 		return fmt.Errorf("SESSION_TTL_DAYS must be a positive number of days")
+	}
+	if cfg.RateLimit.FailureBudget <= 0 {
+		return fmt.Errorf("RATE_LIMIT_AUTH_FAILURE_BUDGET must be a positive number of failures")
+	}
+	if cfg.RateLimit.FailureWindowMinutes <= 0 {
+		return fmt.Errorf("RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES must be a positive number of minutes")
 	}
 	return nil
 }

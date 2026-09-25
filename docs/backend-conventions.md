@@ -247,14 +247,18 @@ already diverged, extraction triggers even below the third copy — the
 log-stream kit (`.scratch/380-log-stream-kit`) is the precedent, where
 two timestamp parsers that disagreed on a spaceless podman line made
 the streaming path un-changeable in one place. The threshold has been
-crossed five times and all five extractions are now the reference: the
+crossed six times and all six extractions are now the reference: the
 endpoint ritual became `internal/web.Handle`, the handler-test
 scaffolding became `testutils.Perform`, the decode+validate ritual
 became `web.Decode`, podman error classification became
 `internal/podmanerr` — one leaf adapter owning podman's error model
 (typed `ErrorModel` status first, phrase fallback over the lowercased
-text) for volumes, secrets, containers, images, and quadlets — and the
-param ritual became `web.URLParam`/`web.QueryBool`/`web.QueryInt`.
+text) for volumes, secrets, containers, images, and quadlets — the
+param ritual became `web.URLParam`/`web.QueryBool`/`web.QueryInt`, and
+the `X-RateLimit-*` header trio became `web.SetRateLimitHeaders`
+(both rate-limit middlewares and the failure-budget handlers write the
+same three headers through it; the type-assert preamble that decides
+whether to write them stays per handler at two copies).
 Domains classify through its predicates, check
 most-specific first, and map the results to their own sentinels; the
 adapter never imports `internal/errors`, so sentinels stay

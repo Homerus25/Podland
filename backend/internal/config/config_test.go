@@ -56,6 +56,35 @@ func TestLoad_AuthRateLimitOverride(t *testing.T) {
 	assert.Equal(t, 30, cfg.RateLimit.AuthRequestsPerMinute, "Auth rate limit should come from the environment")
 }
 
+// TestLoad_AuthFailureBudgetDefaults pins the credential-failure
+// budget's defaults when neither env var is set: five failures per
+// fifteen-minute window (issue 186).
+func TestLoad_AuthFailureBudgetDefaults(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "test-key")
+	t.Setenv("RATE_LIMIT_AUTH_FAILURE_BUDGET", "")
+	t.Setenv("RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES", "")
+
+	cfg, err := Load()
+	require.NoError(t, err, "Load should succeed with no failure-budget env set")
+
+	assert.Equal(t, 5, cfg.RateLimit.FailureBudget, "Failure budget should default to 5")
+	assert.Equal(t, 15, cfg.RateLimit.FailureWindowMinutes, "Failure window should default to 15 minutes")
+}
+
+// TestLoad_AuthFailureBudgetOverride asserts the shared budget pair is
+// environment-configurable as one pair.
+func TestLoad_AuthFailureBudgetOverride(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "test-key")
+	t.Setenv("RATE_LIMIT_AUTH_FAILURE_BUDGET", "3")
+	t.Setenv("RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES", "30")
+
+	cfg, err := Load()
+	require.NoError(t, err, "Load should succeed with the failure-budget override")
+
+	assert.Equal(t, 3, cfg.RateLimit.FailureBudget, "Failure budget should come from the environment")
+	assert.Equal(t, 30, cfg.RateLimit.FailureWindowMinutes, "Failure window should come from the environment")
+}
+
 // TestValidate_RejectsNonPositiveSessionTTL asserts a zero or negative
 // TTL is rejected at startup rather than expiring sessions instantly.
 func TestValidate_RejectsNonPositiveSessionTTL(t *testing.T) {
@@ -68,6 +97,26 @@ func TestValidate_RejectsNonPositiveSessionTTL(t *testing.T) {
 		err := cfg.Validate()
 
 		assert.Error(t, err, "TTL of %d day(s) should fail validation", days)
+	}
+}
+
+// TestValidate_RejectsNonPositiveFailureBudget asserts a zero or
+// negative failure budget or window is rejected at startup — either
+// zero would silently lock every fresh login out of the instance.
+func TestValidate_RejectsNonPositiveFailureBudget(t *testing.T) {
+	for _, tc := range []struct{ budget, window int }{
+		{0, 15}, {-1, 15},
+		{5, 0}, {5, -1},
+	} {
+		cfg := &Config{
+			Encryption: EncryptionConfig{Key: "k"},
+			Session:    SessionConfig{TTLDays: 30},
+			RateLimit:  RateLimitConfig{FailureBudget: tc.budget, FailureWindowMinutes: tc.window},
+		}
+
+		err := cfg.Validate()
+
+		assert.Error(t, err, "Budget %d / window %d should fail validation", tc.budget, tc.window)
 	}
 }
 

@@ -3,15 +3,18 @@ package middleware
 import (
 	"net"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/web"
 )
 
-// RateLimiter implements a token bucket rate limiter
+// NewRateLimiter builds a keyed fixed-window limiter: each key spends
+// one unit per Allow call within a window that opens on its first
+// visit and only its expiry restores the budget. HasBudget/Record are
+// the check/spend pair the failure-budget surfaces use.
 func NewRateLimiter(requests int, window time.Duration) *RateLimiter {
 	return &RateLimiter{
 		store: &RateLimitStore{
@@ -26,10 +29,11 @@ func NewRateLimiter(requests int, window time.Duration) *RateLimiter {
 
 // RateLimiter handles rate limiting. The key identifies whose budget
 // is being spent: the per-user middleware passes the authenticated user
-// ID, the auth middleware passes the client IP.
+// ID, the auth middleware passes the client IP, and the failure-budget
+// surfaces pass the claimed identity (username or caller ID).
 func (rl *RateLimiter) Allow(key string) bool {
 	if key == "" {
-		return true // Skip rate limiting for unauthenticated requests
+		return true // No key, no budget: unsized requests pass unthrottled
 	}
 
 	rl.store.mu.Lock()
@@ -85,6 +89,14 @@ func (rl *RateLimiter) GetRemaining(key string) int {
 	rl.store.mu.Lock()
 	defer rl.store.mu.Unlock()
 
+	return rl.remainingLocked(key)
+}
+
+// remainingLocked returns the key's unspent budget in its current
+// window. A missing entry or an expired window has the full budget —
+// neither is rewritten, the reads leave the store untouched. Callers
+// hold the store lock.
+func (rl *RateLimiter) remainingLocked(key string) int {
 	entry, exists := rl.store.entries[key]
 	if !exists {
 		return rl.requests
@@ -95,8 +107,7 @@ func (rl *RateLimiter) GetRemaining(key string) int {
 		return rl.requests
 	}
 
-	remaining := rl.requests - entry.count
-	return remaining
+	return rl.requests - entry.count
 }
 
 // GetResetIn returns the duration until the rate limit resets for a key
@@ -122,6 +133,40 @@ func (rl *RateLimiter) GetResetIn(key string) time.Duration {
 	return rl.window - elapsed
 }
 
+// Limit returns the configured per-window budget: the number both
+// middlewares advertise as X-RateLimit-Limit and the auth handler
+// advertises for the failure budget's 429 answers.
+func (rl *RateLimiter) Limit() int {
+	return rl.requests
+}
+
+// HasBudget reports whether the key still has unspent budget without
+// spending any: the read the failure-budget surfaces run before a
+// credential verification, so a failed check never consumes budget and
+// a passed one is spent only by Record. Like Allow, an empty key is
+// skipped and always has budget.
+func (rl *RateLimiter) HasBudget(key string) bool {
+	if key == "" {
+		return true
+	}
+
+	rl.store.mu.Lock()
+	defer rl.store.mu.Unlock()
+
+	return rl.remainingLocked(key) > 0
+}
+
+// Record spends one unit of the key's budget: the failure-budget
+// surfaces call it when a credential verification fails. The first
+// record for a key opens its fixed window; only the window's expiry
+// restores spent budget, and recording past the configured count is a
+// no-op. The state change is exactly Allow's count-on-call, so Record
+// delegates to it — the budget arithmetic keeps one owner. Like Allow,
+// an empty key is skipped.
+func (rl *RateLimiter) Record(key string) {
+	rl.Allow(key)
+}
+
 // RateLimitStore stores rate limit information
 //
 // Entries are evicted lazily from Allow: lastSweep throttles the
@@ -138,7 +183,8 @@ type RateLimitEntry struct {
 	windowStart time.Time
 }
 
-// RateLimitMiddleware creates a middleware for rate limiting
+// RateLimiter bounds a keyed fixed-window budget behind Allow's
+// count-on-call, the pure HasBudget read, and the Record spend.
 type RateLimiter struct {
 	store    *RateLimitStore
 	requests int
@@ -152,13 +198,13 @@ func RateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
 			userID := contextutils.GetUserIDFromContext(r.Context())
 
 			if !rl.Allow(userID) {
-				rl.setRateLimitHeaders(w, 0, rl.GetResetIn(userID))
+				web.SetRateLimitHeaders(w, rl.Limit(), 0, rl.GetResetIn(userID))
 				apperrors.RespondWithError(w, apperrors.ErrRateLimitExceeded, contextutils.GetRequestID(r.Context()))
 				return
 			}
 
 			// Set rate limit headers
-			rl.setRateLimitHeaders(w, rl.GetRemaining(userID), rl.GetResetIn(userID))
+			web.SetRateLimitHeaders(w, rl.Limit(), rl.GetRemaining(userID), rl.GetResetIn(userID))
 
 			next.ServeHTTP(w, r)
 		})
@@ -178,26 +224,17 @@ func AuthRateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
 			ip := clientIP(r)
 
 			if !rl.Allow(ip) {
-				rl.setRateLimitHeaders(w, 0, rl.GetResetIn(ip))
+				web.SetRateLimitHeaders(w, rl.Limit(), 0, rl.GetResetIn(ip))
 				apperrors.RespondWithError(w, apperrors.ErrRateLimitExceeded, contextutils.GetRequestID(r.Context()))
 				return
 			}
 
 			// Set rate limit headers
-			rl.setRateLimitHeaders(w, rl.GetRemaining(ip), rl.GetResetIn(ip))
+			web.SetRateLimitHeaders(w, rl.Limit(), rl.GetRemaining(ip), rl.GetResetIn(ip))
 
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// setRateLimitHeaders writes the X-RateLimit-* trio both middlewares
-// advertise: the configured limit, the key's remaining budget, and the
-// seconds until its window resets.
-func (rl *RateLimiter) setRateLimitHeaders(w http.ResponseWriter, remaining int, resetIn time.Duration) {
-	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.requests))
-	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(int64(resetIn.Seconds()), 10))
 }
 
 // clientIP returns the host portion of the request's remote address. It

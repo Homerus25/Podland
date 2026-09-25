@@ -46,14 +46,16 @@ func seedTargetSessions(t *testing.T, sessionRepo *testutils.MockSessionReposito
 }
 
 // TestUserHandler_ResetPassword_AdminResetsUser asserts the happy path:
-// an admin resets a user's password, gets 200 with the updated user —
-// exactly id, username, role, createdAt — every one of the target's
-// sessions is revoked, and the admin's own session survives.
+// an admin resets a user's password with their own password in the
+// body, gets 200 with the updated user — exactly id, username, role,
+// createdAt — every one of the target's sessions is revoked, and the
+// admin's own session survives.
 func TestUserHandler_ResetPassword_AdminResetsUser(t *testing.T) {
 	router, authService, sessionRepo := newUsersTestRouter(t)
 	seedTargetSessions(t, sessionRepo)
 
-	w := putUserPasswordAs(t, router, authService, "admin-1", "user-1", `{"newPassword":"brand-new-pw"}`)
+	w := putUserPasswordAs(t, router, authService, "admin-1", "user-1",
+		`{"adminPassword":"known-admin-password","newPassword":"brand-new-pw"}`)
 
 	resp := w.Result()
 	defer resp.Body.Close()
@@ -74,28 +76,48 @@ func TestUserHandler_ResetPassword_AdminResetsUser(t *testing.T) {
 	assert.Len(t, sessionRepo.SessionsForUser("admin-1"), 1, "The admin's own session must be untouched")
 }
 
-// TestUserHandler_ResetPassword_AdminSelfReset asserts the caller ==
-// target edge through the HTTP surface: the admin PUTs their own ID,
-// gets 200, and the revoke-all falls on the admin's own sessions —
-// there is no caller exception in the guard chain (the admin gate only
-// checks the role, the service only knows the target).
-func TestUserHandler_ResetPassword_AdminSelfReset(t *testing.T) {
+// TestUserHandler_ResetPassword_WrongAdminPasswordRejected pins the
+// re-auth gate at the wire: a wrong admin password answers 401
+// INVALID_CREDENTIALS carrying the change-password message, and writes
+// nothing — the target's sessions survive.
+func TestUserHandler_ResetPassword_WrongAdminPasswordRejected(t *testing.T) {
 	router, authService, sessionRepo := newUsersTestRouter(t)
 	seedTargetSessions(t, sessionRepo)
 
-	w := putUserPasswordAs(t, router, authService, "admin-1", "admin-1", `{"newPassword":"brand-new-pw"}`)
+	w := putUserPasswordAs(t, router, authService, "admin-1", "user-1",
+		`{"adminPassword":"not-the-admins-password","newPassword":"brand-new-pw"}`)
 
 	resp := w.Result()
 	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode, "Admin self-reset should return 200")
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "A wrong admin password should be rejected with 401")
 
-	var body map[string]any
-	err := json.NewDecoder(resp.Body).Decode(&body)
-	require.NoError(t, err, "Should decode the updated-user response")
-	assert.Equal(t, "admin-1", body["id"], "Response should carry the admin's own ID")
-	assert.Equal(t, "root", body["username"], "Response should carry the admin's username")
+	envelope := testutils.DecodeErrorEnvelope(t, resp)
+	assert.Equal(t, "INVALID_CREDENTIALS", envelope.Error.Code, "Error body should carry INVALID_CREDENTIALS")
+	assert.Equal(t, "Current password is incorrect", envelope.Error.Message, "The message must match the change-password path")
 
-	assert.Empty(t, sessionRepo.SessionsForUser("admin-1"), "The admin's own session must be revoked by their self-reset")
+	assert.Len(t, sessionRepo.SessionsForUser("user-1"), 2, "Sessions must be untouched")
+}
+
+// TestUserHandler_ResetPassword_SelfResetRejected pins the self-lockout
+// guard at the wire: an admin PUTting their own ID gets 400
+// SELF_PASSWORD_RESET even with a wrong password — the guard runs
+// before verification — and nothing is written.
+func TestUserHandler_ResetPassword_SelfResetRejected(t *testing.T) {
+	router, authService, sessionRepo := newUsersTestRouter(t)
+	seedTargetSessions(t, sessionRepo)
+
+	w := putUserPasswordAs(t, router, authService, "admin-1", "admin-1",
+		`{"adminPassword":"not-the-admins-password","newPassword":"brand-new-pw"}`)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, "A self reset should be rejected with 400")
+
+	envelope := testutils.DecodeErrorEnvelope(t, resp)
+	assert.Equal(t, "SELF_PASSWORD_RESET", envelope.Error.Code, "Error body should carry SELF_PASSWORD_RESET")
+	assert.Equal(t, "Cannot reset your own password", envelope.Error.Message, "The message should point at the self-service path")
+
+	assert.Len(t, sessionRepo.SessionsForUser("admin-1"), 1, "The admin's own session must be untouched")
 	assert.Len(t, sessionRepo.SessionsForUser("user-1"), 2, "Other users' sessions must be untouched")
 }
 
@@ -106,7 +128,8 @@ func TestUserHandler_ResetPassword_ShortPasswordRejected(t *testing.T) {
 	router, authService, sessionRepo := newUsersTestRouter(t)
 	seedTargetSessions(t, sessionRepo)
 
-	w := putUserPasswordAs(t, router, authService, "admin-1", "user-1", `{"newPassword":"short7"}`)
+	w := putUserPasswordAs(t, router, authService, "admin-1", "user-1",
+		`{"adminPassword":"known-admin-password","newPassword":"short7"}`)
 
 	resp := w.Result()
 	defer resp.Body.Close()
@@ -117,15 +140,18 @@ func TestUserHandler_ResetPassword_ShortPasswordRejected(t *testing.T) {
 }
 
 // TestUserHandler_ResetPassword_MissingPasswordRejected asserts the
-// decode ritual: a body without newPassword fails the required tag and
-// answers 400 VALIDATION_FAILED before the service runs.
+// decode ritual: a body missing either required field — adminPassword
+// or newPassword — fails the required tag and answers 400
+// VALIDATION_FAILED before the service runs.
 func TestUserHandler_ResetPassword_MissingPasswordRejected(t *testing.T) {
 	router, authService, sessionRepo := newUsersTestRouter(t)
 	seedTargetSessions(t, sessionRepo)
 
 	for name, body := range map[string]string{
-		"missing newPassword": `{}`,
-		"empty newPassword":   `{"newPassword":""}`,
+		"missing adminPassword": `{"newPassword":"brand-new-pw"}`,
+		"empty adminPassword":   `{"adminPassword":"","newPassword":"brand-new-pw"}`,
+		"missing newPassword":   `{"adminPassword":"known-admin-password"}`,
+		"empty newPassword":     `{"adminPassword":"known-admin-password","newPassword":""}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := putUserPasswordAs(t, router, authService, "admin-1", "user-1", body)
@@ -146,7 +172,8 @@ func TestUserHandler_ResetPassword_MissingPasswordRejected(t *testing.T) {
 func TestUserHandler_ResetPassword_TargetNotFound(t *testing.T) {
 	router, authService, _ := newUsersTestRouter(t)
 
-	w := putUserPasswordAs(t, router, authService, "admin-1", "ghost-id", `{"newPassword":"brand-new-pw"}`)
+	w := putUserPasswordAs(t, router, authService, "admin-1", "ghost-id",
+		`{"adminPassword":"known-admin-password","newPassword":"brand-new-pw"}`)
 
 	resp := w.Result()
 	defer resp.Body.Close()

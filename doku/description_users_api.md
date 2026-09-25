@@ -140,7 +140,7 @@ The change takes effect immediately: the admin gate, the users-list shape, and t
 
 ## PUT /api/users/{id}/password
 
-Resets a user's password. **Admin-only**: the caller must authenticate with a valid JWT whose user has the `admin` role.
+Resets a user's password. **Admin-only**: the caller must authenticate with a valid JWT whose user has the `admin` role. The caller must also re-authenticate with their own password: the request carries the acting admin's password, verified against the caller (the JWT subject) before the reset runs — a stolen or borrowed admin session alone cannot take over an account.
 
 **Request:**
 ```
@@ -149,12 +149,16 @@ Authorization: Bearer <admin token>
 ```
 ```json
 {
+  "adminPassword": "string",
   "newPassword": "string"
 }
 ```
 
 **Fields:**
-- `newPassword`: Required; at least 8 characters (`PASSWORD_TOO_SHORT` otherwise). There is no current-password check — the caller is the admin, not the target.
+- `adminPassword`: Required. The **acting admin's own** password — named for the acting admin, since actor and target differ. Verified with the same bcrypt comparison the login and the self-service password change use. A wrong value answers 401 `INVALID_CREDENTIALS`, "Current password is incorrect" — the same message and code the self-service change produces.
+- `newPassword`: Required; at least 8 characters (`PASSWORD_TOO_SHORT` otherwise).
+- **Failure budget**: failed admin-password verifications count against the acting admin — five per fifteen minutes (the shared `RATE_LIMIT_AUTH_FAILURE_BUDGET` / `RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES` pair; the users surface holds its own limiter instance keyed by the acting admin, separate from the auth surface's). Once spent, further resets answer 429 `RATE_LIMIT_EXCEEDED` with the standard `X-RateLimit-*` header trio **before any verification runs**, even with the correct admin password; only the window's expiry restores the budget. Successful resets and storage failures never consume it.
+- **Self-lockout guard:** an admin cannot reset their **own** password through this endpoint (`SELF_PASSWORD_RESET`) — self-service `POST /api/auth/password` is the only self path. The guard runs before the password verification, so a doomed request burns neither a bcrypt compare nor failure budget, and it answers 400 regardless of the supplied password's correctness.
 
 **Response (Success - 200):** the updated user.
 ```json
@@ -167,13 +171,14 @@ Authorization: Bearer <admin token>
 ```
 
 **Fields:**
-- The password is stored bcrypt-hashed and never echoed; the response contains exactly `id`, `username`, `role`, `createdAt`.
+- The passwords are never echoed; the response contains exactly `id`, `username`, `role`, `createdAt`.
 
-The reset takes effect immediately: **every session of the target user is revoked**, so all of the target's refresh tokens (stolen ones included) die with the old password. No fresh login is issued for the target — unlike the self-service `POST /api/auth/password` change, the caller is the admin, and the target must log in with the new password. For any other target the admin's own sessions are untouched; resetting their **own** password through this endpoint revokes the admin's sessions like any other target's, current device included. A target may be any existing user.
+The reset takes effect immediately: **every session of the target user is revoked**, so all of the target's refresh tokens (stolen ones included) die with the old password. No fresh login is issued for the target — unlike the self-service `POST /api/auth/password` change, the caller is the admin, and the target must log in with the new password. The admin's own sessions are untouched. A target may be any existing user other than the caller.
 
 **Response (Error):**
-- 401 Unauthorized: Missing or invalid token (`TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`)
+- 401 Unauthorized: Missing or invalid token (`TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`); a wrong `adminPassword` (`INVALID_CREDENTIALS`, "Current password is incorrect")
 - 403 Forbidden: Authenticated caller without the admin role (`ADMIN_REQUIRED`)
-- 400 Bad Request: A password shorter than 8 characters (`PASSWORD_TOO_SHORT`, "Password must be at least 8 characters"); a missing or empty `newPassword` (`VALIDATION_FAILED`); malformed JSON body (`INVALID_REQUEST`)
-- 404 Not Found: No user with the given `id` (`USER_NOT_FOUND`)
+- 400 Bad Request: A `newPassword` shorter than 8 characters (`PASSWORD_TOO_SHORT`, "Password must be at least 8 characters"); a missing or empty `adminPassword` or `newPassword` (`VALIDATION_FAILED`); the caller resetting their own password (`SELF_PASSWORD_RESET`, "Cannot reset your own password"); malformed JSON body (`INVALID_REQUEST`)
+- 404 Not Found: No user with the given `id` (`USER_NOT_FOUND`; answered **before** the budget check, so an unknown target stays 404 unchanged even for a locked-out caller — and the lookup verifies nothing, so it never spends the budget)
+- 429 Too Many Requests: The acting admin's credential-failure budget is spent (`RATE_LIMIT_EXCEEDED`, "Too many requests") — carries `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` (seconds until the window resets)
 - 500 Internal Server Error: storage failure behind the lookup, the update, or the session revocation (generic `INTERNAL_ERROR`)

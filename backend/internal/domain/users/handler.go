@@ -2,14 +2,17 @@ package users
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
+	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/web"
 )
 
 // UserHandler handles user management requests.
 type UserHandler struct {
-	service *UserService
+	service  *UserService
+	failures FailureBudget
 }
 
 // NewUserHandler creates a new UserHandler.
@@ -17,6 +20,17 @@ func NewUserHandler(service *UserService) *UserHandler {
 	return &UserHandler{
 		service: service,
 	}
+}
+
+// WithFailureBudget wires the shared credential-failure budget, so the
+// handler can advertise its X-RateLimit-* trio on the 429 answers the
+// service's budget rejections produce. The fluent shape mirrors the
+// auth handler's WithFailureBudget: an optional dependency layered onto
+// the one-argument constructor. Unwired, budget 429s (unreachable when
+// the service's brake is unwired too) carry no rate-limit headers.
+func (h *UserHandler) WithFailureBudget(failures FailureBudget) *UserHandler {
+	h.failures = failures
+	return h
 }
 
 // List handles GET /api/users: any authenticated caller may list users,
@@ -87,13 +101,33 @@ func (h *UserHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// setFailureBudgetHeaders advertises the credential-failure budget's
+// X-RateLimit-* trio when the service answered the budget's 429: the
+// configured limit, zero remaining, and the seconds until the key's
+// window resets — the same advertisement the auth handler makes for its
+// budget's rejections, keyed by the acting admin's ID here. Any other
+// failure — and an unwired budget — writes nothing.
+func (h *UserHandler) setFailureBudgetHeaders(w http.ResponseWriter, key string, err error) {
+	if h.failures == nil {
+		return
+	}
+	appErr, ok := errors.AsType[*apperrors.AppError](err)
+	if !ok || appErr.Status != http.StatusTooManyRequests {
+		return
+	}
+	web.SetRateLimitHeaders(w, h.failures.Limit(), 0, h.failures.GetResetIn(key))
+}
+
 // ResetPassword handles PUT /api/users/{userId}/password: an admin
-// sets a new password for another user, revoking every session of the
-// target (the length policy and the revocation live in the service;
-// no fresh login is issued — the target must log in with the new
-// password). Registration behind JWTMiddleware + RequireAdmin happens
-// in internal/app; the handler reads the URL param, decodes the body,
-// and crosses the envelope.
+// sets a new password for another user, re-authenticating with their
+// own password (the body's adminPassword — verified against the acting
+// admin by the service, which also spends the caller-keyed failure
+// budget on misses and refuses a self reset) and revoking every session
+// of the target (the length policy and the revocation live in the
+// service; no fresh login is issued — the target must log in with the
+// new password). Registration behind JWTMiddleware + RequireAdmin
+// happens in internal/app; the handler reads the URL param, decodes the
+// body, and crosses the envelope.
 func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, callerID string) (UserResponse, error) {
 		targetID, guard := web.URLParam(r, "userId", "MISSING_USER_ID")
@@ -106,8 +140,9 @@ func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 			return UserResponse{}, appErr
 		}
 
-		user, err := h.service.ResetPassword(targetID, req.NewPassword)
+		user, err := h.service.ResetPassword(callerID, targetID, req.AdminPassword, req.NewPassword)
 		if err != nil {
+			h.setFailureBudgetHeaders(w, resetBudgetKey(callerID), err)
 			return UserResponse{}, err
 		}
 		return toUserResponse(user), nil

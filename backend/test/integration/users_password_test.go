@@ -16,10 +16,11 @@ import (
 )
 
 // adminWithID seeds an admin user and logs in through the real login
-// endpoint, returning the bearer token and the admin's user ID — the
-// password-reset tests count the admin's session rows to prove a reset
-// never touches the caller's sessions.
-func adminWithID(t *testing.T) (string, string) {
+// endpoint, returning the bearer token, the admin's user ID, and the
+// admin's password — the password-reset tests need the ID to count
+// session rows (a reset never touches the caller's sessions) and the
+// password as the body's adminPassword re-authentication value.
+func adminWithID(t *testing.T) (string, string, string) {
 	t.Helper()
 
 	username := "it-" + suite.RunID + "-pwadmin-" + uuid.New().String()[:8]
@@ -29,7 +30,7 @@ func adminWithID(t *testing.T) (string, string) {
 
 	token, err := realLogin(suite.ServerURL, username, password)
 	require.NoError(t, err, "Should log in as the seeded admin")
-	return token, adminID
+	return token, adminID, password
 }
 
 // assertUpdatedUserBody pins the reset endpoint's wire shape on a decoded
@@ -53,7 +54,7 @@ func assertUpdatedUserBody(t *testing.T, body map[string]any) {
 func TestUsers_ResetPassword_AdminResetRevokesTargetSessions(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
-	adminToken, adminID := adminWithID(t)
+	adminToken, adminID, adminPassword := adminWithID(t)
 
 	username := "it-" + suite.RunID + "-resetpw-" + uuid.New().String()[:8]
 	oldPassword := "it-" + suite.RunID + "-oldpw-" + uuid.New().String()[:8]
@@ -81,10 +82,12 @@ func TestUsers_ResetPassword_AdminResetRevokesTargetSessions(t *testing.T) {
 	require.Len(t, sessionTokenHashes(t, db, userID), 2, "Two devices should leave two session rows")
 	adminSessionsBefore := len(sessionTokenHashes(t, db, adminID))
 
-	// The admin resets the target's password through the endpoint: 200
-	// with the updated user — exactly id, username, role, createdAt.
+	// The admin resets the target's password through the endpoint —
+	// re-authenticating with their own password: 200 with the updated
+	// user — exactly id, username, role, createdAt.
 	resetResp := requestJSONWithBearer(t, http.DefaultClient, http.MethodPut, "/api/users/"+userID+"/password", adminToken, map[string]string{
-		"newPassword": newPassword,
+		"adminPassword": adminPassword,
+		"newPassword":   newPassword,
 	})
 	defer resetResp.Body.Close()
 	require.Equal(t, http.StatusOK, resetResp.StatusCode, "Admin password reset should return 200")
@@ -125,76 +128,114 @@ func TestUsers_ResetPassword_AdminResetRevokesTargetSessions(t *testing.T) {
 	assert.Len(t, sessionTokenHashes(t, db, userID), 1, "The new login should be the target's only live session")
 }
 
-// TestUsers_ResetPassword_AdminSelfResetRevokesOwnSessions pins the
-// caller == target edge on the real server: an admin resetting their
-// own password is an ordinary reset whose target happens to be the
-// caller, so every one of the admin's own sessions is revoked — the
-// admin signs themselves out of all devices, the old password stops
-// working, and the new one logs in.
-func TestUsers_ResetPassword_AdminSelfResetRevokesOwnSessions(t *testing.T) {
+// TestUsers_ResetPassword_SelfResetRejected pins the self-lockout
+// guard on the real server (issue 187): an admin resetting their own
+// password through the admin endpoint is refused with 400
+// SELF_PASSWORD_RESET regardless of the supplied password's
+// correctness — self-service change password is the only self path —
+// and nothing is written: the admin's sessions survive and the old
+// password keeps working.
+func TestUsers_ResetPassword_SelfResetRejected(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
 	username := "it-" + suite.RunID + "-selfpw-" + uuid.New().String()[:8]
-	oldPassword := "it-" + suite.RunID + "-oldpw-" + uuid.New().String()[:8]
-	newPassword := "brand-new-pw-" + uuid.New().String()[:8]
-	adminID, err := suite.SeedUserWithRole(username, oldPassword, models.RoleAdmin)
+	password := "it-" + suite.RunID + "-oldpw-" + uuid.New().String()[:8]
+	adminID, err := suite.SeedUserWithRole(username, password, models.RoleAdmin)
 	require.NoError(t, err, "Should seed self-resetting admin")
 	db := openSuiteDB(t)
 
 	// The admin is signed in on two devices: the bearer token minted by
 	// a plain login, and a cookie-jar client.
-	adminToken, err := realLogin(suite.ServerURL, username, oldPassword)
+	adminToken, err := realLogin(suite.ServerURL, username, password)
 	require.NoError(t, err, "Should log in as the admin (bearer token)")
 	device := suite.CookieJarClient()
 	login := postJSONWithClient(t, device, "/api/auth/login", map[string]string{
 		"username": username,
-		"password": oldPassword,
+		"password": password,
 	})
 	require.Equal(t, http.StatusOK, login.StatusCode, "Second device should log in")
 	require.NoError(t, login.Body.Close(), "Should close second device login body")
 	require.Len(t, sessionTokenHashes(t, db, adminID), 2, "Two sign-ins should leave two session rows")
 
-	// The admin resets their own password through the endpoint: 200
-	// with the updated user — exactly id, username, role, createdAt.
-	resetResp := requestJSONWithBearer(t, http.DefaultClient, http.MethodPut, "/api/users/"+adminID+"/password", adminToken, map[string]string{
-		"newPassword": newPassword,
-	})
-	defer resetResp.Body.Close()
-	require.Equal(t, http.StatusOK, resetResp.StatusCode, "Admin self-reset should return 200")
+	// Self reset with a wrong password: 400 SELF_PASSWORD_RESET — the
+	// guard runs before any verification.
+	for name, adminPassword := range map[string]string{
+		"wrong password":   "not-the-admins-password",
+		"correct password": password,
+	} {
+		t.Run(name, func(t *testing.T) {
+			resetResp := requestJSONWithBearer(t, http.DefaultClient, http.MethodPut, "/api/users/"+adminID+"/password", adminToken, map[string]string{
+				"adminPassword": adminPassword,
+				"newPassword":   "brand-new-pw",
+			})
+			defer resetResp.Body.Close()
+			require.Equal(t, http.StatusBadRequest, resetResp.StatusCode, "A self reset should be rejected with 400")
 
-	var resetBody map[string]any
-	require.NoError(t, json.NewDecoder(resetResp.Body).Decode(&resetBody), "Should decode reset body")
-	assert.Equal(t, adminID, resetBody["id"], "Body should carry the admin's own user ID")
-	assert.Equal(t, username, resetBody["username"], "Body should carry the admin's username")
-	assert.Equal(t, "admin", resetBody["role"], "The admin role must ride through unchanged")
-	assertUpdatedUserBody(t, resetBody)
+			envelope := testutils.DecodeErrorEnvelope(t, resetResp)
+			assert.Equal(t, "SELF_PASSWORD_RESET", envelope.Error.Code, "Error body should carry SELF_PASSWORD_RESET")
+			assert.Equal(t, "Cannot reset your own password", envelope.Error.Message, "The message should point at the self-service path")
+		})
+	}
 
-	// Database effect: both of the admin's own session rows are gone.
-	assert.Empty(t, sessionTokenHashes(t, db, adminID), "Every session of the admin themself must be revoked")
+	// Nothing was written: both of the admin's own session rows stand,
+	// the second device still refreshes, and the old password works.
+	assert.Len(t, sessionTokenHashes(t, db, adminID), 2, "A refused self reset must revoke nothing")
 
-	// The second device is signed out: its jar-held cookie no longer
-	// addresses a live session.
 	refresh := postJSONWithClient(t, device, "/api/auth/refresh", map[string]string{})
 	defer refresh.Body.Close()
-	require.Equal(t, http.StatusUnauthorized, refresh.StatusCode, "The admin's second device must be signed out")
-	assert.Equal(t, "AUTH_REFRESH_INVALID", testutils.DecodeErrorEnvelope(t, refresh).Error.Code, "The revoked session must report AUTH_REFRESH_INVALID")
+	require.Equal(t, http.StatusOK, refresh.StatusCode, "The admin's second device must stay signed in")
 
-	// The old password is dead; the new one logs in (leaving its own
-	// fresh session row).
-	oldLogin := postJSONWithClient(t, suite.CookieJarClient(), "/api/auth/login", map[string]string{
+	stillWorks := postJSONWithClient(t, suite.CookieJarClient(), "/api/auth/login", map[string]string{
+		"username": username,
+		"password": password,
+	})
+	defer stillWorks.Body.Close()
+	assert.Equal(t, http.StatusOK, stillWorks.StatusCode, "The admin's password must be unchanged")
+}
+
+// TestUsers_ResetPassword_RejectsWrongAdminPassword pins the re-auth
+// gate on the real server: a reset whose adminPassword does not verify
+// answers 401 INVALID_CREDENTIALS with the change-password message and
+// changes nothing — the target's sessions survive and the old password
+// still works.
+func TestUsers_ResetPassword_RejectsWrongAdminPassword(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+
+	adminToken, _ /* adminID */, _ /* adminPassword */ := adminWithID(t)
+
+	username := "it-" + suite.RunID + "-resetpw-" + uuid.New().String()[:8]
+	oldPassword := "it-" + suite.RunID + "-oldpw-" + uuid.New().String()[:8]
+	userID, err := suite.SeedUserWithRole(username, oldPassword, "user")
+	require.NoError(t, err, "Should seed reset target")
+	db := openSuiteDB(t)
+
+	device := suite.CookieJarClient()
+	login := postJSONWithClient(t, device, "/api/auth/login", map[string]string{
 		"username": username,
 		"password": oldPassword,
 	})
-	defer oldLogin.Body.Close()
-	assert.Equal(t, http.StatusUnauthorized, oldLogin.StatusCode, "The old password must stop working for the admin too")
+	require.Equal(t, http.StatusOK, login.StatusCode, "Device should log in")
+	require.NoError(t, login.Body.Close(), "Should close device login body")
 
-	newLogin := postJSONWithClient(t, suite.CookieJarClient(), "/api/auth/login", map[string]string{
-		"username": username,
-		"password": newPassword,
+	resetResp := requestJSONWithBearer(t, http.DefaultClient, http.MethodPut, "/api/users/"+userID+"/password", adminToken, map[string]string{
+		"adminPassword": "not-the-admins-password",
+		"newPassword":   "brand-new-pw",
 	})
-	defer newLogin.Body.Close()
-	assert.Equal(t, http.StatusOK, newLogin.StatusCode, "The new password must log the admin back in")
-	assert.Len(t, sessionTokenHashes(t, db, adminID), 1, "The new login should be the admin's only live session")
+	defer resetResp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resetResp.StatusCode, "A wrong admin password must be a 401")
+
+	envelope := testutils.DecodeErrorEnvelope(t, resetResp)
+	assert.Equal(t, "INVALID_CREDENTIALS", envelope.Error.Code, "Should carry the credentials code")
+	assert.Equal(t, "Current password is incorrect", envelope.Error.Message, "The message must match the change-password path")
+
+	assert.Len(t, sessionTokenHashes(t, db, userID), 1, "Sessions must be untouched")
+
+	stillWorks := postJSONWithClient(t, suite.CookieJarClient(), "/api/auth/login", map[string]string{
+		"username": username,
+		"password": oldPassword,
+	})
+	defer stillWorks.Body.Close()
+	assert.Equal(t, http.StatusOK, stillWorks.StatusCode, "The target's password must be unchanged")
 }
 
 // TestUsers_ResetPassword_RejectsShortPassword asserts the password
@@ -204,7 +245,7 @@ func TestUsers_ResetPassword_AdminSelfResetRevokesOwnSessions(t *testing.T) {
 func TestUsers_ResetPassword_RejectsShortPassword(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
-	adminToken, _ := adminWithID(t)
+	adminToken, _ /* adminID */, adminPassword := adminWithID(t)
 
 	username := "it-" + suite.RunID + "-shortpw-" + uuid.New().String()[:8]
 	password := "it-" + suite.RunID + "-pw-" + uuid.New().String()[:8]
@@ -221,7 +262,8 @@ func TestUsers_ResetPassword_RejectsShortPassword(t *testing.T) {
 	require.NoError(t, login.Body.Close(), "Should close login body")
 
 	resetResp := requestJSONWithBearer(t, http.DefaultClient, http.MethodPut, "/api/users/"+userID+"/password", adminToken, map[string]string{
-		"newPassword": "short7",
+		"adminPassword": adminPassword,
+		"newPassword":   "short7",
 	})
 	defer resetResp.Body.Close()
 	require.Equal(t, http.StatusBadRequest, resetResp.StatusCode, "A too-short password must be a 400")
@@ -285,11 +327,12 @@ func TestUsers_ResetPassword_NonAdminForbidden(t *testing.T) {
 func TestUsers_ResetPassword_UnknownUser(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
-	adminToken, _ := adminWithID(t)
+	adminToken, _ /* adminID */, adminPassword := adminWithID(t)
 
 	ghostID := uuid.New().String()
 	resetResp := requestJSONWithBearer(t, http.DefaultClient, http.MethodPut, "/api/users/"+ghostID+"/password", adminToken, map[string]string{
-		"newPassword": "brand-new-pw",
+		"adminPassword": adminPassword,
+		"newPassword":   "brand-new-pw",
 	})
 	defer resetResp.Body.Close()
 	require.Equal(t, http.StatusNotFound, resetResp.StatusCode, "A missing target user must be a 404")

@@ -42,6 +42,19 @@ Content-Type: application/json
 **Response (Error):**
 - 401 Unauthorized: Invalid credentials (`INVALID_CREDENTIALS`)
 - 400 Bad Request: Malformed JSON body (`INVALID_REQUEST`, "Invalid request body"); missing or empty username/password (`VALIDATION_FAILED`, carrying the validator's message)
+- 429 Too Many Requests: credential-failure budget exhausted (`RATE_LIMIT_EXCEEDED`) — see [Credential-failure budget](#credential-failure-budget)
+
+**Credential-failure budget:** failed logins — wrong password and
+unknown username alike — count against the username in the request
+body. After five failures within fifteen minutes
+(`RATE_LIMIT_AUTH_FAILURE_BUDGET` / `RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES`),
+further fresh logins for that name answer 429 `RATE_LIMIT_EXCEEDED`
+**even with the correct password**, and only the window's expiry
+restores access. The lockout bars fresh logins only: an active refresh
+session (POST /api/auth/refresh) keeps working while its username is
+locked out. Successful logins never consume the budget. Rejections
+carry the same `X-RateLimit-Limit` / `X-RateLimit-Remaining` /
+`X-RateLimit-Reset` headers the per-IP cap sets.
 
 ---
 
@@ -172,7 +185,35 @@ curl -s http://localhost:8080/api/setup/user \
 
 **Rate limiting:** login, refresh, this status probe, and the setup
 endpoint share one per-IP budget (`RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE`,
-default 10/min). Exceeding it answers 429 `RATE_LIMIT_EXCEEDED`.
+default 10/min). Exceeding it answers 429 `RATE_LIMIT_EXCEEDED`. Login
+additionally spends the shared [credential-failure budget](#credential-failure-budget)
+keyed per username.
+
+---
+
+### Credential-failure budget
+
+Login and the self-service password change share one brake: a count of
+failed credential verifications per identity within a fixed window,
+configured as one pair — `RATE_LIMIT_AUTH_FAILURE_BUDGET` (default 5)
+and `RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES` (default 15).
+
+- **Login** keys the budget on the username in the request body; a
+  wrong password and an unknown username spend it alike. Once spent,
+  further fresh logins for that name answer 429
+  `RATE_LIMIT_EXCEEDED` with `X-RateLimit-Limit` /
+  `X-RateLimit-Remaining` (`0`) / `X-RateLimit-Reset` headers, even
+  with the correct password. Only the window's expiry restores access;
+  an active refresh session keeps working throughout.
+- **Password change** (POST /api/auth/password) keys the same budget on
+  the caller: wrong current-password attempts spend it; once spent,
+  further attempts answer 429 `RATE_LIMIT_EXCEEDED` until the window
+  expires. A single wrong attempt still returns the unchanged 401.
+- **Only failures spend the budget.** Successful logins and password
+  changes, storage failures, and validation failures never do.
+- The per-IP auth cap (`RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE`)
+  stays layered underneath for the unauthenticated routes; whichever
+  budget rejects first writes its own headers on the 429.
 
 ---
 
@@ -213,3 +254,4 @@ Content-Type: application/json
 - 401 Unauthorized: Wrong current password (`INVALID_CREDENTIALS`, message "Current password is incorrect"), or missing/invalid bearer token (`TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`)
 - 400 Bad Request: New password shorter than 8 characters (`PASSWORD_TOO_SHORT`, "Password must be at least 8 characters"); malformed JSON body (`INVALID_REQUEST`, "Invalid request body"); missing or empty fields (`VALIDATION_FAILED`, carrying the validator's message)
 - 404 Not Found: The token's user no longer exists (`USER_NOT_FOUND`)
+- 429 Too Many Requests: credential-failure budget exhausted (`RATE_LIMIT_EXCEEDED`) — wrong current-password attempts count against the caller into the shared budget; see [Credential-failure budget](#credential-failure-budget)

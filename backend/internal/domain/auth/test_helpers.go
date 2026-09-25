@@ -92,7 +92,22 @@ func NewTestAuthServiceWithSessionRepo(userRepo models.UserRepositoryInterface, 
 		Issuer:         "test-issuer",
 	}
 
-	return NewAuthService(config, userRepo, sessionRepo, sessionTTL, unimplementedFirstUsers{})
+	return NewAuthService(config, userRepo, sessionRepo, sessionTTL, unimplementedFirstUsers{}, nil)
+}
+
+// NewTestAuthServiceWithFailureBudget is NewTestAuthServiceWithSessionRepo
+// with a credential-failure budget of the test's choosing wired, so the
+// budget tests exercise the check/spend contract. (The auth package
+// cannot import the middleware limiter for real — middleware imports
+// auth — so unit tests wire a fake and the production wiring is pinned
+// at the app and integration seams.)
+func NewTestAuthServiceWithFailureBudget(userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, failures FailureBudget) (*AuthService, error) {
+	service, err := NewTestAuthServiceWithSessionRepo(userRepo, sessionRepo, 30*24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	service.failures = failures
+	return service, nil
 }
 
 // unimplementedFirstUsers is the test helpers' stand-in FirstUserCreator.

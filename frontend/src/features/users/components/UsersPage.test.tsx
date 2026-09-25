@@ -1,9 +1,9 @@
 import type { User } from "@shared/types/api";
-import { setBearerToken } from "@shared/utils/api";
+import { getBearerToken, setBearerToken } from "@shared/utils/api";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
 import { errorResponse } from "@/test/errors";
 import { userFixture } from "@/test/factories";
@@ -40,7 +40,11 @@ function mockUsersApi(
 	let users = initial;
 	const createdBodies: unknown[] = [];
 	const roleBodies: { id: string; role: string }[] = [];
-	const passwordBodies: { id: string; newPassword: string }[] = [];
+	const passwordBodies: {
+		id: string;
+		adminPassword: string;
+		newPassword: string;
+	}[] = [];
 	let listRequests = 0;
 	server.use(
 		http.get("*/api/users", () => {
@@ -75,7 +79,10 @@ function mockUsersApi(
 			return HttpResponse.json(users.find((user) => user.id === params.id));
 		}),
 		http.put("*/api/users/:id/password", async ({ request, params }) => {
-			const body = (await request.json()) as { newPassword: string };
+			const body = (await request.json()) as {
+				adminPassword: string;
+				newPassword: string;
+			};
 			passwordBodies.push({ id: params.id as string, ...body });
 			return HttpResponse.json(users.find((user) => user.id === params.id));
 		}),
@@ -321,20 +328,42 @@ describe("change-role dialog", () => {
 });
 
 describe("reset-password dialog", () => {
+	// The reset re-authenticates the acting admin, so the dialog tests run
+	// with a live session bearer: a wrong admin password (401) must read as
+	// an input error, and only a fired session-death seam would clear it.
+	beforeEach(() => {
+		setBearerToken("current-access-token");
+	});
+
+	async function fillResetForm(adminPassword: string, newPassword: string) {
+		// Regex prefixes: the required indicator (an appended asterisk) is
+		// part of the label text.
+		await userEvent.type(
+			screen.getByLabelText(/^Your password/),
+			adminPassword,
+		);
+		await userEvent.type(screen.getByLabelText(/^New password/), newPassword);
+	}
+
 	it("resets the target's password, refreshes the list, and toasts the forced re-login", async () => {
 		const { passwordBodies, listCount } = mockUsersApi();
 		renderUsersApp("/users");
 		await openRowDialog("bob", "reset-password-button");
 
-		// The dialog is named for the target user and the field starts empty.
+		// The dialog is named for the target user and both fields start
+		// empty — the admin's own password above the target's new one.
 		expect(
 			screen.getByRole("dialog", { name: "Reset password — bob" }),
 		).toBeInTheDocument();
+		const adminField = screen.getByLabelText(/^Your password/);
+		expect(adminField).toHaveValue("");
 		expect(screen.getByLabelText(/^new password/i)).toHaveValue("");
-		await userEvent.type(
-			screen.getByLabelText(/^new password/i),
-			"bob-fresh-secret",
-		);
+		expect(
+			adminField.compareDocumentPosition(
+				screen.getByLabelText(/^New password/),
+			) & Node.DOCUMENT_POSITION_FOLLOWING,
+		).not.toBe(0);
+		await fillResetForm("alice-admin-secret", "bob-fresh-secret");
 		const requestsBefore = listCount();
 		await userEvent.click(screen.getByTestId("reset-password-submit"));
 
@@ -344,7 +373,11 @@ describe("reset-password dialog", () => {
 		expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
 		await waitFor(() => expect(listCount()).toBeGreaterThan(requestsBefore));
 		expect(passwordBodies).toEqual([
-			{ id: "u-2", newPassword: "bob-fresh-secret" },
+			{
+				id: "u-2",
+				adminPassword: "alice-admin-secret",
+				newPassword: "bob-fresh-secret",
+			},
 		]);
 	});
 
@@ -353,12 +386,82 @@ describe("reset-password dialog", () => {
 		renderUsersApp("/users");
 		await openRowDialog("bob", "reset-password-button");
 
-		await userEvent.type(screen.getByLabelText(/^new password/i), "short");
+		await fillResetForm("alice-admin-secret", "short");
 		expect(
 			screen.getByText("Password must be at least 8 characters"),
 		).toBeInTheDocument();
 		expect(screen.getByTestId("reset-password-submit")).toBeDisabled();
 		expect(passwordBodies).toHaveLength(0);
+	});
+
+	it("surfaces a wrong admin password in the dialog and keeps the session", async () => {
+		mockUsersApi();
+		server.use(
+			http.put("*/api/users/:id/password", () =>
+				errorResponse(
+					401,
+					"INVALID_CREDENTIALS",
+					"Current password is incorrect",
+				),
+			),
+		);
+		renderUsersApp("/users");
+		await openRowDialog("bob", "reset-password-button");
+
+		await fillResetForm("wrong-admin-secret", "bob-fresh-secret");
+		await userEvent.click(screen.getByTestId("reset-password-submit"));
+
+		expect(
+			await screen.findByTestId("mutation-dialog-error"),
+		).toHaveTextContent("Current password is incorrect");
+		expect(screen.getByTestId("modal")).toBeInTheDocument();
+		// The failed re-auth is an input error, not session death: the app
+		// stays on the page with the session holder untouched.
+		expect(screen.getByTestId("location")).toHaveTextContent("/users");
+		expect(screen.getByTestId("account-menu-button")).toBeInTheDocument();
+		expect(getBearerToken()).toBe("current-access-token");
+	});
+
+	it("surfaces the spent failure budget in the dialog error region", async () => {
+		mockUsersApi();
+		server.use(
+			http.put("*/api/users/:id/password", () =>
+				errorResponse(429, "RATE_LIMIT_EXCEEDED", "Too many requests"),
+			),
+		);
+		renderUsersApp("/users");
+		await openRowDialog("bob", "reset-password-button");
+
+		await fillResetForm("alice-admin-secret", "bob-fresh-secret");
+		await userEvent.click(screen.getByTestId("reset-password-submit"));
+
+		expect(
+			await screen.findByTestId("mutation-dialog-error"),
+		).toHaveTextContent("Too many requests");
+		expect(screen.getByTestId("modal")).toBeInTheDocument();
+	});
+
+	it("surfaces the self-reset guard in the dialog error region", async () => {
+		mockUsersApi();
+		server.use(
+			http.put("*/api/users/:id/password", () =>
+				errorResponse(
+					400,
+					"SELF_PASSWORD_RESET",
+					"Cannot reset your own password",
+				),
+			),
+		);
+		renderUsersApp("/users");
+		await openRowDialog("alice", "reset-password-button");
+
+		await fillResetForm("alice-admin-secret", "another-secret-1");
+		await userEvent.click(screen.getByTestId("reset-password-submit"));
+
+		expect(
+			await screen.findByTestId("mutation-dialog-error"),
+		).toHaveTextContent("Cannot reset your own password");
+		expect(screen.getByTestId("modal")).toBeInTheDocument();
 	});
 
 	it("surfaces a reset rejection inside the dialog and stays open", async () => {
@@ -371,10 +474,7 @@ describe("reset-password dialog", () => {
 		renderUsersApp("/users");
 		await openRowDialog("bob", "reset-password-button");
 
-		await userEvent.type(
-			screen.getByLabelText(/^new password/i),
-			"bob-fresh-secret",
-		);
+		await fillResetForm("alice-admin-secret", "bob-fresh-secret");
 		await userEvent.click(screen.getByTestId("reset-password-submit"));
 
 		expect(

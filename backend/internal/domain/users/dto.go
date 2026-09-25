@@ -26,12 +26,16 @@ type UpdateRoleRequest struct {
 }
 
 // ResetPasswordRequest is the body of PUT /api/users/{id}/password.
-// The admin supplies only the new password — there is no
-// current-password check, because the caller is not the target; the
-// length policy lives in the service, like on every other password
-// path.
+// AdminPassword is the acting admin's own password — named for the
+// acting admin, since actor and target differ — and re-authenticates
+// the caller before the reset runs (issue 187); the service verifies
+// it against the acting admin and spends the caller-keyed failure
+// budget on misses. The admin supplies the target's new password
+// alongside; the length policy lives in the service, like on every
+// other password path.
 type ResetPasswordRequest struct {
-	NewPassword string `json:"newPassword" validate:"required"`
+	AdminPassword string `json:"adminPassword" validate:"required"`
+	NewPassword   string `json:"newPassword" validate:"required"`
 }
 
 // UserResponse is the wire representation of a user. It intentionally

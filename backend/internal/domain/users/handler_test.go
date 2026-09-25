@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // newUsersTestRouter wires the users routes exactly like internal/app:
@@ -33,26 +34,46 @@ import (
 // Perform invokes a single handler func, so it cannot build that
 // chain. The auth package's handler tests can stay on Perform because
 // they pin handler behaviour below the middleware.
+//
+// The admin carries a real bcrypt hash of known-admin-password so the
+// password-reset tests can re-authenticate the acting admin.
 func newUsersTestRouter(t *testing.T) (http.Handler, *auth.AuthService, *testutils.MockSessionRepository) {
+	return newUsersTestRouterWithBudget(t, nil)
+}
+
+// newUsersTestRouterWithBudget is newUsersTestRouter with the reset
+// surface's credential-failure budget wired into the service and the
+// handler, the way internal/app wires one shared limiter instance into
+// both. A nil budget builds the plain unwired router.
+func newUsersTestRouterWithBudget(t *testing.T, budget FailureBudget) (http.Handler, *auth.AuthService, *testutils.MockSessionRepository) {
 	t.Helper()
 
 	authService, err := auth.NewTestAuthService()
 	require.NoError(t, err, "Should create auth service without error")
 
+	adminHash, err := bcrypt.GenerateFromPassword([]byte("known-admin-password"), bcrypt.DefaultCost)
+	require.NoError(t, err, "Should hash the admin's password")
+
 	repo := testutils.NewMockUserRepository()
-	repo.AddUser(&models.User{ID: "admin-1", Username: "root", Role: models.RoleAdmin, CreatedAt: time.Now()})
+	repo.AddUser(&models.User{ID: "admin-1", Username: "root", Role: models.RoleAdmin, PasswordHash: string(adminHash), CreatedAt: time.Now()})
 	repo.AddUser(&models.User{ID: "user-1", Username: "pleb", Role: models.RoleUser, CreatedAt: time.Now()})
 	sessionRepo := testutils.NewMockSessionRepository()
 
-	handler := NewUserHandler(NewUserService(repo, sessionRepo))
+	userService := NewUserService(repo, sessionRepo)
+	userHandler := NewUserHandler(userService)
+	if budget != nil {
+		userService = userService.WithFailureBudget(budget)
+		userHandler = userHandler.WithFailureBudget(budget)
+	}
+
 	router := chi.NewRouter()
 	router.Route("/api", func(api chi.Router) {
 		api.Group(func(protected chi.Router) {
 			protected.Use(appmiddleware.JWTMiddleware(authService))
-			protected.Get("/users", handler.List)
-			protected.With(appmiddleware.RequireAdmin(repo)).Post("/users", handler.Create)
-			protected.With(appmiddleware.RequireAdmin(repo)).Put("/users/{userId}/role", handler.UpdateRole)
-			protected.With(appmiddleware.RequireAdmin(repo)).Put("/users/{userId}/password", handler.ResetPassword)
+			protected.Get("/users", userHandler.List)
+			protected.With(appmiddleware.RequireAdmin(repo)).Post("/users", userHandler.Create)
+			protected.With(appmiddleware.RequireAdmin(repo)).Put("/users/{userId}/role", userHandler.UpdateRole)
+			protected.With(appmiddleware.RequireAdmin(repo)).Put("/users/{userId}/password", userHandler.ResetPassword)
 		})
 	})
 

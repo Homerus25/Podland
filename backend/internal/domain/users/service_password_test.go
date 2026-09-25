@@ -2,6 +2,7 @@ package users
 
 import (
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -53,17 +54,17 @@ func storedPasswordMatches(t *testing.T, repo *testutils.MockUserRepository, use
 }
 
 // TestUserService_ResetPassword_Success asserts the full contract: the
-// hash is replaced so the new password authenticates and the old one
-// dies, every session of the target user is revoked, and everyone
-// else's sessions — the admin's included — are untouched. No fresh
-// login is minted for the target: unlike the self-service change, the
-// caller is the admin, and the target must log in with the new
-// password.
+// acting admin's own password verifies, the hash is replaced so the new
+// password authenticates and the old one dies, every session of the
+// target user is revoked, and everyone else's sessions — the admin's
+// included — are untouched. No fresh login is minted for the target:
+// unlike the self-service change, the caller is the admin, and the
+// target must log in with the new password.
 func TestUserService_ResetPassword_Success(t *testing.T) {
 	service, repo, sessionRepo := passwordResetFixture(t)
 
-	reset, err := service.ResetPassword("user-1", "brand-new-password")
-	require.NoError(t, err, "An admin reset should succeed")
+	reset, err := service.ResetPassword("admin-1", "user-1", "known-old-password", "brand-new-password")
+	require.NoError(t, err, "An admin reset with the acting admin's correct password should succeed")
 	require.NotNil(t, reset, "The updated user should be returned")
 	assert.Equal(t, "user-1", reset.ID, "The updated user should be the target")
 	assert.Equal(t, "alice", reset.Username, "The target's username should ride through")
@@ -76,28 +77,55 @@ func TestUserService_ResetPassword_Success(t *testing.T) {
 	assert.Len(t, sessionRepo.SessionsForUser("admin-1"), 1, "The admin's own session must be untouched")
 }
 
-// TestUserService_ResetPassword_AdminSelfReset pins the caller ==
-// target edge of the revoke-all contract: an admin resetting their own
-// password is an ordinary reset whose target happens to be the caller,
-// so the admin's own sessions are revoked exactly like any other
-// target's — the story's "all of that user's sessions" has no caller
-// exception. The new password authenticates, the old one dies, and the
-// other users' sessions are untouched.
-func TestUserService_ResetPassword_AdminSelfReset(t *testing.T) {
+// TestUserService_ResetPassword_WrongAdminPassword pins the re-auth
+// gate: a reset whose admin password does not verify against the acting
+// admin (the JWT subject) is answered with the change-password 401 —
+// INVALID_CREDENTIALS carrying "Current password is incorrect" — and
+// writes nothing: the target's hash and sessions are untouched. A
+// correct retry then succeeds, so one typo never locks the admin out.
+func TestUserService_ResetPassword_WrongAdminPassword(t *testing.T) {
 	service, repo, sessionRepo := passwordResetFixture(t)
 
-	reset, err := service.ResetPassword("admin-1", "brand-new-password")
-	require.NoError(t, err, "An admin resetting their own password should succeed")
-	require.NotNil(t, reset, "The updated user should be returned")
-	assert.Equal(t, "admin-1", reset.ID, "The updated user should be the caller themself")
-	assert.Equal(t, models.RoleAdmin, reset.Role, "The admin role must ride through unchanged")
+	reset, err := service.ResetPassword("admin-1", "user-1", "not-the-admins-password", "brand-new-password")
 
-	assert.False(t, storedPasswordMatches(t, repo, "admin-1", "known-old-password"), "The old password must no longer authenticate")
-	assert.True(t, storedPasswordMatches(t, repo, "admin-1", "brand-new-password"), "The new password must authenticate")
+	appErr, ok := err.(*apperrors.AppError)
+	require.True(t, ok, "The re-auth failure should be an AppError")
+	assert.Equal(t, "INVALID_CREDENTIALS", appErr.Code, "A wrong admin password must surface the credentials code")
+	assert.Equal(t, http.StatusUnauthorized, appErr.Status, "A wrong admin password must be a 401")
+	assert.Equal(t, "Current password is incorrect", appErr.Message, "The message must match the change-password path")
+	assert.Nil(t, reset, "No user is returned for a rejected reset")
+	assert.True(t, storedPasswordMatches(t, repo, "user-1", "known-old-password"), "The target's password must be unchanged")
+	assert.Len(t, sessionRepo.SessionsForUser("user-1"), 2, "The target's sessions must be untouched")
 
-	assert.Empty(t, sessionRepo.SessionsForUser("admin-1"), "Every session of the admin themself must be revoked")
+	_, err = service.ResetPassword("admin-1", "user-1", "known-old-password", "brand-new-password")
+	require.NoError(t, err, "The corrected retry should succeed")
+}
+
+// TestUserService_ResetPassword_SelfResetRejected pins the self-lockout
+// guard: an admin resetting their own password through the admin
+// endpoint is refused with ErrSelfPasswordReset regardless of the
+// supplied password's correctness — self-service change password is the
+// only self path. The guard runs before verification, so nothing is
+// written and (with a budget wired, see the budget tests) nothing is
+// spent.
+func TestUserService_ResetPassword_SelfResetRejected(t *testing.T) {
+	service, repo, sessionRepo := passwordResetFixture(t)
+
+	for name, adminPassword := range map[string]string{
+		"wrong password":   "not-the-admins-password",
+		"correct password": "known-old-password",
+	} {
+		t.Run(name, func(t *testing.T) {
+			reset, err := service.ResetPassword("admin-1", "admin-1", adminPassword, "brand-new-password")
+
+			require.ErrorIs(t, err, apperrors.ErrSelfPasswordReset, "A self reset must surface SELF_PASSWORD_RESET")
+			assert.Nil(t, reset, "No user is returned for a refused self reset")
+		})
+	}
+
+	assert.True(t, storedPasswordMatches(t, repo, "admin-1", "known-old-password"), "The admin's password must be unchanged")
+	assert.Len(t, sessionRepo.SessionsForUser("admin-1"), 1, "The admin's own sessions must be untouched")
 	assert.Len(t, sessionRepo.SessionsForUser("user-1"), 2, "Other users' sessions must be untouched")
-	assert.Len(t, sessionRepo.SessionsForUser("user-2"), 1, "Other users' sessions must be untouched")
 }
 
 // TestUserService_ResetPassword_BoundaryLengthAccepted pins the policy
@@ -105,7 +133,7 @@ func TestUserService_ResetPassword_AdminSelfReset(t *testing.T) {
 func TestUserService_ResetPassword_BoundaryLengthAccepted(t *testing.T) {
 	service, repo, _ := passwordResetFixture(t)
 
-	_, err := service.ResetPassword("user-1", "12345678")
+	_, err := service.ResetPassword("admin-1", "user-1", "known-old-password", "12345678")
 	require.NoError(t, err, "A password of exactly the minimum length should be accepted")
 	assert.True(t, storedPasswordMatches(t, repo, "user-1", "12345678"), "The boundary-length password should be persisted")
 }
@@ -117,7 +145,7 @@ func TestUserService_ResetPassword_BoundaryLengthAccepted(t *testing.T) {
 func TestUserService_ResetPassword_NewPasswordTooShort(t *testing.T) {
 	service, repo, sessionRepo := passwordResetFixture(t)
 
-	reset, err := service.ResetPassword("user-1", "short7")
+	reset, err := service.ResetPassword("admin-1", "user-1", "known-old-password", "short7")
 
 	require.ErrorIs(t, err, apperrors.ErrPasswordTooShort, "A 7-character password is below the floor")
 	assert.Nil(t, reset, "No user is returned for a rejected reset")
@@ -132,7 +160,7 @@ func TestUserService_ResetPassword_NewPasswordTooShort(t *testing.T) {
 func TestUserService_ResetPassword_LengthCountsCharactersNotBytes(t *testing.T) {
 	service, repo, sessionRepo := passwordResetFixture(t)
 
-	_, err := service.ResetPassword("user-1", "日本語日本")
+	_, err := service.ResetPassword("admin-1", "user-1", "known-old-password", "日本語日本")
 
 	require.ErrorIs(t, err, apperrors.ErrPasswordTooShort, "Four characters is below the floor despite twelve bytes")
 	assert.True(t, storedPasswordMatches(t, repo, "user-1", "known-old-password"), "The password must be unchanged")
@@ -145,7 +173,7 @@ func TestUserService_ResetPassword_LengthCountsCharactersNotBytes(t *testing.T) 
 func TestUserService_ResetPassword_TargetNotFound(t *testing.T) {
 	service, _, sessionRepo := passwordResetFixture(t)
 
-	reset, err := service.ResetPassword("ghost-id", "brand-new-password")
+	reset, err := service.ResetPassword("admin-1", "ghost-id", "known-old-password", "brand-new-password")
 
 	require.ErrorIs(t, err, apperrors.ErrUserNotFound, "A missing target user should surface USER_NOT_FOUND")
 	assert.Nil(t, reset, "No user is returned for a missing target")
@@ -162,7 +190,7 @@ func TestUserService_ResetPassword_UserRepoErrorPropagates(t *testing.T) {
 	service, repo, sessionRepo := passwordResetFixture(t)
 	repo.WithUpdateError(fmt.Errorf("disk on fire"))
 
-	reset, err := service.ResetPassword("user-1", "brand-new-password")
+	reset, err := service.ResetPassword("admin-1", "user-1", "known-old-password", "brand-new-password")
 
 	require.Error(t, err, "A failing update must fail the call")
 	assert.Nil(t, reset, "No user is returned for a failed reset")
@@ -181,7 +209,7 @@ func TestUserService_ResetPassword_RevokeErrorPropagates(t *testing.T) {
 	service, repo, sessionRepo := passwordResetFixture(t)
 	sessionRepo.WithDeleteAllError(fmt.Errorf("revoke failed"))
 
-	reset, err := service.ResetPassword("user-1", "brand-new-password")
+	reset, err := service.ResetPassword("admin-1", "user-1", "known-old-password", "brand-new-password")
 
 	require.Error(t, err, "A failing revoke-all must fail the call")
 	assert.Nil(t, reset, "No user is returned for a failed reset")
