@@ -108,11 +108,11 @@ func (s *QuadletService) Start(ctx context.Context, userID, machineID, name stri
 }
 
 // Stop stops a running quadlet-managed resource by running
-// `systemctl stop <unit>` over SSH (doku/description_quadlets_api.md:188-215).
+// `systemctl stop <unit>` over SSH (doku/description_quadlets_api.md:186-212).
 //
-// Honours the contract's `force` and `timeout` query params: force maps to
-// `systemctl --force`, timeout bounds the wait via the coreutils timeout
-// wrapper (expiry answers QUADLET_STOP_TIMED_OUT, 504). Refuses a
+// Honours the contract's `timeout` query param: it bounds the wait via the
+// coreutils timeout wrapper (expiry answers QUADLET_STOP_TIMED_OUT, 504).
+// No force option (issue 205 — see LifecycleOptions). Refuses a
 // non-running resource with QUADLET_NOT_RUNNING (400).
 //
 // Returns `{id, state: stopped, unit}` on success.
@@ -130,11 +130,12 @@ func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name strin
 }
 
 // Restart restarts a quadlet-managed resource by running
-// `systemctl restart <unit>` over SSH (doku/description_quadlets_api.md:217-244).
+// `systemctl restart <unit>` over SSH (doku/description_quadlets_api.md:214-241).
 //
-// Supports the same `force`/`timeout` options as Stop — the timeout bounds
-// the wait for the whole restart (one wrapped call). Refuses a non-running
-// resource with QUADLET_NOT_RUNNING (400).
+// Supports the same `timeout` option as Stop — it bounds the wait for the
+// whole restart (one wrapped call). No force option (issue 205 — see
+// LifecycleOptions). Refuses a non-running resource with
+// QUADLET_NOT_RUNNING (400).
 //
 // Returns `{id, state: running, unit, restartedAt}` on success.
 func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
@@ -196,9 +197,11 @@ func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.
 // non-zero exit into the domain's error vocabulary. Callers supply a resolved
 // unit (resolveUnitNameForLifecycle) and finish with buildResponse.
 //
-// The argv reads `systemctl [--force] <action> <unit>`: force prepends the
-// global flag, the action verb and unit come last. A positive timeout wraps
-// the whole call in the coreutils `timeout` wrapper —
+// The argv reads `systemctl <action> <unit>`: the action verb and unit come
+// last. There is no force flag in the vocabulary — systemd ignores --force
+// for stop/restart (issue 205; the full ruling lives on LifecycleOptions),
+// so aggressive teardown stays with DELETE's force.
+// A positive timeout wraps the whole call in the coreutils `timeout` wrapper —
 // `timeout <n> systemctl --user <action> <unit>` — because no systemd version
 // has a per-stop-call timeout flag. Expiry exits 124 and maps to
 // ErrQuadletStopTimedOut (the WAIT was given up; the stop job may still
@@ -210,13 +213,10 @@ func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.
 // fail-fast, no retry, per docs/architecture-decisions.md §4.
 func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID string, action lifecycleAction, unit string, opts LifecycleOptions) (sshexec.ExecResult, error) {
 	command := "systemctl"
-	var args []string
-	if opts.Force {
-		args = append(args, "--force")
-	}
-	args = append(args, "--user", string(action), unit)
+	args := []string{"--user", string(action), unit}
 	if opts.Timeout > 0 {
-		command, args = "timeout", append([]string{strconv.Itoa(opts.Timeout), command}, args...)
+		command = "timeout"
+		args = append([]string{strconv.Itoa(opts.Timeout), "systemctl"}, args...)
 	}
 
 	result, err := s.execSystemctl(ctx, machineID, userID, command, args)

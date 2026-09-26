@@ -115,8 +115,9 @@ func (h *QuadletHandler) Start(w http.ResponseWriter, r *http.Request) {
 }
 
 // Stop handles stopping a running quadlet-managed resource.
-// Runs `systemctl stop <unit>` over SSH, honouring the `force` and `timeout`
-// query params (doku/description_quadlets_api.md:194-196).
+// Runs `systemctl stop <unit>` over SSH, honouring the `timeout`
+// query param (doku/description_quadlets_api.md). No force param —
+// see LifecycleOptions (issue 205).
 func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletLifecycleResponse, error) {
 		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
@@ -128,8 +129,9 @@ func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
 }
 
 // Restart handles restarting a quadlet-managed resource.
-// Runs `systemctl restart <unit>` over SSH, honouring the `force` and `timeout`
-// query params (doku/description_quadlets_api.md:223-225).
+// Runs `systemctl restart <unit>` over SSH, honouring the `timeout`
+// query param (doku/description_quadlets_api.md). No force param —
+// see LifecycleOptions (issue 205).
 func (h *QuadletHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletLifecycleResponse, error) {
 		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
@@ -140,12 +142,12 @@ func (h *QuadletHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// parseLifecycleOptions reads the `force` (bool) and `timeout` (int, seconds)
-// query parameters for stop/restart through web's lenient helpers.
-// force defaults to false; timeout defaults to 0 (unset) — positivity is
-// this domain's judgment, so a non-positive value stays unset.
+// parseLifecycleOptions reads the `timeout` (int, seconds) query parameter
+// for stop/restart through web's lenient helper. Timeout defaults to 0
+// (unset) — positivity is this domain's judgment, so a non-positive value
+// stays unset. There is no force param to read (issue 205).
 func parseLifecycleOptions(r *http.Request) LifecycleOptions {
-	opts := LifecycleOptions{Force: web.QueryBool(r, "force", false)}
+	opts := LifecycleOptions{}
 	if t := web.QueryInt(r, "timeout", 0); t > 0 {
 		opts.Timeout = t
 	}

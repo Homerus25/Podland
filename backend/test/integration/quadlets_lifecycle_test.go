@@ -185,7 +185,7 @@ StopTimeout=30
 		return
 	}
 
-	// --- AC: restart returns the quadlet to running; force accepted ---
+	// --- AC: restart returns the quadlet to running --------------------
 	t.Run("RestartReturnsToRunning", func(t *testing.T) {
 		// The timeout stop above left the unit stopped; restart preconditions
 		// on running, so bring it back first.
@@ -193,8 +193,7 @@ StopTimeout=30
 		waitForQuadletRunning(t, machineID, quadletName+".container",
 			"re-start after the timeout stop must reach running")
 
-		restarted := quadletLifecycleAction(t, machineID, quadletName+".container", "restart",
-			url.Values{"force": {"true"}})
+		restarted := quadletLifecycleAction(t, machineID, quadletName+".container", "restart", nil)
 		require.NotEmpty(t, restarted.RestartedAt,
 			"restart response must include restartedAt")
 		waitForQuadletRunning(t, machineID, quadletName+".container",
@@ -204,10 +203,9 @@ StopTimeout=30
 		return
 	}
 
-	// --- AC: stop transitions the quadlet out of running; force accepted
+	// --- AC: stop transitions the quadlet out of running ----------------
 	t.Run("StopTransitionsOutOfRunning", func(t *testing.T) {
-		quadletLifecycleAction(t, machineID, quadletName+".container", "stop",
-			url.Values{"force": {"true"}})
+		quadletLifecycleAction(t, machineID, quadletName+".container", "stop", nil)
 		waitForQuadletNotRunning(t, machineID, quadletName+".container",
 			"stop must transition the quadlet out of running")
 	})

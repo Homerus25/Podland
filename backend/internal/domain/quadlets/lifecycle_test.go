@@ -117,7 +117,10 @@ func TestCheckLifecyclePrecondition(t *testing.T) {
 // TestQuadletService_ApplyUnitAction_ArgvTable pins the systemctl argv
 // grammar exactly once, at the applyUnitAction seam, through the mock SSH
 // exec: one row per action × options combination. Nothing below this seam
-// (handler tests included) re-asserts argv.
+// (handler tests included) re-asserts argv. The grammar has no force flag —
+// systemctl's --force is ignored for stop/restart and the param was removed
+// from the contract (issue 205); the handler tests pin that a `force=true`
+// query is inert on the HTTP surface.
 func TestQuadletService_ApplyUnitAction_ArgvTable(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -128,7 +131,7 @@ func TestQuadletService_ApplyUnitAction_ArgvTable(t *testing.T) {
 		wantArgs    []string
 	}{
 		{
-			name:   "start has no force/timeout flags",
+			name:   "start has no options",
 			action: actionStart, unit: "web.service",
 			wantCommand: "systemctl",
 			wantArgs:    []string{"--user", "start", "web.service"},
@@ -140,13 +143,6 @@ func TestQuadletService_ApplyUnitAction_ArgvTable(t *testing.T) {
 			wantArgs:    []string{"--user", "stop", "web.service"},
 		},
 		{
-			name:   "stop with force",
-			action: actionStop, unit: "web.service",
-			opts:        LifecycleOptions{Force: true},
-			wantCommand: "systemctl",
-			wantArgs:    []string{"--force", "--user", "stop", "web.service"},
-		},
-		{
 			name:   "stop with timeout wraps in the coreutils timeout",
 			action: actionStop, unit: "web.service",
 			opts:        LifecycleOptions{Timeout: 10},
@@ -154,18 +150,11 @@ func TestQuadletService_ApplyUnitAction_ArgvTable(t *testing.T) {
 			wantArgs:    []string{"10", "systemctl", "--user", "stop", "web.service"},
 		},
 		{
-			name:   "stop with force and timeout wraps the whole call",
-			action: actionStop, unit: "web.service",
-			opts:        LifecycleOptions{Force: true, Timeout: 5},
-			wantCommand: "timeout",
-			wantArgs:    []string{"5", "systemctl", "--force", "--user", "stop", "web.service"},
-		},
-		{
-			name:   "restart with force and timeout is one wrapped call",
+			name:   "restart with timeout is one wrapped call",
 			action: actionRestart, unit: "grp.service",
-			opts:        LifecycleOptions{Force: true, Timeout: 30},
+			opts:        LifecycleOptions{Timeout: 30},
 			wantCommand: "timeout",
-			wantArgs:    []string{"30", "systemctl", "--force", "--user", "restart", "grp.service"},
+			wantArgs:    []string{"30", "systemctl", "--user", "restart", "grp.service"},
 		},
 		{
 			name:   "zero timeout is omitted",

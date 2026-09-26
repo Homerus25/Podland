@@ -508,9 +508,10 @@ func runningContainerFixture() []*entities.ListQuadlet {
 }
 
 // TestQuadletHandler_Stop pins the stop HTTP contract through the real
-// service: force and timeout are accepted from the query, success answers
-// 200 with the stopped state, and a timeout expiry answers 504. The argv
-// grammar is pinned once at the applyUnitAction seam (lifecycle_test.go).
+// service: timeout is accepted from the query, the retired force param is
+// inert (issue 205), success answers 200 with the stopped state, and a
+// timeout expiry answers 504. The argv grammar is pinned once at the
+// applyUnitAction seam (lifecycle_test.go).
 func TestQuadletHandler_Stop(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -524,18 +525,13 @@ func TestQuadletHandler_Stop(t *testing.T) {
 			wantStatus:  http.StatusOK,
 		},
 		{
-			name:        "force=true query honoured",
+			name:        "retired force param is ignored",
 			queryParams: "?force=true",
 			wantStatus:  http.StatusOK,
 		},
 		{
 			name:        "timeout query reaches the wrapper and stops",
 			queryParams: "?timeout=10",
-			wantStatus:  http.StatusOK,
-		},
-		{
-			name:        "force and timeout combined",
-			queryParams: "?force=true&timeout=5",
 			wantStatus:  http.StatusOK,
 		},
 		{
@@ -593,9 +589,9 @@ func TestQuadletHandler_Stop(t *testing.T) {
 
 // TestQuadletHandler_Restart pins the restart HTTP contract through the
 // real service: the response carries the running state and a restartedAt
-// timestamp, and force/timeout are accepted from the query (the timeout
-// bounds the wait for the whole restart; its argv is pinned at the
-// applyUnitAction seam).
+// timestamp, and timeout is accepted from the query (the timeout bounds the
+// wait for the whole restart; its argv is pinned at the applyUnitAction
+// seam). The retired force param is inert (issue 205).
 func TestQuadletHandler_Restart(t *testing.T) {
 	t.Run("successful restart returns 200 with running state and restartedAt", func(t *testing.T) {
 		engine := &fakeQuadletEngine{
@@ -617,7 +613,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), "restartedAt", "restart response must include restartedAt")
 	})
 
-	t.Run("force and timeout accepted from the query", func(t *testing.T) {
+	t.Run("timeout accepted and retired force param ignored", func(t *testing.T) {
 		engine := &fakeQuadletEngine{
 			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
 				return runningContainerFixture(), nil

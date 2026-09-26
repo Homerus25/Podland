@@ -197,12 +197,17 @@ Stop a running quadlet-managed resource.
 **Authentication:** Required
 
 **Query Parameters:**
-- `force` (boolean, optional): Force stop
 - `timeout` (integer, optional): Seconds to wait for the stop to finish. The
   backend wraps the systemctl call in the coreutils `timeout` command; when
   the wait expires the request answers 504 (the stop job may still complete
   in systemd afterwards — the error says the wait was given up, not that the
   stop failed).
+
+There is no `force` parameter: systemctl's `--force` flag is documented for
+enable/link/mask and the halt family only and is ignored for stop and
+restart, so a force param would be a hollow affordance. A slow stop is
+bounded by `timeout`; aggressive teardown stays with DELETE's `force`
+(podman rm --force).
 
 **Response (Success - 200):**
 ```json
@@ -231,10 +236,11 @@ Restart a quadlet-managed resource.
 **Authentication:** Required
 
 **Query Parameters:**
-- `force` (boolean, optional): Force restart
 - `timeout` (integer, optional): Seconds to wait for the whole restart to
   finish (one wrapped call — the restart is not split into a bounded stop
   followed by an unbounded start). Expiry answers 504.
+
+No `force` parameter — same ruling as stop.
 
 **Response (Success - 200):**
 ```json

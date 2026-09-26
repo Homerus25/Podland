@@ -143,11 +143,11 @@ export async function startQuadlet(
 }
 
 // Query parameters for the stop and restart endpoints
-// (backend/internal/domain/quadlets/handler.go parseLifecycleOptions). force
-// defaults to false; timeout is seconds and unset by default, in which case
-// it is omitted from the request entirely so systemd's own default applies.
+// (backend/internal/domain/quadlets/handler.go parseLifecycleOptions). There
+// is no force parameter (systemd ignores --force for stop/restart, issue
+// 205). timeout is seconds and unset by default, in which case it is omitted
+// from the request entirely so systemd's own default applies.
 export interface QuadletLifecycleOptions {
-	force: boolean;
 	timeout?: number;
 }
 
@@ -185,9 +185,7 @@ export async function restartQuadlet(
 }
 
 function lifecycleParams(options: QuadletLifecycleOptions) {
-	return options.timeout === undefined
-		? { force: options.force }
-		: { force: options.force, timeout: options.timeout };
+	return options.timeout === undefined ? {} : { timeout: options.timeout };
 }
 
 // Log source for GET /api/machines/{machineId}/quadlets/{quadletId}/logs:

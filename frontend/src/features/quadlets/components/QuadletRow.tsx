@@ -1,6 +1,5 @@
 import {
 	Button,
-	Checkbox,
 	FormControl,
 	FormLabel,
 	HStack,
@@ -8,7 +7,6 @@ import {
 	Td,
 	Text,
 	Tr,
-	VStack,
 } from "@chakra-ui/react";
 import {
 	useRestartQuadlet,
@@ -22,14 +20,14 @@ import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
 import { useState } from "react";
 
-// Stop and restart share the backend's option set (force, timeout), so one
-// modal serves both: the caller names the action and owns the mutation.
-// Defaults mirror the backend's own (force off, timeout unset and therefore
-// omitted from the request), so confirming untouched sends the defaults.
-// The gray confirm opts out of the preset's destructive red — stopping a
-// unit is routine, not danger — and the footer machinery (reset lifecycle,
-// close-on-success, pending wiring, error region above the body) is the
-// module's.
+// Stop and restart share the backend's option set (timeout only — there is
+// no force param, issue 205), so one modal serves both: the caller names the
+// action and owns the mutation. Defaults mirror the backend's own (timeout
+// unset and therefore omitted from the request), so confirming untouched
+// sends no query parameters. The gray confirm opts out of the preset's
+// destructive red — stopping a unit is routine, not danger — and the footer
+// machinery (reset lifecycle, close-on-success, pending wiring, error region
+// above the body) is the module's.
 function LifecycleOptionsModal({
 	quadlet,
 	actionLabel,
@@ -43,7 +41,6 @@ function LifecycleOptionsModal({
 		| ReturnType<typeof useRestartQuadlet>;
 	onClose: () => void;
 }) {
-	const [force, setForce] = useState(false);
 	const [timeoutSeconds, setTimeoutSeconds] = useState("");
 
 	return (
@@ -57,7 +54,6 @@ function LifecycleOptionsModal({
 				const timeout = Number(timeoutSeconds);
 				return {
 					quadletId: quadlet.id,
-					force,
 					// An empty input means "systemd default", so no timeout parameter
 					// travels; a non-positive or otherwise unparsable value is dropped
 					// for the same reason the backend drops it.
@@ -70,29 +66,18 @@ function LifecycleOptionsModal({
 					<Text>
 						{actionLabel} “{quadlet.name}”?
 					</Text>
-					<VStack align="flex-start" mt={3} spacing={2}>
-						<Checkbox
-							isChecked={force}
-							onChange={(event) => setForce(event.target.checked)}
-							data-testid="lifecycle-force-option"
-						>
-							Force
-						</Checkbox>
-						<FormControl>
-							<FormLabel htmlFor="lifecycle-timeout">
-								Timeout (seconds)
-							</FormLabel>
-							<Input
-								id="lifecycle-timeout"
-								type="number"
-								min={1}
-								value={timeoutSeconds}
-								onChange={(event) => setTimeoutSeconds(event.target.value)}
-								placeholder="systemd default"
-								data-testid="lifecycle-timeout-input"
-							/>
-						</FormControl>
-					</VStack>
+					<FormControl mt={3}>
+						<FormLabel htmlFor="lifecycle-timeout">Timeout (seconds)</FormLabel>
+						<Input
+							id="lifecycle-timeout"
+							type="number"
+							min={1}
+							value={timeoutSeconds}
+							onChange={(event) => setTimeoutSeconds(event.target.value)}
+							placeholder="systemd default"
+							data-testid="lifecycle-timeout-input"
+						/>
+					</FormControl>
 				</>
 			}
 		/>

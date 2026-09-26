@@ -82,12 +82,17 @@ type QuadletCreateResponse struct {
 	Content string `json:"content"`
 }
 
-// LifecycleOptions carries the optional force/timeout parameters for stop and
-// restart operations (doku/description_quadlets_api.md:194-196, 223-225). Start has
+// LifecycleOptions carries the optional timeout parameter for stop and
+// restart operations (doku/description_quadlets_api.md:199-212, 238-243). Start has
 // no options per the contract.
+//
+// There is deliberately no force option: systemctl's --force is an
+// enable/link/mask and halt-family flag that systemd accepts but ignores for
+// stop and restart, so a force param would be a silently hollow affordance
+// (issue 205). Aggressive teardown stays where podman actually has it —
+// DELETE's force (podman rm --force) — and a slow stop is bounded by the
+// timeout below.
 type LifecycleOptions struct {
-	// Force requests an aggressive stop/restart. Maps to `systemctl --force`.
-	Force bool
 	// Timeout is the stop/restart grace period in seconds. 0 means unset.
 	// Maps to the coreutils `timeout <n>` wrapper around the systemctl call
 	// (no systemd version has a per-stop-call timeout flag); expiry answers
