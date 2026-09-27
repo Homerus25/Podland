@@ -158,13 +158,7 @@ export async function stopQuadlet(
 	quadletId: string,
 	options: QuadletLifecycleOptions,
 ): Promise<void> {
-	await api.post(
-		machineApiPath(machineId, "quadlets", quadletId, "stop"),
-		undefined,
-		{
-			params: lifecycleParams(options),
-		},
-	);
+	return postLifecycle(machineId, quadletId, "stop", options);
 }
 
 // POST /api/machines/{id}/quadlets/{quadletId}/restart -> 200
@@ -175,8 +169,19 @@ export async function restartQuadlet(
 	quadletId: string,
 	options: QuadletLifecycleOptions,
 ): Promise<void> {
+	return postLifecycle(machineId, quadletId, "restart", options);
+}
+
+// Shared stop/restart body: the endpoints differ only in the path segment,
+// and both take the same query parameters via lifecycleParams.
+async function postLifecycle(
+	machineId: string,
+	quadletId: string,
+	action: string,
+	options: QuadletLifecycleOptions,
+): Promise<void> {
 	await api.post(
-		machineApiPath(machineId, "quadlets", quadletId, "restart"),
+		machineApiPath(machineId, "quadlets", quadletId, action),
 		undefined,
 		{
 			params: lifecycleParams(options),
