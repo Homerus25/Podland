@@ -95,16 +95,7 @@ func (a lifecycleAction) buildResponse(name, unit string) *QuadletLifecycleRespo
 // Returns `{id, state: running, unit}` on success. Start has no force/timeout
 // options per the contract.
 func (s *QuadletService) Start(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error) {
-	unit, err := s.resolveUnitNameForLifecycle(ctx, userID, machineID, name, actionStart)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := s.applyUnitAction(ctx, userID, machineID, actionStart, unit, LifecycleOptions{}); err != nil {
-		return nil, err
-	}
-
-	return actionStart.buildResponse(name, unit), nil
+	return s.runLifecycle(ctx, userID, machineID, name, actionStart, LifecycleOptions{})
 }
 
 // Stop stops a running quadlet-managed resource by running
@@ -117,16 +108,7 @@ func (s *QuadletService) Start(ctx context.Context, userID, machineID, name stri
 //
 // Returns `{id, state: stopped, unit}` on success.
 func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-	unit, err := s.resolveUnitNameForLifecycle(ctx, userID, machineID, name, actionStop)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := s.applyUnitAction(ctx, userID, machineID, actionStop, unit, opts); err != nil {
-		return nil, err
-	}
-
-	return actionStop.buildResponse(name, unit), nil
+	return s.runLifecycle(ctx, userID, machineID, name, actionStop, opts)
 }
 
 // Restart restarts a quadlet-managed resource by running
@@ -139,16 +121,26 @@ func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name strin
 //
 // Returns `{id, state: running, unit, restartedAt}` on success.
 func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-	unit, err := s.resolveUnitNameForLifecycle(ctx, userID, machineID, name, actionRestart)
+	return s.runLifecycle(ctx, userID, machineID, name, actionRestart, opts)
+}
+
+// runLifecycle is the three-step ritual every lifecycle action shares:
+// resolve the unit and enforce the action's state precondition
+// (resolveUnitNameForLifecycle), execute the action over SSH
+// (applyUnitAction), then build the response (lifecycleAction.buildResponse).
+// The Start/Stop/Restart wrappers above keep the per-action contract
+// comments; the sequencing itself lives here and nowhere else.
+func (s *QuadletService) runLifecycle(ctx context.Context, userID, machineID, name string, action lifecycleAction, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
+	unit, err := s.resolveUnitNameForLifecycle(ctx, userID, machineID, name, action)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.applyUnitAction(ctx, userID, machineID, actionRestart, unit, opts); err != nil {
+	if err := s.applyUnitAction(ctx, userID, machineID, action, unit, opts); err != nil {
 		return nil, err
 	}
 
-	return actionRestart.buildResponse(name, unit), nil
+	return action.buildResponse(name, unit), nil
 }
 
 // resolveUnitNameForLifecycle performs the shared pre-work for every lifecycle action:
