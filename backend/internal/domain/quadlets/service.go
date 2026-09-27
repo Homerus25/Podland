@@ -302,7 +302,7 @@ func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name str
 		// no nested engine lease — and its failure propagates so nothing
 		// is removed.
 		if parseStateFromStatus(target.Status) == "running" && !force {
-			if _, err := s.applyUnitAction(ctx, userID, machineID, actionStop, resolveUnitName(target, name), LifecycleOptions{}); err != nil {
+			if err := s.applyUnitAction(ctx, userID, machineID, actionStop, resolveUnitName(target, name), LifecycleOptions{}); err != nil {
 				return fmt.Errorf("failed to stop quadlet before remove: %w", err)
 			}
 		}

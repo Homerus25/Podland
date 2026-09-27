@@ -100,7 +100,7 @@ func (s *QuadletService) Start(ctx context.Context, userID, machineID, name stri
 		return nil, err
 	}
 
-	if _, err := s.applyUnitAction(ctx, userID, machineID, actionStart, unit, LifecycleOptions{}); err != nil {
+	if err := s.applyUnitAction(ctx, userID, machineID, actionStart, unit, LifecycleOptions{}); err != nil {
 		return nil, err
 	}
 
@@ -122,7 +122,7 @@ func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name strin
 		return nil, err
 	}
 
-	if _, err := s.applyUnitAction(ctx, userID, machineID, actionStop, unit, opts); err != nil {
+	if err := s.applyUnitAction(ctx, userID, machineID, actionStop, unit, opts); err != nil {
 		return nil, err
 	}
 
@@ -144,7 +144,7 @@ func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name st
 		return nil, err
 	}
 
-	if _, err := s.applyUnitAction(ctx, userID, machineID, actionRestart, unit, opts); err != nil {
+	if err := s.applyUnitAction(ctx, userID, machineID, actionRestart, unit, opts); err != nil {
 		return nil, err
 	}
 
@@ -211,7 +211,7 @@ func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.
 //
 // An SSH-layer failure (dial, session, network) maps to ErrConnectionFailed —
 // fail-fast, no retry, per docs/architecture-decisions.md §4.
-func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID string, action lifecycleAction, unit string, opts LifecycleOptions) (sshexec.ExecResult, error) {
+func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID string, action lifecycleAction, unit string, opts LifecycleOptions) error {
 	command := "systemctl"
 	args := []string{"--user", string(action), unit}
 	if opts.Timeout > 0 {
@@ -221,20 +221,20 @@ func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID 
 
 	result, err := s.execSystemctl(ctx, machineID, userID, command, args)
 	if err != nil {
-		return sshexec.ExecResult{}, err
+		return err
 	}
 
 	if opts.Timeout > 0 {
 		switch result.ExitCode {
 		case 124:
-			return result, appErrors.ErrQuadletStopTimedOut
+			return appErrors.ErrQuadletStopTimedOut
 		case 125, 126, 127:
-			return result, fmt.Errorf("timeout wrapper failed for systemctl %s (exit %d): %s",
+			return fmt.Errorf("timeout wrapper failed for systemctl %s (exit %d): %s",
 				action, result.ExitCode, result.Stderr)
 		}
 	}
 
-	return result, action.interpretResult(result)
+	return action.interpretResult(result)
 }
 
 // execSystemctl executes a command with its argument vector over SSH via the

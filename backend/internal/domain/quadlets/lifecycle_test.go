@@ -183,7 +183,7 @@ func TestQuadletService_ApplyUnitAction_ArgvTable(t *testing.T) {
 			// The engine stays unarmed: applyUnitAction crosses only the SSH seam.
 			service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, sshExec)
 
-			_, err := service.applyUnitAction(context.Background(), "user", "machine", tt.action, tt.unit, tt.opts)
+			err := service.applyUnitAction(context.Background(), "user", "machine", tt.action, tt.unit, tt.opts)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantCommand, gotCommand)
@@ -285,7 +285,7 @@ func TestQuadletService_ApplyUnitAction_WrapperExitCodes(t *testing.T) {
 			})
 			service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, sshExec)
 
-			_, err := service.applyUnitAction(context.Background(), "user", "machine", actionStop, "web.service", tt.opts)
+			err := service.applyUnitAction(context.Background(), "user", "machine", actionStop, "web.service", tt.opts)
 
 			tt.assertErr(t, err)
 		})
@@ -467,7 +467,7 @@ func TestQuadletService_Lifecycle_NilSSHExec(t *testing.T) {
 	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil)
 	ctx := context.Background()
 
-	_, err := service.applyUnitAction(ctx, "test-machine", "test-user", actionStart, "test.service", LifecycleOptions{})
+	err := service.applyUnitAction(ctx, "test-machine", "test-user", actionStart, "test.service", LifecycleOptions{})
 	assert.Error(t, err, "Should return error when sshExec is nil")
 	assert.Equal(t, appErrors.ErrInternalError, err, "Should map to ErrInternalError")
 }
