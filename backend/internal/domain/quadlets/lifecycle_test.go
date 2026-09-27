@@ -467,7 +467,7 @@ func TestQuadletService_Lifecycle_NilSSHExec(t *testing.T) {
 	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil)
 	ctx := context.Background()
 
-	err := service.applyUnitAction(ctx, "test-machine", "test-user", actionStart, "test.service", LifecycleOptions{})
+	err := service.applyUnitAction(ctx, "test-user", "test-machine", actionStart, "test.service", LifecycleOptions{})
 	assert.Error(t, err, "Should return error when sshExec is nil")
 	assert.Equal(t, appErrors.ErrInternalError, err, "Should map to ErrInternalError")
 }
