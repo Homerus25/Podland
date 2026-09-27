@@ -279,7 +279,7 @@ func TestQuadletService_Create_InstallFailureSkipsReload(t *testing.T) {
 }
 
 // TestQuadletService_Create_NilSSHExec pins the defensive nil check in
-// reloadUserSystemd, mirroring the lifecycle's execSystemctl contract: a nil
+// execSystemctl, reached via reloadUserSystemd on the Create path: a nil
 // sshExec is a programming error and answers INTERNAL_ERROR, not a panic.
 func TestQuadletService_Create_NilSSHExec(t *testing.T) {
 	engine := &fakeQuadletEngine{
