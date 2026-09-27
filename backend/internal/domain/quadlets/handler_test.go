@@ -337,7 +337,8 @@ func TestQuadletHandler_Update(t *testing.T) {
 }
 
 // TestQuadletHandler_Delete pins the delete contract through the real
-// service: the parsed force/stop flags reach the machine's remove call,
+// service: the parsed force flag reaches the machine's remove call
+// (stop drives the pre-remove lifecycle stop and never reaches Remove),
 // a successful delete answers 204 with an empty body, and a malformed
 // force flag is ignored (deletes as unforced).
 func TestQuadletHandler_Delete(t *testing.T) {
@@ -358,12 +359,6 @@ func TestQuadletHandler_Delete(t *testing.T) {
 			quadletID:     "my-container.container",
 			queryParams:   "?force=true",
 			expectedForce: true,
-		},
-		{
-			name:          "stop=false query honoured",
-			quadletID:     "my-container.container",
-			queryParams:   "?stop=false",
-			expectedForce: false,
 		},
 		{
 			name:          "force=true&stop=false combined",
