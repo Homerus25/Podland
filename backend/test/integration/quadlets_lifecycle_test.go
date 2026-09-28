@@ -26,8 +26,10 @@ import (
 //	POST /api/machines/{id}/quadlets/{name}/stop    → 200, unit leaves running
 //	POST /api/machines/{id}/quadlets/{name}/restart → 200, unit back to running
 //
-// These endpoints run `systemctl --user <action> <unit>` over SSH via the
-// sshexec service wired into app.New, so this is the only slice that
+// These endpoints run `systemctl <action> <unit>` over SSH via the
+// sshexec service wired into app.New — scoped to the registered SSH
+// user's manager (`--user`) unless that login is root, in which case the
+// system manager owns the units — so this is the only slice that
 // exercises the SSH-exec infrastructure against the real machine.
 //
 // State verification policy (same reasoning as waitForContainerState in
@@ -70,10 +72,11 @@ func Test_Integration_Quadlets_Lifecycle(t *testing.T) {
 
 	machineID := suite.MachineID
 
-	// The lifecycle actions shell out to `systemctl --user` over SSH as
-	// the machine's SSH user, so the machine must (a) accept SSH with the
-	// registered identity and (b) have a functioning user systemd
-	// instance. Rootless podman machines do; if the target can't, skip
+	// The lifecycle actions shell out to `systemctl` over SSH as the
+	// machine's registered SSH user, so the machine must (a) accept SSH
+	// with the registered identity and (b) have a functioning systemd
+	// manager for that user's scope — the user instance for a non-root
+	// login, the system instance for root. If the target can't, skip
 	// with a clear reason rather than failing (per the PRD).
 	requireUserSystemd(t)
 
@@ -251,8 +254,11 @@ func requireUserSystemd(t *testing.T) {
 }
 
 // userSystemdAvailable is the boolean probe behind requireUserSystemd:
-// it dials the machine's SSH target and checks `systemctl --user
-// is-system-running` answers with "running" or "degraded". The quadlet
+// it dials the machine's SSH target with the registered identity and
+// checks `systemctl is-system-running` answers with "running" or
+// "degraded" — proof that SSH works and a systemd manager answers for
+// the registered user (readable system-manager queries serve any login;
+// the backend's own scope choice rides on the registered SSH user). The quadlet
 // API surface needs this on the machine (podman's quadlet list/install/
 // remove dial the user systemd over DBus), so callers gate or skip
 // quadlet coverage on the result — e.g. on the systemd-free container
@@ -283,7 +289,7 @@ func userSystemdAvailable() bool {
 	}
 	defer session.Close()
 
-	out, _ := session.CombinedOutput("systemctl --user is-system-running")
+	out, _ := session.CombinedOutput("systemctl is-system-running")
 	status := strings.TrimSpace(string(out))
 	// "degraded" still means the user manager is up; individual units may
 	// have failed but systemctl itself works, which is all we need. Note

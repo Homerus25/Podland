@@ -7,11 +7,23 @@ import (
 	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
+
+// machineLookup is the narrow subset of *models.MachineRepository that the
+// quadlets service depends on: resolving a machine's registered SSH user
+// decides the systemctl scope (`--user` for a non-root login, the system
+// manager for root). Defining it locally keeps the constructor honest about
+// what is actually needed and lets tests supply a fake, mirroring the
+// machineRepo seam in internal/sshexec. *models.MachineRepository satisfies
+// it implicitly.
+type machineLookup interface {
+	GetByID(id string) (*models.Machine, error)
+}
 
 // ListFilters represents the filters for listing quadlets.
 type ListFilters struct {
@@ -29,18 +41,23 @@ type QuadletService struct {
 	// operations. It is a SEPARATE dependency from the engine provider (which
 	// is a podman-socket seam only) per the 070-10 SSH-exec infra slice.
 	sshExec sshexec.SSHExecInterface
+	// machines resolves the machine's registered SSH user, which scopes the
+	// systemctl invocations: a non-root login targets the user manager
+	// (`systemctl --user`), root targets the system manager.
+	machines machineLookup
 }
 
 // NewQuadletService creates a new QuadletService with the given engine
-// provider and SSH-exec interface. The SSH-exec dependency is required
-// by the lifecycle endpoints (Start/Stop/Restart) which run systemctl over SSH;
-// the other operations (List/Get/Create/Update/Delete) use only the connection
-// manager and are unaffected by it. Tests that do not exercise lifecycle may
-// pass nil for sshExec.
-func NewQuadletService(engines QuadletEngineProvider, sshExec sshexec.SSHExecInterface) *QuadletService {
+// provider, SSH-exec interface, and machine lookup. The SSH-exec dependency
+// is required by the lifecycle endpoints (Start/Stop/Restart) and the
+// install paths' daemon-reload, which run systemctl over SSH; the machine
+// lookup decides each invocation's scope from the registered SSH user.
+// Tests that do not exercise those paths may pass nil for either.
+func NewQuadletService(engines QuadletEngineProvider, sshExec sshexec.SSHExecInterface, machines machineLookup) *QuadletService {
 	return &QuadletService{
-		engines: engines,
-		sshExec: sshExec,
+		engines:  engines,
+		sshExec:  sshExec,
+		machines: machines,
 	}
 }
 
@@ -120,10 +137,10 @@ func (s *QuadletService) Get(ctx context.Context, userID, machineID, name string
 // framing podman requires is the engine adapter's job). A name collision in
 // the install report is mapped to ErrQuadletAlreadyExists.
 //
-// After a successful install the service also reloads the SSH user's user
-// manager (reloadUserSystemd): podman's internal reload reaches the manager
-// the podman service sees, not necessarily the one the lifecycle's
-// `systemctl --user` calls address. A reload failure fails the create with
+// After a successful install the service also reloads the machine's
+// systemd manager (reloadUserSystemd): podman's internal reload reaches the
+// manager the podman service sees, not necessarily the one the lifecycle's
+// scoped systemctl calls address. A reload failure fails the create with
 // ErrConnectionFailed even though the file is installed — the quadlet would
 // not be startable otherwise.
 func (s *QuadletService) Create(ctx context.Context, userID, machineID string, req QuadletCreateRequest) (*QuadletCreateResponse, error) {
@@ -197,9 +214,9 @@ func (s *QuadletService) Create(ctx context.Context, userID, machineID string, r
 // reported as "unknown" immediately after the reinstall because systemd has not
 // yet reloaded to report a fresh status — matching the Create slice's behaviour.
 //
-// Like Create, a successful reinstall is followed by a user-manager reload
+// Like Create, a successful reinstall is followed by a manager reload
 // (reloadUserSystemd) so the rebuilt unit is visible to the lifecycle's
-// `systemctl --user` calls. A reload failure fails the update with
+// scoped systemctl calls. A reload failure fails the update with
 // ErrConnectionFailed even though the reinstall itself succeeded.
 func (s *QuadletService) Update(ctx context.Context, userID, machineID, name string, req QuadletUpdateRequest) (*QuadletGetResponse, error) {
 	var response *QuadletGetResponse

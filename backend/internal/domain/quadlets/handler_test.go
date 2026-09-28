@@ -25,13 +25,13 @@ import (
 // endpoints run systemctl through). Tests arm only the operations their
 // scenario needs; an unarmed operation panics if the handler reaches it.
 func newTestHandler(engine *fakeQuadletEngine) *QuadletHandler {
-	return NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec()))
+	return NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core")))
 }
 
 // newLifecycleTestHandler builds the handler around the real service whose
 // systemctl runs through the given SSH exec double.
 func newLifecycleTestHandler(engine *fakeQuadletEngine, sshExec sshexec.SSHExecInterface) *QuadletHandler {
-	return NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, sshExec))
+	return NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core")))
 }
 
 // quadletFixture builds a ListQuadlet like podman's list answer: the name,
@@ -449,7 +449,7 @@ func TestQuadletHandler_Start(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rr.Code)
 		assert.Equal(t, []string{"--user", "start", "my-container.service"}, gotArgs,
-			"the resolved unit name must drive the systemctl invocation")
+			"the resolved unit name must drive the systemctl invocation, scoped to the non-root SSH user's manager")
 		assert.JSONEq(t, `{"id":"my-container.container","state":"running","unit":"my-container.service"}`, rr.Body.String())
 	})
 
@@ -551,6 +551,33 @@ func TestQuadletHandler_Stop(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 	})
+}
+
+// TestQuadletHandler_Stop_RootMachineOmitsUserFlag pins the root half of the
+// scoping rule through the HTTP surface: a machine registered with a root
+// SSH login gets a plain `systemctl stop` targeting the system manager —
+// `--user` must not appear.
+func TestQuadletHandler_Stop_RootMachineOmitsUserFlag(t *testing.T) {
+	var gotArgs []string
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return runningContainerFixture(), nil
+		},
+	}
+	sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+		gotArgs = opts.Args
+		return sshexec.ExecResult{ExitCode: 0}, nil
+	})
+	handler := NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("root")))
+
+	req := quadletRequest("POST", "/api/machines/machine123/quadlets/my-container.container/stop", "user123", "machine123", "my-container.container", nil)
+
+	rr := httptest.NewRecorder()
+	handler.Stop(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, []string{"stop", "my-container.service"}, gotArgs,
+		"a root SSH login must target the system manager, without --user")
 }
 
 // TestQuadletHandler_Restart pins the restart contract through the real

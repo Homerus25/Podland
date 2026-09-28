@@ -2,6 +2,7 @@ package quadlets
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -110,44 +111,69 @@ func TestCheckLifecyclePrecondition(t *testing.T) {
 }
 
 func TestBuildLifecycleArgs(t *testing.T) {
-	t.Run("start has no force/timeout flags", func(t *testing.T) {
-		got := buildLifecycleArgs("start", "web.service", LifecycleOptions{})
-		assert.Equal(t, []string{"--user", "start", "web.service"}, got)
+	// userScope=true mirrors a non-root SSH login: every invocation targets
+	// the user manager via `--user`, inserted after the option flags and
+	// before the action verb.
+	t.Run("non-root login scopes to the user manager", func(t *testing.T) {
+		t.Run("start has no force/timeout flags", func(t *testing.T) {
+			got := buildLifecycleArgs("start", "web.service", LifecycleOptions{}, true)
+			assert.Equal(t, []string{"--user", "start", "web.service"}, got)
+		})
+
+		t.Run("stop without options", func(t *testing.T) {
+			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{}, true)
+			assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
+		})
+
+		t.Run("stop with force", func(t *testing.T) {
+			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true}, true)
+			assert.Equal(t, []string{"--force", "--user", "stop", "web.service"}, got)
+		})
+
+		t.Run("stop with timeout", func(t *testing.T) {
+			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 10}, true)
+			assert.Equal(t, []string{"--kill-seconds=10", "--user", "stop", "web.service"}, got)
+		})
+
+		t.Run("stop with force and timeout", func(t *testing.T) {
+			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true, Timeout: 5}, true)
+			assert.Equal(t, []string{"--force", "--kill-seconds=5", "--user", "stop", "web.service"}, got)
+		})
+
+		t.Run("restart with force and timeout", func(t *testing.T) {
+			got := buildLifecycleArgs("restart", "grp.service", LifecycleOptions{Force: true, Timeout: 30}, true)
+			assert.Equal(t, []string{"--force", "--kill-seconds=30", "--user", "restart", "grp.service"}, got)
+		})
+
+		t.Run("zero timeout is omitted", func(t *testing.T) {
+			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 0}, true)
+			assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
+		})
+
+		t.Run("negative timeout is omitted", func(t *testing.T) {
+			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: -1}, true)
+			assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
+		})
 	})
 
-	t.Run("stop without options", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{})
-		assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
-	})
+	// userScope=false mirrors a root SSH login: root's units live in the
+	// system manager and root has no user manager that owns them, so
+	// `--user` must NOT be passed.
+	t.Run("root login targets the system manager", func(t *testing.T) {
+		t.Run("start omits --user", func(t *testing.T) {
+			got := buildLifecycleArgs("start", "web.service", LifecycleOptions{}, false)
+			assert.Equal(t, []string{"start", "web.service"}, got)
+		})
 
-	t.Run("stop with force", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true})
-		assert.Equal(t, []string{"--force", "--user", "stop", "web.service"}, got)
-	})
+		t.Run("stop with force omits --user", func(t *testing.T) {
+			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true}, false)
+			assert.Equal(t, []string{"--force", "stop", "web.service"}, got)
+		})
 
-	t.Run("stop with timeout", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 10})
-		assert.Equal(t, []string{"--kill-seconds=10", "--user", "stop", "web.service"}, got)
-	})
-
-	t.Run("stop with force and timeout", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true, Timeout: 5})
-		assert.Equal(t, []string{"--force", "--kill-seconds=5", "--user", "stop", "web.service"}, got)
-	})
-
-	t.Run("restart with force and timeout", func(t *testing.T) {
-		got := buildLifecycleArgs("restart", "grp.service", LifecycleOptions{Force: true, Timeout: 30})
-		assert.Equal(t, []string{"--force", "--kill-seconds=30", "--user", "restart", "grp.service"}, got)
-	})
-
-	t.Run("zero timeout is omitted", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 0})
-		assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
-	})
-
-	t.Run("negative timeout is omitted", func(t *testing.T) {
-		got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: -1})
-		assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
+		t.Run("stop with force and timeout omits --user", func(t *testing.T) {
+			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true, Timeout: 5}, false)
+			assert.Equal(t, []string{"--force", "--kill-seconds=5", "stop", "web.service"}, got)
+		})
 	})
 }
 
@@ -273,10 +299,11 @@ func TestQuadletService_Start_ResolvesUnitThenRunsSystemctl(t *testing.T) {
 	}
 	sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
 		assert.Equal(t, []string{"--user", "start", "web.service"}, opts.Args,
-			"the resolved unit name must drive the systemctl invocation")
+			"the resolved unit name must drive the systemctl invocation, scoped to the non-root SSH user's manager")
 		return sshexec.ExecResult{ExitCode: 0}, nil
 	})
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec)
+	machines := lookupForUser("core")
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, machines)
 
 	got, err := service.Start(context.Background(), "user", "machine", "web.container")
 
@@ -286,6 +313,37 @@ func TestQuadletService_Start_ResolvesUnitThenRunsSystemctl(t *testing.T) {
 		"the lookup must filter by name")
 	assert.Equal(t, "running", got.State)
 	assert.Equal(t, "web.service", got.Unit)
+	assert.Equal(t, "machine", machines.lastID,
+		"the systemctl scope must be resolved for the machine being acted on")
+}
+
+// TestQuadletService_Start_RootSSHUserOmitsUserFlag pins the root half of
+// the scoping rule: when the machine's registered SSH login is root, the
+// lifecycle addresses the system manager and `--user` must NOT be passed
+// (root has no user manager owning its units).
+func TestQuadletService_Start_RootSSHUserOmitsUserFlag(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{
+				Name:     "web.container",
+				UnitName: "web.service",
+				Path:     "/x/web.container",
+				Status:   "stopped",
+			}}, nil
+		},
+	}
+	sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+		assert.Equal(t, []string{"start", "web.service"}, opts.Args,
+			"a root SSH login must target the system manager, without --user")
+		return sshexec.ExecResult{ExitCode: 0}, nil
+	})
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("root"))
+
+	got, err := service.Start(context.Background(), "user", "machine", "web.container")
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "running", got.State)
 }
 
 func TestQuadletService_Stop_MissingQuadletIs404(t *testing.T) {
@@ -295,7 +353,7 @@ func TestQuadletService_Stop_MissingQuadletIs404(t *testing.T) {
 		},
 	}
 	// The SSH exec stays unarmed: a missing quadlet must not run systemctl.
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec())
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), nil)
 
 	got, err := service.Stop(context.Background(), "user", "machine", "web.container", LifecycleOptions{})
 
@@ -310,7 +368,7 @@ func TestQuadletService_Restart_NonRunningRefused(t *testing.T) {
 		},
 	}
 	// The SSH exec stays unarmed: a wrong-state quadlet must not run systemctl.
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec())
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), nil)
 
 	got, err := service.Restart(context.Background(), "user", "machine", "web.container", LifecycleOptions{})
 
@@ -322,7 +380,7 @@ func TestQuadletService_Restart_NonRunningRefused(t *testing.T) {
 // runSystemctl. When a nil sshExec is configured, the service should return
 // ErrInternalError rather than panic.
 func TestQuadletService_Lifecycle_NilSSHExec(t *testing.T) {
-	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, nil)
 	ctx := context.Background()
 
 	result, err := service.runSystemctl(ctx, "test-machine", "test-user", "start", "test.service", LifecycleOptions{})
@@ -331,11 +389,44 @@ func TestQuadletService_Lifecycle_NilSSHExec(t *testing.T) {
 	assert.Equal(t, sshexec.ExecResult{}, result, "Should return empty result")
 }
 
+// TestQuadletService_Lifecycle_NilMachineLookup pins the defensive nil-check
+// in systemctlUserScope: a nil machine lookup is a programming error and
+// answers ErrInternalError rather than panicking.
+func TestQuadletService_Lifecycle_NilMachineLookup(t *testing.T) {
+	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, testutils.NewMockSSHExec(), nil)
+	ctx := context.Background()
+
+	result, err := service.runSystemctl(ctx, "test-machine", "test-user", "start", "test.service", LifecycleOptions{})
+	assert.Error(t, err, "Should return error when machine lookup is nil")
+	assert.Equal(t, appErrors.ErrInternalError, err, "Should map to ErrInternalError")
+	assert.Equal(t, sshexec.ExecResult{}, result, "Should return empty result")
+}
+
+// TestSystemctlUserScope_LookupFailure pins the error mapping of the scope
+// resolution itself: a machine deleted concurrently with the request is the
+// 404 sentinel, a store failure wraps ErrInternalError.
+func TestSystemctlUserScope_LookupFailure(t *testing.T) {
+	t.Run("machine vanished mid-request maps to not found", func(t *testing.T) {
+		service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, &fakeMachineLookup{})
+
+		_, err := service.systemctlUserScope("gone-machine")
+		require.ErrorIs(t, err, appErrors.ErrMachineNotFound)
+	})
+
+	t.Run("store failure wraps internal error", func(t *testing.T) {
+		service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil,
+			&fakeMachineLookup{err: errors.New("db is down")})
+
+		_, err := service.systemctlUserScope("machine")
+		require.ErrorIs(t, err, appErrors.ErrInternalError)
+	})
+}
+
 // TestQuadletService_Lifecycle_ServiceConstruction tests that a service can
 // be constructed with nil dependencies for defensive programming, matching
 // the established pattern in this package.
 func TestQuadletService_Lifecycle_ServiceConstruction(t *testing.T) {
-	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, nil)
 	assert.NotNil(t, service, "Service should construct even with nil sshExec")
 	assert.Nil(t, service.sshExec, "sshExec should be nil")
 }

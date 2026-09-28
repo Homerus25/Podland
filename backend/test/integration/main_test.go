@@ -4,6 +4,7 @@ package integration
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -228,6 +229,11 @@ func run(m *testing.M) int {
 	if err := probePodmanConnection(connectionName, 60*time.Second); err != nil {
 		return failFast("probe podman connection", err)
 	}
+	suite.RegisterCleanup("ssh-keygen -R [127.0.0.1]:24422",
+		func() error {
+			_, err := exec.CommandContext(context.Background(), "ssh-keygen", "-R", "[127.0.0.1]:24422").CombinedOutput()
+			return err
+		})
 	logf("integration: target ready: host=%s port=%d user=%s socket=%s connection=%s",
 		target.Host, target.Port, target.SSHUser, target.Socket, connectionName)
 

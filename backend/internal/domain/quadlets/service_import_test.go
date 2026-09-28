@@ -36,7 +36,7 @@ func TestServiceImport_ImportsAndCollectsFailures(t *testing.T) {
 	}
 	// A successful per-entry install is followed by the user-manager
 	// daemon-reload, so the service needs a (succeeding) SSH exec wired.
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec())
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core"))
 
 	req := QuadletImportRequest{
 		Quadlets: []QuadletImportEntry{
@@ -72,7 +72,7 @@ func TestServiceImport_InstallFailureIsCollected(t *testing.T) {
 	// The batch completes with collected per-entry failures, so the
 	// post-batch daemon-reload still runs — a (succeeding) SSH exec is
 	// wired for it.
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec())
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core"))
 
 	response, err := service.Import(context.Background(), "user-1", "machine-1", QuadletImportRequest{
 		Quadlets: []QuadletImportEntry{
@@ -90,7 +90,7 @@ func TestServiceImport_EmptyRequest(t *testing.T) {
 	t.Parallel()
 
 	// The engine stays unarmed: an empty request must not touch podman.
-	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, nil)
 
 	ctx := context.Background()
 	req := QuadletImportRequest{

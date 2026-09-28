@@ -3,6 +3,7 @@ package quadlets
 import (
 	"context"
 
+	"github.com/Homerus25/podland/backend/internal/models"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -82,4 +83,26 @@ func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, o
 		return p.err
 	}
 	return fn(p.engine)
+}
+
+// fakeMachineLookup is the function-field fake for the machineLookup seam
+// behind systemctl scoping: machine is the row GetByID answers (nil
+// simulates a machine deleted concurrently with the request), err a store
+// failure. lastID records what the service asked for so tests can pin that
+// scoping resolves per machine.
+type fakeMachineLookup struct {
+	machine *models.Machine
+	err     error
+	lastID  string
+}
+
+func (f *fakeMachineLookup) GetByID(id string) (*models.Machine, error) {
+	f.lastID = id
+	return f.machine, f.err
+}
+
+// lookupForUser arms a fakeMachineLookup whose machine row registers the
+// given SSH user — the input that decides the `--user` scope.
+func lookupForUser(sshUser string) *fakeMachineLookup {
+	return &fakeMachineLookup{machine: &models.Machine{ID: "machine", SSHUsername: sshUser}}
 }

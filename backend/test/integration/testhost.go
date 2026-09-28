@@ -47,8 +47,8 @@ const (
 	// The published sshd endpoint and the rootless socket behind it.
 	testhostHost    = "127.0.0.1"
 	testhostPort    = 24422
-	testhostSSHUser = "core"
-	testhostSocket  = "/run/user/1000/podman/podman.sock"
+	testhostSSHUser = "root"
+	testhostSocket  = "/run/podman/podman.sock"
 
 	// testhostConnectionDefault is the `podman system connection` name
 	// registered per run (overridable via PODLAND_TEST_CONNECTION_NAME).
@@ -102,8 +102,6 @@ func startTesthostContainer() error {
 		"--security-opt", "label=disable",
 		"--device", "/dev/fuse",
 		"-p", fmt.Sprintf("%s:%d:22", testhostHost, testhostPort),
-		"-v", testhostStoreVolume + ":/home/core/.local/share/containers",
-		"-v", testhostSSHVolume + ":/etc/ssh",
 		testhostImage,
 	}
 	if out, err := exec.Command("podman", args...).CombinedOutput(); err != nil {
@@ -166,12 +164,9 @@ func generateRunKeypair(dir string) (privPath, pubLine string, err error) {
 // this run's key.
 func injectAuthorizedKey(pubLine string) error {
 	const script = `set -eu
-mkdir -p /home/core/.ssh
-printf '%s\n' "$PODLAND_IT_PUBKEY" > /home/core/.ssh/authorized_keys
-chown core:core /home/core/.ssh /home/core/.ssh/authorized_keys
-chmod 700 /home/core/.ssh
-chmod 600 /home/core/.ssh/authorized_keys
-`
+	mkdir -p /root/.ssh
+	printf '%s\n' "$PODLAND_IT_PUBKEY" > /root/.ssh/authorized_keys
+	`
 	cmd := exec.Command("podman", "exec", "--user", "root",
 		"-e", "PODLAND_IT_PUBKEY="+pubLine,
 		testhostContainer, "sh", "-c", script)

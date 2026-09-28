@@ -46,7 +46,7 @@ func TestQuadletService_GetLogs_ResolvesSystemdContainerName(t *testing.T) {
 			return nil
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
 	got, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
 
@@ -75,7 +75,7 @@ func TestQuadletService_GetLogs_ExplicitContainerNameWins(t *testing.T) {
 			return nil
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
 	_, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
 
@@ -100,7 +100,7 @@ func TestQuadletService_GetLogs_PodQuadletUsesPodContainer(t *testing.T) {
 			return nil
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
 	_, err := service.GetLogs(context.Background(), "user", "machine", "stack.pod", time.Time{}, 0)
 
@@ -116,7 +116,7 @@ func TestQuadletService_GetLogs_MissingQuadletIs404BeforeLogs(t *testing.T) {
 		// printFn/logsFn stay unarmed: a missing quadlet must not touch
 		// the machine beyond the existence check.
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
 	got, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
 
@@ -136,7 +136,7 @@ func TestQuadletService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
 			return &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
 	got, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
 
@@ -156,7 +156,7 @@ func TestQuadletService_GetLogsWithStream_MapsMissingContainerTo404(t *testing.T
 			return &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
 	err := service.GetLogsWithStream(context.Background(), "user", "machine", "web.container", time.Time{}, 0,
 		func(streaming.LogEvent) {})
@@ -183,7 +183,7 @@ func TestQuadletService_GetLogsWithStream_ReturnsPromptlyOnCancel(t *testing.T) 
 			return nil
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
 	testutils.RequirePromptReturnOnCancel(t, "GetLogsWithStream", started,
 		func(ctx context.Context) error {

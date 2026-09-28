@@ -57,7 +57,7 @@ func (d *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 func newAutoUpdateTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*chi.Mux, *deadlineRecorder) {
 	t.Helper()
 	engine := &fakeQuadletEngine{}
-	handler := NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, sshExec))
+	handler := NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core")))
 	r := chi.NewRouter()
 	r.Post("/api/machines/{id}/quadlets/auto-update", handler.AutoUpdate)
 	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
@@ -226,7 +226,7 @@ func TestQuadletHandler_AutoUpdate_WriteGate(t *testing.T) {
 				return sshexec.ExecResult{ExitCode: 0, Stdout: "[]"}, nil
 			})
 			engine := &fakeQuadletEngine{}
-			service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec)
+			service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
 			router := autoUpdateAccessRouter(machineRepo, accessRepo, service)
 
 			req := httptest.NewRequest("POST", "/api/machines/machine-1/quadlets/auto-update", nil)
@@ -248,7 +248,7 @@ func TestQuadletHandler_AutoUpdate_UnknownMachineIsNotFound(t *testing.T) {
 	})
 	engine := &fakeQuadletEngine{}
 	router := autoUpdateAccessRouter(testutils.NewMockMachineRepository(), testutils.NewMockMachineAccessRepository(),
-		NewQuadletService(fakeEngineProvider{engine: engine}, sshExec))
+		NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core")))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, requestAsUserForAutoUpdate(http.MethodPost, "/api/machines/no-such-machine/quadlets/auto-update", "owner-1"))
@@ -268,7 +268,7 @@ func TestQuadletHandler_AutoUpdate_UserWithoutAccessIsForbidden(t *testing.T) {
 	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
 	engine := &fakeQuadletEngine{}
 	router := autoUpdateAccessRouter(machineRepo, testutils.NewMockMachineAccessRepository(),
-		NewQuadletService(fakeEngineProvider{engine: engine}, sshExec))
+		NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core")))
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, requestAsUserForAutoUpdate(http.MethodPost, "/api/machines/machine-1/quadlets/auto-update", "stranger-1"))
