@@ -165,6 +165,13 @@ var (
 	ErrQuadletAlreadyRunning   = NewAppError("QUADLET_ALREADY_RUNNING", "Quadlet is already running", http.StatusBadRequest)
 	ErrQuadletNotRunning       = NewAppError("QUADLET_NOT_RUNNING", "Quadlet is not running", http.StatusBadRequest)
 	ErrQuadletGenerationFailed = NewAppError("QUADLET_GENERATION_FAILED", "Failed to generate quadlet", http.StatusInternalServerError)
+	// ErrQuadletStopTimedOut is the stop/restart wait give-up answer: the
+	// coreutils timeout wrapper around `systemctl stop/restart` expired
+	// (exit 124) before the unit's stop job finished. 504 Gateway Timeout —
+	// the backend acts as a gateway to the remote systemd and gave up
+	// waiting. It says the WAIT was given up, not that the stop failed:
+	// the stop job may still complete in systemd after expiry.
+	ErrQuadletStopTimedOut = NewAppError("QUADLET_STOP_TIMED_OUT", "Timed out waiting for the quadlet to stop", http.StatusGatewayTimeout)
 )
 
 // Secrets

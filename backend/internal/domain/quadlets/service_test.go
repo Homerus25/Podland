@@ -307,7 +307,7 @@ func TestQuadletService_Create_InstallFailureSkipsReload(t *testing.T) {
 }
 
 // TestQuadletService_Create_NilSSHExec pins the defensive nil check in
-// reloadUserSystemd, mirroring the lifecycle's runSystemctl contract: a nil
+// execSystemctl, reached via reloadUserSystemd on the Create path: a nil
 // sshExec is a programming error and answers INTERNAL_ERROR, not a panic.
 func TestQuadletService_Create_NilSSHExec(t *testing.T) {
 	engine := &fakeQuadletEngine{
@@ -445,36 +445,91 @@ func TestQuadletService_Delete_PreconditionsRunBeforeRemove(t *testing.T) {
 		require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	})
 
-	t.Run("running without force is refused before remove", func(t *testing.T) {
+	t.Run("running without force and without stop is refused before remove", func(t *testing.T) {
 		engine := &fakeQuadletEngine{
 			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
 				return []*entities.ListQuadlet{{Name: "web.container", Status: "running (5s ago)"}}, nil
 			},
 			// removeFn stays unarmed.
 		}
-		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
+		// The SSH exec stays unarmed too: a refused delete must not stop.
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), nil)
 
-		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+		err := service.Delete(context.Background(), "user", "machine", "web.container", false, false)
 
 		require.ErrorIs(t, err, appErrors.ErrQuadletResourceRunning)
 	})
 
-	t.Run("running with force proceeds to remove", func(t *testing.T) {
+	t.Run("running with default stop stops through the seam then removes", func(t *testing.T) {
+		var order []string
+		var removedName string
 		var removedForce bool
 		engine := &fakeQuadletEngine{
 			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				order = append(order, "list")
+				return []*entities.ListQuadlet{{Name: "web.container", UnitName: "web.service", Status: "running (5s ago)"}}, nil
+			},
+			removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+				order = append(order, "remove")
+				removedName, removedForce = name, force
+				return &entities.QuadletRemoveReport{}, nil
+			},
+		}
+		sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+			order = append(order, command)
+			assert.Equal(t, []string{"--user", "stop", "web.service"}, opts.Args)
+			return sshexec.ExecResult{ExitCode: 0}, nil
+		})
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
+
+		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+
+		require.NoError(t, err)
+		assert.Equal(t, []string{"list", "systemctl", "remove"}, order,
+			"a running quadlet deleted with the default stop must stop through the SSH seam before remove")
+		assert.Equal(t, "web.container", removedName)
+		assert.False(t, removedForce, "the remove follows an explicit stop and must not be forced")
+	})
+
+	t.Run("stop failure propagates and nothing is removed", func(t *testing.T) {
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				return []*entities.ListQuadlet{{Name: "web.container", UnitName: "web.service", Status: "running (5s ago)"}}, nil
+			},
+			// removeFn stays unarmed: a failed stop must not remove.
+		}
+		sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions) (sshexec.ExecResult, error) {
+			return sshexec.ExecResult{ExitCode: 1, Stderr: "job failed"}, nil
+		})
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
+
+		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to stop quadlet before remove")
+	})
+
+	t.Run("running with force proceeds to remove without a stop", func(t *testing.T) {
+		var order []string
+		var removedForce bool
+		engine := &fakeQuadletEngine{
+			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+				order = append(order, "list")
 				return []*entities.ListQuadlet{{Name: "web.container", Status: "running (5s ago)"}}, nil
 			},
 			removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+				order = append(order, "remove")
 				removedForce = force
 				return &entities.QuadletRemoveReport{}, nil
 			},
 		}
-		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
+		// The SSH exec stays unarmed: force deletes must not spend a stop.
+		service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), nil)
 
 		err := service.Delete(context.Background(), "user", "machine", "web.container", true, true)
 
 		require.NoError(t, err)
+		assert.Equal(t, []string{"list", "remove"}, order)
 		assert.True(t, removedForce)
 	})
 }
@@ -925,32 +980,37 @@ func TestFindQuadletByName(t *testing.T) {
 
 func TestCheckDeletePreconditions(t *testing.T) {
 	t.Run("nil target is not found", func(t *testing.T) {
-		err := checkDeletePreconditions(nil, false)
+		err := checkDeletePreconditions(nil, false, true)
 		assert.Equal(t, appErrors.ErrQuadletNotFound, err)
 	})
 
 	t.Run("stopped quadlet may be deleted without force", func(t *testing.T) {
-		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "stopped"}, false)
+		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "stopped"}, false, true)
 		assert.NoError(t, err)
 	})
 
 	t.Run("unknown state may be deleted without force", func(t *testing.T) {
-		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: ""}, false)
+		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: ""}, false, true)
 		assert.NoError(t, err)
 	})
 
-	t.Run("running quadlet without force is rejected", func(t *testing.T) {
-		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "running (1s ago)"}, false)
+	t.Run("running quadlet without force and without stop is rejected", func(t *testing.T) {
+		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "running (1s ago)"}, false, false)
 		assert.Equal(t, appErrors.ErrQuadletResourceRunning, err)
 	})
 
-	t.Run("running quadlet with force is allowed", func(t *testing.T) {
-		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "running (1s ago)"}, true)
+	t.Run("running quadlet with the stop waiver is allowed", func(t *testing.T) {
+		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "running (1s ago)"}, false, true)
 		assert.NoError(t, err)
 	})
 
+	t.Run("running quadlet with force is allowed (stop irrelevant)", func(t *testing.T) {
+		assert.NoError(t, checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "running (1s ago)"}, true, false))
+		assert.NoError(t, checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "running (1s ago)"}, true, true))
+	})
+
 	t.Run("failed/error state may be deleted without force", func(t *testing.T) {
-		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "failed"}, false)
+		err := checkDeletePreconditions(&entities.ListQuadlet{Name: "x.container", Status: "failed"}, false, true)
 		assert.NoError(t, err)
 	})
 }

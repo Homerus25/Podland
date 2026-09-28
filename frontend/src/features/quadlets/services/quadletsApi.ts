@@ -143,11 +143,11 @@ export async function startQuadlet(
 }
 
 // Query parameters for the stop and restart endpoints
-// (backend/internal/domain/quadlets/handler.go parseLifecycleOptions). force
-// defaults to false; timeout is seconds and unset by default, in which case
-// it is omitted from the request entirely so systemd's own default applies.
+// (backend/internal/domain/quadlets/handler.go parseLifecycleOptions). There
+// is no force parameter (systemd ignores --force for stop/restart, issue
+// 205). timeout is seconds and unset by default, in which case it is omitted
+// from the request entirely so systemd's own default applies.
 export interface QuadletLifecycleOptions {
-	force: boolean;
 	timeout?: number;
 }
 
@@ -158,13 +158,7 @@ export async function stopQuadlet(
 	quadletId: string,
 	options: QuadletLifecycleOptions,
 ): Promise<void> {
-	await api.post(
-		machineApiPath(machineId, "quadlets", quadletId, "stop"),
-		undefined,
-		{
-			params: lifecycleParams(options),
-		},
-	);
+	return postLifecycle(machineId, quadletId, "stop", options);
 }
 
 // POST /api/machines/{id}/quadlets/{quadletId}/restart -> 200
@@ -175,8 +169,19 @@ export async function restartQuadlet(
 	quadletId: string,
 	options: QuadletLifecycleOptions,
 ): Promise<void> {
+	return postLifecycle(machineId, quadletId, "restart", options);
+}
+
+// Shared stop/restart body: the endpoints differ only in the path segment,
+// and both take the same query parameters via lifecycleParams.
+async function postLifecycle(
+	machineId: string,
+	quadletId: string,
+	action: string,
+	options: QuadletLifecycleOptions,
+): Promise<void> {
 	await api.post(
-		machineApiPath(machineId, "quadlets", quadletId, "restart"),
+		machineApiPath(machineId, "quadlets", quadletId, action),
 		undefined,
 		{
 			params: lifecycleParams(options),
@@ -185,9 +190,7 @@ export async function restartQuadlet(
 }
 
 function lifecycleParams(options: QuadletLifecycleOptions) {
-	return options.timeout === undefined
-		? { force: options.force }
-		: { force: options.force, timeout: options.timeout };
+	return options.timeout === undefined ? {} : { timeout: options.timeout };
 }
 
 // Log source for GET /api/machines/{machineId}/quadlets/{quadletId}/logs:

@@ -1085,12 +1085,12 @@ export const quadletsApi = {
     return response.data
   },
 
-  stop: async (machineId: string, quadletId: string, query?: { force?: boolean; timeout?: number }): Promise<Quadlet> => {
+  stop: async (machineId: string, quadletId: string, query?: { timeout?: number }): Promise<Quadlet> => {
     const response = await api.post(`/machines/${machineId}/quadlets/${quadletId}/stop`, null, { params: query })
     return response.data
   },
 
-  restart: async (machineId: string, quadletId: string, query?: { force?: boolean; timeout?: number }): Promise<Quadlet> => {
+  restart: async (machineId: string, quadletId: string, query?: { timeout?: number }): Promise<Quadlet> => {
     const response = await api.post(`/machines/${machineId}/quadlets/${quadletId}/restart`, null, { params: query })
     return response.data
   },

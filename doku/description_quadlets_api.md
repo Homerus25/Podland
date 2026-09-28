@@ -144,14 +144,19 @@ Remove a quadlet from a machine.
 **Authentication:** Required
 
 **Query Parameters:**
-- `stop` (boolean, optional): Stop the resource before removing (default: true)
-- `force` (boolean, optional): Force remove even if resource is running
+- `stop` (boolean, optional): Stop the resource before removing (default: true).
+  When the resource is running and `force` is not set, the resource is stopped
+  through the lifecycle's systemctl stop before the removal (a stop failure
+  propagates and nothing is removed); with `stop=false` a running resource is
+  refused with 400.
+- `force` (boolean, optional): Force remove even if the resource is running
+  (no explicit stop is performed).
 
 **Response (Success - 204):**
 - No body
 
 **Response (Error):**
-- 400: `QUADLET_RESOURCE_RUNNING` (if running and force/stop not set)
+- 400: `QUADLET_RESOURCE_RUNNING` (if running and neither `force` nor `stop` is set)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
 - 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
@@ -192,8 +197,17 @@ Stop a running quadlet-managed resource.
 **Authentication:** Required
 
 **Query Parameters:**
-- `force` (boolean, optional): Force stop
-- `timeout` (integer, optional): Stop timeout in seconds
+- `timeout` (integer, optional): Seconds to wait for the stop to finish. The
+  backend wraps the systemctl call in the coreutils `timeout` command; when
+  the wait expires the request answers 504 (the stop job may still complete
+  in systemd afterwards — the error says the wait was given up, not that the
+  stop failed).
+
+There is no `force` parameter: systemctl's `--force` flag is documented for
+enable/link/mask and the halt family only and is ignored for stop and
+restart, so a force param would be a hollow affordance. A slow stop is
+bounded by `timeout`; aggressive teardown stays with DELETE's `force`
+(podman rm --force).
 
 **Response (Success - 200):**
 ```json
@@ -211,6 +225,7 @@ Stop a running quadlet-managed resource.
 - 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
+- 504: `QUADLET_STOP_TIMED_OUT` (the timeout expired before the unit stopped)
 
 ---
 
@@ -221,8 +236,11 @@ Restart a quadlet-managed resource.
 **Authentication:** Required
 
 **Query Parameters:**
-- `force` (boolean, optional): Force restart
-- `timeout` (integer, optional): Stop timeout in seconds before restart
+- `timeout` (integer, optional): Seconds to wait for the whole restart to
+  finish (one wrapped call — the restart is not split into a bounded stop
+  followed by an unbounded start). Expiry answers 504.
+
+No `force` parameter — same ruling as stop.
 
 **Response (Success - 200):**
 ```json
@@ -241,6 +259,7 @@ Restart a quadlet-managed resource.
 - 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
+- 504: `QUADLET_STOP_TIMED_OUT` (the timeout expired before the restart finished)
 
 ---
 

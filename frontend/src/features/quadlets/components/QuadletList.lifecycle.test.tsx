@@ -115,14 +115,17 @@ describe("QuadletList lifecycle", () => {
 		);
 		await openOptionsModal("stop");
 
-		expect(screen.getByRole("checkbox", { name: /force/i })).not.toBeChecked();
+		// No force checkbox — the param left the contract (issue 205).
+		expect(
+			screen.queryByRole("checkbox", { name: /force/i }),
+		).not.toBeInTheDocument();
 		expect(screen.getByRole("spinbutton", { name: /timeout/i })).toHaveValue(
 			null,
 		);
 		expect(lifecycleRequests).toHaveLength(0);
 	});
 
-	it("confirming stop with the defaults sends force=false and no timeout parameter", async () => {
+	it("confirming stop with the defaults sends no query parameters", async () => {
 		server.use(
 			quadletsHandler(() => [quadletFixture()]),
 			captureLifecycle("stop"),
@@ -135,23 +138,21 @@ describe("QuadletList lifecycle", () => {
 		expect(lifecycleRequests[0].pathname).toBe(
 			"/api/machines/m-1/quadlets/web/stop",
 		);
-		expect(lifecycleRequests[0].searchParams.get("force")).toBe("false");
-		expect(lifecycleRequests[0].searchParams.has("timeout")).toBe(false);
+		expect(lifecycleRequests[0].search).toBe("");
 	});
 
-	it("maps the chosen stop options onto the force and timeout query parameters", async () => {
+	it("maps the chosen timeout onto the timeout query parameter", async () => {
 		server.use(
 			quadletsHandler(() => [quadletFixture()]),
 			captureLifecycle("stop"),
 		);
 		const user = await openOptionsModal("stop");
 
-		await user.click(screen.getByRole("checkbox", { name: /force/i }));
 		await user.type(screen.getByRole("spinbutton", { name: /timeout/i }), "30");
 		await user.click(screen.getByTestId("confirm-lifecycle-button"));
 
 		await waitFor(() => expect(lifecycleRequests).toHaveLength(1));
-		expect(lifecycleRequests[0].searchParams.get("force")).toBe("true");
+		expect(lifecycleRequests[0].searchParams.has("force")).toBe(false);
 		expect(lifecycleRequests[0].searchParams.get("timeout")).toBe("30");
 	});
 
@@ -163,7 +164,6 @@ describe("QuadletList lifecycle", () => {
 		const user = await openOptionsModal("restart");
 
 		expect(screen.getByTestId("modal")).toHaveTextContent("Restart");
-		await user.click(screen.getByRole("checkbox", { name: /force/i }));
 		await user.type(screen.getByRole("spinbutton", { name: /timeout/i }), "45");
 		await user.click(screen.getByTestId("confirm-lifecycle-button"));
 
@@ -171,11 +171,10 @@ describe("QuadletList lifecycle", () => {
 		expect(lifecycleRequests[0].pathname).toBe(
 			"/api/machines/m-1/quadlets/web/restart",
 		);
-		expect(lifecycleRequests[0].searchParams.get("force")).toBe("true");
 		expect(lifecycleRequests[0].searchParams.get("timeout")).toBe("45");
 	});
 
-	it("confirming restart with defaults sends force=false and no timeout parameter", async () => {
+	it("confirming restart with defaults sends no query parameters", async () => {
 		server.use(
 			quadletsHandler(() => [quadletFixture()]),
 			captureLifecycle("restart"),
@@ -188,8 +187,7 @@ describe("QuadletList lifecycle", () => {
 		expect(lifecycleRequests[0].pathname).toBe(
 			"/api/machines/m-1/quadlets/web/restart",
 		);
-		expect(lifecycleRequests[0].searchParams.get("force")).toBe("false");
-		expect(lifecycleRequests[0].searchParams.has("timeout")).toBe(false);
+		expect(lifecycleRequests[0].search).toBe("");
 	});
 
 	it("disables the row lifecycle actions while a start runs and resists double clicks", async () => {

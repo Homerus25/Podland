@@ -3,6 +3,7 @@ package quadlets
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -22,9 +23,12 @@ import (
 //
 //   - resolveUnitName — unit-name resolution (prefer UnitName, derive fallback)
 //   - checkLifecyclePrecondition — wrong-state guard per action
-//   - buildLifecycleArgs — systemctl command/arg construction (force/timeout)
 //   - interpretLifecycleResult — non-zero exit-code → AppError mapping
 //   - buildLifecycleResponse — success-response shape per action
+//
+// The systemctl argv grammar is pinned once at the applyUnitAction seam (the
+// action × options table below); the Start/Stop/Restart flow tests cover
+// resolution, guards, and response shape without re-asserting argv.
 
 func TestResolveUnitName(t *testing.T) {
 	t.Run("prefers UnitName when present", func(t *testing.T) {
@@ -110,71 +114,204 @@ func TestCheckLifecyclePrecondition(t *testing.T) {
 	})
 }
 
-func TestBuildLifecycleArgs(t *testing.T) {
-	// userScope=true mirrors a non-root SSH login: every invocation targets
-	// the user manager via `--user`, inserted after the option flags and
-	// before the action verb.
-	t.Run("non-root login scopes to the user manager", func(t *testing.T) {
-		t.Run("start has no force/timeout flags", func(t *testing.T) {
-			got := buildLifecycleArgs("start", "web.service", LifecycleOptions{}, true)
-			assert.Equal(t, []string{"--user", "start", "web.service"}, got)
-		})
+// TestQuadletService_ApplyUnitAction_ArgvTable pins the systemctl argv
+// grammar exactly once, at the applyUnitAction seam, through the mock SSH
+// exec: one row per action × options × SSH-login combination. Nothing below
+// this seam (handler tests included) re-asserts argv. The grammar has no
+// force flag — systemctl's --force is ignored for stop/restart and the param
+// was removed from the contract (issue 205); the handler tests pin that a
+// `force=true` query is inert on the HTTP surface. The login dimension pins
+// the scoping rule: a non-root SSH login targets the user manager
+// (`--user`), a root login targets the system manager (no flag).
+func TestQuadletService_ApplyUnitAction_ArgvTable(t *testing.T) {
+	tests := []struct {
+		name        string
+		sshUser     string
+		action      lifecycleAction
+		unit        string
+		opts        LifecycleOptions
+		wantCommand string
+		wantArgs    []string
+	}{
+		{
+			name:    "start has no options",
+			sshUser: "core", action: actionStart, unit: "web.service",
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--user", "start", "web.service"},
+		},
+		{
+			name:    "stop without options",
+			sshUser: "core", action: actionStop, unit: "web.service",
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--user", "stop", "web.service"},
+		},
+		{
+			name:    "stop with timeout wraps in the coreutils timeout",
+			sshUser: "core", action: actionStop, unit: "web.service",
+			opts:        LifecycleOptions{Timeout: 10},
+			wantCommand: "timeout",
+			wantArgs:    []string{"10", "systemctl", "--user", "stop", "web.service"},
+		},
+		{
+			name:    "restart with timeout is one wrapped call",
+			sshUser: "core", action: actionRestart, unit: "grp.service",
+			opts:        LifecycleOptions{Timeout: 30},
+			wantCommand: "timeout",
+			wantArgs:    []string{"30", "systemctl", "--user", "restart", "grp.service"},
+		},
+		{
+			name:    "zero timeout is omitted",
+			sshUser: "core", action: actionStop, unit: "web.service",
+			opts:        LifecycleOptions{Timeout: 0},
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--user", "stop", "web.service"},
+		},
+		{
+			name:    "negative timeout is omitted",
+			sshUser: "core", action: actionStop, unit: "web.service",
+			opts:        LifecycleOptions{Timeout: -1},
+			wantCommand: "systemctl",
+			wantArgs:    []string{"--user", "stop", "web.service"},
+		},
+		{
+			name:    "root start omits --user",
+			sshUser: "root", action: actionStart, unit: "web.service",
+			wantCommand: "systemctl",
+			wantArgs:    []string{"start", "web.service"},
+		},
+		{
+			name:    "root stop omits --user",
+			sshUser: "root", action: actionStop, unit: "web.service",
+			wantCommand: "systemctl",
+			wantArgs:    []string{"stop", "web.service"},
+		},
+		{
+			name:    "root stop with timeout wraps without --user",
+			sshUser: "root", action: actionStop, unit: "web.service",
+			opts:        LifecycleOptions{Timeout: 10},
+			wantCommand: "timeout",
+			wantArgs:    []string{"10", "systemctl", "stop", "web.service"},
+		},
+	}
 
-		t.Run("stop without options", func(t *testing.T) {
-			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{}, true)
-			assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
-		})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotCommand string
+			var gotArgs []string
+			sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+				gotCommand, gotArgs = command, opts.Args
+				return sshexec.ExecResult{ExitCode: 0}, nil
+			})
+			// The engine stays unarmed: applyUnitAction crosses only the SSH seam.
+			service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, sshExec, lookupForUser(tt.sshUser))
 
-		t.Run("stop with force", func(t *testing.T) {
-			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true}, true)
-			assert.Equal(t, []string{"--force", "--user", "stop", "web.service"}, got)
-		})
+			err := service.applyUnitAction(context.Background(), "user", "machine", tt.action, tt.unit, tt.opts)
 
-		t.Run("stop with timeout", func(t *testing.T) {
-			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 10}, true)
-			assert.Equal(t, []string{"--kill-seconds=10", "--user", "stop", "web.service"}, got)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCommand, gotCommand)
+			assert.Equal(t, tt.wantArgs, gotArgs)
 		})
+	}
+}
 
-		t.Run("stop with force and timeout", func(t *testing.T) {
-			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true, Timeout: 5}, true)
-			assert.Equal(t, []string{"--force", "--kill-seconds=5", "--user", "stop", "web.service"}, got)
-		})
+// TestQuadletService_ApplyUnitAction_WrapperExitCodes pins the interpretation
+// of the coreutils timeout wrapper's exit codes: expiry (124) answers the
+// QUADLET_STOP_TIMED_OUT sentinel, the wrapper's own failures (125/126/127)
+// keep the generic 500 mapping, and a real systemctl exit code (5: unit not
+// loaded) still routes through the stderr heuristics even under the wrapper.
+// Without a timeout no wrapper ran, so 124 is NOT the sentinel.
+func TestQuadletService_ApplyUnitAction_WrapperExitCodes(t *testing.T) {
+	tests := []struct {
+		name      string
+		opts      LifecycleOptions
+		exitCode  int
+		stderr    string
+		assertErr func(t *testing.T, err error)
+	}{
+		{
+			name:     "expiry 124 maps to the stop-timed-out sentinel",
+			opts:     LifecycleOptions{Timeout: 1},
+			exitCode: 124,
+			assertErr: func(t *testing.T, err error) {
+				require.ErrorIs(t, err, appErrors.ErrQuadletStopTimedOut)
+				var appErr *appErrors.AppError
+				require.ErrorAs(t, err, &appErr)
+				assert.Equal(t, http.StatusGatewayTimeout, appErr.Status)
+			},
+		},
+		{
+			name:     "restart expiry 124 maps to the same sentinel",
+			opts:     LifecycleOptions{Timeout: 3},
+			exitCode: 124,
+			assertErr: func(t *testing.T, err error) {
+				require.ErrorIs(t, err, appErrors.ErrQuadletStopTimedOut)
+			},
+		},
+		{
+			name:     "wrapper failure 125 keeps the generic mapping",
+			opts:     LifecycleOptions{Timeout: 1},
+			exitCode: 125,
+			stderr:   "timeout: failed to run command",
+			assertErr: func(t *testing.T, err error) {
+				require.Error(t, err)
+				var appErr *appErrors.AppError
+				assert.False(t, errors.As(err, &appErr),
+					"wrapper failures must stay generic (500), not map to a domain sentinel")
+			},
+		},
+		{
+			name:     "wrapper failure 126 keeps the generic mapping",
+			opts:     LifecycleOptions{Timeout: 1},
+			exitCode: 126,
+			stderr:   "timeout: failed to run command 'systemctl': Permission denied",
+			assertErr: func(t *testing.T, err error) {
+				var appErr *appErrors.AppError
+				assert.False(t, errors.As(err, &appErr))
+			},
+		},
+		{
+			name:     "wrapper failure 127 keeps the generic mapping",
+			opts:     LifecycleOptions{Timeout: 1},
+			exitCode: 127,
+			stderr:   "timeout: failed to run command 'systemctl': No such file or directory",
+			assertErr: func(t *testing.T, err error) {
+				var appErr *appErrors.AppError
+				assert.False(t, errors.As(err, &appErr),
+					"the shell's 'no such' wording must not leak into the not-found heuristic")
+			},
+		},
+		{
+			name:     "systemctl exit 5 under the wrapper still maps to not found",
+			opts:     LifecycleOptions{Timeout: 10},
+			exitCode: 5,
+			stderr:   "Failed to stop web.service: Unit web.service not loaded.",
+			assertErr: func(t *testing.T, err error) {
+				require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+			},
+		},
+		{
+			name:     "exit 124 without the wrapper is not the sentinel",
+			opts:     LifecycleOptions{},
+			exitCode: 124,
+			assertErr: func(t *testing.T, err error) {
+				require.Error(t, err)
+				assert.NotErrorIs(t, err, appErrors.ErrQuadletStopTimedOut)
+			},
+		},
+	}
 
-		t.Run("restart with force and timeout", func(t *testing.T) {
-			got := buildLifecycleArgs("restart", "grp.service", LifecycleOptions{Force: true, Timeout: 30}, true)
-			assert.Equal(t, []string{"--force", "--kill-seconds=30", "--user", "restart", "grp.service"}, got)
-		})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions) (sshexec.ExecResult, error) {
+				return sshexec.ExecResult{ExitCode: tt.exitCode, Stderr: tt.stderr}, nil
+			})
+			service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, sshExec, lookupForUser("core"))
 
-		t.Run("zero timeout is omitted", func(t *testing.T) {
-			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: 0}, true)
-			assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
-		})
+			err := service.applyUnitAction(context.Background(), "user", "machine", actionStop, "web.service", tt.opts)
 
-		t.Run("negative timeout is omitted", func(t *testing.T) {
-			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Timeout: -1}, true)
-			assert.Equal(t, []string{"--user", "stop", "web.service"}, got)
+			tt.assertErr(t, err)
 		})
-	})
-
-	// userScope=false mirrors a root SSH login: root's units live in the
-	// system manager and root has no user manager that owns them, so
-	// `--user` must NOT be passed.
-	t.Run("root login targets the system manager", func(t *testing.T) {
-		t.Run("start omits --user", func(t *testing.T) {
-			got := buildLifecycleArgs("start", "web.service", LifecycleOptions{}, false)
-			assert.Equal(t, []string{"start", "web.service"}, got)
-		})
-
-		t.Run("stop with force omits --user", func(t *testing.T) {
-			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true}, false)
-			assert.Equal(t, []string{"--force", "stop", "web.service"}, got)
-		})
-
-		t.Run("stop with force and timeout omits --user", func(t *testing.T) {
-			got := buildLifecycleArgs("stop", "web.service", LifecycleOptions{Force: true, Timeout: 5}, false)
-			assert.Equal(t, []string{"--force", "--kill-seconds=5", "stop", "web.service"}, got)
-		})
-	})
+	}
 }
 
 func TestInterpretLifecycleResult(t *testing.T) {
@@ -277,8 +414,8 @@ func TestBuildLifecycleResponse(t *testing.T) {
 // The domain logic this slice introduces (unit-name resolution, the wrong-state
 // guard, systemctl command construction, exit-code interpretation) is covered
 // directly on the pure functions above. An SSH-exec mock is still wired into
-// the service so that, if resolveForLifecycle ever does return, runSystemctl is
-// exercised — but under the mock connection that path is not reached.
+// the service so that, if resolveForLifecycle ever does return, applyUnitAction
+// is exercised — but under the mock connection that path is not reached.
 
 // TestQuadletService_Start_ResolvesUnitThenRunsSystemctl pins the lifecycle
 // flow end to end: the quadlet lookup runs through the engine provider, the
@@ -377,29 +514,31 @@ func TestQuadletService_Restart_NonRunningRefused(t *testing.T) {
 }
 
 // TestQuadletService_Lifecycle_NilSSHExec tests the defensive nil-check in
-// runSystemctl. When a nil sshExec is configured, the service should return
-// ErrInternalError rather than panic.
+// execSystemctl (shared by applyUnitAction and reloadUserSystemd). When a nil
+// sshExec is configured, the service should return ErrInternalError rather
+// than panic. The machine lookup is armed so the scope resolution succeeds
+// and the call reaches the nil-checked exec seam.
 func TestQuadletService_Lifecycle_NilSSHExec(t *testing.T) {
-	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, nil)
+	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, lookupForUser("core"))
 	ctx := context.Background()
 
-	result, err := service.runSystemctl(ctx, "test-machine", "test-user", "start", "test.service", LifecycleOptions{})
+	err := service.applyUnitAction(ctx, "test-user", "test-machine", actionStart, "test.service", LifecycleOptions{})
 	assert.Error(t, err, "Should return error when sshExec is nil")
 	assert.Equal(t, appErrors.ErrInternalError, err, "Should map to ErrInternalError")
-	assert.Equal(t, sshexec.ExecResult{}, result, "Should return empty result")
 }
 
 // TestQuadletService_Lifecycle_NilMachineLookup pins the defensive nil-check
 // in systemctlUserScope: a nil machine lookup is a programming error and
-// answers ErrInternalError rather than panicking.
+// answers ErrInternalError rather than panicking, before anything crosses
+// the SSH seam.
 func TestQuadletService_Lifecycle_NilMachineLookup(t *testing.T) {
+	// The SSH exec stays unarmed: a nil lookup must fail before any exec.
 	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, testutils.NewMockSSHExec(), nil)
 	ctx := context.Background()
 
-	result, err := service.runSystemctl(ctx, "test-machine", "test-user", "start", "test.service", LifecycleOptions{})
+	err := service.applyUnitAction(ctx, "test-user", "test-machine", actionStart, "test.service", LifecycleOptions{})
 	assert.Error(t, err, "Should return error when machine lookup is nil")
 	assert.Equal(t, appErrors.ErrInternalError, err, "Should map to ErrInternalError")
-	assert.Equal(t, sshexec.ExecResult{}, result, "Should return empty result")
 }
 
 // TestSystemctlUserScope_LookupFailure pins the error mapping of the scope

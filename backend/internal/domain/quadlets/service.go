@@ -288,19 +288,18 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 //
 //   - The quadlet is located via a List pre-check. A missing quadlet
 //     maps to ErrQuadletNotFound (404).
-//   - If the managed resource is currently running and force is not set, the
-//     delete is refused with ErrQuadletResourceRunning (400).
-//   - Otherwise Remove is called with Force=force (systemd reload included)
-//     so systemd picks up the removal.
+//   - If the managed resource is currently running:
+//     force removes it over the running resource; without force, a true
+//     `stop` (the default) stops the resource through the lifecycle seam
+//     (applyUnitAction — `systemctl [--user] stop`, scoped to the SSH
+//     login's manager) before the remove and
+//     answers 204, while `stop=false` is refused with
+//     ErrQuadletResourceRunning (400).
+//   - A stop failure propagates and nothing is removed.
 //
-// `stop` (default true) would normally trigger a systemctl stop over SSH before
-// remove when the resource is running; the SSH-exec infra lands in slice
-// 070-10. Until then stop is accepted and the running-resource guarantee above
-// is enforced via the pre-check so a running quadlet is never silently removed
-// without force.
+// Otherwise Remove is called with Force=force (systemd reload included)
+// so systemd picks up the removal.
 func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error {
-	_ = stop // honoured once SSH-exec (070-10) is available; see doc comment.
-
 	return s.engines.WithEngine(ctx, userID, machineID, "quadlets.Delete", func(e QuadletEngine) error {
 		// Pre-check: locate the quadlet and evaluate the running guard so we map
 		// not-found / running-conflict before attempting the destructive call.
@@ -309,8 +308,21 @@ func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name str
 			return fmt.Errorf("failed to list quadlets: %w", err)
 		}
 
-		if err := checkDeletePreconditions(findQuadletByName(list, name), force); err != nil {
+		target := findQuadletByName(list, name)
+		if err := checkDeletePreconditions(target, force, stop); err != nil {
 			return err
+		}
+
+		// Wire the contract's stop param: a running resource is stopped
+		// through the lifecycle seam before remove, unless force is set
+		// (the remove happens over the running resource) or stop=false
+		// refused the delete above. The stop crosses the SSH seam only —
+		// no nested engine lease — and its failure propagates so nothing
+		// is removed.
+		if parseStateFromStatus(target.Status) == "running" && !force {
+			if err := s.applyUnitAction(ctx, userID, machineID, actionStop, resolveUnitName(target, name), LifecycleOptions{}); err != nil {
+				return fmt.Errorf("failed to stop quadlet before remove: %w", err)
+			}
 		}
 
 		report, err := e.Remove(name, force)
@@ -390,13 +402,14 @@ func findQuadletByName(quadlets []*entities.ListQuadlet, name string) *entities.
 // checkDeletePreconditions evaluates the not-found and running-resource guards
 // for a delete operation against the target quadlet's parsed state. It returns
 // ErrQuadletNotFound when the target is absent, ErrQuadletResourceRunning when
-// the managed resource is running and force is not set, or nil when the delete
-// may proceed.
-func checkDeletePreconditions(target *entities.ListQuadlet, force bool) error {
+// the managed resource is running and neither force nor the stop-before-remove
+// waiver applies, or nil when the delete may proceed (with a stop first when
+// the resource is running and stop is set).
+func checkDeletePreconditions(target *entities.ListQuadlet, force, stop bool) error {
 	if target == nil {
 		return appErrors.ErrQuadletNotFound
 	}
-	if parseStateFromStatus(target.Status) == "running" && !force {
+	if parseStateFromStatus(target.Status) == "running" && !force && !stop {
 		return appErrors.ErrQuadletResourceRunning
 	}
 	return nil
