@@ -90,7 +90,7 @@ test:
 # started podman machine on macOS), set ALL of
 # PODLAND_TEST_SSH_{HOST,PORT,USER,SOCKET,KEY_PATH} — the container
 # lifecycle is skipped entirely.
-test-integration: testhost-build
+test-integration:
 	$(GOCMD) test -v -tags=integration ./test/integration/...
 
 # Container test host image — a podman machine stand-in built from
