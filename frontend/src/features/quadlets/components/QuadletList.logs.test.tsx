@@ -1,4 +1,5 @@
 import { QuadletList } from "@features/quadlets/components/QuadletList";
+import { LOG_ROUTE_PATTERN } from "@shared/logs/logRoute";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
@@ -16,10 +17,7 @@ function renderQuadletList() {
 				path="/machines/:machineId"
 				element={<QuadletList machine={machineFixture()} />}
 			/>
-			<Route
-				path="/machines/:machineId/logs/:kind/:targetId"
-				element={<LogsPage />}
-			/>
+			<Route path={LOG_ROUTE_PATTERN} element={<LogsPage />} />
 		</Routes>,
 		{ router: { initialEntries: ["/machines/m-1"] } },
 	);

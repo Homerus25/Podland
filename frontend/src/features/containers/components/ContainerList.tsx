@@ -13,11 +13,11 @@ import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
+import { useOpenLogs } from "@shared/logs/logRoute";
 import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { shortImageId } from "@shared/utils/format";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 // Podman reports container names with a leading slash; display them bare and
 // fall back to the short id when a container has no name at all.
@@ -56,17 +56,6 @@ function DeleteContainerModal({
 			}
 		/>
 	);
-}
-
-// Opens the full-page logs view; the page itself bridges the LogViewer onto
-// this container's log endpoint.
-function useOpenContainerLogs(machineId: string) {
-	const navigate = useNavigate();
-	return (container: ContainerSummary) => {
-		navigate(`/machines/${machineId}/logs/container/${container.id}`, {
-			state: { name: displayName(container) },
-		});
-	};
 }
 
 // Each row owns its lifecycle mutation instances, so pending state and
@@ -175,7 +164,7 @@ export function ContainerList({ machine }: { machine: Machine }) {
 	const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(
 		null,
 	);
-	const openLogs = useOpenContainerLogs(machineId);
+	const openLogs = useOpenLogs(machineId, "container");
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 
 	return (
@@ -199,7 +188,12 @@ export function ContainerList({ machine }: { machine: Machine }) {
 						container={container}
 						canManage={canManage}
 						onDelete={setPendingDelete}
-						onShowLogs={openLogs}
+						onShowLogs={(container) =>
+							openLogs({
+								targetId: container.id,
+								name: displayName(container),
+							})
+						}
 					/>
 				)}
 				toolbar={

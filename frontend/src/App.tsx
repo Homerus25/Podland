@@ -1,6 +1,7 @@
 import { AdminRoute } from "@shared/components/AdminRoute";
 import { Layout } from "@shared/components/Layout";
 import { ProtectedRoute } from "@shared/components/ProtectedRoute";
+import { LOG_ROUTE_PATTERN } from "@shared/logs/logRoute";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LoginPage } from "@/pages/LoginPage";
@@ -26,10 +27,7 @@ export function App() {
 				<Route index element={<DashboardPage />} />
 				<Route path="machines" element={<MachinesPage />} />
 				<Route path="machines/:machineId" element={<MachineDetailPage />} />
-				<Route
-					path="machines/:machineId/logs/:kind/:targetId"
-					element={<LogsPage />}
-				/>
+				<Route path={LOG_ROUTE_PATTERN} element={<LogsPage />} />
 				<Route
 					path="users"
 					element={
