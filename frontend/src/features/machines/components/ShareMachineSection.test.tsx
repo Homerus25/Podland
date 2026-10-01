@@ -90,6 +90,33 @@ describe("ShareMachineSection", () => {
 		grantsRequests = 0;
 	});
 
+	it("shows the derived loading copy while the grants request is in flight", async () => {
+		server.use(
+			http.get("*/api/machines/m-1/access", async () => {
+				await new Promise((resolve) => setTimeout(resolve, 50));
+				return HttpResponse.json(defaultGrants);
+			}),
+			http.get("*/api/users", () => HttpResponse.json(users)),
+		);
+		renderShareMachineSection();
+
+		expect(screen.getByTestId("grants-loading")).toHaveTextContent(
+			"Loading grants…",
+		);
+		expect(await screen.findByTestId("grant-row-u-bob")).toBeInTheDocument();
+	});
+
+	it("renders the owner-facing empty state when the machine has no grants", async () => {
+		grants = [];
+		await renderWithGrants();
+
+		const empty = await screen.findByTestId("grants-empty");
+		expect(empty).toHaveTextContent(
+			"No one else has access to this machine yet. Use the form below to grant access.",
+		);
+		expect(screen.queryByTestId("grant-row-u-bob")).not.toBeInTheDocument();
+	});
+
 	it("shows usernames resolved from the users query, not raw user ids", async () => {
 		await renderWithGrants();
 

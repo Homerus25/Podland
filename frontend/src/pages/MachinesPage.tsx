@@ -1,19 +1,11 @@
-import {
-	Button,
-	Heading,
-	HStack,
-	SimpleGrid,
-	Text,
-	VStack,
-} from "@chakra-ui/react";
+import { Button, Heading, HStack, SimpleGrid, VStack } from "@chakra-ui/react";
 import { MachineCard } from "@features/machines/components/MachineCard";
 import { MachineForm } from "@features/machines/components/MachineForm";
 import {
 	useCreateMachine,
 	useMachines,
 } from "@features/machines/hooks/useMachines";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { getApiError } from "@shared/utils/api";
+import { ResourceStates } from "@shared/components/ResourceStates";
 import { useState } from "react";
 
 export function MachinesPage() {
@@ -33,24 +25,19 @@ export function MachinesPage() {
 					Add Machine
 				</Button>
 			</HStack>
-			{isPending && (
-				<Text data-testid="machines-loading">Loading machines…</Text>
-			)}
-			{error && <ErrorDisplay error={getApiError(error)} />}
-			{machines &&
-				(machines.length === 0 ? (
-					<Text data-testid="machines-empty">
-						No machines yet. Register a machine to start managing its Podman
-						containers — or ask an owner to share one with you. Once you have
-						access, it will appear here.
-					</Text>
-				) : (
-					<SimpleGrid columns={[1, null, 2, 3]} spacing={4}>
-						{machines.map((machine) => (
-							<MachineCard key={machine.id} machine={machine} />
-						))}
-					</SimpleGrid>
-				))}
+			<ResourceStates
+				resource="machine"
+				isPending={isPending}
+				error={error}
+				items={machines}
+				emptyMessage="No machines yet. Register a machine to start managing its Podman containers — or ask an owner to share one with you. Once you have access, it will appear here."
+			>
+				<SimpleGrid columns={[1, null, 2, 3]} spacing={4}>
+					{machines?.map((machine) => (
+						<MachineCard key={machine.id} machine={machine} />
+					))}
+				</SimpleGrid>
+			</ResourceStates>
 			{isAddOpen ? (
 				<MachineForm
 					mode="create"

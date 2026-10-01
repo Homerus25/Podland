@@ -17,6 +17,7 @@ import { UserPicker } from "@features/users/components/UserPicker";
 import { useUsers } from "@features/users/hooks/useUsers";
 import type { UserSummary } from "@features/users/services/usersApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
+import { ResourceStates } from "@shared/components/ResourceStates";
 import type { MachinePermission } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { useMemo, useState } from "react";
@@ -74,10 +75,13 @@ export function ShareMachineSection({
 
 	return (
 		<VStack spacing={4} align="stretch" data-testid="share-machine-section">
-			{error ? <ErrorDisplay error={getApiError(error)} /> : null}
-			{isPending ? (
-				<Text data-testid="grants-loading">Loading access grants…</Text>
-			) : (
+			<ResourceStates
+				resource="grant"
+				isPending={isPending}
+				error={error}
+				items={grants}
+				emptyMessage="No one else has access to this machine yet. Use the form below to grant access."
+			>
 				<VStack spacing={2} align="stretch">
 					{grants?.map((grant) => (
 						<HStack
@@ -113,7 +117,7 @@ export function ShareMachineSection({
 						</HStack>
 					))}
 				</VStack>
-			)}
+			</ResourceStates>
 			{revokeAccess.error ? (
 				<ErrorDisplay error={getApiError(revokeAccess.error)} />
 			) : null}

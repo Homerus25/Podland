@@ -2,7 +2,6 @@ import { Button, Td, Tr } from "@chakra-ui/react";
 import { ResourceList } from "@shared/components/ResourceList";
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { axiosError } from "@/test/errors";
 
 type Gadget = { id: string; name: string };
 
@@ -39,55 +38,8 @@ function renderResourceList(
 	return render(<ResourceList {...props} />);
 }
 
-describe("ResourceList triad", () => {
-	it("renders loading alone, with the toolbar still above it", () => {
-		renderResourceList({ isPending: true, items: undefined });
-
-		const loading = screen.getByTestId("gadgets-loading");
-		expect(loading).toHaveTextContent("Loading gadgets…");
-		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-error")).not.toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-empty")).not.toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-table")).not.toBeInTheDocument();
-	});
-
-	it("renders the error envelope alone on the derived error testid", () => {
-		renderResourceList({
-			error: axiosError(404, "GADGET_DOWN", "Gadget exploded"),
-		});
-
-		expect(screen.getByTestId("gadgets-error")).toHaveRole("alert");
-		expect(screen.getByText("GADGET_DOWN")).toBeInTheDocument();
-		expect(screen.getByText("Gadget exploded")).toBeInTheDocument();
-		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-loading")).not.toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-empty")).not.toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-table")).not.toBeInTheDocument();
-	});
-
-	it("renders the empty state alone with the default copy", () => {
-		renderResourceList({ items: [] });
-
-		const empty = screen.getByTestId("gadgets-empty");
-		expect(empty).toHaveTextContent("No gadgets on this machine yet.");
-		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-loading")).not.toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-error")).not.toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-table")).not.toBeInTheDocument();
-	});
-
-	it("renders the empty state with the emptyMessage override", () => {
-		renderResourceList({
-			items: [],
-			emptyMessage: "No gadgets found. Pull some first.",
-		});
-
-		expect(screen.getByTestId("gadgets-empty")).toHaveTextContent(
-			"No gadgets found. Pull some first.",
-		);
-	});
-
-	it("renders the table alone with derived testids, headers, and feature rows", () => {
+describe("ResourceList composition", () => {
+	it("renders the triad through ResourceStates, the table with the toolbar still above it", () => {
 		renderResourceList();
 
 		expect(screen.getByTestId("gadgets-table")).toBeInTheDocument();
@@ -95,9 +47,6 @@ describe("ResourceList triad", () => {
 		expect(screen.getByText("spinner")).toBeInTheDocument();
 		expect(screen.getByText("doodad")).toBeInTheDocument();
 		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-loading")).not.toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-error")).not.toBeInTheDocument();
-		expect(screen.queryByTestId("gadgets-empty")).not.toBeInTheDocument();
 	});
 });
 
