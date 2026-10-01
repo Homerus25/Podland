@@ -9,6 +9,7 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // generatePublicKeyFromPrivate generates a public key PEM from a private key PEM
@@ -129,13 +130,20 @@ func cleanupFile(filename string) {
 	os.Remove(filename)
 }
 
-// CreateExpiredTestToken creates an expired JWT token for testing
-// Note: This is a simplified version that creates a token and then modifies it to be expired
-// In a real test scenario, you might want to use a different approach
+// CreateExpiredTestToken mints a genuinely expired RS256 JWT: signed
+// with the service's own key and issuer, with an expiry an hour in the
+// past, so ValidateToken takes the real expired path and answers
+// ErrTokenExpired (and the JWT middleware the TOKEN_EXPIRED envelope).
 func CreateExpiredTestToken(service *AuthService, userID string) (string, error) {
-	// For now, just generate a valid token
-	// A proper implementation would create an expired token
-	return service.GenerateToken(userID)
+	claims := TokenClaims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    service.issuer,
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(-time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
+		},
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodRS256, claims).SignedString(service.privateKey)
 }
 
 // CreateValidTestToken creates a valid JWT token for testing

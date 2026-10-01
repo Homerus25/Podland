@@ -23,14 +23,17 @@ func observedUserIDHandler(observed *string) http.Handler {
 
 // TestJWTMiddleware_RejectionCodes pins the required chain's 401
 // vocabulary: a missing Authorization header answers TOKEN_MISSING
-// (no credentials were presented at all), while a malformed header or
-// an invalid token answers TOKEN_INVALID — credentials were presented
-// and they are bad. Expired tokens answer TOKEN_EXPIRED further down
-// in token validation. These are the codes the domain doku files'
-// 401 lines document.
+// (no credentials were presented at all), while a malformed header, an
+// invalid token, or an expired one answers with the matching sentinel
+// from ValidateToken's two-error vocabulary — credentials were
+// presented and they are bad. These are the codes the domain doku
+// files' 401 lines document.
 func TestJWTMiddleware_RejectionCodes(t *testing.T) {
 	service, err := auth.NewTestAuthService()
 	require.NoError(t, err, "Should create auth service without error")
+
+	expiredToken, err := auth.CreateExpiredTestToken(service, "user-expired-1")
+	require.NoError(t, err, "Should mint an expired test token")
 
 	var observed string
 	handler := JWTMiddleware(service)(observedUserIDHandler(&observed))
@@ -42,6 +45,7 @@ func TestJWTMiddleware_RejectionCodes(t *testing.T) {
 		"missing header":   {authHeader: "", wantCode: "TOKEN_MISSING"},
 		"malformed header": {authHeader: "Token abc", wantCode: "TOKEN_INVALID"},
 		"invalid token":    {authHeader: "Bearer not-a-real-token", wantCode: "TOKEN_INVALID"},
+		"expired token":    {authHeader: "Bearer " + expiredToken, wantCode: "TOKEN_EXPIRED"},
 	}
 
 	for name, tc := range cases {
