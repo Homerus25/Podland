@@ -3,14 +3,12 @@ import {
 	Table,
 	TableContainer,
 	Tbody,
-	Text,
 	Th,
 	Thead,
 	Tr,
 } from "@chakra-ui/react";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { PermissionHint } from "@shared/components/PermissionHint";
-import { getApiError } from "@shared/utils/api";
+import { ResourceStates } from "@shared/components/ResourceStates";
 import type { ReactNode } from "react";
 
 export type ResourceListColumn = {
@@ -19,8 +17,10 @@ export type ResourceListColumn = {
 };
 
 // One owner for the machinery every feature list hand-rolled: the
-// toolbar-or-hint row, the loading/error/empty/table triad, the table
-// chrome, and the plural testids. Props-based on purpose: the module never
+// toolbar-or-hint row, the table chrome, and the plural table testid.
+// The loading/error/empty triad is composed through ResourceStates, the
+// headless owner those states share with the non-table collection sites.
+// Props-based on purpose: the module never
 // touches react-query; features keep their hooks and hand over resolved
 // state, their columns as data, and their own row elements (rows carry the
 // singular testid and their own key). Rows own their interactions: a row
@@ -67,18 +67,13 @@ export function ResourceList<T>({
 					</HStack>
 				)
 			)}
-			{isPending ? (
-				<Text data-testid={`${plural}-loading`}>Loading {plural}…</Text>
-			) : error ? (
-				<ErrorDisplay
-					error={getApiError(error)}
-					data-testid={`${plural}-error`}
-				/>
-			) : !items || items.length === 0 ? (
-				<Text color="gray.500" data-testid={`${plural}-empty`}>
-					{emptyMessage ?? `No ${plural} on this machine yet.`}
-				</Text>
-			) : (
+			<ResourceStates
+				resource={resource}
+				isPending={isPending}
+				error={error}
+				items={items}
+				emptyMessage={emptyMessage}
+			>
 				<TableContainer>
 					<Table data-testid={`${plural}-table`} variant="simple">
 						<Thead>
@@ -91,10 +86,10 @@ export function ResourceList<T>({
 								))}
 							</Tr>
 						</Thead>
-						<Tbody>{items.map((item) => renderRow(item))}</Tbody>
+						<Tbody>{items?.map((item) => renderRow(item))}</Tbody>
 					</Table>
 				</TableContainer>
-			)}
+			</ResourceStates>
 		</>
 	);
 }
