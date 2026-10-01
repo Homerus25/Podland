@@ -7,6 +7,7 @@ import (
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -160,40 +161,68 @@ func TestValidateToken_ValidToken(t *testing.T) {
 	assert.Equal(t, "test-user", claims.UserID, "User ID should match")
 }
 
-// TestValidateToken_ExpiredToken tests validation of an expired token
+// TestValidateToken_ExpiredToken tests validation of an expired token:
+// the helper mints a genuinely expired RS256 token (the service's own
+// key and issuer, expiry in the past), so the expired path itself is
+// under test and must answer the bare ErrTokenExpired sentinel.
 func TestValidateToken_ExpiredToken(t *testing.T) {
 	service, err := NewTestAuthService()
 	require.NoError(t, err, "Should create auth service without error")
 
-	// Test with a manually created expired token
-	// Since we can't easily create expired tokens with the current service,
-	// we'll test that validation works correctly for tokens that should be valid
-	token, err := service.GenerateToken("test-user")
-	require.NoError(t, err, "Should generate token without error")
+	token, err := CreateExpiredTestToken(service, "test-user")
+	require.NoError(t, err, "Should mint an expired token without error")
 
-	// Validate the token (should work since it's newly generated)
 	claims, err := service.ValidateToken(token)
-	require.NoError(t, err, "Should validate freshly generated token without error")
-	assert.Equal(t, "test-user", claims.UserID, "User ID should match for valid token")
+	assert.ErrorIs(t, err, apperrors.ErrTokenExpired, "Expired token should be rejected with ErrTokenExpired")
+	assert.NotErrorIs(t, err, apperrors.ErrTokenInvalid, "Expired must not collapse into the invalid sentinel")
+	assert.Nil(t, claims, "No claims should be returned for an expired token")
 }
 
-// TestValidateToken_ExpiredErrorMessage tests that expired tokens return proper error messages
-func TestValidateToken_ExpiredErrorMessage(t *testing.T) {
+// mintTokenWithClaims signs custom registered claims with the service's
+// own RS256 key — how a test mints a well-formed, correctly signed
+// token that is wrong in exactly one claim (issuer, nbf).
+func mintTokenWithClaims(service *AuthService, userID string, claims jwt.RegisteredClaims) (string, error) {
+	return jwt.NewWithClaims(jwt.SigningMethodRS256, TokenClaims{
+		UserID:           userID,
+		RegisteredClaims: claims,
+	}).SignedString(service.privateKey)
+}
+
+// TestValidateToken_FailClosedClassification pins the fail-closed side
+// of ValidateToken's two-sentinel vocabulary: every non-expired library
+// failure — wrong signing algorithm, not-yet-valid claims included —
+// answers the bare ErrTokenInvalid sentinel, never anything else.
+func TestValidateToken_FailClosedClassification(t *testing.T) {
 	service, err := NewTestAuthService()
 	require.NoError(t, err, "Should create auth service without error")
 
-	// Test with various invalid tokens that might trigger expired-like errors
-	invalidTokens := []string{
-		"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJpc3MiOiJ0ZXN0LWlzc3VlciIsImV4cCI6MTIzNDU2Nzg5fQ.invalid-signature",
-		"expired.token.here",
+	notYetValidToken, err := mintTokenWithClaims(service, "test-user", jwt.RegisteredClaims{
+		Issuer:    service.issuer,
+		NotBefore: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(2 * time.Hour)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	})
+	require.NoError(t, err, "Should mint a not-yet-valid token without error")
+
+	wrongAlgorithmToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": "test-user",
+		"iss": service.issuer,
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+	signedWrongAlgorithmToken, err := wrongAlgorithmToken.SignedString([]byte("attacker-secret"))
+	require.NoError(t, err, "Should sign the HS256 token without error")
+
+	cases := map[string]string{
+		"not-yet-valid token": notYetValidToken,
+		"wrong algorithm":     signedWrongAlgorithmToken,
 	}
 
-	for _, invalidToken := range invalidTokens {
-		_, err := service.ValidateToken(invalidToken)
-		if err != nil {
-			// Should contain token-related error message
-			assert.Contains(t, err.Error(), "token", "Error should contain token-related message")
-		}
+	for name, token := range cases {
+		t.Run(name, func(t *testing.T) {
+			claims, err := service.ValidateToken(token)
+			assert.ErrorIs(t, err, apperrors.ErrTokenInvalid, "Non-expired failure should fail closed to ErrTokenInvalid")
+			assert.Nil(t, claims, "No claims should be returned for a rejected token")
+		})
 	}
 }
 
@@ -211,8 +240,9 @@ func TestValidateToken_InvalidFormat(t *testing.T) {
 	}
 
 	for _, invalidToken := range invalidTokens {
-		_, err := service.ValidateToken(invalidToken)
-		assert.Error(t, err, "Should return error for invalid token format: %s", invalidToken)
+		claims, err := service.ValidateToken(invalidToken)
+		assert.ErrorIs(t, err, apperrors.ErrTokenInvalid, "Should reject malformed token with ErrTokenInvalid: %s", invalidToken)
+		assert.Nil(t, claims, "No claims should be returned for a malformed token: %s", invalidToken)
 	}
 }
 
@@ -221,27 +251,28 @@ func TestValidateToken_NilToken(t *testing.T) {
 	service, err := NewTestAuthService()
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, err = service.ValidateToken("")
-	assert.Error(t, err, "Should return error for empty token")
+	claims, err := service.ValidateToken("")
+	assert.ErrorIs(t, err, apperrors.ErrTokenInvalid, "Should reject empty token with ErrTokenInvalid")
+	assert.Nil(t, claims, "No claims should be returned for an empty token")
 }
 
-// TestValidateToken_WrongIssuer tests validation of tokens with wrong issuer
+// TestValidateToken_WrongIssuer tests validation of tokens minted with
+// the service's own key but a foreign issuer claim: well-formed and
+// correctly signed, rejected solely by the issuer check.
 func TestValidateToken_WrongIssuer(t *testing.T) {
 	service, err := NewTestAuthService()
 	require.NoError(t, err, "Should create auth service without error")
 
-	// Test with tokens that have different issuer (simulated with invalid tokens)
-	// Since we can't easily create tokens with different issuers, we'll test with clearly invalid tokens
-	wrongIssuerTokens := []string{
-		"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0LXVzZXIiLCJpc3MiOiJ3cm9uZy1pc3N1ZXIiLCJleHAiOjE3ODMxMDc3MjJ9.invalid-signature",
-		"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0IiwiaXNzIjoiaW52YWxpZC1pc3N1ZXIifQ.invalid-signature",
-	}
+	token, err := mintTokenWithClaims(service, "test-user", jwt.RegisteredClaims{
+		Issuer:    "wrong-issuer",
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	})
+	require.NoError(t, err, "Should mint a wrong-issuer token without error")
 
-	// These should either be rejected due to invalid signature or wrong issuer
-	for _, token := range wrongIssuerTokens {
-		_, err := service.ValidateToken(token)
-		assert.Error(t, err, "Should reject token with wrong issuer or invalid signature")
-	}
+	claims, err := service.ValidateToken(token)
+	assert.ErrorIs(t, err, apperrors.ErrTokenInvalid, "Wrong issuer should be rejected with ErrTokenInvalid")
+	assert.Nil(t, claims, "No claims should be returned for a wrong-issuer token")
 }
 
 // TestValidateToken_InvalidSignature tests validation of tokens with tampered signatures
@@ -263,8 +294,9 @@ func TestValidateToken_InvalidSignature(t *testing.T) {
 	}
 
 	for _, token := range invalidSignatureTokens {
-		_, err := service.ValidateToken(token)
-		assert.Error(t, err, "Should reject token with invalid signature: %s", token)
+		claims, err := service.ValidateToken(token)
+		assert.ErrorIs(t, err, apperrors.ErrTokenInvalid, "Should reject token with tampered signature using ErrTokenInvalid: %s", token)
+		assert.Nil(t, claims, "No claims should be returned for a tampered token: %s", token)
 	}
 }
 
@@ -371,20 +403,6 @@ func TestGenerateToken_MultipleUsers(t *testing.T) {
 	assert.NotEqual(t, tokens["user1"], tokens["user2"], "Tokens for different users should be different")
 	assert.NotEqual(t, tokens["user2"], tokens["user3"], "Tokens for different users should be different")
 	assert.NotEqual(t, tokens["user1"], tokens["user3"], "Tokens for different users should be different")
-}
-
-// TestValidateToken_ErrorMessages tests specific error messages for different validation failures
-func TestValidateToken_ErrorMessages(t *testing.T) {
-	service, err := NewTestAuthService()
-	require.NoError(t, err, "Should create auth service without error")
-
-	// Test malformed token
-	_, err = service.ValidateToken("malformed.token")
-	assert.Error(t, err, "Should return error for malformed token")
-
-	// Test empty token
-	_, err = service.ValidateToken("")
-	assert.Error(t, err, "Should return error for empty token")
 }
 
 // TestGenerateToken_Consistency tests that token generation is consistent

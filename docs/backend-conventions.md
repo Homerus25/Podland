@@ -166,6 +166,19 @@ closest sibling that already exists. Rulings so far:
   must never fabricate placeholder rows for API clients — a typed
   interface turns the miss into a compile error. Settled 2026-09-24
   (architecture-review candidate C22).
+- **JWT classification (typed, at the library seam)** — the auth
+  service's `ValidateToken` (`internal/domain/auth/service.go`) is the
+  single place jwt parse errors are classified: one typed predicate
+  (`errors.Is` against `jwt.ErrTokenExpired`) splits the library's
+  whole failure surface into the two bare AppError sentinels it may
+  return — `ErrTokenExpired` or `ErrTokenInvalid`, every other cause
+  (not-yet-valid, signature, malformed, unverifiable, keyfunc,
+  `!token.Valid`, claims-cast, issuer mismatch) failing closed to
+  invalid — and the JWT middleware answers the returned sentinel
+  directly, unwrapped via `errors.AsType`. Never by message string:
+  the callers of a parse failure must not know the library's message
+  format (the ruling `internal/podmanerr` applies to podman, applied
+  here to jwt). Settled 2026-10-01 (architecture-review candidate C6).
 - **Prune endpoints** — volumes prune is the reference pattern:
   `internal/domain/volumes/service.go` (`Prune`), `handler.go`
   (`Prune`), `dto.go` (`FromPodmanPruneReports`), and

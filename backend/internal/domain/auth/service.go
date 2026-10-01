@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -479,7 +480,15 @@ func (s *AuthService) GenerateToken(userID string) (string, error) {
 	return signedToken, nil
 }
 
-// ValidateToken validates a JWT token
+// ValidateToken validates a JWT token. Its failure vocabulary is
+// exactly two AppError sentinels, returned bare: an expired library
+// error (typed — errors.Is against jwt.ErrTokenExpired, so a joined
+// multi-cause error counts too) yields ErrTokenExpired; every other
+// failure — malformed, bad signature, not-yet-valid, unverifiable,
+// keyfunc/signing-method error, !token.Valid, claims-cast failure,
+// issuer mismatch — fails closed to ErrTokenInvalid. Classification
+// happens here, once, by type; callers (the JWT middleware) must never
+// re-classify by message string.
 func (s *AuthService) ValidateToken(tokenString string) (*TokenClaims, error) {
 	// Parse token
 	token, err := jwt.ParseWithClaims(tokenString, &TokenClaims{}, func(token *jwt.Token) (any, error) {
@@ -492,34 +501,26 @@ func (s *AuthService) ValidateToken(tokenString string) (*TokenClaims, error) {
 	})
 
 	if err != nil {
-		// Check for expired token error
-		if err.Error() == "token has invalid claims: token is expired" {
-			return nil, fmt.Errorf("token expired: %w", err)
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, apperrors.ErrTokenExpired
 		}
-		// Check for other validation errors
-		if err.Error() == "token contains an invalid number of segments" ||
-			err.Error() == "token signature is invalid" ||
-			err.Error() == "token is not valid yet" ||
-			err.Error() == "token is malformed" {
-			return nil, fmt.Errorf("invalid token: %w", err)
-		}
-		return nil, fmt.Errorf("failed to parse token: %w", err)
+		return nil, apperrors.ErrTokenInvalid
 	}
 
 	// Check if token is valid
 	if !token.Valid {
-		return nil, fmt.Errorf("invalid token")
+		return nil, apperrors.ErrTokenInvalid
 	}
 
 	// Extract claims
 	claims, ok := token.Claims.(*TokenClaims)
 	if !ok {
-		return nil, fmt.Errorf("invalid token claims")
+		return nil, apperrors.ErrTokenInvalid
 	}
 
 	// Verify issuer
 	if claims.Issuer != s.issuer {
-		return nil, fmt.Errorf("invalid token issuer")
+		return nil, apperrors.ErrTokenInvalid
 	}
 
 	return claims, nil

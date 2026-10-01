@@ -1,12 +1,13 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/domain/auth"
-	"github.com/Homerus25/podland/backend/internal/errors"
+	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 )
 
 // JWTMiddleware creates middleware for JWT authentication
@@ -62,26 +63,28 @@ func bearerClaims(w http.ResponseWriter, r *http.Request, authService *auth.Auth
 	// presented and rejected (TOKEN_INVALID).
 	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		errors.RespondWithError(w, errors.ErrTokenMissing, contextutils.GetRequestID(r.Context()))
+		apperrors.RespondWithError(w, apperrors.ErrTokenMissing, contextutils.GetRequestID(r.Context()))
 		return nil
 	}
 
 	// Extract token from Bearer scheme
 	parts := strings.Split(authHeader, " ")
 	if len(parts) != 2 || parts[0] != "Bearer" {
-		errors.RespondWithError(w, errors.ErrTokenInvalid, contextutils.GetRequestID(r.Context()))
+		apperrors.RespondWithError(w, apperrors.ErrTokenInvalid, contextutils.GetRequestID(r.Context()))
 		return nil
 	}
 
-	// Validate token
+	// Validate token. ValidateToken answers bare AppError sentinels
+	// (ErrTokenExpired | ErrTokenInvalid); unwrap via errors.AsType —
+	// the house idiom — and fail closed to ErrTokenInvalid should the
+	// vocabulary ever widen.
 	claims, err := authService.ValidateToken(parts[1])
 	if err != nil {
-		// Check if token is expired
-		if strings.Contains(err.Error(), "expired") {
-			errors.RespondWithError(w, errors.ErrTokenExpired, contextutils.GetRequestID(r.Context()))
-		} else {
-			errors.RespondWithError(w, errors.ErrTokenInvalid, contextutils.GetRequestID(r.Context()))
+		appErr := apperrors.ErrTokenInvalid
+		if mapped, ok := errors.AsType[*apperrors.AppError](err); ok {
+			appErr = mapped
 		}
+		apperrors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 		return nil
 	}
 
