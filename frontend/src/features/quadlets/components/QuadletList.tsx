@@ -16,20 +16,9 @@ import {
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { ActionDialog, ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
+import { useOpenLogs } from "@shared/logs/logRoute";
 import type { Machine } from "@shared/types/api";
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-
-// Opens the full-page logs view; the page itself bridges the LogViewer onto
-// this quadlet's journalctl endpoint.
-function useOpenQuadletLogs(machineId: string) {
-	const navigate = useNavigate();
-	return (quadlet: QuadletSummary) => {
-		navigate(`/machines/${machineId}/logs/quadlet/${quadlet.id}`, {
-			state: { name: quadlet.name },
-		});
-	};
-}
 
 // No delete request leaves the browser until the user explicitly confirms.
 // The danger footer, pending wiring, close-on-success, reset lifecycle, and
@@ -102,7 +91,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<QuadletSummary | null>(null);
-	const openLogs = useOpenQuadletLogs(machineId);
+	const openLogs = useOpenLogs(machineId, "quadlet");
 
 	return (
 		<>
@@ -126,7 +115,9 @@ export function QuadletList({ machine }: { machine: Machine }) {
 						quadlet={row}
 						onEdit={setEditTarget}
 						onDelete={setDeleteTarget}
-						onShowLogs={openLogs}
+						onShowLogs={(quadlet) =>
+							openLogs({ targetId: quadlet.id, name: quadlet.name })
+						}
 					/>
 				)}
 				toolbar={

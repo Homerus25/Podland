@@ -51,7 +51,7 @@ One line each; full detail in `docs/architecture-decisions.md`.
 | **Podman Service API** | The REST API provided by Podman for managing containers and images |
 | **SSE** | Server-Sent Events, a standard for push notifications from server to client |
 | **Endpoint envelope** | The uniform response contract every JSON endpoint speaks — failures as `{requestId, error{code, message}}`, successes as a DTO with an explicit status. _Avoid_: error wrapper, response helper |
-| **Kit** | A shared module owning one ritual end to end (log-stream kit, stream transport, test kit); features and domains adapt to it, never copy it |
+| **Kit** | A shared module owning one ritual end to end (log-stream kit, logs route kit, stream transport, test kit); features and domains adapt to it, never copy it |
 
 ---
 

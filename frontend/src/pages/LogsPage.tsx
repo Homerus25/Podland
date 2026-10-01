@@ -2,17 +2,18 @@ import { Button, Heading, HStack, VStack } from "@chakra-ui/react";
 import { containerLogs } from "@features/containers/services/containersApi";
 import { quadletLogs } from "@features/quadlets/services/quadletsApi";
 import { LogViewer } from "@shared/components/LogViewer";
+import {
+	isLogKind,
+	type LogKind,
+	type LogsPageState,
+} from "@shared/logs/logRoute";
 import type { LogSource } from "@shared/streaming/logSource";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
-type LogKind = "container" | "quadlet";
-
-function isLogKind(value: string | undefined): value is LogKind {
-	return value === "container" || value === "quadlet";
-}
-
-// Exhaustive over LogKind: a future log-bearing kind is a type error until it
-// gets an entry. The kind guard still narrows before the lookup.
+// Exhaustive over LogKind (owned by the route kit): a future log-bearing kind
+// is a type error until it gets an entry. The kit's kind guard still narrows
+// before the lookup. The record stays here because it needs the feature
+// services; the dependency direction stays features → shared.
 const LOG_SOURCES: Record<
 	LogKind,
 	(machineId: string, targetId: string) => LogSource
@@ -32,8 +33,8 @@ export function LogsPage() {
 	}>();
 	const navigate = useNavigate();
 	const location = useLocation();
-	const name =
-		(location.state as { name?: string } | null)?.name ?? targetId ?? "";
+	const state = location.state as LogsPageState | null;
+	const name = state?.name ?? targetId ?? "";
 
 	if (!machineId || !targetId || !isLogKind(kind)) {
 		return null;
