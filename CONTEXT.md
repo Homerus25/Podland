@@ -8,8 +8,8 @@ serves the embedded UI and API on :8080.
 ## Documentation map
 
 - `docs/architecture-decisions.md` — all system-level decisions, §-numbered
-  (§1 podman integration … §17 first-run bootstrap). Code comments cite
-  these numbers; keep them stable.
+  (§1 podman integration … §18 quadlet volume data migration). Code comments
+  cite these numbers; keep them stable.
 - `docs/backend-conventions.md` — read before touching `backend/`:
   endpoint envelopes, streaming kit, connection seam, testing expectations.
 - `docs/frontend-conventions.md` — read before touching `frontend/src/`:
@@ -39,6 +39,7 @@ One line each; full detail in `docs/architecture-decisions.md`.
 15. **File handling** — no uploads; images pulled from registries only
 16. **Machine registration** — dedicated endpoint, synchronous connection test
 17. **First-run bootstrap** — setup landing page creates the first admin (one-time endpoint); no baked-in credentials; container DB in the mounted `/app/data` volume
+18. **Quadlet volume data migration** — opt-in `migrateVolumeData` on move/copy: preflight (409 non-empty target / 413 bound) → stop → export-import through the streaming kit; data before installs so a failure installs nothing
 
 ## Glossary
 
@@ -52,6 +53,9 @@ One line each; full detail in `docs/architecture-decisions.md`.
 | **SSE** | Server-Sent Events, a standard for push notifications from server to client |
 | **Endpoint envelope** | The uniform response contract every JSON endpoint speaks — failures as `{requestId, error{code, message}}`, successes as a DTO with an explicit status. _Avoid_: error wrapper, response helper |
 | **Kit** | A shared module owning one ritual end to end (log-stream kit, logs route kit, stream transport, test kit); features and domains adapt to it, never copy it |
+| **Companion quadlet** | A quadlet file on the same machine that another quadlet references by filename (a container's `Volume=app-data.volume`). Move/copy may carry the definition along — installed on the target before the referencing quadlet, skipped when the target's file is byte-identical; the volume's DATA follows only when the request opts into `migrateVolumeData` (§18) |
+| **Volume data migration** | The move/copy transfer's opt-in data phase (§18): every volume-kind `Volume=` reference resolves (bare name, or the companion's `VolumeName=`, else `systemd-<name>`) and its content is exported from the source and imported into the target. Refuses non-empty target volumes (409) unless `overwriteVolumes` merges; answers as NDJSON progress events with one terminal event |
+| **Secret transfer** | The move/copy transfer's opt-in secret phase (issue 215): every `Secret=` reference resolves (token before the first comma; `source=` governs the all-options form) and — with `transferSecrets` — its value is revealed on the source (admin on the source, the secrets API's reveal gate) and recreated on the target. Same-name skips before the reveal, secrets are copy-only, and per-reference outcomes ride the envelope's `secretTransfer` block |
 
 ---
 

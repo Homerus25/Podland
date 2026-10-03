@@ -137,6 +137,58 @@ candidate number. API contracts live in `doku/`.
   drift; the in-process test seeding seam (`App.SeedUserWithRole`) is a
   test-only adapter over the same path
 
+### 18. Quadlet Volume Data Migration (2026-10-02, issue 214)
+The move/copy transfer (issue 207/211/217 lineage) gains an opt-in data
+phase that carries the referenced podman volumes' content from source to
+target:
+- **Opt-in, conditional transport**: `migrateVolumeData` on the request —
+  default false, file-only transfers answer the plain JSON envelope exactly
+  as before. With the flag set the response switches to the NDJSON
+  streaming kit (the images-pull arrangement): per-volume progress events
+  (`start`/`bytes`/`done`/`skip`), then exactly one terminal event
+  (complete envelope or mapped error). Errors answered before the stream
+  begins (bad param/body) stay plain. The response carries its own
+  10-minute write deadline — an operation-duration fact, handler-side.
+- **Phases run before anything is installed**: preflight (target emptiness
+  → 409 `VOLUME_MIGRATION_TARGET_NOT_EMPTY` unless `overwriteVolumes`
+  merges; size bound → 413) → a move's stop → the data itself. A data
+  failure therefore leaves both machines' quadlet sets untouched. A
+  migrating move stops the source's running unit BEFORE the data phase
+  (exporting under a live writer would capture torn state); the
+  non-migration path keeps the delete flow's stop inside the removal,
+  byte-identical to its issue-211 shape.
+- **Service-owned bound**: the migration bound is the same
+  `VOLUME_UPLOAD_MAX_BYTES` config value the volumes domain caps populate
+  uploads with, wired via `WithMaxVolumeUploadBytes`. Podman's service API
+  reports NO volume content size today (verified in the fork:
+  `InspectVolumeData` has no size), so the inspect-size pre-check is
+  conditional — it fires only for an engine that reports one; the counting
+  reader between export and import is the always-on enforcement and fails
+  the stream with 413 at the first byte past the bound.
+- **Emptiness via bounded export probe**: target emptiness is decided by
+  exporting the target volume and reading the tar — directory entries and
+  tar meta headers are framing, the first real entry proves content and
+  closes the pipe mid-stream (the probe never reads a big volume to its
+  end). A directory-only tar followed by a clean EOF means empty.
+- **Two leases on purpose**: the data phase holds the source lease (export)
+  and the target lease (create-if-absent + import) at once; export streams
+  through an in-process pipe, cancellation closes the pipe so a client
+  disconnect ends the export promptly.
+- **Resolution ritual shared by preview and transfer**: a volume-kind
+  reference resolves to the bare name itself, or through the companion
+  `.volume` quadlet's `VolumeName=` (first non-empty wins), else podman's
+  `systemd-<name>` default — dangling references still resolve the default
+  so the preview can label them and the data phase can skip them honestly
+  (skipped outcomes ride the envelope's `volumeMigration` block). Host
+  bind paths never enter the migration set; the plan deduplicates by
+  resolved volume name. The preview shows these facts (migratable, target
+  existence, sizes when an engine reports them) flag-independently. The
+  same opt-in pattern carries `Secret=` references (issue 215): the value
+  is revealed on the source and recreated on the target, gated by **admin
+  on the source** — a secret's value leaving a machine is a reveal, so
+  the secrets API's reveal gate owns it — with same-name skips before the
+  reveal and copy-only semantics (a move never removes source secrets).
+
 ## Technical Stack
 
 ### Backend (Go)

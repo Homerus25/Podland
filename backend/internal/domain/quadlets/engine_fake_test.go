@@ -2,6 +2,7 @@ package quadlets
 
 import (
 	"context"
+	"io"
 
 	"github.com/Homerus25/podland/backend/internal/models"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -18,6 +19,10 @@ type fakeQuadletEngine struct {
 	logsFn             func(containerName string, opts entities.ContainerLogsOptions) error
 	inspectContainerFn func(id string) ([]*entities.ContainerInspectReport, []error, error)
 	inspectPodFn       func(id string) ([]*entities.PodInspectReport, []error, error)
+	volumeInspectFn    func(name string) (*QuadletVolumeInspect, error)
+	volumeCreateFn     func(name string) error
+	volumeExportFn     func(name string, w io.Writer) error
+	volumeImportFn     func(name string, r io.Reader) error
 }
 
 func (f *fakeQuadletEngine) List(opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
@@ -69,6 +74,39 @@ func (f *fakeQuadletEngine) InspectPod(id string) ([]*entities.PodInspectReport,
 	return f.inspectPodFn(id)
 }
 
+func (f *fakeQuadletEngine) VolumeInspect(name string) (*QuadletVolumeInspect, error) {
+	if f.volumeInspectFn == nil {
+		// No panic here: MovePreview inspects volumes unconditionally since
+		// issue 214, so an unarmed inspect answers the production contract
+		// for an absent volume — nil report, nil error — instead of failing
+		// every preview-shaped test that doesn't care about volumes. Tests
+		// that DO care arm volumeInspectFn explicitly.
+		return nil, nil
+	}
+	return f.volumeInspectFn(name)
+}
+
+func (f *fakeQuadletEngine) VolumeCreate(name string) error {
+	if f.volumeCreateFn == nil {
+		panic("unexpected QuadletEngine.VolumeCreate call")
+	}
+	return f.volumeCreateFn(name)
+}
+
+func (f *fakeQuadletEngine) VolumeExport(name string, w io.Writer) error {
+	if f.volumeExportFn == nil {
+		panic("unexpected QuadletEngine.VolumeExport call")
+	}
+	return f.volumeExportFn(name, w)
+}
+
+func (f *fakeQuadletEngine) VolumeImport(name string, r io.Reader) error {
+	if f.volumeImportFn == nil {
+		panic("unexpected QuadletEngine.VolumeImport call")
+	}
+	return f.volumeImportFn(name, r)
+}
+
 // fakeEngineProvider arms the provider seam: engine is handed to the
 // service closure; err simulates an acquisition failure (the 502 sentinel
 // crossing) and short-circuits the closure, exactly like the production
@@ -76,13 +114,73 @@ func (f *fakeQuadletEngine) InspectPod(id string) ([]*entities.PodInspectReport,
 type fakeEngineProvider struct {
 	engine QuadletEngine
 	err    error
+	// engines serves per-machine engines keyed by machine ID — the shape
+	// the cross-machine operations (move-preview) exercise. When non-nil
+	// it takes precedence over engine; a lookup miss panics, so a closure
+	// crossing an unexpected machine fails the test loudly.
+	engines map[string]QuadletEngine
 }
 
 func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e QuadletEngine) error) error {
 	if p.err != nil {
 		return p.err
 	}
+	if p.engines != nil {
+		e, ok := p.engines[machineID]
+		if !ok {
+			panic("unexpected WithEngine machine: " + machineID)
+		}
+		return fn(e)
+	}
 	return fn(p.engine)
+}
+
+// fakeMoveSecretEngine is the function-field fake for the moveSecretEngine
+// seam (issue 215). Each test arms only the operations its scenario needs;
+// an unarmed operation panics, so an unexpected secret-store call fails
+// the test loudly — the shape that pins "no reveal when the flag is
+// absent" and "no store consult for hostPath references".
+type fakeMoveSecretEngine struct {
+	namesFn  func() ([]string, error)
+	revealFn func(name string) (string, error)
+	createFn func(name, value string) error
+}
+
+func (f *fakeMoveSecretEngine) Names() ([]string, error) {
+	if f.namesFn == nil {
+		panic("unexpected moveSecretEngine.Names call")
+	}
+	return f.namesFn()
+}
+
+func (f *fakeMoveSecretEngine) Reveal(name string) (string, error) {
+	if f.revealFn == nil {
+		panic("unexpected moveSecretEngine.Reveal call")
+	}
+	return f.revealFn(name)
+}
+
+func (f *fakeMoveSecretEngine) Create(name, value string) error {
+	if f.createFn == nil {
+		panic("unexpected moveSecretEngine.Create call")
+	}
+	return f.createFn(name, value)
+}
+
+// fakeSecretEngineProvider arms the secret provider seam per machine ID
+// (the two-lease shape the secret surface exercises); a lookup miss
+// panics, so a closure crossing an unexpected machine fails the test
+// loudly.
+type fakeSecretEngineProvider struct {
+	engines map[string]moveSecretEngine
+}
+
+func (p fakeSecretEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e moveSecretEngine) error) error {
+	e, ok := p.engines[machineID]
+	if !ok {
+		panic("unexpected secret WithEngine machine: " + machineID)
+	}
+	return fn(e)
 }
 
 // fakeMachineLookup is the function-field fake for the machineLookup seam

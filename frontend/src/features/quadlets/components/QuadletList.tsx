@@ -1,6 +1,7 @@
 import { Button, Checkbox, Text, VStack } from "@chakra-ui/react";
 import { can } from "@features/machines/permissions";
 import { AutoUpdateModal } from "@features/quadlets/components/AutoUpdateModal";
+import { MoveQuadletDialog } from "@features/quadlets/components/MoveQuadletDialog";
 import {
 	CreateQuadletDialog,
 	EditQuadletDialog,
@@ -10,6 +11,7 @@ import { useQuadletAutoUpdate } from "@features/quadlets/hooks/useQuadletAutoUpd
 import {
 	useCreateQuadlet,
 	useDeleteQuadlet,
+	useMoveQuadlet,
 	useQuadlets,
 	useUpdateQuadlet,
 } from "@features/quadlets/hooks/useQuadlets";
@@ -73,10 +75,12 @@ function DeleteQuadletModal({
 // The toolbar/triad/table machinery, the plural testids, and the hint swap
 // are ResourceList's; this adapter owns the busiest toolbar of the five
 // (create plus the two auto-update buttons), the edit/delete/logs/auto-update
-// feature code, and the now-tiny update-all pre-flight (an ActionDialog: the
-// confirm gates the caller-owned stream, so no mutation machinery applies).
-// The row and its lifecycle options modal live in QuadletRow. Create is a
-// write like every other toolbar action, so below manage level the module
+// and move/copy feature code, and the now-tiny update-all pre-flight (an
+// ActionDialog: the confirm gates the caller-owned stream, so no mutation
+// machinery applies).
+// The row and its lifecycle options modal live in QuadletRow; the transfer
+// dialog (mode, target, volume warning) lives in MoveQuadletDialog. Create is
+// a write like every other toolbar action, so below manage level the module
 // swaps the whole toolbar for the canonical read hint.
 export function QuadletList({ machine }: { machine: Machine }) {
 	const machineId = machine.id;
@@ -84,6 +88,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 	const createQuadlet = useCreateQuadlet(machineId);
 	const updateQuadlet = useUpdateQuadlet(machineId);
 	const deleteQuadlet = useDeleteQuadlet(machineId);
+	const moveQuadlet = useMoveQuadlet(machineId);
 	const autoUpdate = useQuadletAutoUpdate(machineId);
 	const canManage = can(machine, "manage-quadlets");
 	const [isConfirmUpdateOpen, setIsConfirmUpdateOpen] = useState(false);
@@ -91,6 +96,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<QuadletSummary | null>(null);
+	const [moveTarget, setMoveTarget] = useState<QuadletSummary | null>(null);
 	const openLogs = useOpenLogs(machineId, "quadlet");
 
 	return (
@@ -106,6 +112,10 @@ export function QuadletList({ machine }: { machine: Machine }) {
 					{ label: "State" },
 					{},
 					{},
+					// The move/copy column exists only when the rows can offer the
+					// action (ContainerList's conditional delete column is the
+					// precedent), so the header matches the row either way.
+					...(canManage ? [{}] : []),
 					{},
 				]}
 				renderRow={(row) => (
@@ -113,7 +123,9 @@ export function QuadletList({ machine }: { machine: Machine }) {
 						key={row.id}
 						machineId={machineId}
 						quadlet={row}
+						canManage={canManage}
 						onEdit={setEditTarget}
+						onMove={setMoveTarget}
 						onDelete={setDeleteTarget}
 						onShowLogs={(quadlet) =>
 							openLogs({ targetId: quadlet.id, name: quadlet.name })
@@ -166,6 +178,14 @@ export function QuadletList({ machine }: { machine: Machine }) {
 					quadlet={deleteTarget}
 					deleteQuadlet={deleteQuadlet}
 					onClose={() => setDeleteTarget(null)}
+				/>
+			) : null}
+			{moveTarget ? (
+				<MoveQuadletDialog
+					machine={machine}
+					quadlet={moveTarget}
+					moveQuadlet={moveQuadlet}
+					onClose={() => setMoveTarget(null)}
 				/>
 			) : null}
 			{isConfirmUpdateOpen ? (

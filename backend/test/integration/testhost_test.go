@@ -122,6 +122,22 @@ func TestHost_SSHOverrides(t *testing.T) {
 	})
 }
 
+// TestHost_SecondHostRunContract pins the second test host's run
+// contract (issue 208): its collision surfaces — container name,
+// published port, volume pair — must all differ from the primary host's,
+// or a run booting both hosts would race over shared state instead of
+// failing loudly.
+func TestHost_SecondHostRunContract(t *testing.T) {
+	assert.NotEqual(t, primaryTesthost.container, secondTesthost.container,
+		"second host must use its own container name")
+	assert.NotEqual(t, primaryTesthost.port, secondTesthost.port,
+		"second host must publish sshd on its own loopback port")
+	assert.NotEqual(t, primaryTesthost.sshVolume, secondTesthost.sshVolume,
+		"second host must keep its own SSH host keys")
+	assert.NotEqual(t, primaryTesthost.storeVolume, secondTesthost.storeVolume,
+		"second host must have its own podman store — independent state is the point")
+}
+
 // TestHost_CollisionClassification pins the serialized-runs guard: the
 // two collision shapes podman emits (name in use, port in use) must be
 // recognized from combined output, and ordinary failures must not be.

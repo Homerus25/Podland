@@ -172,6 +172,18 @@ var (
 	// waiting. It says the WAIT was given up, not that the stop failed:
 	// the stop job may still complete in systemd after expiry.
 	ErrQuadletStopTimedOut = NewAppError("QUADLET_STOP_TIMED_OUT", "Timed out waiting for the quadlet to stop", http.StatusGatewayTimeout)
+	// ErrVolumeMigrationTargetNotEmpty is the move/copy data phase's refusal
+	// (issue 214): the target machine already holds a non-empty podman
+	// volume the transfer would import into, and the request did not opt
+	// into merging with overwriteVolumes. Fires in the preflight, before
+	// anything is installed.
+	ErrVolumeMigrationTargetNotEmpty = NewAppError("VOLUME_MIGRATION_TARGET_NOT_EMPTY", "Target volume is not empty", http.StatusConflict)
+	// ErrVolumeMigrationFailed is the move/copy data phase's engine answer
+	// (issue 214): the export/import stream or the podman engine failed
+	// mid-volume. Callers carry the volume name and cause via WithMessage;
+	// the plain envelope rewrites 5xx messages, so the named detail rides
+	// the NDJSON terminal error event.
+	ErrVolumeMigrationFailed = NewAppError("VOLUME_MIGRATION_FAILED", "Volume data migration failed", http.StatusInternalServerError)
 )
 
 // Secrets
@@ -180,6 +192,13 @@ var (
 	ErrSecretAlreadyExists  = NewAppError("SECRET_ALREADY_EXISTS", "Secret with this name already exists", http.StatusConflict)
 	ErrSecretInUse          = NewAppError("SECRET_IN_USE", "Secret is in use by one or more containers", http.StatusConflict)
 	ErrSecretCreationFailed = NewAppError("SECRET_CREATION_FAILED", "Failed to create secret", http.StatusInternalServerError)
+	// ErrSecretTransferFailed is the quadlet move/copy secret phase's
+	// engine answer (issue 215): a secret could not be revealed on the
+	// source or created on the target mid-phase. Callers carry the secret
+	// name and cause via WithMessage; the plain envelope rewrites 5xx
+	// messages, so the named detail rides the NDJSON terminal error event
+	// when migrateVolumeData also set the streaming transport.
+	ErrSecretTransferFailed = NewAppError("SECRET_TRANSFER_FAILED", "Secret transfer failed", http.StatusInternalServerError)
 )
 
 // Volumes

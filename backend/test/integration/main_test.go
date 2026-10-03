@@ -172,13 +172,15 @@ func run(m *testing.M) int {
 		if err := ensureTesthostImage(); err != nil {
 			return failFast("ensure test host image", err)
 		}
-		if err := startTesthostContainer(); err != nil {
+		if err := startTesthostContainer(primaryTesthost); err != nil {
 			return failFast("start test host container", err)
 		}
 		// Registered FIRST so the LIFO teardown stack removes the
 		// container LAST, after the connection pointing into it is
 		// gone. Volumes are retained by removeTesthostContainer.
-		suite.RegisterCleanup("podman rm -f test host", removeTesthostContainer)
+		suite.RegisterCleanup("podman rm -f test host", func() error {
+			return removeTesthostContainer(primaryTesthost)
+		})
 
 		// Per-run identity: fresh ed25519 keypair, public half
 		// injected into the container, private half living only in
@@ -188,16 +190,16 @@ func run(m *testing.M) int {
 			return failFast("generate run keypair", err)
 		}
 		identityPath = keyPath
-		if err := injectAuthorizedKey(pubLine); err != nil {
+		if err := injectAuthorizedKey(primaryTesthost.container, pubLine); err != nil {
 			return failFast("inject authorized key", err)
 		}
 		target = reachableTarget{
 			Host:    testhostHost,
-			Port:    testhostPort,
+			Port:    primaryTesthost.port,
 			SSHUser: testhostSSHUser,
 			Socket:  testhostSocket,
 		}
-		logf("integration: test host container %q up; identity injected", testhostContainer)
+		logf("integration: test host container %q up; identity injected", primaryTesthost.container)
 	} else {
 		target, identityPath, err = externalTargetFromEnv()
 		if err != nil {
@@ -226,7 +228,7 @@ func run(m *testing.M) int {
 			return failFast("wait for sshd port", err)
 		}
 	}
-	if err := probePodmanConnection(connectionName, 60*time.Second); err != nil {
+	if err := probePodmanConnection(primaryTesthost, connectionName, 60*time.Second); err != nil {
 		return failFast("probe podman connection", err)
 	}
 	suite.RegisterCleanup("ssh-keygen -R [127.0.0.1]:24422",

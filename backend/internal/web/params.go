@@ -41,6 +41,20 @@ func requiredMessage(code string) string {
 	return strings.Join(words, " ") + " is required"
 }
 
+// QueryString reads a required string query parameter with the same
+// missing-param contract as URLParam: an empty value answers 400 with
+// exactly the given error code and a message derived from it. The code
+// stays explicit at the call site. Optional string query parameters
+// keep using r.URL.Query().Get directly (the lenient default is the
+// caller's empty string).
+func QueryString(r *http.Request, name, code string) (string, *appErrors.AppError) {
+	value := r.URL.Query().Get(name)
+	if value == "" {
+		return "", appErrors.NewAppError(code, requiredMessage(code), http.StatusBadRequest)
+	}
+	return value, nil
+}
+
 // QueryBool reads a boolean query flag with one lenient contract: a
 // missing or malformed value yields def. The default is explicit
 // because the flags disagree (delete force defaults false, quadlet

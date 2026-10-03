@@ -1,7 +1,16 @@
 import type { AuthStatusResponse } from "@features/auth/services/authApi";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import type { ImageSummary } from "@features/images/services/imagesApi";
-import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
+import type {
+	QuadletMoveCompanionState,
+	QuadletMovePreview,
+	QuadletMovePreviewSecret,
+	QuadletMovePreviewVolume,
+	QuadletMoveResult,
+	QuadletMoveSecretOutcome,
+	QuadletMoveVolumeOutcome,
+	QuadletSummary,
+} from "@features/quadlets/services/quadletsApi";
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
 import type { UserSummary } from "@features/users/services/usersApi";
 import type { VolumeSummary } from "@features/volumes/services/volumesApi";
@@ -64,6 +73,134 @@ export function quadletFixture(
 		unit: "web.service",
 		resource: "container",
 		state: "running",
+		...overrides,
+	};
+}
+
+// Move/copy preview (GET .../quadlets/{id}/move-preview): default shape
+// references one podman volume and one host bind path with a clean target;
+// tests override `volumes`/`collision`/`running` per scenario. Volume-kind
+// entries always carry existsOnTarget/migratable (issue 214), so the
+// defaults do too.
+export function quadletMovePreviewFixture(
+	overrides: Partial<QuadletMovePreview> = {},
+): QuadletMovePreview {
+	return {
+		volumes: [
+			{
+				source: "pgdata",
+				kind: "volume",
+				podmanVolume: "pgdata",
+				existsOnTarget: false,
+				migratable: true,
+			},
+			{
+				source: "/srv/data",
+				kind: "hostPath",
+				existsOnTarget: false,
+				migratable: false,
+				reason: "host bind paths are not migrated",
+			},
+		],
+		secrets: [],
+		collision: false,
+		running: false,
+		...overrides,
+	};
+}
+
+// One secret-kind preview entry (issue 215): a podman secret that exists on
+// the source and is new on the target — the transferable shape. Tests
+// override `existsOnSource`/`existsOnTarget` per scenario; a host-path
+// reference overrides `kind` to "hostPath" (both existence flags then
+// render false, the no-claims shape).
+export function quadletMovePreviewSecretFixture(
+	overrides: Partial<QuadletMovePreviewSecret> = {},
+): QuadletMovePreviewSecret {
+	return {
+		name: "db-password",
+		kind: "secret",
+		existsOnSource: true,
+		existsOnTarget: false,
+		...overrides,
+	};
+}
+
+// One volume-kind preview entry with the issue-214 data fields: a migratable
+// reference whose resolved volume is fresh on the target. Tests override
+// `existsOnTarget`/`targetSizeBytes`/`migratable`/`reason` per scenario.
+export function quadletMoveDataVolumeFixture(
+	overrides: Partial<QuadletMovePreviewVolume> = {},
+): QuadletMovePreviewVolume {
+	return {
+		source: "pgdata",
+		kind: "volume",
+		podmanVolume: "pgdata",
+		existsOnTarget: false,
+		migratable: true,
+		...overrides,
+	};
+}
+
+// One companion .volume preview entry (issue 217): the source names the
+// same-named quadlet file and the preview labels how that file sits on the
+// target machine. Companion references resolve to podman's `systemd-<name>`
+// default unless the file sets VolumeName= (issue 214), so the entry carries
+// the resolved name and the always-present data fields too.
+export function quadletMoveCompanionVolumeFixture(
+	targetState: QuadletMoveCompanionState,
+	source = "app-data.volume",
+): QuadletMovePreviewVolume {
+	return {
+		source,
+		kind: "volume",
+		quadletFile: source,
+		targetState,
+		podmanVolume: `systemd-${source.replace(/\.volume$/, "")}`,
+		existsOnTarget: false,
+		migratable: true,
+	};
+}
+
+// Move/copy transfer envelope (POST .../quadlets/{id}/move): default shape
+// is a completed move from m-1 to m-2.
+export function quadletMoveResultFixture(
+	overrides: Partial<QuadletMoveResult> = {},
+): QuadletMoveResult {
+	return {
+		id: "web",
+		name: "web",
+		resource: "container",
+		status: "moved",
+		sourceMachineId: "m-1",
+		targetMachineId: "m-2",
+		...overrides,
+	};
+}
+
+// One data-phase outcome of the volumeMigration block (issue 214): default
+// shape is a migrated pgdata volume; skipped entries override `outcome` and
+// carry `reason`.
+export function quadletMoveVolumeOutcomeFixture(
+	overrides: Partial<QuadletMoveVolumeOutcome> = {},
+): QuadletMoveVolumeOutcome {
+	return {
+		ref: "pgdata",
+		podmanVolume: "pgdata",
+		outcome: "migrated",
+		...overrides,
+	};
+}
+
+// One secret-phase outcome of the secretTransfer block (issue 215): default
+// shape is a transferred db-password; skipped entries override `outcome`
+// and carry `reason`.
+export function quadletMoveSecretOutcomeFixture(
+	overrides: Partial<QuadletMoveSecretOutcome> = {},
+): QuadletMoveSecretOutcome {
+	return {
+		name: "db-password",
+		outcome: "transferred",
 		...overrides,
 	};
 }

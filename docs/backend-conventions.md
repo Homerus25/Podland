@@ -22,8 +22,10 @@ closest sibling that already exists. Rulings so far:
   `web.Decode`'s vocabulary and are never hand-minted per handler. The
   same ruling covers route params and query flags: `web.URLParam` owns
   the missing-param guard (the error code stays explicit at the call
-  site, the 400 message is derived from it) and
-  `web.QueryBool`/`web.QueryInt` own the lenient flag parse (a missing
+  site, the 400 message is derived from it),
+  `web.QueryString` owns the required string query param (same guard
+  contract) and `web.QueryBool`/`web.QueryInt` own the lenient flag
+  parse (a missing
   or malformed value yields the explicit default) — route-param guards
   and query-flag parses belong to `web`'s vocabulary, never hand-minted
   per handler. The
@@ -199,8 +201,11 @@ closest sibling that already exists. Rulings so far:
   `RequireMachinePermission` middleware (which contributes the
   HTTP-shaped machine-resolution ritual — 401/400/404 — and maps the
   returned sentinels onto the error envelope the way the web envelope
-  unwraps AppErrors) and the secrets reveal gate (admin level, fired
-  before the connection lease). `models.HasAtLeast` and the level
+  unwraps AppErrors), the secrets reveal gate (admin level, fired
+  before the connection lease), and the quadlet move/copy secret-transfer
+  gate (admin on the SOURCE machine, fired in preflight when
+  `transferSecrets` is set — issue 215; a secret's value leaving a
+  machine is a reveal). `models.HasAtLeast` and the level
   constants stay in `models`; `RequireAdmin` is a different domain
   (role, not level) with its own single owner already.
 - **Runtime connection failures** — a persisted machine's podman socket
@@ -320,7 +325,12 @@ is incomplete.
   published port (127.0.0.1:24422), and cache volumes shared across
   runs — so a second concurrent run fails fast with "another
   integration run is active on this host"; that error is the
-  serialization contract, not a broken environment. To target an
+  serialization contract, not a broken environment. Cross-machine
+  features get a second, state-independent test host under the same
+  contract (name, port 127.0.0.1:24423, own volumes): it is booted
+  lazily by `Suite.RegisterSecondMachine` and paid for only by runs
+  that use it (decision recorded in `test/integration/secondhost_test.go`).
+  To target an
   externally managed host instead (e.g. a manually started podman
   machine on macOS), set the `PODLAND_TEST_SSH_*` overrides documented
   in the Makefile's `test-integration` header — the container

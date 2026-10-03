@@ -447,8 +447,8 @@ func TestDecode_CleanBodyAnswersNil(t *testing.T) {
 	assert.Equal(t, "my-volume", target.Name)
 }
 
-// URLParam / QueryBool / QueryInt pins — the param ritual every
-// route-param guard and query-flag parse crosses, pinned here once, not
+// URLParam / QueryString / QueryBool / QueryInt pins — the param ritual
+// every route-param guard and query parse crosses, pinned here once, not
 // per domain.
 
 // paramRequest builds a request carrying chi URL params the way the
@@ -507,6 +507,24 @@ func TestQueryInt_ParsedValueWinsOverDefault(t *testing.T) {
 	assert.Equal(t, 5, QueryInt(queryRequest("last=5"), "last", 0))
 	assert.Equal(t, 7, QueryInt(queryRequest("last=NaN"), "last", 7), "malformed value yields the default")
 	assert.Equal(t, 0, QueryInt(queryRequest(""), "last", 0), "missing value yields the default")
+}
+
+func TestQueryString_PresentValuePassesThrough(t *testing.T) {
+	value, appErr := QueryString(queryRequest("targetMachineId=machine-b"), "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+
+	assert.Nil(t, appErr)
+	assert.Equal(t, "machine-b", value)
+}
+
+func TestQueryString_EmptyValueAnswersGuardWithDerivedMessage(t *testing.T) {
+	value, appErr := QueryString(queryRequest(""), "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+
+	require.NotNil(t, appErr)
+	assert.Empty(t, value)
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Equal(t, "MISSING_TARGET_MACHINE_ID", appErr.Code)
+	assert.Equal(t, "Target machine ID is required", appErr.Message,
+		"the message must be derived from the code")
 }
 
 func queryRequest(query string) *http.Request {

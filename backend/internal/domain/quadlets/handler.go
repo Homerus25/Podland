@@ -189,6 +189,104 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// MovePreview handles the move/copy preview for a quadlet: the referenced
+// volumes, the target collision flag, and the source's running state
+// (doku/description_quadlets_api.md). Read-level on the source suffices
+// (the route sits at the subtree's read gate); the target machine's access
+// is enforced inside the service against the access store.
+func (h *QuadletHandler) MovePreview(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletMovePreviewResponse, error) {
+		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		targetMachineID, guard := web.QueryString(r, "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		return h.service.MovePreview(ctx, userID, machineID, quadletID, targetMachineID)
+	})
+}
+
+// Move handles the move/copy transfer of a quadlet to another machine
+// (doku/description_quadlets_api.md). The route sits at the subtree's
+// write gate for the SOURCE machine; the target machine's write-level
+// access is enforced inside the service against the access store. Copy
+// mode (issue 210) answers the transfer envelope with status "copied";
+// move mode (issue 211) removes the source after the install and answers
+// "moved", or "partial" with an error detail when the removal failed.
+//
+// Transport (issue 214): a plain file-only transfer answers one JSON
+// envelope exactly as before. A transfer with migrateVolumeData set
+// streams NDJSON instead — the data phase can run minutes on real
+// volumes, so the caller gets per-volume progress events and one terminal
+// event (complete envelope or mapped error) rather than a held-open
+// silence; registry pulls set the same precedent. Errors answered BEFORE
+// the stream begins (bad param, bad body) keep the plain envelope.
+func (h *QuadletHandler) Move(w http.ResponseWriter, r *http.Request) {
+	quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
+	if guard != nil {
+		errors.RespondWithError(w, guard, contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	// Decode answers its 400s before the stream begins; the streaming
+	// envelope takes over from there (the images Pull arrangement).
+	var request QuadletMoveRequest
+	if appErr := web.Decode(r, &request); appErr != nil {
+		errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	if !request.MigrateVolumeData {
+		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletMoveResponse, error) {
+			return h.service.Move(ctx, userID, machineID, quadletID, request)
+		})
+		return
+	}
+
+	operationID := uuid.New().String()
+	slog.InfoContext(r.Context(), "Move quadlet with volume data migration",
+		slog.String("requestID", contextutils.GetRequestID(r.Context())),
+		slog.String("machineID", chi.URLParam(r, "id")),
+		slog.String("quadletID", quadletID),
+		slog.String("operationID", operationID))
+
+	// Registry pulls set the deadline precedent: the data phase routinely
+	// exceeds the global 30-second write timeout, so this response carries
+	// its own 10-minute one.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(10 * time.Minute)); err != nil {
+		slog.WarnContext(r.Context(), "Failed to extend write deadline", slog.Any("error", err))
+	}
+
+	stream := streaming.Begin(w, r)
+	if stream == nil {
+		return
+	}
+
+	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[QuadletMoveEvent, *QuadletMoveResponse]{
+		Operation: func(ctx context.Context, onProgress func(QuadletMoveEvent)) (*QuadletMoveResponse, error) {
+			return h.service.MoveWithProgress(ctx, stream.UserID, stream.MachineID, quadletID, request, func(event QuadletMoveEvent) {
+				event.OperationID = operationID
+				event.MachineID = stream.MachineID
+				onProgress(event)
+			})
+		},
+		OnEvent: func(event QuadletMoveEvent) error {
+			return stream.Writer.Write(event)
+		},
+		CompleteEvent: func(response *QuadletMoveResponse) any {
+			return NewQuadletMoveCompleteEvent(operationID, stream.MachineID, *response)
+		},
+		ErrorDefault: errors.ErrConnectionFailed,
+		ErrorEvent: func(code, message string, _ bool) any {
+			return NewQuadletMoveErrorEvent(operationID, stream.MachineID, code, message)
+		},
+	})
+}
+
 // Generate handles generating a quadlet from an existing container or pod
 func (h *QuadletHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletGenerateResponse, error) {

@@ -89,13 +89,17 @@ function LifecycleOptionsModal({
 export function QuadletRow({
 	machineId,
 	quadlet,
+	canManage,
 	onEdit,
+	onMove,
 	onDelete,
 	onShowLogs,
 }: {
 	machineId: string;
 	quadlet: QuadletSummary;
+	canManage: boolean;
 	onEdit: (quadlet: QuadletSummary) => void;
+	onMove: (quadlet: QuadletSummary) => void;
 	onDelete: (quadlet: QuadletSummary) => void;
 	onShowLogs: (quadlet: QuadletSummary) => void;
 }) {
@@ -192,6 +196,19 @@ export function QuadletRow({
 						Edit
 					</Button>
 				</Td>
+				{canManage ? (
+					<Td>
+						<Button
+							size="xs"
+							variant="outline"
+							aria-label={`Move or copy ${quadlet.name}`}
+							onClick={() => onMove(quadlet)}
+							data-testid="move-quadlet-button"
+						>
+							Move/Copy
+						</Button>
+					</Td>
+				) : null}
 				<Td>
 					<Button
 						size="xs"
@@ -207,7 +224,7 @@ export function QuadletRow({
 			</Tr>
 			{startQuadlet.error ? (
 				<Tr>
-					<Td colSpan={6}>
+					<Td colSpan={canManage ? 7 : 6}>
 						<ErrorDisplay error={getApiError(startQuadlet.error)} />
 					</Td>
 				</Tr>

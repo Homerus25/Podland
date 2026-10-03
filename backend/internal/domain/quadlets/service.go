@@ -8,6 +8,7 @@ import (
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/streaming"
@@ -45,6 +46,24 @@ type QuadletService struct {
 	// systemctl invocations: a non-root login targets the user manager
 	// (`systemctl --user`), root targets the system manager.
 	machines machineLookup
+	// accessRepo resolves the caller's permission level for the cross-machine
+	// operations (move/copy preview and transfer): route middleware only sees
+	// the route's machine, so the target machine's access is checked here,
+	// against the store, before any podman call. Wired via WithAccessRepo.
+	accessRepo permission.PermissionGetter
+	// maxVolumeUploadBytes bounds the volume data migration's stream (issue
+	// 214, §18), enforced by the data phase's counting reader. Wired via
+	// WithMaxVolumeUploadBytes from the same config value the volumes
+	// domain caps populate uploads with; zero falls back to
+	// DefaultMaxVolumeUploadBytes.
+	maxVolumeUploadBytes int64
+	// secretEngines resolves the podman secret stores the move/copy's
+	// secret surface crosses (issue 215): the existence reads for the
+	// preview, the value reveal on the source and the create on the
+	// target for the transfer. Wired via WithSecretEngines; production
+	// wiring always sets it — calling a secret-touching path on a service
+	// without it is a wiring bug and panics at the seam.
+	secretEngines moveSecretEngineProvider
 }
 
 // NewQuadletService creates a new QuadletService with the given engine
@@ -59,6 +78,51 @@ func NewQuadletService(engines QuadletEngineProvider, sshExec sshexec.SSHExecInt
 		sshExec:  sshExec,
 		machines: machines,
 	}
+}
+
+// WithAccessRepo wires the machine-access store the cross-machine
+// operations (move/copy, issue 207) gate the target machine on, and
+// returns the service for chaining. Production wiring always sets it;
+// calling a cross-machine operation on a service without it is a wiring
+// bug and panics at the gate.
+func (s *QuadletService) WithAccessRepo(accessRepo permission.PermissionGetter) *QuadletService {
+	s.accessRepo = accessRepo
+	return s
+}
+
+// DefaultMaxVolumeUploadBytes is the volume data migration's bound when no
+// explicit override is wired in: 2 GiB, matching VOLUME_UPLOAD_MAX_BYTES
+// (the same env value the volumes domain's populate upload cap reads).
+const DefaultMaxVolumeUploadBytes int64 = 2 << 30
+
+// WithMaxVolumeUploadBytes wires the volume data migration's bound (issue
+// 214, §18) and returns the service for chaining. The bound is
+// service-owned — the same VOLUME_UPLOAD_MAX_BYTES config value the
+// volumes domain caps populate uploads with — so the migration cannot
+// stream past what the deployment already accepts for volume data.
+func (s *QuadletService) WithMaxVolumeUploadBytes(max int64) *QuadletService {
+	s.maxVolumeUploadBytes = max
+	return s
+}
+
+// WithSecretEngines wires the podman secret-store seam the move/copy's
+// secret surface crosses (issue 215) and returns the service for
+// chaining. Production wiring always sets it; calling a secret-touching
+// path (a preview of quadlet content with `Secret=` lines, or a transfer
+// with transferSecrets set) on a service without it is a wiring bug and
+// panics at the seam.
+func (s *QuadletService) WithSecretEngines(secretEngines moveSecretEngineProvider) *QuadletService {
+	s.secretEngines = secretEngines
+	return s
+}
+
+// volumeDataLimit answers the wired migration bound; zero (unset in tests)
+// falls back to DefaultMaxVolumeUploadBytes.
+func (s *QuadletService) volumeDataLimit() int64 {
+	if s.maxVolumeUploadBytes == 0 {
+		return DefaultMaxVolumeUploadBytes
+	}
+	return s.maxVolumeUploadBytes
 }
 
 // List returns a list of quadlets on the specified machine.

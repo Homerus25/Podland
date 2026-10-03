@@ -325,13 +325,10 @@ func getQuadletExpectNotFound(t *testing.T, machineID, quadletName string) {
 	require.Equalf(t, http.StatusNotFound, resp.StatusCode,
 		"get missing quadlet: expected 404, got %d. body: %s", resp.StatusCode, string(body))
 
-	var errResp struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	}
+	var errResp quadletErrorEnvelope
 	require.NoErrorf(t, json.Unmarshal(body, &errResp),
 		"get missing quadlet: error response must decode. body: %s", string(body))
-	require.Equal(t, "QUADLET_NOT_FOUND", errResp.Code,
+	require.Equal(t, "QUADLET_NOT_FOUND", errResp.Error.Code,
 		"get missing quadlet: error code must be QUADLET_NOT_FOUND")
 }
 

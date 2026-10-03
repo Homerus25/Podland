@@ -161,7 +161,10 @@ func New(cfg *config.Config) (*App, error) {
 	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService, sshExecService)
 	containerService := containers.NewContainerService(containers.NewContainerEngineProvider(connectionManager))
 	imageService := images.NewImageService(images.NewImageEngineProvider(connectionManager))
-	quadletService := quadlets.NewQuadletService(quadlets.NewQuadletEngineProvider(connectionManager), sshExecService, machineRepo)
+	quadletService := quadlets.NewQuadletService(quadlets.NewQuadletEngineProvider(connectionManager), sshExecService, machineRepo).
+		WithAccessRepo(accessRepo).
+		WithMaxVolumeUploadBytes(cfg.Volumes.MaxUploadBytes).
+		WithSecretEngines(quadlets.NewQuadletSecretEngineProvider(connectionManager))
 	secretService := secrets.NewSecretService(secrets.NewSecretEngineProvider(connectionManager), accessRepo)
 	volumeService := volumes.NewVolumeService(volumes.NewVolumeEngineProvider(connectionManager))
 
@@ -313,6 +316,18 @@ func New(cfg *config.Config) (*App, error) {
 							r.With(requireWrite).Post("/restart", quadletHandler.Restart)
 							r.Get("/logs", quadletHandler.GetLogs)
 							r.Post("/generate", quadletHandler.Generate)
+							// Move/copy preview stays read-level: it mutates
+							// nothing on the source, and the target machine's
+							// read access is enforced inside the service
+							// against the access store (issue 209).
+							r.Get("/move-preview", quadletHandler.MovePreview)
+							// The transfer mutates remote state (it installs on
+							// the target machine), so it gates at write level on
+							// the source; the target machine's write access is
+							// enforced inside the service against the access
+							// store — route middleware only sees the route's
+							// machine (issue 210).
+							r.With(requireWrite).Post("/move", quadletHandler.Move)
 						})
 					})
 

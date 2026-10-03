@@ -56,6 +56,40 @@ const (
 	testhostConnectionDefault = "podland-it"
 )
 
+// testhostSpec is one testhost instance's run contract: the fixed
+// container name, published loopback port, and volume pair that make
+// colliding runs fail loudly instead of racing over shared storage.
+// Two instances exist: the primary (machine A, booted by TestMain) and
+// the second host (machine B, booted lazily by
+// Suite.RegisterSecondMachine — see secondhost_test.go).
+type testhostSpec struct {
+	container   string
+	port        int
+	sshVolume   string // /etc/ssh — stable host keys
+	storeVolume string // rootless podman image cache
+}
+
+// primaryTesthost is machine A: the host every existing slice runs
+// against, booted during TestMain setup.
+var primaryTesthost = testhostSpec{
+	container:   testhostContainer,
+	port:        testhostPort,
+	sshVolume:   testhostSSHVolume,
+	storeVolume: testhostStoreVolume,
+}
+
+// secondTesthost is machine B: same image and boot contract as the
+// primary, but with its own container name, published port, store
+// volume and host-key volume — its podman state is genuinely
+// independent of machine A's. Booted only when a test first asks for
+// machine B, so single-machine runs never pay for it.
+var secondTesthost = testhostSpec{
+	container:   testhostContainer + "-2",
+	port:        testhostPort + 1,
+	sshVolume:   testhostSSHVolume + "-2",
+	storeVolume: testhostStoreVolume + "-2",
+}
+
 // ensureTesthostImage fails fast when the test-host image is absent —
 // with the make target that builds it, so a fresh clone produces one
 // actionable error instead of a cryptic `podman run` failure.
@@ -83,25 +117,25 @@ func ensureTesthostImage() error {
 //
 // Pre-checked collision surfaces (container name, published port) yield
 // the serialized-runs error; `podman run` itself is the backstop.
-func startTesthostContainer() error {
-	if err := exec.Command("podman", "container", "exists", testhostContainer).Run(); err == nil {
+func startTesthostContainer(spec testhostSpec) error {
+	if err := exec.Command("podman", "container", "exists", spec.container).Run(); err == nil {
 		return fmt.Errorf(
 			"container %q already exists — another integration run is active on this host (or a previous run crashed); run `podman rm -f %s` and retry",
-			testhostContainer, testhostContainer)
+			spec.container, spec.container)
 	}
-	if !tcpPortAvailable(testhostHost, testhostPort) {
+	if !tcpPortAvailable(testhostHost, spec.port) {
 		return fmt.Errorf(
 			"port %s:%d is already in use — another integration run is active on this host",
-			testhostHost, testhostPort)
+			testhostHost, spec.port)
 	}
 
 	args := []string{
 		"run", "--detach",
-		"--name", testhostContainer,
+		"--name", spec.container,
 		"--privileged",
 		"--security-opt", "label=disable",
 		"--device", "/dev/fuse",
-		"-p", fmt.Sprintf("%s:%d:22", testhostHost, testhostPort),
+		"-p", fmt.Sprintf("%s:%d:22", testhostHost, spec.port),
 		testhostImage,
 	}
 	if out, err := exec.Command("podman", args...).CombinedOutput(); err != nil {
@@ -110,7 +144,7 @@ func startTesthostContainer() error {
 				"podman refused to start the test host — another integration run is active on this host (%s)",
 				strings.TrimSpace(string(out)))
 		}
-		return fmt.Errorf("podman run %s: %w (%s)", testhostContainer, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("podman run %s: %w (%s)", spec.container, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -118,9 +152,9 @@ func startTesthostContainer() error {
 // removeTesthostContainer tears the test host down. The volumes are
 // deliberately retained: the store makes re-runs skip re-pulling images
 // and the SSH volume keeps the host key stable.
-func removeTesthostContainer() error {
-	if out, err := exec.Command("podman", "rm", "-f", testhostContainer).CombinedOutput(); err != nil {
-		return fmt.Errorf("podman rm -f %s: %w (%s)", testhostContainer, err, strings.TrimSpace(string(out)))
+func removeTesthostContainer(spec testhostSpec) error {
+	if out, err := exec.Command("podman", "rm", "-f", spec.container).CombinedOutput(); err != nil {
+		return fmt.Errorf("podman rm -f %s: %w (%s)", spec.container, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -157,22 +191,22 @@ func generateRunKeypair(dir string) (privPath, pubLine string, err error) {
 }
 
 // injectAuthorizedKey installs pubLine as core's authorized_keys inside
-// the running test host, via podman exec as root: write, chown to core,
-// and the permissions sshd's StrictModes requires (0700 dir, 0600 file).
-// Overwrite (not append) is deliberate: runs are serialized and the
-// image ships no committed keys, so the file ends up holding exactly
-// this run's key.
-func injectAuthorizedKey(pubLine string) error {
+// the given running test host, via podman exec as root: write, chown to
+// core, and the permissions sshd's StrictModes requires (0700 dir, 0600
+// file). Overwrite (not append) is deliberate: runs are serialized and
+// the image ships no committed keys, so the file ends up holding
+// exactly this run's key.
+func injectAuthorizedKey(container, pubLine string) error {
 	const script = `set -eu
 	mkdir -p /root/.ssh
 	printf '%s\n' "$PODLAND_IT_PUBKEY" > /root/.ssh/authorized_keys
 	`
 	cmd := exec.Command("podman", "exec", "--user", "root",
 		"-e", "PODLAND_IT_PUBKEY="+pubLine,
-		testhostContainer, "sh", "-c", script)
+		container, "sh", "-c", script)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("inject authorized_keys into %s: %w (%s)",
-			testhostContainer, err, strings.TrimSpace(string(out)))
+			container, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -285,8 +319,9 @@ func waitForSSHDPort(host string, port int, timeout time.Duration) error {
 // including the first-contact known_hosts auto-append — so a green
 // probe means the tracer can rely on a warm socket. A host-key
 // mismatch is deterministic and fails fast with the fix hint instead of
-// burning the budget.
-func probePodmanConnection(name string, budget time.Duration) error {
+// burning the budget; the hint names the probed spec's own volume and
+// port.
+func probePodmanConnection(spec testhostSpec, name string, budget time.Duration) error {
 	deadline := time.Now().Add(budget)
 	backoff := 1 * time.Second
 	var lastErr error
@@ -301,7 +336,7 @@ func probePodmanConnection(name string, budget time.Duration) error {
 		if isKnownHostsMismatch(string(out)) {
 			return fmt.Errorf(`%w
   hint: the test host's SSH host key changed (the %q volume was wiped or recreated?).
-  Remove the stale entry with: ssh-keygen -R "[%s]:%d"`, lastErr, testhostSSHVolume, testhostHost, testhostPort)
+  Remove the stale entry with: ssh-keygen -R "[%s]:%d"`, lastErr, spec.sshVolume, testhostHost, spec.port)
 		}
 		time.Sleep(backoff)
 		backoff = min(backoff*2, 8*time.Second)

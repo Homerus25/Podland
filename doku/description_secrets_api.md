@@ -8,7 +8,7 @@ Secrets live only in the remote machine's podman; the backend proxies podman's s
 - **write** — additionally create and delete secrets
 - **admin** — additionally **reveal secret values** (`?reveal=true`)
 
-**Redaction discipline:** a secret's value travels exactly twice — in the create request and in an admin reveal response. It is never persisted by the backend, never logged at any level, and never appears in any other response (list and metadata inspect responses have no value field at all).
+**Redaction discipline:** a secret's value reaches the client exactly twice — in the create request and in an admin reveal response. It is never persisted by the backend, never logged at any level, and never appears in any other response (list and metadata inspect responses have no value field at all). The one server-side exception is the quadlet move/copy transfer's opt-in secret phase (issue 215, see the [quadlets doc](description_quadlets_api.md)): a `transferSecrets` request reveals a referenced secret's value on the source — requiring **admin** on the source machine, the same gate as `?reveal=true` — and recreates the secret, value identical, on the target; the value never reaches the client, and each moved secret is audit-logged by name only.
 
 ---
 

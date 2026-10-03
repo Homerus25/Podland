@@ -2,6 +2,8 @@ import type {
 	CreateQuadletInput,
 	DeleteQuadletOptions,
 	QuadletLifecycleOptions,
+	QuadletMoveInput,
+	QuadletMoveResult,
 	UpdateQuadletInput,
 } from "@features/quadlets/services/quadletsApi";
 import {
@@ -9,14 +11,28 @@ import {
 	deleteQuadlet,
 	getQuadlet,
 	listQuadlets,
+	moveQuadlet,
+	quadletMovePreview,
 	restartQuadlet,
 	startQuadlet,
 	stopQuadlet,
 	updateQuadlet,
 } from "@features/quadlets/services/quadletsApi";
-import { quadletQueryKey, quadletsQueryKey } from "@shared/queries/queryKeys";
-import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
-import { useQuery } from "@tanstack/react-query";
+import {
+	quadletMovePreviewQueryKey,
+	quadletQueryKey,
+	quadletsQueryKey,
+} from "@shared/queries/queryKeys";
+import {
+	invalidateMachineResources,
+	useListInvalidatingMutation,
+} from "@shared/queries/useListInvalidatingMutation";
+import {
+	type QueryClient,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 
 export function useQuadlets(machineId: string) {
 	return useQuery({
@@ -98,4 +114,58 @@ export function useRestartQuadlet(machineId: string) {
 		}: { quadletId: string } & QuadletLifecycleOptions) =>
 			restartQuadlet(machineId, quadletId, options),
 	);
+}
+
+// The transfer dialog's warning payload, keyed by the chosen target so a
+// target change refetches. Disabled until a target exists — the dialog
+// defaults the select to the first writable machine once the machines list
+// arrives.
+export function useQuadletMovePreview(
+	machineId: string,
+	quadletId: string,
+	targetMachineId: string | null,
+) {
+	return useQuery({
+		queryKey: quadletMovePreviewQueryKey(
+			machineId,
+			quadletId,
+			targetMachineId ?? "",
+		),
+		queryFn: () => {
+			if (targetMachineId === null) {
+				throw new Error("move preview requires a target machine");
+			}
+			return quadletMovePreview(machineId, quadletId, targetMachineId);
+		},
+		enabled: targetMachineId !== null,
+	});
+}
+
+// A move/copy touches two machines: the quadlet leaves the source and (in
+// move mode) is gone from it, while the target gains it. The response carries
+// both machine ids, so both lists invalidate from what the server answered
+// rather than from closure assumptions. A "partial" result is still a
+// success-shaped answer — the target install stands — so both lists refresh
+// there too. One owner for the rule (issue 222 review): the plain mutation's
+// onSuccess and the stream transport's complete handler both call this.
+export function invalidateMoveResult(
+	queryClient: QueryClient,
+	result: QuadletMoveResult,
+) {
+	invalidateMachineResources(queryClient, result.sourceMachineId, "quadlets");
+	invalidateMachineResources(queryClient, result.targetMachineId, "quadlets");
+}
+
+export function useMoveQuadlet(machineId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({
+			quadletId,
+			...input
+		}: { quadletId: string } & QuadletMoveInput) =>
+			moveQuadlet(machineId, quadletId, input),
+		onSuccess: (result) => {
+			invalidateMoveResult(queryClient, result);
+		},
+	});
 }

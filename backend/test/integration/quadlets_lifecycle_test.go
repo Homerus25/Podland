@@ -309,7 +309,14 @@ func requireUserSystemd(t *testing.T) {
 }
 
 // userSystemdAvailable is the boolean probe behind requireUserSystemd:
-// it dials the machine's SSH target with the registered identity and
+// it dials the shared good machine's SSH target (see
+// userSystemdAvailableOn) and checks whether its user systemd answers.
+func userSystemdAvailable() bool {
+	return userSystemdAvailableOn(suite.goodMachineRegistration)
+}
+
+// userSystemdAvailableOn probes an arbitrary target the same way: it
+// dials the target's SSH endpoint with the registered identity and
 // checks `systemctl is-system-running` answers with "running" or
 // "degraded" — proof that SSH works and a systemd manager answers for
 // the registered user (readable system-manager queries serve any login;
@@ -317,10 +324,10 @@ func requireUserSystemd(t *testing.T) {
 // API surface needs this on the machine (podman's quadlet list/install/
 // remove dial the user systemd over DBus), so callers gate or skip
 // quadlet coverage on the result — e.g. on the systemd-free container
-// test host.
-func userSystemdAvailable() bool {
-	target := suite.goodMachineRegistration
-
+// test host, or on the second test host via
+// SecondMachine.Target. Returns false for an unusable or unreachable
+// target.
+func userSystemdAvailableOn(target reachableTarget) bool {
 	key, err := ssh.ParsePrivateKey([]byte(target.SSHKey))
 	if err != nil {
 		return false

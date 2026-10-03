@@ -42,6 +42,21 @@ export function quadletQueryKey(machineId: string, quadletId: string) {
 	return [...quadletsQueryKey(machineId), quadletId] as const;
 }
 
+// The move/copy preview is a quadlet sub-resource keyed by the chosen target,
+// so changing the target refetches. Never an invalidation target of its own:
+// quadlets-prefix invalidation (a transfer's success) covers it.
+export function quadletMovePreviewQueryKey(
+	machineId: string,
+	quadletId: string,
+	targetMachineId: string,
+) {
+	return [
+		...quadletQueryKey(machineId, quadletId),
+		"move-preview",
+		targetMachineId,
+	] as const;
+}
+
 export function secretQueryKey(machineId: string, secretId: string) {
 	return [...secretsQueryKey(machineId), secretId] as const;
 }

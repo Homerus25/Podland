@@ -80,9 +80,11 @@ test:
 # in backend/test/integration/. Gated behind a build tag so `make test`
 # / `go test ./...` never boot a container or depend on podman.
 #
-# Runs are serialized per host: the test host uses a fixed container
-# name and a fixed published port (127.0.0.1:24422), so a second
-# concurrent run fails fast instead of racing over shared volumes.
+# Runs are serialized per host: the test hosts use fixed container
+# names and fixed published ports (127.0.0.1:24422 for the primary,
+# 127.0.0.1:24423 for the lazily-booted second host used by cross-machine
+# tests), so a second concurrent run fails fast instead of racing over
+# shared volumes.
 #
 # Override the registered `podman system connection` name with
 # PODLAND_TEST_CONNECTION_NAME (default "podland-it"). To target an
