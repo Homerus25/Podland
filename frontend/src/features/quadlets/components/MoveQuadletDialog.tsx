@@ -27,6 +27,7 @@ import type {
 	QuadletMoveResult,
 	QuadletSummary,
 } from "@features/quadlets/services/quadletsApi";
+import { buildMoveInput } from "@features/quadlets/services/quadletsApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
 import type { Machine } from "@shared/types/api";
@@ -454,52 +455,31 @@ export function MoveQuadletDialog({
 		(volumes.length > 0 && !volumesAcknowledged);
 
 	const confirmTransfer = () => {
-		// The flags are move-mode vocabulary; copy never sends them.
-		const modeFlags = mode === "move" ? { stop: stopFirst, force } : {};
-		// The companion flag only means something when the preview found
-		// companions; without them the request omits it and the backend's
-		// default (true) applies.
-		const companionFlags =
-			companions.length > 0
-				? { transferVolumeQuadlets: transferCompanions }
-				: {};
-		// The migration flags dispatch only while the current preview still
-		// backs them: a target change can take the checkboxes away, and a
-		// stale checked state must not smuggle a heavy migration into a
-		// target the preview no longer offers it for.
-		const migrateChecked = migrate && migratable;
-		const overwriteChecked = overwrite && anyExistsOnTarget;
-		// The secret flag follows the same discipline (issue 222): it is
-		// sent only when the current preview and the caller's source-admin
-		// level still offer the checkbox AND it is checked — otherwise the
-		// field is omitted and the backend's default (false) stands.
-		const secretFlags =
-			transferSecrets && secretTransferOffered ? { transferSecrets: true } : {};
-		if (migrateChecked) {
-			// Checked migration switches the transport: the request carries the
-			// flag — plus the overwrite option, which the backend reads only
-			// alongside it — and the answer streams back as NDJSON. Checked
-			// secrets ride the same request; the block then lands in the
-			// terminal event's envelope.
-			moveStream.run(quadlet.id, {
+		// The builder owns the whole guard set (issue 228): which flags the
+		// current preview and mode still back, and whether a checked
+		// migration switches the transport.
+		const { input, stream } = buildMoveInput(
+			{
 				targetMachineId: targetId,
-				mode,
-				...modeFlags,
-				...companionFlags,
-				...secretFlags,
-				migrateVolumeData: true,
-				...(overwriteChecked ? { overwriteVolumes: true } : {}),
-			});
+				companions: companions.length > 0,
+				migratable,
+				anyExistsOnTarget,
+				secretTransferOffered,
+			},
+			mode,
+			{
+				stop: stopFirst,
+				force,
+				transferCompanions,
+				migrate,
+				overwrite,
+				transferSecrets,
+			},
+		);
+		if (stream) {
+			moveStream.run(quadlet.id, input);
 		} else {
-			// Unchecked keeps the plain request, body vocabulary unchanged.
-			moveQuadlet.mutate({
-				quadletId: quadlet.id,
-				targetMachineId: targetId,
-				mode,
-				...modeFlags,
-				...companionFlags,
-				...secretFlags,
-			});
+			moveQuadlet.mutate({ quadletId: quadlet.id, ...input });
 		}
 	};
 

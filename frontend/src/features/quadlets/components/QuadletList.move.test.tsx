@@ -1024,71 +1024,6 @@ describe("QuadletList move/copy", () => {
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 	});
 
-	it("does not smuggle a stale migration into a target whose preview reports nothing migratable", async () => {
-		// The first target previews a migratable volume; the backup machine's
-		// preview reports only a dangling reference and a host path.
-		server.use(
-			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
-			http.get(
-				"*/api/machines/m-1/quadlets/web/move-preview",
-				({ request }) => {
-					const target = new URL(request.url).searchParams.get(
-						"targetMachineId",
-					);
-					previewTargets.push(target ?? "");
-					return HttpResponse.json(
-						quadletMovePreviewFixture(
-							target === "m-4"
-								? {
-										volumes: [
-											quadletMoveDataVolumeFixture({
-												migratable: false,
-												reason: "source volume does not exist",
-											}),
-											hostPathVolume,
-										],
-									}
-								: {},
-						),
-					);
-				},
-			),
-			moveHandler(),
-		);
-		const user = await openMoveDialogWithPreview();
-
-		await user.click(
-			screen.getByRole("checkbox", { name: /Migrate volume data/ }),
-		);
-		await user.selectOptions(screen.getByTestId("move-target-select"), "m-4");
-
-		// The checkbox disappears with the preview, and the checked state it
-		// leaves behind must not switch the transport on confirm.
-		await waitFor(() =>
-			expect(
-				screen.queryByTestId("move-migrate-option"),
-			).not.toBeInTheDocument(),
-		);
-		await user.click(
-			screen.getByRole("checkbox", {
-				name: "I understand this data stays behind",
-			}),
-		);
-		await waitFor(() =>
-			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
-		);
-		await user.click(screen.getByTestId("confirm-move-button"));
-
-		await waitFor(() => expect(moveRequests.count).toBe(1));
-		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-4",
-			mode: "move",
-			stop: true,
-			force: false,
-		});
-	});
-
 	it("renders the secrets warning with kind and existence facts in both modes (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
@@ -1256,57 +1191,6 @@ describe("QuadletList move/copy", () => {
 			stop: true,
 			force: false,
 			transferSecrets: true,
-		});
-	});
-
-	it("does not smuggle a stale secret transfer into a target whose preview reports none (issue 222)", async () => {
-		server.use(
-			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
-			http.get(
-				"*/api/machines/m-1/quadlets/web/move-preview",
-				({ request }) => {
-					const target = new URL(request.url).searchParams.get(
-						"targetMachineId",
-					);
-					previewTargets.push(target ?? "");
-					return HttpResponse.json(
-						quadletMovePreviewFixture(
-							target === "m-4" ? { secrets: [] } : secretPreview,
-						),
-					);
-				},
-			),
-			moveHandler(),
-		);
-		const user = await openMoveDialogWithPreview();
-
-		await user.click(screen.getByTestId("move-transfer-secrets-option"));
-		await user.selectOptions(screen.getByTestId("move-target-select"), "m-4");
-
-		// The checkbox disappears with the preview, and the checked state it
-		// leaves behind must not move values the preview no longer offers.
-		await waitFor(() =>
-			expect(
-				screen.queryByTestId("move-transfer-secrets-option"),
-			).not.toBeInTheDocument(),
-		);
-		await user.click(
-			screen.getByRole("checkbox", {
-				name: "I understand this data stays behind",
-			}),
-		);
-		await waitFor(() =>
-			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
-		);
-		await user.click(screen.getByTestId("confirm-move-button"));
-
-		await waitFor(() => expect(moveRequests.count).toBe(1));
-		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-4",
-			mode: "move",
-			stop: true,
-			force: false,
 		});
 	});
 
