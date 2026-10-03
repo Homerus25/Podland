@@ -340,6 +340,69 @@ export interface QuadletMoveInput {
 	transferSecrets?: boolean;
 }
 
+// The preview facts the request's flags are guarded by, computed by the
+// caller (MoveQuadletDialog) from one resolved preview: which target the
+// preview names, whether it found companion .volume quadlets, whether any
+// reference is still migratable, whether any target volume already holds
+// content, and whether the caller (admin on the source) is offered the
+// secret transfer at all.
+export interface QuadletMoveFacts {
+	targetMachineId: string;
+	companions: boolean;
+	migratable: boolean;
+	anyExistsOnTarget: boolean;
+	secretTransferOffered: boolean;
+}
+
+// The dialog's six option answers (issue 228), assembled by the caller at
+// confirm from its option state — the same single object a dialog
+// restructure would collapse the six option useStates into. The builder
+// owns which of these reach the wire.
+export interface QuadletMoveChoices {
+	stop: boolean;
+	force: boolean;
+	transferCompanions: boolean;
+	migrate: boolean;
+	overwrite: boolean;
+	transferSecrets: boolean;
+}
+
+// Builds the transfer request from preview facts, mode, and choices, and
+// owns the whole guard set (issue 228): stop/force are move-mode vocabulary
+// (copy never sends them); transferVolumeQuadlets is sent only when the
+// preview found companions; migrateVolumeData only when checked AND the
+// preview still offers migration — stale checked state must not smuggle a
+// heavy migration into a target the preview no longer offers it for, and a
+// checked migration is also the transport switch to the NDJSON stream;
+// overwriteVolumes only alongside that checked migration onto a target that
+// already holds a volume; transferSecrets only when checked AND still
+// offered. Everything else is omitted and the backend's defaults stand.
+export function buildMoveInput(
+	facts: QuadletMoveFacts,
+	mode: QuadletMoveMode,
+	choices: QuadletMoveChoices,
+): { input: QuadletMoveInput; stream: boolean } {
+	const migrateChecked = choices.migrate && facts.migratable;
+	const input: QuadletMoveInput = {
+		targetMachineId: facts.targetMachineId,
+		mode,
+		...(mode === "move" ? { stop: choices.stop, force: choices.force } : {}),
+		...(facts.companions
+			? { transferVolumeQuadlets: choices.transferCompanions }
+			: {}),
+		...(choices.transferSecrets && facts.secretTransferOffered
+			? { transferSecrets: true }
+			: {}),
+	};
+	if (migrateChecked) {
+		input.migrateVolumeData = true;
+		if (choices.overwrite && facts.anyExistsOnTarget) {
+			input.overwriteVolumes = true;
+		}
+	}
+	return { input, stream: migrateChecked };
+}
+
 // Status of a transfer
 // (backend/internal/domain/quadlets/dto.go MoveStatus*): "copied" for a
 // completed copy, "moved" for a completed move, "partial" when a move's
