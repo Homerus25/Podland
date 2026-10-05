@@ -346,14 +346,6 @@ const (
 	MovePreviewVolumeKindHostPath = "hostPath"
 )
 
-// isPodmanVolume reports whether the parsed reference names a podman
-// volume rather than a host bind path — the one test the volume/host split
-// turns on, shared by the preview's resolution and facts and the
-// migration plan's derivation (issue 214).
-func (v QuadletMovePreviewVolume) isPodmanVolume() bool {
-	return v.Kind == MovePreviewVolumeKindVolume
-}
-
 // Target-state labels for QuadletMovePreviewVolume.TargetState (issue 217):
 // how the companion .volume quadlet file already named by quadletFile sits
 // on the TARGET machine — absent, byte-identical, or with different
@@ -416,6 +408,53 @@ type QuadletMovePreviewVolume struct {
 	// Reason explains a non-migratable entry. Present only when
 	// Migratable is false (issue 214).
 	Reason string `json:"reason,omitempty"`
+}
+
+// ToMovePreviewVolumes projects one volume resolution into the preview's
+// wire rows (issue 230, §18): one row per REFERENCE, in file order — two
+// references resolving to one volume stay two rows sharing podmanVolume —
+// carrying the companion fields where discovery resolved a source file (a
+// bare name or a dangling .volume reference stays an ordinary entry,
+// issue 217) and the migration facts where the reference resolves to a
+// podman volume at all (issue 214): host bind paths are labeled not
+// migratable, dangling references carry their reason, existing source
+// volumes are migratable with whatever size the engine reported (nil
+// until an engine reports one). targetStates maps a discovered companion
+// file to its state on the target machine; targetVolumes maps a resolved
+// volume name to the target's inspect (nil inspect = absent). Used once,
+// at MovePreview's response assembly.
+func ToMovePreviewVolumes(resolution volumeResolution, targetStates map[string]string, targetVolumes map[string]*QuadletVolumeInspect) []QuadletMovePreviewVolume {
+	sourceVolumes := make(map[string]resolvedVolume, len(resolution.Volumes))
+	for _, volume := range resolution.Volumes {
+		sourceVolumes[volume.Name] = volume
+	}
+
+	volumes := []QuadletMovePreviewVolume{}
+	for _, ref := range resolution.Refs {
+		entry := QuadletMovePreviewVolume{Source: ref.Source, Kind: ref.Kind}
+		if state, resolved := targetStates[ref.QuadletFile]; resolved {
+			entry.QuadletFile = ref.QuadletFile
+			entry.TargetState = state
+		}
+		if !ref.isPodmanVolume() {
+			entry.Reason = MovePreviewReasonHostPath
+			volumes = append(volumes, entry)
+			continue
+		}
+		entry.PodmanVolume = ref.PodmanVolume
+		if src := sourceVolumes[ref.PodmanVolume]; src.Inspect != nil {
+			entry.SizeBytes = src.Inspect.Size
+			entry.Migratable = true
+		} else {
+			entry.Reason = MovePreviewReasonDangling
+		}
+		if tgt := targetVolumes[ref.PodmanVolume]; tgt != nil {
+			entry.ExistsOnTarget = true
+			entry.TargetSizeBytes = tgt.Size
+		}
+		volumes = append(volumes, entry)
+	}
+	return volumes
 }
 
 // QuadletMovePreviewResponse is the body of the move/copy preview
@@ -593,45 +632,6 @@ type QuadletMoveVolumeOutcome struct {
 // resolved podman volume).
 type QuadletMoveVolumeMigration struct {
 	Volumes []QuadletMoveVolumeOutcome `json:"volumes"`
-}
-
-// parseQuadletVolumes extracts every `Volume=` line from quadlet file
-// content and labels each source: a source with no path separator is a
-// named podman volume, anything else a host bind path. The parse is
-// backend-owned and lives next to the code that writes `Volume=` lines
-// when generating quadlets (issue 207). Key matching is case-insensitive
-// and comment lines are skipped, matching systemd's unit-file parser —
-// the same ritual as explicitContainerNameFromQuadletContent. The
-// result is file-ordered and never nil, so a quadlet without `Volume=`
-// lines renders as an empty JSON array.
-func parseQuadletVolumes(content string) []QuadletMovePreviewVolume {
-	volumes := []QuadletMovePreviewVolume{}
-	for line := range strings.Lines(content) {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-		key, value, found := strings.Cut(line, "=")
-		if !found || !strings.EqualFold(strings.TrimSpace(key), "Volume") {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		// The source is everything before the first ":"; the rest is the
-		// container mount point and options (`Volume=name:/mnt:ro`).
-		source := value
-		if idx := strings.Index(value, ":"); idx >= 0 {
-			source = value[:idx]
-		}
-		kind := MovePreviewVolumeKindVolume
-		if strings.ContainsRune(source, '/') {
-			kind = MovePreviewVolumeKindHostPath
-		}
-		volumes = append(volumes, QuadletMovePreviewVolume{Source: source, Kind: kind})
-	}
-	return volumes
 }
 
 // volumeQuadletCandidate applies the companion discovery rule (issue 217)

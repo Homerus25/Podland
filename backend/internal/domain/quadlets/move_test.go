@@ -1336,6 +1336,67 @@ Volume=/srv/host.volume:/host
 		"a host path ending in .volume is a host bind path, never a quadlet reference")
 }
 
+// TestQuadletService_MovePreview_TwoRefsOneVolumeSharesPodmanVolume pins
+// §18's per-reference rows through the service (issue 230): two references
+// resolving to one podman volume — here a companion whose VolumeName=
+// collides with a bare name — stay two entries sharing podmanVolume, both
+// migratable. The same fixture drives the migration suite's one-outcome
+// pin. The print count pins the issue-230 fetch discipline: the main
+// quadlet and each companion are Printed exactly once per source lease —
+// the companion's single print feeds both the companion set and the
+// resolution's VolumeName= extraction.
+func TestQuadletService_MovePreview_TwoRefsOneVolumeSharesPodmanVolume(t *testing.T) {
+	content := `[Container]
+Image=busybox
+Volume=app-data.volume:/var/lib/app
+Volume=custom-name:/var/lib/other
+`
+	prints := 0
+	source := &fakeQuadletEngine{
+		printFn: func(name string) (string, error) {
+			prints++
+			switch name {
+			case "web.container":
+				return content, nil
+			case "app-data.volume":
+				return "[Volume]\nVolumeName=custom-name\n", nil
+			}
+			panic("unexpected QuadletEngine.Print call: " + name)
+		},
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{
+				{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: "stopped"},
+				{Name: "app-data.volume", Path: "/x/app-data.volume", Status: "stopped"},
+			}, nil
+		},
+		volumeInspectFn: func(name string) (*QuadletVolumeInspect, error) {
+			if name == "custom-name" {
+				return &QuadletVolumeInspect{Name: "custom-name"}, nil
+			}
+			return nil, nil
+		},
+	}
+	target := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return nil, nil
+		},
+	}
+	service := newMovePreviewTestService(source, target, &fakeAccessRepo{getPermissionFn: allowTargetRead})
+
+	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+
+	require.NoError(t, err)
+	require.Len(t, got.Volumes, 2, "per-reference rows: two references stay two entries")
+	assert.Equal(t, "app-data.volume", got.Volumes[0].Source)
+	assert.Equal(t, "custom-name", got.Volumes[0].PodmanVolume)
+	assert.Equal(t, "custom-name", got.Volumes[1].PodmanVolume,
+		"two references resolving to one volume share podmanVolume")
+	assert.True(t, got.Volumes[0].Migratable)
+	assert.True(t, got.Volumes[1].Migratable)
+	assert.Equal(t, 2, prints,
+		"the main quadlet and the companion print once each per source lease (issue 230)")
+}
+
 // TestQuadletService_Move_CopyInstallsCompanionsBeforeMain pins the
 // dependency-first order: the companion .volume quadlet installs before the
 // main quadlet, both verbatim from the source, and the answer stays the

@@ -9,16 +9,156 @@ import (
 	"strings"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // Volume data migration for the move/copy transfer (issue 214,
 // architecture-decisions §18). The phases live in move.go's MoveWithProgress;
-// this file owns the pieces the phases are built from: reference resolution,
-// the migration plan, the target-emptiness and size preflight, and the
-// machine-to-machine data phase itself (podman export on the source spliced
-// into podman import on the target through an in-process pipe).
+// this file owns the pieces the phases are built from: the `Volume=` parse
+// and the one volume resolution derivation both the preview and the plan
+// read (issue 230), the migration plan projected from that derivation, the
+// target-emptiness and size preflight, and the machine-to-machine data
+// phase itself (podman export on the source spliced into podman import on
+// the target through an in-process pipe).
+
+// volumeRef is one parsed `Volume=` reference (issue 230): the source as
+// written (the part of the `Volume=` value before the first ":") and its
+// kind. parseQuadletVolumes fills Source and Kind; deriveVolumeResolution
+// enriches each volume-kind ref with the podman volume it resolves to and
+// the companion file it consulted. Refs stay in file order without dedup —
+// two references resolving to one volume stay two refs, the preview's
+// per-reference rows (§18).
+type volumeRef struct {
+	Source string
+	Kind   string
+	// PodmanVolume is the podman volume the reference resolves to on the
+	// source machine; "" until the derivation fills it, and always "" for
+	// host bind paths.
+	PodmanVolume string
+	// QuadletFile is the companion .volume quadlet file the source names
+	// ("" for bare names and host paths) — the candidate, present for
+	// dangling references too.
+	QuadletFile string
+}
+
+// isPodmanVolume reports whether the parsed reference names a podman
+// volume rather than a host bind path — the one test the volume/host split
+// turns on, shared by the resolution derivation and its projections
+// (issue 214).
+func (r volumeRef) isPodmanVolume() bool {
+	return r.Kind == MovePreviewVolumeKindVolume
+}
+
+// parseQuadletVolumes extracts every `Volume=` line from quadlet file
+// content and labels each source: a source with no path separator is a
+// named podman volume, anything else a host bind path. The parse is
+// backend-owned (issue 207) and runs once per source lease — the companion
+// set and the volume resolution both read its refs (issue 230). Key
+// matching is case-insensitive and comment lines are skipped, matching
+// systemd's unit-file parser — the same ritual as
+// explicitContainerNameFromQuadletContent. The result is file-ordered and
+// never nil, so a quadlet without `Volume=` lines renders as an empty
+// JSON array.
+func parseQuadletVolumes(content string) []volumeRef {
+	refs := []volumeRef{}
+	for line := range strings.Lines(content) {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found || !strings.EqualFold(strings.TrimSpace(key), "Volume") {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		// The source is everything before the first ":"; the rest is the
+		// container mount point and options (`Volume=name:/mnt:ro`).
+		source := value
+		if idx := strings.Index(value, ":"); idx >= 0 {
+			source = value[:idx]
+		}
+		kind := MovePreviewVolumeKindVolume
+		if strings.ContainsRune(source, '/') {
+			kind = MovePreviewVolumeKindHostPath
+		}
+		refs = append(refs, volumeRef{Source: source, Kind: kind})
+	}
+	return refs
+}
+
+// resolvedVolume is one resolved podman volume's facts (issue 230, §18):
+// the name both machines address it by, the FIRST reference (file order)
+// that resolved to it, and the source machine's inspect — nil means the
+// volume does not exist there (a dangling reference).
+type resolvedVolume struct {
+	Name        string
+	Ref         string
+	QuadletFile string
+	Inspect     *QuadletVolumeInspect
+}
+
+// volumeResolution is the one derivation of the volume facts both the
+// move preview and the volume data migration plan read (issue 230, §18):
+// per-reference facts in file order without dedup, plus per-resolved-volume
+// facts deduplicated by name (first reference wins).
+type volumeResolution struct {
+	Refs    []volumeRef
+	Volumes []resolvedVolume
+}
+
+// deriveVolumeResolution is the single entry point both projections — the
+// preview's per-reference entries and the plan's per-volume entries —
+// derive from (issue 230, §18). It enriches each volume-kind ref with the
+// podman volume it resolves to (consuming the companion contents the
+// caller fetched once, never re-Printing) and inspects each resolved
+// volume on the source machine once, deduplicated by resolved name with
+// the first reference winning the volume fact. Host bind paths stay
+// unresolved and out of the volume facts. The dedup key is the resolved
+// name for the volume level and nothing at the ref level — the preview
+// keeps per-reference rows while the plan dedups — which is exactly the
+// divergence (preview deduped by reference string, plan by resolved name)
+// that required one derivation. Neither slice is ever nil.
+func deriveVolumeResolution(refs []volumeRef, list []*entities.ListQuadlet, companions []companionVolumeQuadlet, e QuadletEngine) (volumeResolution, error) {
+	companionContents := make(map[string]string, len(companions))
+	for _, companion := range companions {
+		companionContents[companion.File] = companion.Content
+	}
+
+	resolution := volumeResolution{
+		Refs:    make([]volumeRef, len(refs)),
+		Volumes: []resolvedVolume{},
+	}
+	copy(resolution.Refs, refs)
+
+	seen := map[string]bool{}
+	for i := range resolution.Refs {
+		ref := &resolution.Refs[i]
+		if !ref.isPodmanVolume() {
+			continue
+		}
+		name, quadletFile := resolvePodmanVolumeName(ref.Source, list, companionContents)
+		ref.PodmanVolume = name
+		ref.QuadletFile = quadletFile
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		inspected, err := e.VolumeInspect(name)
+		if err != nil {
+			return volumeResolution{}, fmt.Errorf("failed to inspect source volume %s: %w", name, err)
+		}
+		resolution.Volumes = append(resolution.Volumes, resolvedVolume{
+			Name:        name,
+			Ref:         ref.Source,
+			QuadletFile: quadletFile,
+			Inspect:     inspected,
+		})
+	}
+	return resolution, nil
+}
 
 // errProbeNotEmpty terminates the emptiness probe's export once a content
 // entry shows up: closing the pipe with it unblocks the export goroutine
@@ -57,63 +197,50 @@ type volumeMigrationPlanEntry struct {
 
 // resolvePodmanVolumeName maps one volume-kind reference to the podman
 // volume it names (issue 214, §18): a bare name is itself; a .volume
-// reference resolves through its companion file's VolumeName= when the
-// companion exists on this machine, else podman's systemd-<name> default.
-// A dangling companion still resolves the default name — the preview labels
-// the reference and the data phase skips it honestly instead of guessing.
-func resolvePodmanVolumeName(source string, list []*entities.ListQuadlet, e QuadletEngine) (name, quadletFile string, err error) {
+// reference resolves through its companion file's VolumeName= (first
+// non-empty wins) when the companion exists on this machine, else podman's
+// systemd-<name> default. A dangling companion still resolves the default
+// name — the preview labels the reference and the data phase skips it
+// honestly instead of guessing. The companion's content comes from the
+// caller's one fetch per source lease (issue 230): companionContents maps
+// file name to printed content, and a listed file missing from it
+// (unprintable mid-lease) keeps the default — the same dangling treatment
+// companionVolumeQuadlets applies.
+func resolvePodmanVolumeName(source string, list []*entities.ListQuadlet, companionContents map[string]string) (name, quadletFile string) {
 	quadletFile = volumeQuadletCandidate(source)
 	if quadletFile == "" {
-		return source, "", nil
+		return source, ""
 	}
 
 	name = "systemd-" + strings.TrimSuffix(quadletFile, ".volume")
 	if findQuadletByName(list, quadletFile) == nil {
-		return name, quadletFile, nil
+		return name, quadletFile
 	}
-	printed, err := e.Print(quadletFile)
-	if err != nil {
-		// Listed but unprintable — vanished mid-lease; the default stands
-		// (the same dangling treatment companionVolumeQuadlets applies).
-		if podmanerr.IsNotFound(err) {
-			return name, quadletFile, nil
+	if content, ok := companionContents[quadletFile]; ok {
+		if override := volumeNameFromQuadlet(content); override != "" {
+			name = override
 		}
-		return "", quadletFile, fmt.Errorf("failed to get volume quadlet %s: %w", quadletFile, err)
 	}
-	if override := volumeNameFromQuadlet(printed); override != "" {
-		name = override
-	}
-	return name, quadletFile, nil
+	return name, quadletFile
 }
 
-// deriveVolumeMigrationPlan resolves every volume-kind reference in the
-// quadlet content to its podman volume (issue 214, §18). Host bind paths
-// never enter the plan — there is no podman export path for them. The plan
-// is file-ordered and deduplicated by resolved podman volume name (first
-// reference wins for the block entry), so two references to one volume
-// migrate its data once and report one outcome. It never returns nil.
-func deriveVolumeMigrationPlan(content string, list []*entities.ListQuadlet, e QuadletEngine) ([]volumeMigrationPlanEntry, error) {
+// deriveVolumeMigrationPlan projects the volume resolution into the data
+// phase's plan (issue 214, §18): one entry per RESOLVED volume — the
+// derivation already deduplicated by name, the first reference winning —
+// so two references to one volume migrate its data once and report one
+// outcome. Host bind paths never entered the resolution. It never returns
+// nil.
+func deriveVolumeMigrationPlan(resolution volumeResolution) []volumeMigrationPlanEntry {
 	plan := []volumeMigrationPlanEntry{}
-	seen := map[string]bool{}
-	for _, volume := range parseQuadletVolumes(content) {
-		if !volume.isPodmanVolume() {
-			continue
-		}
-		name, quadletFile, err := resolvePodmanVolumeName(volume.Source, list, e)
-		if err != nil {
-			return nil, err
-		}
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
+	for _, volume := range resolution.Volumes {
 		plan = append(plan, volumeMigrationPlanEntry{
-			Ref:          volume.Source,
-			PodmanVolume: name,
-			QuadletFile:  quadletFile,
+			Ref:          volume.Ref,
+			PodmanVolume: volume.Name,
+			QuadletFile:  volume.QuadletFile,
+			SourceExists: volume.Inspect != nil,
 		})
 	}
-	return plan, nil
+	return plan
 }
 
 // preflightVolumeMigration refuses the data phase before anything is

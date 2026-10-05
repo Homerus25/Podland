@@ -45,17 +45,17 @@ func (s *QuadletService) MovePreview(ctx context.Context, userID, machineID, qua
 
 	// Source lease: content (for the volume parse) plus the list entry
 	// (for resource and live state). A missing quadlet is a 404. The
-	// companion set is derived here too — content and source list in hand,
-	// one lease — so the preview and the transfer re-derive from the same
-	// source of truth (issue 217).
+	// content parses once per lease (issue 230): the companion set and the
+	// volume resolution both read the same refs, and each companion file
+	// is Printed once — its verbatim content feeds both the companion
+	// install set and the resolution's VolumeName= extraction. The
+	// resolution itself is the one derivation the transfer's plan also
+	// reads (issue 230, §18), so the preview cannot promise what the
+	// transfer would do differently (issue 214).
 	var content string
 	var source *entities.ListQuadlet
 	var companions []companionVolumeQuadlet
-	// Volume-data facts (issue 214): each volume-kind reference's resolved
-	// podman volume, and the source machine's inspect of each. Flag
-	// independent — the preview always shows migration facts.
-	resolvedRefs := map[string]string{}
-	sourceVolumes := map[string]*QuadletVolumeInspect{}
+	var resolution volumeResolution
 	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.MovePreview", func(e QuadletEngine) error {
 		c, list, listed, err := fetchQuadletWithList(e, quadletID)
 		if err != nil {
@@ -63,33 +63,12 @@ func (s *QuadletService) MovePreview(ctx context.Context, userID, machineID, qua
 		}
 		source = listed
 
-		if companions, err = companionVolumeQuadlets(c, list, e); err != nil {
+		refs := parseQuadletVolumes(c)
+		if companions, err = companionVolumeQuadlets(refs, list, e); err != nil {
 			return err
 		}
-
-		// The same resolution ritual the transfer's plan derivation uses,
-		// so the preview cannot promise what the transfer would do
-		// differently (issue 214).
-		for _, volume := range parseQuadletVolumes(c) {
-			if !volume.isPodmanVolume() {
-				continue
-			}
-			if _, done := resolvedRefs[volume.Source]; done {
-				continue
-			}
-			name, _, err := resolvePodmanVolumeName(volume.Source, list, e)
-			if err != nil {
-				return err
-			}
-			resolvedRefs[volume.Source] = name
-			if _, seen := sourceVolumes[name]; seen {
-				continue
-			}
-			inspected, err := e.VolumeInspect(name)
-			if err != nil {
-				return fmt.Errorf("failed to inspect source volume %s: %w", name, err)
-			}
-			sourceVolumes[name] = inspected
+		if resolution, err = deriveVolumeResolution(refs, list, companions, e); err != nil {
+			return err
 		}
 
 		content = c
@@ -135,15 +114,12 @@ func (s *QuadletService) MovePreview(ctx context.Context, userID, machineID, qua
 			}
 		}
 
-		for _, name := range resolvedRefs {
-			if _, seen := targetVolumes[name]; seen {
-				continue
-			}
-			inspected, err := e.VolumeInspect(name)
+		for _, volume := range resolution.Volumes {
+			inspected, err := e.VolumeInspect(volume.Name)
 			if err != nil {
-				return fmt.Errorf("failed to inspect target volume %s: %w", name, err)
+				return fmt.Errorf("failed to inspect target volume %s: %w", volume.Name, err)
 			}
-			targetVolumes[name] = inspected
+			targetVolumes[volume.Name] = inspected
 		}
 		return nil
 	})
@@ -151,38 +127,13 @@ func (s *QuadletService) MovePreview(ctx context.Context, userID, machineID, qua
 		return nil, err
 	}
 
-	// The parsed volumes carry the companion fields only where discovery
-	// resolved a source file — a bare name or a dangling .volume reference
-	// stays an ordinary entry (issue 217) — and the migration facts where
-	// the reference resolves to a podman volume at all (issue 214): host
-	// bind paths are labeled not migratable, dangling references carry
-	// their reason, existing source volumes are migratable with whatever
-	// size the engine reported (nil until an engine reports one).
-	volumes := parseQuadletVolumes(content)
-	for i := range volumes {
-		if file := volumeQuadletCandidate(volumes[i].Source); file != "" {
-			if state, resolved := targetStates[file]; resolved {
-				volumes[i].QuadletFile = file
-				volumes[i].TargetState = state
-			}
-		}
-		if !volumes[i].isPodmanVolume() {
-			volumes[i].Reason = MovePreviewReasonHostPath
-			continue
-		}
-		name := resolvedRefs[volumes[i].Source]
-		volumes[i].PodmanVolume = name
-		if srcInspect := sourceVolumes[name]; srcInspect != nil {
-			volumes[i].SizeBytes = srcInspect.Size
-			volumes[i].Migratable = true
-		} else {
-			volumes[i].Reason = MovePreviewReasonDangling
-		}
-		if tgtInspect := targetVolumes[name]; tgtInspect != nil {
-			volumes[i].ExistsOnTarget = true
-			volumes[i].TargetSizeBytes = tgtInspect.Size
-		}
-	}
+	// The one projection into the preview's wire rows (issue 230, §18):
+	// per-reference entries in file order — two references resolving to
+	// one volume stay two entries sharing podmanVolume — with the
+	// companion fields where discovery resolved a source file and the
+	// migration facts where the reference resolves to a podman volume at
+	// all (issues 217 and 214).
+	volumes := ToMovePreviewVolumes(resolution, targetStates, targetVolumes)
 
 	// Secret references (issue 215): every `Secret=` line, always
 	// computed, flag-independent — the volume facts' discipline. Existence
@@ -420,37 +371,42 @@ func (s *QuadletService) MoveWithProgress(ctx context.Context, userID, machineID
 			}
 		}
 
-		if req.WantsVolumeQuadletTransfer() {
-			if companions, err = companionVolumeQuadlets(c, list, e); err != nil {
+		// One parse per lease (issue 230): the companion set and the
+		// volume resolution both read these refs, and each companion file
+		// is Printed once — its verbatim content feeds both the install
+		// set and the resolution's VolumeName= extraction.
+		refs := parseQuadletVolumes(c)
+
+		// The companion contents are fetched once per lease (issue 230)
+		// whenever either consumer needs them: the install set below, or
+		// the volume resolution when the request migrates data.
+		if req.WantsVolumeQuadletTransfer() || req.MigrateVolumeData {
+			if companions, err = companionVolumeQuadlets(refs, list, e); err != nil {
 				return err
 			}
 		}
 
-		// Volume data migration planning (issue 214, §18): resolve every
-		// volume-kind reference against the source while the lease is open,
-		// and run the size bound's pre-check when an engine reports an
-		// inspect size — production never does (podman's service API has no
-		// volume usage), so the counting reader during the data phase stays
-		// the always-on enforcement.
+		// Volume data migration planning (issue 214, §18): the same
+		// derivation the preview reads (issue 230) resolves every
+		// volume-kind reference against the source and inspects each
+		// resolved volume once while the lease is open. The size bound's
+		// pre-check fires when an engine reports an inspect size —
+		// production never does (podman's service API has no volume
+		// usage), so the counting reader during the data phase stays the
+		// always-on enforcement.
 		if req.MigrateVolumeData {
-			if plan, err = deriveVolumeMigrationPlan(c, list, e); err != nil {
+			resolution, err := deriveVolumeResolution(refs, list, companions, e)
+			if err != nil {
 				return err
 			}
-			for i, entry := range plan {
-				inspected, err := e.VolumeInspect(entry.PodmanVolume)
-				if err != nil {
-					return volumeMigrationFailed(entry.PodmanVolume, err)
-				}
-				// The preflight's target probe runs only for references
-				// that will actually carry data; a source-dangling one is
-				// skipped and reported, never refused.
-				plan[i].SourceExists = inspected != nil
-				if inspected != nil && inspected.Size != nil && *inspected.Size > s.volumeDataLimit() {
+			for _, volume := range resolution.Volumes {
+				if volume.Inspect != nil && volume.Inspect.Size != nil && *volume.Inspect.Size > s.volumeDataLimit() {
 					return appErrors.ErrVolumeUploadTooLarge.WithMessage(fmt.Sprintf(
 						"Volume %s is %d bytes, above the %d byte migration bound",
-						entry.PodmanVolume, *inspected.Size, s.volumeDataLimit()))
+						volume.Name, *volume.Inspect.Size, s.volumeDataLimit()))
 				}
 			}
+			plan = deriveVolumeMigrationPlan(resolution)
 		}
 
 		content = c
@@ -726,20 +682,22 @@ type companionVolumeQuadlet struct {
 }
 
 // companionVolumeQuadlets derives the companion set from the quadlet's
-// content against the source machine's own list (issue 217): every parsed
-// volume source that names a candidate (suffix .volume, no path separator)
-// AND has a same-named quadlet file on the source machine — exact filename
-// match — yields that file with its printed content. A candidate with no
-// matching source file is dangling and yields nothing (the reference stays
-// an ordinary volume entry); bare names and host paths never match at all.
-// The set is file-ordered by first reference and deduplicated, so one
-// companion file referenced twice prints once. Both the preview and the
-// transfer call this — the transfer re-derives at execution time, never
-// trusting what a preview saw.
-func companionVolumeQuadlets(content string, list []*entities.ListQuadlet, e QuadletEngine) ([]companionVolumeQuadlet, error) {
+// parsed volume refs against the source machine's own list (issue 217):
+// every parsed volume source that names a candidate (suffix .volume, no
+// path separator) AND has a same-named quadlet file on the source machine
+// — exact filename match — yields that file with its printed content. A
+// candidate with no matching source file is dangling and yields nothing
+// (the reference stays an ordinary volume entry); bare names and host
+// paths never match at all. The set is file-ordered by first reference and
+// deduplicated, so one companion file referenced twice prints once — the
+// issue-230 guarantee that each companion is Printed exactly once per
+// source lease, its content feeding both the install set and the volume
+// resolution. Both the preview and the transfer call this — the transfer
+// re-derives at execution time, never trusting what a preview saw.
+func companionVolumeQuadlets(refs []volumeRef, list []*entities.ListQuadlet, e QuadletEngine) ([]companionVolumeQuadlet, error) {
 	companions := []companionVolumeQuadlet{}
 	seen := map[string]bool{}
-	for _, volume := range parseQuadletVolumes(content) {
+	for _, volume := range refs {
 		file := volumeQuadletCandidate(volume.Source)
 		if file == "" || seen[file] {
 			continue
