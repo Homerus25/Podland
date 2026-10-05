@@ -708,6 +708,66 @@ func TestQuadletService_MoveVolumeData_EmptyVolumeStillMigrates(t *testing.T) {
 	assert.Equal(t, MoveVolumeOutcomeMigrated, got.VolumeMigration.Volumes[0].Outcome)
 }
 
+// TestQuadletService_MoveVolumeData_TwoRefsOneVolumeMigratesOnce pins the
+// plan-side projection of the same two-refs-one-volume fixture the preview
+// test uses (issue 230, §18): two references resolving to one podman
+// volume carry its data once and report one outcome, the first reference
+// winning the entry. The print count pins the issue-230 fetch discipline:
+// the main quadlet and the companion print once each per source lease —
+// the companion's single print feeds both the companion install set and
+// the resolution's VolumeName= extraction.
+func TestQuadletService_MoveVolumeData_TwoRefsOneVolumeMigratesOnce(t *testing.T) {
+	content := "[Container]\nImage=busybox\nVolume=app-data.volume:/a\nVolume=custom-name:/b\n"
+	prints := 0
+	source := volumeSourceFixture(content, map[string]*QuadletVolumeInspect{
+		"custom-name": {Name: "custom-name"},
+	})
+	source.printFn = func(name string) (string, error) {
+		prints++
+		switch name {
+		case "web.container":
+			return content, nil
+		case "app-data.volume":
+			return "[Volume]\nVolumeName=custom-name\n", nil
+		}
+		panic("unexpected QuadletEngine.Print call: " + name)
+	}
+	source.listFn = func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+		return []*entities.ListQuadlet{
+			{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: "stopped"},
+			{Name: "app-data.volume", Path: "/x/app-data.volume", Status: "stopped"},
+		}, nil
+	}
+	source.volumeExportFn = func(_ string, w io.Writer) error {
+		_, err := w.Write(buildVolumeTar(t, map[string][]byte{"custom-name/data": []byte("x")}))
+		return err
+	}
+	target := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) { return nil, nil },
+		installFn: func(string, []byte, bool) (*entities.QuadletInstallReport, error) {
+			return &entities.QuadletInstallReport{}, nil
+		},
+		volumeInspectFn: func(string) (*QuadletVolumeInspect, error) { return nil, nil },
+		volumeCreateFn:  func(string) error { return nil },
+		volumeImportFn:  func(_ string, r io.Reader) error { _, err := io.Copy(io.Discard, r); return err },
+	}
+
+	service := newMoveVolumeTestService(source, target, 0)
+	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+
+	require.NoError(t, err)
+	require.NotNil(t, got.VolumeMigration)
+	require.Len(t, got.VolumeMigration.Volumes, 1,
+		"two references resolving to one volume migrate its data once and report one outcome")
+	assert.Equal(t, QuadletMoveVolumeOutcome{
+		Ref:          "app-data.volume",
+		PodmanVolume: "custom-name",
+		Outcome:      MoveVolumeOutcomeMigrated,
+	}, got.VolumeMigration.Volumes[0])
+	assert.Equal(t, 2, prints,
+		"the main quadlet and the companion print once each per source lease (issue 230)")
+}
+
 // TestQuadletService_MovePreview_VolumeMigrationFacts pins the preview's
 // flag-independent enrichment: an existing source volume is migratable
 // with its inspect facts, the target's facts ride along (existence, size),
@@ -753,6 +813,114 @@ func TestQuadletService_MovePreview_VolumeMigrationFacts(t *testing.T) {
 	assert.Equal(t, MovePreviewReasonHostPath, host.Reason)
 	assert.Empty(t, host.PodmanVolume)
 	assert.False(t, host.ExistsOnTarget)
+}
+
+// --- The one derivation (issue 230, §18) ---
+
+// TestDeriveVolumeResolution pins the one derivation both the preview's
+// per-reference rows and the plan's per-volume entries read (issue 230,
+// §18): refs stay in file order without dedup — two references resolving
+// to one volume stay two refs — while the volume facts dedup by resolved
+// name, first reference winning. Resolution consumes the companion
+// contents the caller fetched once (no engine Print), so the table feeds
+// companions directly.
+func TestDeriveVolumeResolution(t *testing.T) {
+	tests := []struct {
+		name        string
+		content     string
+		list        []*entities.ListQuadlet
+		companions  []companionVolumeQuadlet
+		inspects    map[string]*QuadletVolumeInspect
+		wantRefs    []volumeRef
+		wantVolumes []resolvedVolume
+	}{
+		{
+			name: "two refs resolving to one volume stay two refs and one volume fact",
+			content: "[Container]\n" +
+				"Volume=app-data.volume:/a\n" +
+				"Volume=custom-name:/b\n",
+			list: []*entities.ListQuadlet{
+				{Name: "app-data.volume", Path: "/x/app-data.volume", Status: "stopped"},
+			},
+			companions: []companionVolumeQuadlet{
+				{File: "app-data.volume", Content: "[Volume]\nVolumeName=custom-name\n"},
+			},
+			inspects: map[string]*QuadletVolumeInspect{
+				"custom-name": {Name: "custom-name"},
+			},
+			wantRefs: []volumeRef{
+				{Source: "app-data.volume", Kind: MovePreviewVolumeKindVolume, PodmanVolume: "custom-name", QuadletFile: "app-data.volume"},
+				{Source: "custom-name", Kind: MovePreviewVolumeKindVolume, PodmanVolume: "custom-name"},
+			},
+			wantVolumes: []resolvedVolume{
+				{Name: "custom-name", Ref: "app-data.volume", QuadletFile: "app-data.volume", Inspect: &QuadletVolumeInspect{Name: "custom-name"}},
+			},
+		},
+		{
+			name: "the same reference twice keeps both refs and one first-ref-wins volume fact",
+			content: "[Container]\n" +
+				"Volume=pgdata:/a\n" +
+				"Volume=pgdata:/b\n",
+			inspects: map[string]*QuadletVolumeInspect{
+				"pgdata": {Name: "pgdata"},
+			},
+			wantRefs: []volumeRef{
+				{Source: "pgdata", Kind: MovePreviewVolumeKindVolume, PodmanVolume: "pgdata"},
+				{Source: "pgdata", Kind: MovePreviewVolumeKindVolume, PodmanVolume: "pgdata"},
+			},
+			wantVolumes: []resolvedVolume{
+				{Name: "pgdata", Ref: "pgdata", Inspect: &QuadletVolumeInspect{Name: "pgdata"}},
+			},
+		},
+		{
+			name:    "host bind paths stay unresolved and out of the volume facts",
+			content: "[Container]\nVolume=/srv/data:/data\n",
+			wantRefs: []volumeRef{
+				{Source: "/srv/data", Kind: MovePreviewVolumeKindHostPath},
+			},
+			wantVolumes: []resolvedVolume{},
+		},
+		{
+			name:    "a dangling companion resolves the default name with no volume fact",
+			content: "[Container]\nVolume=missing.volume:/gone\n",
+			wantRefs: []volumeRef{
+				{Source: "missing.volume", Kind: MovePreviewVolumeKindVolume, PodmanVolume: "systemd-missing", QuadletFile: "missing.volume"},
+			},
+			wantVolumes: []resolvedVolume{
+				{Name: "systemd-missing", Ref: "missing.volume", QuadletFile: "missing.volume"},
+			},
+		},
+		{
+			name:    "a companion without VolumeName= resolves podman's systemd default",
+			content: "[Container]\nVolume=app-data.volume:/a\n",
+			list: []*entities.ListQuadlet{
+				{Name: "app-data.volume", Path: "/x/app-data.volume", Status: "stopped"},
+			},
+			companions: []companionVolumeQuadlet{
+				{File: "app-data.volume", Content: "[Volume]\nDriver=local\n"},
+			},
+			wantRefs: []volumeRef{
+				{Source: "app-data.volume", Kind: MovePreviewVolumeKindVolume, PodmanVolume: "systemd-app-data", QuadletFile: "app-data.volume"},
+			},
+			wantVolumes: []resolvedVolume{
+				{Name: "systemd-app-data", Ref: "app-data.volume", QuadletFile: "app-data.volume"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := &fakeQuadletEngine{volumeInspectFn: func(name string) (*QuadletVolumeInspect, error) {
+				return tt.inspects[name], nil
+			}}
+
+			got, err := deriveVolumeResolution(parseQuadletVolumes(tt.content), tt.list, tt.companions, e)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantRefs, got.Refs, "per-reference facts, file order, no dedup")
+			assert.Equal(t, tt.wantVolumes, got.Volumes, "per-volume facts, deduped by resolved name, first ref wins")
+		})
+	}
 }
 
 // TestQuadletService_MoveVolumeData_ProbeEmptyTargetProceeds pins the

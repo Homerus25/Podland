@@ -188,6 +188,11 @@ target:
   on the source** — a secret's value leaving a machine is a reveal, so
   the secrets API's reveal gate owns it — with same-name skips before the
   reveal and copy-only semantics (a move never removes source secrets).
+  Both projections — the preview's per-reference entries and the plan's
+  per-volume entries — derive from one entry point
+  (`deriveVolumeResolution`); the dedup-key divergence that preceded this
+  ruling (preview deduped by reference string, plan by resolved name) is
+  the incident that requires it.
 
 ## Technical Stack
 
