@@ -1,10 +1,10 @@
 package quadlets
 
 import (
-	"path"
 	"strings"
 	"time"
 
+	"github.com/Homerus25/podland/backend/internal/transfer"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -634,22 +634,6 @@ type QuadletMoveVolumeMigration struct {
 	Volumes []QuadletMoveVolumeOutcome `json:"volumes"`
 }
 
-// volumeQuadletCandidate applies the companion discovery rule (issue 217)
-// to one parsed volume source: a source ending in ".volume" with no path
-// separator references the same-named quadlet FILE on the same machine —
-// podman resolves exactly the suffix form (the quadlet-generated volume is
-// systemd-<name> unless VolumeName= overrides), so bare names never match
-// and host paths are hostPath references, not quadlet references. The
-// return is the candidate file name; "" means the source references no
-// quadlet. A candidate with no matching source file is dangling — the
-// caller leaves such an entry ordinary.
-func volumeQuadletCandidate(source string) string {
-	if source == "" || strings.ContainsRune(source, '/') || !strings.HasSuffix(source, ".volume") {
-		return ""
-	}
-	return source
-}
-
 // Stream-event type labels for the move/copy transfer's NDJSON transport
 // (issue 214): per-volume progress events, then exactly one terminal
 // event — the transfer envelope on success, the mapped error otherwise.
@@ -805,87 +789,25 @@ type QuadletMoveSecretTransfer struct {
 	Secrets []QuadletMoveSecretOutcome `json:"secrets"`
 }
 
-// parseQuadletSecrets extracts every `Secret=` line from quadlet file
-// content and resolves each reference's name and kind (issue 215). The
-// name is the token before the first comma; when that token contains `=`
-// (the all-options form), `source=` governs. An absolute-path source is
-// a hostPath reference — podman reads it off the host filesystem at run
-// time, so it never enters a secret store; everything else is a podman
-// secret. The parse is backend-owned and type-generic — podman honors the
-// key in .container and .build files alike, and other resource types
-// simply carry no `Secret=` lines. Key matching is case-insensitive and
-// comment lines are skipped, matching systemd's unit-file parser — the
-// same ritual as parseQuadletVolumes. A `Secret=` line that resolves to
-// no name (an empty value, or an all-options token without `source=`)
-// yields no entry. The result is file-ordered and never nil, so a quadlet
-// without `Secret=` lines renders as an empty JSON array.
+// parseQuadletSecrets maps the shared transfer kit's quadlet reference
+// parse (§19, issue 242) onto the preview's wire rows: the kit owns the
+// `Secret=` line ritual — the same parse the secrets move preview reads —
+// and this maps its kind labels onto the preview's vocabulary. The scan
+// is type-generic — podman honors the key in .container and .build files
+// alike, and other resource types simply carry no `Secret=` lines. A
+// `Secret=` line that resolves to no name (an empty value, or an
+// all-options token without `source=`) yields no entry. The result is
+// file-ordered and never nil, so a quadlet without `Secret=` lines
+// renders as an empty JSON array.
 func parseQuadletSecrets(content string) []QuadletMovePreviewSecret {
-	secrets := []QuadletMovePreviewSecret{}
-	for line := range strings.Lines(content) {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
+	parsed := transfer.ParseQuadletSecrets(content)
+	secrets := make([]QuadletMovePreviewSecret, 0, len(parsed))
+	for _, p := range parsed {
+		kind := MovePreviewSecretKindSecret
+		if p.Kind == transfer.QuadletRefKindHostPath {
+			kind = MovePreviewSecretKindHostPath
 		}
-		key, value, found := strings.Cut(line, "=")
-		if !found || !strings.EqualFold(strings.TrimSpace(key), "Secret") {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		name, kind := resolveSecretReference(value)
-		if name == "" {
-			continue
-		}
-		secrets = append(secrets, QuadletMovePreviewSecret{Name: name, Kind: kind})
+		secrets = append(secrets, QuadletMovePreviewSecret{Name: p.Name, Kind: kind})
 	}
 	return secrets
-}
-
-// resolveSecretReference applies the issue-215 naming rule to one
-// `Secret=` value: the token before the first comma is the name, unless
-// it carries `=` — the all-options form, where the `source=` option
-// governs (a token without `source=` names nothing and yields no entry).
-// A resolved name starting with `/` is an absolute-path hostPath
-// reference; anything else is a podman secret.
-func resolveSecretReference(value string) (name, kind string) {
-	token := value
-	if idx := strings.Index(value, ","); idx >= 0 {
-		token = value[:idx]
-	}
-	if optKey, optValue, found := strings.Cut(token, "="); found {
-		if !strings.EqualFold(strings.TrimSpace(optKey), "source") {
-			return "", ""
-		}
-		token = strings.TrimSpace(optValue)
-	}
-	if token == "" {
-		return "", ""
-	}
-	kind = MovePreviewSecretKindSecret
-	if path.IsAbs(token) {
-		kind = MovePreviewSecretKindHostPath
-	}
-	return token, kind
-}
-
-// volumeNameFromQuadlet extracts the VolumeName= value from a .volume
-// quadlet file's content — the authoritative podman volume name for the
-// volume it generates (issue 214). Key matching is case-insensitive and
-// comment lines are skipped, the same systemd unit-file parser ritual as
-// parseQuadletVolumes. The first non-empty value wins; "" means the file
-// sets no name and podman's systemd-<name> default applies.
-func volumeNameFromQuadlet(content string) string {
-	for line := range strings.Lines(content) {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-		key, value, found := strings.Cut(line, "=")
-		if !found || !strings.EqualFold(strings.TrimSpace(key), "VolumeName") {
-			continue
-		}
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }

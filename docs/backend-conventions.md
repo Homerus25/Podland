@@ -190,14 +190,20 @@ closest sibling that already exists. Rulings so far:
 - **Cross-machine transfer core** — `internal/transfer` is the one kit
   behind every cross-machine copy/move (architecture-decisions §19):
   `CopyVolumeData` (export→import splice, byte bound, progress),
-  `ProbeVolumeEmpty` (bounded tar probe), and `TransferSecrets`
-  (reveal/create with same-name skips). The quadlet move's volume-data
-  phase (`internal/domain/quadlets/move_volume_data.go`), the
+  `ProbeVolumeEmpty` (bounded tar probe), `TransferSecrets`
+  (reveal/create with same-name skips), and the quadlet reference
+  resolution (`transfer/quadlet.go`, issue 242: the `Volume=`/`Secret=`
+  line parse and the source→name rules, one seam for the quadlet move's
+  preview/plan and the volumes and secrets move previews — the parse
+  ritual is pinned once in the kit's suite, the domains pin their
+  projections). The quadlet move's volume-data phase
+  (`internal/domain/quadlets/move_volume_data.go`), the
   volumes copy/move (`internal/domain/volumes/move.go`), and the
   secrets copy/move (`internal/domain/secrets/move.go`) are its three
-  compositions; handlers, DTOs, and preview logic stay per-domain, and
-  each domain maps the kit's errors onto its own wire codes. Settled
-  2026-10-05 (issue 238; secrets composition issue 239).
+  compositions; handlers, DTOs, and preview projections stay per-domain,
+  and each domain maps the kit's errors onto its own wire codes. Settled
+  2026-10-05 (issue 238; secrets composition issue 239; reference seam
+  issue 242).
 - **Prune endpoints** — volumes prune is the reference pattern:
   `internal/domain/volumes/service.go` (`Prune`), `handler.go`
   (`Prune`), `dto.go` (`FromPodmanPruneReports`), and

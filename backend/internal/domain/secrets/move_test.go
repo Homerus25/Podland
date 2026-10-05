@@ -107,7 +107,7 @@ func idleUsageFixture() *fakeUsageEngine {
 func TestSecretService_MovePreview_ReportsFacts(t *testing.T) {
 	usage := &fakeUsageEngine{
 		listQuadletNamesFn: func() ([]string, error) {
-			return []string{"web.container", "db.container"}, nil
+			return []string{"web.container", "db.container", "side.container"}, nil
 		},
 		printQuadletFn: func(name string) (string, error) {
 			switch name {
@@ -115,6 +115,12 @@ func TestSecretService_MovePreview_ReportsFacts(t *testing.T) {
 				return "[Container]\nImage=busybox\nSecret=db-password\n", nil
 			case "db.container":
 				return "[Container]\nImage=busybox\nSecret=other-secret\n", nil
+			case "side.container":
+				// Neither line names a store secret: an absolute-path
+				// source is a hostPath reference, and an all-options
+				// token without source= names nothing — the projection
+				// side of the shared parse's kind rule.
+				return "[Container]\nImage=busybox\nSecret=/etc/certs/store.pem\nSecret=target=/run/secrets/x\n", nil
 			}
 			return "", errors.New("no such quadlet")
 		},
@@ -351,28 +357,4 @@ func TestSecretService_Move_SourceUnreachableIsConnectionFailed(t *testing.T) {
 
 	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, response)
-}
-
-// --- the `Secret=` parse ritual -------------------------------------------
-
-func TestQuadletSecretReferences(t *testing.T) {
-	content := `[Container]
-Image=busybox
-Secret=db-password
-Secret=db-password,target=/run/secrets/db
-Secret=source=api-token
-Secret=src=not-the-option
-Secret=/etc/certs/store.pem
-# Secret=commented-out
-; Secret=semicolon-commented
-Volume=db-password:/data
-secret=lowercase-key
-Secret=
-`
-	references := quadletSecretReferences(content)
-
-	assert.Equal(t, []string{"db-password", "db-password", "api-token", "lowercase-key"}, references,
-		"the name is the token before the first comma; source= governs the all-options form (any other "+
-			"option key names nothing); host paths and comment lines never match; key matching is "+
-			"case-insensitive")
 }

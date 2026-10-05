@@ -9,6 +9,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/transfer"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -67,7 +68,7 @@ func (s *QuadletService) MovePreview(ctx context.Context, userID, machineID, qua
 		if companions, err = companionVolumeQuadlets(refs, list, e); err != nil {
 			return err
 		}
-		if resolution, err = deriveVolumeResolution(refs, list, companions, e); err != nil {
+		if resolution, err = deriveVolumeResolution(refs, companions, e); err != nil {
 			return err
 		}
 
@@ -395,7 +396,7 @@ func (s *QuadletService) MoveWithProgress(ctx context.Context, userID, machineID
 		// usage), so the counting reader during the data phase stays the
 		// always-on enforcement.
 		if req.MigrateVolumeData {
-			resolution, err := deriveVolumeResolution(refs, list, companions, e)
+			resolution, err := deriveVolumeResolution(refs, companions, e)
 			if err != nil {
 				return err
 			}
@@ -641,7 +642,8 @@ type companionVolumeQuadlet struct {
 // companionVolumeQuadlets derives the companion set from the quadlet's
 // parsed volume refs against the source machine's own list (issue 217):
 // every parsed volume source that names a candidate (suffix .volume, no
-// path separator) AND has a same-named quadlet file on the source machine
+// path separator — the shared transfer kit's companion discovery rule,
+// §19 issue 242) AND has a same-named quadlet file on the source machine
 // — exact filename match — yields that file with its printed content. A
 // candidate with no matching source file is dangling and yields nothing
 // (the reference stays an ordinary volume entry); bare names and host
@@ -655,7 +657,7 @@ func companionVolumeQuadlets(refs []volumeRef, list []*entities.ListQuadlet, e Q
 	companions := []companionVolumeQuadlet{}
 	seen := map[string]bool{}
 	for _, volume := range refs {
-		file := volumeQuadletCandidate(volume.Source)
+		file := transfer.QuadletVolumeCandidate(volume.Source)
 		if file == "" || seen[file] {
 			continue
 		}

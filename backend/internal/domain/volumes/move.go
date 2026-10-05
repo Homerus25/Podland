@@ -370,9 +370,10 @@ func volumeMountSource(mount string) string {
 // name→content map: a bare-name source matches directly, a `.volume`
 // companion source resolves through its companion file's VolumeName=
 // (first non-empty wins, podman's systemd-<name> default otherwise), and
-// host paths (a "/" in the source) never match. The `Volume=` parse is
-// the quadlets domain's ritual, mirrored here — domains never import
-// each other, and the extraction happens at the third copy.
+// host paths never match. The `Volume=` parse and the source→volume
+// resolution are the shared transfer kit's quadlet reference seam (§19,
+// issue 242) — the same ritual the quadlet move's preview and plan read,
+// so this preview cannot drift from what a quadlet move would report.
 func scanReferencingQuadlets(e VolumeUsageEngine, volumeName string) ([]VolumeMoveQuadletRef, error) {
 	names, err := e.ListQuadletNames()
 	if err != nil {
@@ -395,80 +396,16 @@ func scanReferencingQuadlets(e VolumeUsageEngine, volumeName string) ([]VolumeMo
 		if !ok {
 			continue
 		}
-		for _, source := range volumeSources(content) {
-			if resolvesToVolume(source, contents) == volumeName {
+		for _, ref := range transfer.ParseQuadletVolumes(content) {
+			// A host bind path never resolves — the seam answers "" for
+			// it, so it can never equal a volume name.
+			if resolved, _ := transfer.ResolveQuadletVolumeName(ref.Source, contents); resolved == volumeName {
 				referencing = append(referencing, VolumeMoveQuadletRef{Name: name})
 				break
 			}
 		}
 	}
 	return referencing, nil
-}
-
-// volumeSources extracts every `Volume=` line's source from quadlet file
-// content: the token before the first ":" (`Volume=name:/mnt:ro`),
-// comment lines skipped, key matching case-insensitive — the quadlets
-// domain's parse ritual, mirrored (the second copy; extraction at the
-// third).
-func volumeSources(content string) []string {
-	sources := []string{}
-	for line := range strings.Lines(content) {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-		key, value, found := strings.Cut(line, "=")
-		if !found || !strings.EqualFold(strings.TrimSpace(key), "Volume") {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		sources = append(sources, volumeMountSource(value))
-	}
-	return sources
-}
-
-// resolvesToVolume maps one `Volume=` source to the podman volume it
-// names on this machine — the quadlets domain's resolution rule,
-// mirrored: a bare name is itself; a `.volume` companion source resolves
-// through its companion file's VolumeName= (first non-empty wins) when
-// the companion exists on this machine, else podman's systemd-<name>
-// default; a host path (a "/" in the source) never resolves.
-func resolvesToVolume(source string, contents map[string]string) string {
-	if source == "" || strings.ContainsRune(source, '/') {
-		return ""
-	}
-	if !strings.HasSuffix(source, ".volume") {
-		return source
-	}
-	if content, ok := contents[source]; ok {
-		if override := volumeNameFromQuadletContent(content); override != "" {
-			return override
-		}
-	}
-	return "systemd-" + strings.TrimSuffix(source, ".volume")
-}
-
-// volumeNameFromQuadletContent extracts the first non-empty VolumeName=
-// value from quadlet file content — the quadlets domain's ritual,
-// mirrored.
-func volumeNameFromQuadletContent(content string) string {
-	for line := range strings.Lines(content) {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-		key, value, found := strings.Cut(line, "=")
-		if !found || !strings.EqualFold(strings.TrimSpace(key), "VolumeName") {
-			continue
-		}
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 // volumeExportAdapter widens the volumes engine's Export to the shared

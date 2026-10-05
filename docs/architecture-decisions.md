@@ -231,6 +231,20 @@ copy/move composes it instead of re-deriving it:
   (`volumeExportAdapter`/`volumeImportAdapter` in `volumes/move.go`;
   the quadlets domain has its own). A domain never re-implements the
   pipe, the bound, or the probe.
+- **The quadlet reference resolution is kit-owned too (issue 242)**: the
+  `Volume=`/`Secret=` line parse and the source→name rules — bare name,
+  `.volume` companion through its `VolumeName=` else podman's
+  `systemd-<name>` default, host paths naming nothing, the `Secret=`
+  token-before-comma and `source=` all-options form — live in
+  `transfer/quadlet.go` (`ParseQuadletVolumes`, `ResolveQuadletVolumeName`,
+  `ParseQuadletSecrets`). The quadlet move's preview and volume-data
+  plan, the volumes move preview, and the secrets move preview all call
+  the seam; the domains keep only their wire vocabulary (the quadlet
+  preview's kind labels are mapped from the kit's kinds). The trigger
+  was drift risk, not copy count: a preview that parses differently
+  from the quadlet domain lies about what a move will break. The
+  rituals are pinned once in the kit's suite; the domains' suites pin
+  their projections.
 
 ## Technical Stack
 

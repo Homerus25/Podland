@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path"
-	"strings"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
@@ -275,9 +273,10 @@ func secretNames(e SecretEngine) (map[string]bool, error) {
 // `Secret=` lines resolve to the secret (issue 239) — the preview's
 // warning, never a block. Every quadlet is printed once; a listed but
 // unprintable file (it vanished mid-lease) cannot be scanned and is
-// skipped rather than failing the preview. The `Secret=` parse is the
-// quadlets domain's ritual, mirrored here — domains never import each
-// other, and the extraction happens at the third copy.
+// skipped rather than failing the preview. The `Secret=` parse and the
+// reference naming are the shared transfer kit's quadlet reference seam
+// (§19, issue 242) — the same ritual the quadlet move's preview reads,
+// so this preview cannot drift from what a quadlet move would report.
 func scanReferencingQuadlets(e SecretUsageEngine, secretName string) ([]SecretMoveQuadletRef, error) {
 	names, err := e.ListQuadletNames()
 	if err != nil {
@@ -298,63 +297,17 @@ func scanReferencingQuadlets(e SecretUsageEngine, secretName string) ([]SecretMo
 		if !ok {
 			continue
 		}
-		for _, reference := range quadletSecretReferences(content) {
-			if reference == secretName {
+		for _, ref := range transfer.ParseQuadletSecrets(content) {
+			// Only a kind secret reference names a store secret — a
+			// hostPath source is read off the host filesystem at run
+			// time and never consults the store.
+			if ref.Kind == transfer.QuadletRefKindSecret && ref.Name == secretName {
 				referencing = append(referencing, SecretMoveQuadletRef{Name: name})
 				break
 			}
 		}
 	}
 	return referencing, nil
-}
-
-// quadletSecretReferences extracts every `Secret=` line's resolved secret
-// name from quadlet file content: the token before the first comma,
-// unless it carries `=` — the all-options form, where the `source=`
-// option governs (a token without `source=` names nothing). An
-// absolute-path source is a hostPath reference — podman reads it off the
-// host filesystem at run time, so it never names a store secret and never
-// matches. Comment lines are skipped and key matching is
-// case-insensitive, matching systemd's unit-file parser — the quadlets
-// domain's ritual, mirrored (the second copy; extraction at the third).
-func quadletSecretReferences(content string) []string {
-	references := []string{}
-	for line := range strings.Lines(content) {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
-			continue
-		}
-		key, value, found := strings.Cut(line, "=")
-		if !found || !strings.EqualFold(strings.TrimSpace(key), "Secret") {
-			continue
-		}
-		if name := secretReferenceName(strings.TrimSpace(value)); name != "" {
-			references = append(references, name)
-		}
-	}
-	return references
-}
-
-// secretReferenceName applies the issue-215 naming rule to one `Secret=`
-// value: the token before the first comma is the name, unless it carries
-// `=` — the all-options form, where the `source=` option governs. A
-// resolved name starting with `/` is a hostPath reference and names
-// nothing here.
-func secretReferenceName(value string) string {
-	token := value
-	if idx := strings.Index(value, ","); idx >= 0 {
-		token = value[:idx]
-	}
-	if optKey, optValue, found := strings.Cut(token, "="); found {
-		if !strings.EqualFold(strings.TrimSpace(optKey), "source") {
-			return ""
-		}
-		token = strings.TrimSpace(optValue)
-	}
-	if token == "" || path.IsAbs(token) {
-		return ""
-	}
-	return token
 }
 
 // secretSourceAdapter widens the secrets engine's Inspect to the shared

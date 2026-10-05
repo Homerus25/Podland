@@ -839,9 +839,6 @@ func TestDeriveVolumeResolution(t *testing.T) {
 			content: "[Container]\n" +
 				"Volume=app-data.volume:/a\n" +
 				"Volume=custom-name:/b\n",
-			list: []*entities.ListQuadlet{
-				{Name: "app-data.volume", Path: "/x/app-data.volume", Status: "stopped"},
-			},
 			companions: []companionVolumeQuadlet{
 				{File: "app-data.volume", Content: "[Volume]\nVolumeName=custom-name\n"},
 			},
@@ -893,9 +890,6 @@ func TestDeriveVolumeResolution(t *testing.T) {
 		{
 			name:    "a companion without VolumeName= resolves podman's systemd default",
 			content: "[Container]\nVolume=app-data.volume:/a\n",
-			list: []*entities.ListQuadlet{
-				{Name: "app-data.volume", Path: "/x/app-data.volume", Status: "stopped"},
-			},
 			companions: []companionVolumeQuadlet{
 				{File: "app-data.volume", Content: "[Volume]\nDriver=local\n"},
 			},
@@ -914,7 +908,7 @@ func TestDeriveVolumeResolution(t *testing.T) {
 				return tt.inspects[name], nil
 			}}
 
-			got, err := deriveVolumeResolution(parseQuadletVolumes(tt.content), tt.list, tt.companions, e)
+			got, err := deriveVolumeResolution(parseQuadletVolumes(tt.content), tt.companions, e)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantRefs, got.Refs, "per-reference facts, file order, no dedup")

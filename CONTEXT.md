@@ -40,7 +40,7 @@ One line each; full detail in `docs/architecture-decisions.md`.
 16. **Machine registration** — dedicated endpoint, synchronous connection test
 17. **First-run bootstrap** — setup landing page creates the first admin (one-time endpoint); no baked-in credentials; container DB in the mounted `/app/data` volume
 18. **Quadlet volume data migration** — opt-in `migrateVolumeData` on move/copy: preflight (409 non-empty target / 413 bound) → stop → export-import through the streaming kit; data before installs so a failure installs nothing
-19. **One transfer kit behind every cross-machine copy/move** — `internal/transfer` owns the export→import splice, byte bound, emptiness probe, and secret transfer; quadlet move's data phase, the volumes copy/move, and the secrets copy/move are its three compositions (§19)
+19. **One transfer kit behind every cross-machine copy/move** — `internal/transfer` owns the export→import splice, byte bound, emptiness probe, secret transfer, and the quadlet `Volume=`/`Secret=` reference resolution (one seam for the quadlet move and both move previews); quadlet move's data phase, the volumes copy/move, and the secrets copy/move are its three compositions (§19)
 
 ## Glossary
 
