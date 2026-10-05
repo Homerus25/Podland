@@ -335,5 +335,10 @@ is incomplete.
   machine on macOS), set the `PODLAND_TEST_SSH_*` overrides documented
   in the Makefile's `test-integration` header — the container
   lifecycle is skipped entirely.
+- Every error code the doku lists for an endpoint earns a service-test pin
+  when the branch is reachable through the fake engine — an unpinned
+  documented branch drifts silently (issue 230's review found the
+  transfer's source-lease inspect failure had switched vocabulary with no
+  test noticing).
 - `go fmt ./...` skips build-tagged files; format them with
   `gofmt -w test/integration` when touched.

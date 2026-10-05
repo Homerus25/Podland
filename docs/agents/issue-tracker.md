@@ -4,7 +4,7 @@ Issues and PRDs for this repo live as Forgejo issues. Use the forgejo MCP tools 
 
 ## Conventions
 
-- **Create an issue**: `create_issue`. Bodies follow the house shape: `## Parent`, `## What to build`, `## Acceptance criteria`, `## Blocked by` (see existing issues for the established voice).
+- **Create an issue**: `create_issue`. Bodies follow the house shape: `## Parent`, `## What to build`, `## Acceptance criteria`, `## Blocked by` (see existing issues for the established voice). Acceptance criteria are the contract; decision sketches inside `## What to build` (signatures, names) yield to them on conflict — issue 230's `deriveVolumeResolution(content, ...)` sketch vs its parse-once criterion is the precedent.
 - **Read an issue**: `get_issue_by_index` + `list_issue_comments`.
 - **List issues**: `list_repo_issues` / `search_issues` (for metadata-only looks keep the limit small — issue bodies are large).
 - **Comment / close**: `create_issue_comment` / `issue_state_change`.

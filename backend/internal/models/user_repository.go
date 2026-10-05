@@ -177,7 +177,9 @@ func (r *UserRepository) UsernameExists(username string) (bool, error) {
 // countUsers runs the users-table count through the given queryer
 // (*sql.DB or an in-flight *sql.Tx), so Count() and CreateFirstUser's
 // in-transaction guard share one query instead of drifting.
-func countUsers(q interface{ QueryRow(query string, args ...any) *sql.Row }) (int, error) {
+func countUsers(q interface {
+	QueryRow(query string, args ...any) *sql.Row
+}) (int, error) {
 	var count int
 	if err := q.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
 		return 0, fmt.Errorf("failed to count users: %w", err)
