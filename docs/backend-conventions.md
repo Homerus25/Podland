@@ -181,6 +181,12 @@ closest sibling that already exists. Rulings so far:
   the callers of a parse failure must not know the library's message
   format (the ruling `internal/podmanerr` applies to podman, applied
   here to jwt). Settled 2026-10-01 (architecture-review candidate C6).
+- **Quadlet stop-and-remove ritual** — `internal/domain/quadlets/remove.go`
+  (`stopAndRemove`) owns the whole quadlet removal lease (list → locate →
+  caller terminals → running refusal → stop gate → remove → report scan);
+  `QuadletService.Delete` and the move source half
+  (`removeSourceAfterInstall` in `move.go`) are its two callers, distinct
+  only in op tag and terminal values. Settled 2026-10-05 (issue 231).
 - **Prune endpoints** — volumes prune is the reference pattern:
   `internal/domain/volumes/service.go` (`Prune`), `handler.go`
   (`Prune`), `dto.go` (`FromPodmanPruneReports`), and
