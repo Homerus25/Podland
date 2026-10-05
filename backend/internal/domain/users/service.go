@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/failurebudget"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/google/uuid"
 	"github.com/mattn/go-sqlite3"
@@ -28,26 +29,7 @@ import (
 type UserService struct {
 	userRepo    models.UserRepositoryInterface
 	sessionRepo models.SessionRepositoryInterface
-	failures    FailureBudget
-}
-
-// FailureBudget is the credential-failure brake the admin password
-// reset spends against (issue 187): HasBudget is read before every
-// credential verification and Record spends one unit when one fails —
-// the check/spend pair of the middleware fixed-window limiter (issue
-// 185), keyed by resetBudgetKey. Declared here consumer-side, like the
-// auth package's twin (the auth surface has its own limiter instance
-// over the same config pair, so the two surfaces hold separate key
-// spaces); internal/app wires the users surface's own
-// middleware.NewRateLimiter in, and that instance backs the handler's
-// X-RateLimit advertisement on the budget's 429 answers. A nil budget
-// leaves the brake unwired: every check reports budget and every record
-// is a no-op.
-type FailureBudget interface {
-	HasBudget(key string) bool
-	Record(key string)
-	Limit() int
-	GetResetIn(key string) time.Duration
+	resetBudget *failurebudget.Surface
 }
 
 // NewUserService creates a new UserService. The session repository
@@ -56,13 +38,16 @@ func NewUserService(userRepo models.UserRepositoryInterface, sessionRepo models.
 	return &UserService{userRepo: userRepo, sessionRepo: sessionRepo}
 }
 
-// WithFailureBudget wires the shared credential-failure budget the
-// reset path spends against. The fluent shape mirrors the auth
-// handler's WithFailureBudget: an optional dependency layered onto the
-// two-argument constructor. Unwired, wrong-password attempts are never
-// throttled.
-func (s *UserService) WithFailureBudget(failures FailureBudget) *UserService {
-	s.failures = failures
+// WithFailureBudget wires the reset endpoint's credential-failure
+// budget the reset path spends against: the failurebudget.Surface
+// (issue 236) whose Check ResetPassword consults before the re-auth
+// and whose Spend a failed verification pays — the surface owns the
+// endpoint-namespaced key, so this surface's budget is separate from
+// the auth surface's. The fluent shape mirrors the auth package's
+// budget setters: an optional dependency layered onto the two-argument
+// constructor. Unwired, wrong-password attempts are never throttled.
+func (s *UserService) WithFailureBudget(budget *failurebudget.Surface) *UserService {
+	s.resetBudget = budget
 	return s
 }
 
@@ -247,7 +232,8 @@ func (s *UserService) SetRole(callerID, targetUserID, role string) (*models.User
 // never the target. A miss answers ErrInvalidCredentials (401) with
 // the change-password message. The endpoint is otherwise a
 // password-guessing oracle for whoever holds an admin token, so failed
-// verifications spend the caller-keyed credential-failure budget: once
+// verifications spend the caller-keyed credential-failure budget (the
+// reset endpoint's failurebudget.Surface, wired by internal/app): once
 // spent, further resets answer ErrRateLimitExceeded (429) before any
 // verification runs, even with the correct password, until the window
 // expires. Only failures spend — successes and storage failures never
@@ -286,8 +272,7 @@ func (s *UserService) ResetPassword(callerID, targetUserID, adminPassword, newPa
 		return nil, apperrors.ErrUserNotFound
 	}
 
-	key := resetBudgetKey(callerID)
-	if !s.hasBudget(key) {
+	if !s.resetBudget.Check(callerID) {
 		return nil, apperrors.ErrRateLimitExceeded
 	}
 
@@ -303,7 +288,7 @@ func (s *UserService) ResetPassword(callerID, targetUserID, adminPassword, newPa
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(adminPassword)); err != nil {
-		s.recordFailure(key)
+		s.resetBudget.Spend(callerID)
 		return nil, apperrors.ErrInvalidCredentials.WithMessage("Current password is incorrect")
 	}
 
@@ -325,32 +310,6 @@ func (s *UserService) ResetPassword(callerID, targetUserID, adminPassword, newPa
 	}
 
 	return user, nil
-}
-
-// resetBudgetKey namespaces the reset surface's budget entries with the
-// endpoint's name: one limiter instance per surface keeps instance key
-// spaces separate, and the prefix keeps this endpoint's keys separate
-// from anything that ever joins the instance (the auth surface's
-// username- and caller-keyed entries live the same way — issue 196
-// review).
-const resetBudgetKeyPrefix = "reset-password:"
-
-func resetBudgetKey(callerID string) string { return resetBudgetKeyPrefix + callerID }
-
-// hasBudget reports whether key may still attempt a credential
-// verification under the failure budget. A nil budget (brake unwired,
-// the default before WithFailureBudget) always reports budget.
-func (s *UserService) hasBudget(key string) bool {
-	return s.failures == nil || s.failures.HasBudget(key)
-}
-
-// recordFailure spends one unit of key's failure budget after a failed
-// credential verification. A nil budget (brake unwired) records
-// nothing.
-func (s *UserService) recordFailure(key string) {
-	if s.failures != nil {
-		s.failures.Record(key)
-	}
 }
 
 // List returns the Podland users plus whether the caller is an admin —

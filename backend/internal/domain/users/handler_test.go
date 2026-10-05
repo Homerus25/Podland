@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/domain/auth"
+	"github.com/Homerus25/podland/backend/internal/failurebudget"
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
@@ -42,10 +43,10 @@ func newUsersTestRouter(t *testing.T) (http.Handler, *auth.AuthService, *testuti
 }
 
 // newUsersTestRouterWithBudget is newUsersTestRouter with the reset
-// surface's credential-failure budget wired into the service and the
-// handler, the way internal/app wires one shared limiter instance into
-// both. A nil budget builds the plain unwired router.
-func newUsersTestRouterWithBudget(t *testing.T, budget FailureBudget) (http.Handler, *auth.AuthService, *testutils.MockSessionRepository) {
+// endpoint's credential-failure budget wired into the service and the
+// handler, the way internal/app wires one failurebudget.Surface value
+// into both. A nil surface builds the plain unwired router.
+func newUsersTestRouterWithBudget(t *testing.T, budget *failurebudget.Surface) (http.Handler, *auth.AuthService, *testutils.MockSessionRepository) {
 	t.Helper()
 
 	authService, err := auth.NewTestAuthService()

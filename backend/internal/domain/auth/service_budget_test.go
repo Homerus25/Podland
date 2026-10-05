@@ -6,20 +6,21 @@ import (
 	"time"
 
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/failurebudget"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// fakeBudget is the FailureBudget seam's function-field fake: a
+// fakeBudget is the failurebudget.Brake seam's function-field fake: a
 // fixed-count budget per key without the clock. Record spends until the
 // budget is gone (further records are no-ops, mirroring the middleware
 // limiter's arithmetic); HasBudget reports unspent units. The real
 // fixed-window semantics — window expiry as the only reset — stay
 // pinned in the middleware package's own tests; this fake pins the
 // service's check-first/spend-on-failure contract. The production
-// wiring (the shared middleware.NewRateLimiter) is exercised at the app
-// and integration seams, which import both packages.
+// wiring (one middleware.NewRateLimiter per surface) is exercised at the
+// app and integration seams, which import both packages.
 type fakeBudget struct {
 	spent   map[string]int
 	budget  int
@@ -52,16 +53,20 @@ func (f *fakeBudget) GetResetIn(key string) time.Duration {
 	return f.resetIn
 }
 
-// newBudgetTestService seeds a user with a fake budget wired, so the
-// service tests exercise the check/spend contract. The seeded user's ID
-// is "user-" + username.
+// newBudgetTestService seeds a user with fake-brake budget surfaces
+// wired the way internal/app wires them — one failurebudget.Surface per
+// credential endpoint, here both over the one fake brake (their
+// namespaced keys never interact) — so the service tests exercise the
+// check/spend contract. The seeded user's ID is "user-" + username.
 func newBudgetTestService(t *testing.T, budget int, username, password string) (*AuthService, *testutils.MockSessionRepository, *fakeBudget) {
 	t.Helper()
 
 	repo := seedLoginUser(t, username, password)
 	sessionRepo := testutils.NewMockSessionRepository()
 	b := newFakeBudget(budget)
-	service, err := NewTestAuthServiceWithFailureBudget(repo, sessionRepo, b)
+	service, err := NewTestAuthServiceWithFailureBudget(repo, sessionRepo,
+		failurebudget.NewSurface("login", b),
+		failurebudget.NewSurface("change-password", b))
 	require.NoError(t, err, "Should create auth service with failure budget")
 	return service, sessionRepo, b
 }
@@ -77,12 +82,12 @@ func TestAuthService_Login_FailureBudgetLocksUsernameAfterThreshold(t *testing.T
 		_, _, _, err := service.Login("testuser", "wrong-password")
 		require.ErrorIs(t, err, apperrors.ErrInvalidCredentials, "Failure %d within the budget should stay a 401", i+1)
 	}
-	require.Equal(t, 3, budget.spent[loginBudgetKey("testuser")], "Exactly the three failures should have spent the budget")
+	require.Equal(t, 3, budget.spent["login:testuser"], "Exactly the three failures should have spent the budget")
 
 	_, _, _, err := service.Login("testuser", "right-password")
 	require.ErrorIs(t, err, apperrors.ErrRateLimitExceeded,
 		"The login past the threshold should be locked out even with the correct password")
-	require.Equal(t, 3, budget.spent[loginBudgetKey("testuser")], "A locked-out attempt must not spend further")
+	require.Equal(t, 3, budget.spent["login:testuser"], "A locked-out attempt must not spend further")
 }
 
 // TestAuthService_Login_FailureBudgetCountsUnknownUsernames pins that
@@ -93,7 +98,7 @@ func TestAuthService_Login_FailureBudgetCountsUnknownUsernames(t *testing.T) {
 
 	_, _, _, err := service.Login("ghost", "whatever")
 	require.ErrorIs(t, err, apperrors.ErrInvalidCredentials, "The first unknown-username attempt should stay a 401")
-	require.Equal(t, 1, budget.spent[loginBudgetKey("ghost")], "The unknown username's failure should be counted against it")
+	require.Equal(t, 1, budget.spent["login:ghost"], "The unknown username's failure should be counted against it")
 
 	_, _, _, err = service.Login("ghost", "whatever")
 	require.ErrorIs(t, err, apperrors.ErrRateLimitExceeded, "The same unknown name should be locked out at once")
@@ -101,7 +106,7 @@ func TestAuthService_Login_FailureBudgetCountsUnknownUsernames(t *testing.T) {
 	token, _, _, err := service.Login("realuser", "right-password")
 	require.NoError(t, err, "Another name's budget must be untouched by ghost's failures")
 	require.NotEmpty(t, token, "The real user should still log in")
-	require.Equal(t, 0, budget.spent[loginBudgetKey("realuser")], "The real user's budget must be untouched")
+	require.Equal(t, 0, budget.spent["login:realuser"], "The real user's budget must be untouched")
 }
 
 // TestAuthService_Login_SuccessNeverSpendsBudget pins the spend rule:
@@ -135,12 +140,12 @@ func TestAuthService_Login_StorageFailureNeverSpendsBudget(t *testing.T) {
 	repo := testutils.NewMockUserRepositoryWithErrors(nil, nil, repoErr, nil, nil, nil)
 	sessionRepo := testutils.NewMockSessionRepository()
 	budget := newFakeBudget(1)
-	service, err := NewTestAuthServiceWithFailureBudget(repo, sessionRepo, budget)
+	service, err := NewTestAuthServiceWithFailureBudget(repo, sessionRepo, failurebudget.NewSurface("login", budget), nil)
 	require.NoError(t, err, "Should create auth service with failure budget")
 
 	_, _, _, err = service.Login("testuser", "right-password")
 	require.ErrorIs(t, err, repoErr, "The repository failure should propagate as-is, not as an AppError")
-	require.Equal(t, 0, budget.spent[loginBudgetKey("testuser")], "A storage failure must not spend the budget")
+	require.Equal(t, 0, budget.spent["login:testuser"], "A storage failure must not spend the budget")
 }
 
 // TestAuthService_Login_LockedUsernameDoesNotTouchRefresh pins the
@@ -193,7 +198,7 @@ func TestAuthService_ChangePassword_FailureBudgetCountsWrongCurrentPassword(t *t
 	require.True(t, ok, "Failure should be an AppError")
 	assert.Equal(t, "INVALID_CREDENTIALS", appErr.Code, "A single wrong attempt keeps the credentials code")
 	assert.Equal(t, "Current password is incorrect", appErr.Message, "A single wrong attempt keeps today's unchanged 401 message")
-	require.Equal(t, 1, budget.spent[changeBudgetKey("user-testuser")], "The wrong current-password attempt should spend the caller's budget")
+	require.Equal(t, 1, budget.spent["change-password:user-testuser"], "The wrong current-password attempt should spend the caller's budget")
 
 	_, _, _, err = service.ChangePassword("user-testuser", "wrong-current", "new-pass-8")
 	requireInvalidCredentials(t, err, "The second wrong attempt is still within the budget")
@@ -216,12 +221,12 @@ func TestAuthService_ChangePassword_SuccessNeverSpendsBudget(t *testing.T) {
 
 	_, _, _, err = service.ChangePassword("user-testuser", "old-password", "newer-pass-8")
 	require.NoError(t, err, "The successful change must go through and spend nothing")
-	require.Equal(t, 1, budget.spent[changeBudgetKey("user-testuser")], "The success must not have spent the budget")
+	require.Equal(t, 1, budget.spent["change-password:user-testuser"], "The success must not have spent the budget")
 
 	_, _, _, err = service.ChangePassword("user-testuser", "wrong-current", "new-pass-8")
 	// The hash has changed, so the old current password no longer
 	// verifies — this is another credential failure, and it fits
 	// because the earlier wrong attempt spent exactly one unit.
 	requireInvalidCredentials(t, err, "Another failure should still fit in the budget")
-	require.Equal(t, 2, budget.spent[changeBudgetKey("user-testuser")], "Exactly the two failures should have spent the budget")
+	require.Equal(t, 2, budget.spent["change-password:user-testuser"], "Exactly the two failures should have spent the budget")
 }

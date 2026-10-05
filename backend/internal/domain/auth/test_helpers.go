@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Homerus25/podland/backend/internal/failurebudget"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/golang-jwt/jwt/v5"
@@ -93,22 +94,23 @@ func NewTestAuthServiceWithSessionRepo(userRepo models.UserRepositoryInterface, 
 		Issuer:         "test-issuer",
 	}
 
-	return NewAuthService(config, userRepo, sessionRepo, sessionTTL, unimplementedFirstUsers{}, nil)
+	return NewAuthService(config, userRepo, sessionRepo, sessionTTL, unimplementedFirstUsers{})
 }
 
 // NewTestAuthServiceWithFailureBudget is NewTestAuthServiceWithSessionRepo
-// with a credential-failure budget of the test's choosing wired, so the
-// budget tests exercise the check/spend contract. (The auth package
-// cannot import the middleware limiter for real — middleware imports
-// auth — so unit tests wire a fake and the production wiring is pinned
-// at the app and integration seams.)
-func NewTestAuthServiceWithFailureBudget(userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, failures FailureBudget) (*AuthService, error) {
+// with the credential-failure surfaces of the test's choosing wired, so
+// the budget tests exercise the check/spend contract. The surfaces are
+// constructed by the caller, so the surface names stay at each test's
+// own wiring site; a nil surface leaves that endpoint's brake unwired.
+// (The auth package cannot import the middleware limiter for real —
+// middleware imports auth — so unit tests wire a fake brake and the
+// production wiring is pinned at the app and integration seams.)
+func NewTestAuthServiceWithFailureBudget(userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, login, change *failurebudget.Surface) (*AuthService, error) {
 	service, err := NewTestAuthServiceWithSessionRepo(userRepo, sessionRepo, 30*24*time.Hour)
 	if err != nil {
 		return nil, err
 	}
-	service.failures = failures
-	return service, nil
+	return service.WithLoginBudget(login).WithChangeBudget(change), nil
 }
 
 // unimplementedFirstUsers is the test helpers' stand-in FirstUserCreator.

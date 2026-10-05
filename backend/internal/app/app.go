@@ -33,6 +33,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/domain/users"
 	"github.com/Homerus25/podland/backend/internal/domain/volumes"
 	"github.com/Homerus25/podland/backend/internal/encryption"
+	"github.com/Homerus25/podland/backend/internal/failurebudget"
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
@@ -102,36 +103,40 @@ func New(cfg *config.Config) (*App, error) {
 	// FirstUserCreator: the first-run setup endpoint rides the same
 	// creation path (hash + validation + the atomic first-user guard).
 	userRepo := models.NewUserRepository(db)
-	userService := users.NewUserService(userRepo, sessionRepo)
-	// The credential-failure budget: keyed not by IP or user ID but by
-	// the identity a request claims — the login body's username, the
-	// password change's caller ID — so it cannot live in middleware.
-	// The auth service checks it before a verification and records
-	// failures; the auth handler advertises its headers on the 429s.
-	failureBudget := appmiddleware.NewRateLimiter(
-		cfg.RateLimit.FailureBudget,
-		time.Duration(cfg.RateLimit.FailureWindowMinutes)*time.Minute,
-	)
 
-	// The users surface's own instance over the same config pair (issue
-	// 187): the admin password reset keys its failures on the acting
-	// admin's ID, and one limiter instance per surface keeps the reset
-	// budget's key space separate from the auth surface's.
-	usersFailureBudget := appmiddleware.NewRateLimiter(
-		cfg.RateLimit.FailureBudget,
-		time.Duration(cfg.RateLimit.FailureWindowMinutes)*time.Minute,
-	)
+	// The credential-failure budgets (issues 185-187): keyed not by IP
+	// or user ID but by the identity a request claims — the login body's
+	// username, the password change's and the admin reset's caller ID —
+	// so they cannot live in middleware. One failurebudget.Surface per
+	// credential endpoint, each over its own limiter instance over the
+	// same config pair (issue 236): the Surface owns the
+	// endpoint-namespaced key, so a username and a caller ID can never
+	// collide (issue 196), and the surface-name strings live here, at
+	// the wiring site. Each surface value is handed to its endpoint's
+	// service and handler as one value.
+	newFailureSurface := func(name string) *failurebudget.Surface {
+		return failurebudget.NewSurface(name, appmiddleware.NewRateLimiter(
+			cfg.RateLimit.FailureBudget,
+			time.Duration(cfg.RateLimit.FailureWindowMinutes)*time.Minute,
+		))
+	}
+	loginBudget := newFailureSurface("login")
+	changeBudget := newFailureSurface("change-password")
+	resetBudget := newFailureSurface("reset-password")
+
+	userService := users.NewUserService(userRepo, sessionRepo).WithFailureBudget(resetBudget)
 
 	authService, err := auth.NewAuthService(auth.JWTConfig{
 		PrivateKeyPath: cfg.JWT.PrivateKeyPath,
 		PublicKeyPath:  cfg.JWT.PublicKeyPath,
 		Expiration:     time.Duration(cfg.JWT.ExpirationMinutes) * time.Minute,
 		Issuer:         cfg.JWT.Issuer,
-	}, userRepo, sessionRepo, time.Duration(cfg.Session.TTLDays)*24*time.Hour, userService, failureBudget)
+	}, userRepo, sessionRepo, time.Duration(cfg.Session.TTLDays)*24*time.Hour, userService)
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("app: failed to initialize auth: %w", err)
 	}
+	authService = authService.WithLoginBudget(loginBudget).WithChangeBudget(changeBudget)
 
 	// Initialize repositories
 	machineRepo := models.NewMachineRepository(db)
@@ -168,10 +173,13 @@ func New(cfg *config.Config) (*App, error) {
 	secretService := secrets.NewSecretService(secrets.NewSecretEngineProvider(connectionManager), accessRepo)
 	volumeService := volumes.NewVolumeService(volumes.NewVolumeEngineProvider(connectionManager))
 
-	// Initialize handlers
-	authHandler := auth.NewAuthHandler(authService, userRepo).WithFailureBudget(failureBudget)
-	userHandler := users.NewUserHandler(userService.WithFailureBudget(usersFailureBudget)).
-		WithFailureBudget(usersFailureBudget)
+	// Initialize handlers. Each credential endpoint's failure-budget
+	// surface is the same value its service checks and spends — the
+	// handler's half only advertises the trio on the budget's 429s.
+	authHandler := auth.NewAuthHandler(authService, userRepo).
+		WithLoginBudget(loginBudget).
+		WithChangeBudget(changeBudget)
+	userHandler := users.NewUserHandler(userService).WithFailureBudget(resetBudget)
 	machineHandler := machines.NewMachineHandler(machineService)
 	containerHandler := containers.NewContainerHandler(containerService)
 	imageHandler := images.NewImageHandler(imageService)
