@@ -1,18 +1,4 @@
-import {
-	Box,
-	Button,
-	Checkbox,
-	FormControl,
-	FormLabel,
-	HStack,
-	Radio,
-	RadioGroup,
-	Select,
-	Spinner,
-	Text,
-	VStack,
-} from "@chakra-ui/react";
-import { useMachines } from "@features/machines/hooks/useMachines";
+import { Box, Checkbox, HStack, Spinner, Text, VStack } from "@chakra-ui/react";
 import { can } from "@features/machines/permissions";
 import type { QuadletMoveVolumeProgress } from "@features/quadlets/hooks/useQuadletMoveStream";
 import { useQuadletMoveStream } from "@features/quadlets/hooks/useQuadletMoveStream";
@@ -21,15 +7,16 @@ import {
 	useQuadletMovePreview,
 } from "@features/quadlets/hooks/useQuadlets";
 import type {
-	QuadletMoveMode,
 	QuadletMovePreviewSecret,
 	QuadletMovePreviewVolume,
 	QuadletMoveResult,
 	QuadletSummary,
 } from "@features/quadlets/services/quadletsApi";
 import { buildMoveInput } from "@features/quadlets/services/quadletsApi";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { Modal } from "@shared/components/Modal";
+import {
+	TransferDialog,
+	useTransferState,
+} from "@shared/components/TransferDialog";
 import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { formatBytes } from "@shared/utils/format";
@@ -277,42 +264,45 @@ function SecretNarration({ result }: { result: QuadletMoveResult }) {
 	);
 }
 
-// One dialog for the whole transfer (issue 212): a mode radio (default
-// Move), a target select of the machines the caller can write to (source
-// excluded), the preview-driven volume warning for both modes, and — move
-// mode only — the delete modal's stop/force checkboxes with its defaults
-// (stop on, force off). When the preview reports companion .volume quadlets
-// (issue 218), a checkbox (default on) offers carrying their definitions
-// along, the volume list annotates each companion entry, and a differing
-// companion blocks confirm exactly like a collision. When the preview
-// reports migratable volumes (issue 214), a checkbox (default off) opts the
-// transfer into carrying their data along — the heavy, consequential act —
-// the volume list shows each entry's resolved volume, sizes, and target
-// state, an overwrite option appears wherever the target already holds a
-// volume, a hot-export caveat shows for a running source, and the transfer
-// rides the NDJSON transport: per-volume progress in flight, the outcomes
-// narrated on success, a 409 refusal answered with the overwrite hint.
-// When the preview reports `Secret=` references (issue 222), the warning
-// area lists each with its kind and source/target existence in both modes;
-// a checkbox (default off) offers carrying the values along — offered only
-// to a caller who is admin on the source and when at least one transferable
-// secret exists, absent otherwise — and the answer's secretTransfer
-// outcomes narrate in place, keeping the dialog open the way the migrating
-// transport's report does. Confirm stays disabled while the preview is
-// pending or reports a collision and, when the quadlet references volumes,
-// until the stranded-data warning is explicitly acknowledged — in copy and
-// move mode alike, because volume data never follows the file by default.
+// One dialog for the whole transfer (issue 212): the shared transfer-dialog
+// preset carries the skeleton — the capability-filtered target select
+// (source excluded), the mode radio (default Move), the target-scoped
+// preview's pending/error/collision states, the stay-open report, and the
+// error region. This adapter keeps the quadlet domain: the manage-quadlets
+// capability and its "you can write to" picker copy, the quadlet preview
+// query, the preview-driven volume and secret warnings for both modes, and
+// — move mode only — the delete modal's stop/force checkboxes with its
+// defaults (stop on, force off). When the preview reports companion .volume
+// quadlets (issue 218), a checkbox (default on) offers carrying their
+// definitions along, the volume list annotates each companion entry, and a
+// differing companion blocks confirm exactly like a collision. When the
+// preview reports migratable volumes (issue 214), a checkbox (default off)
+// opts the transfer into carrying their data along — the heavy,
+// consequential act — the volume list shows each entry's resolved volume,
+// sizes, and target state, an overwrite option appears wherever the target
+// already holds a volume, a hot-export caveat shows for a running source,
+// and the transfer rides the NDJSON transport: per-volume progress in
+// flight, the outcomes narrated on success, a 409 refusal answered with the
+// overwrite hint. When the preview reports `Secret=` references (issue 222),
+// the warning area lists each with its kind and source/target existence in
+// both modes; a checkbox (default off) offers carrying the values along —
+// offered only to a caller who is admin on the source and when at least one
+// transferable secret exists, absent otherwise — and the answer's
+// secretTransfer outcomes narrate in place, keeping the dialog open the way
+// the migrating transport's report does. Confirm stays disabled until the
+// stranded-data warning is explicitly acknowledged — in copy and move mode
+// alike, because volume data never follows the file by default.
 //
-// The dialog rides the plain Modal rather than the MutationDialog core, the
-// PruneReportDialog precedent: its success behavior is mixed — a file-only
-// copied/moved closes, while a "partial" result must keep the dialog open
-// narrating the both-machines state and a migrating transfer narrates its
-// data outcomes in place — which the core's unconditional close-on-success
-// cannot express. The reset invariant is the same: the caller renders
-// conditionally, so reset() on mount and unmount always starts clean (the
-// migrating transport lives in this component for the same reason — mount
-// is open, unmount is close, and a close mid-run aborts the stream), and
-// the both-machines invalidation lives in the hooks, not here.
+// The success behavior is mixed — a file-only copied/moved closes, while a
+// "partial" result must keep the dialog open narrating the both-machines
+// state and a migrating transfer narrates its data outcomes in place —
+// which the MutationDialog core's unconditional close-on-success cannot
+// express; the preset's stay-open report carries it. The reset invariant
+// covers the caller-owned move mutation (it lives in the list, so it
+// outlives the dialog): reset() on mount and unmount always starts clean,
+// and the migrating transport lives in this component for the same reason
+// — mount is open, unmount is close, and a close mid-run aborts the stream.
+// The both-machines invalidation lives in the hooks, not here.
 export function MoveQuadletDialog({
 	machine,
 	quadlet,
@@ -324,21 +314,9 @@ export function MoveQuadletDialog({
 	moveQuadlet: ReturnType<typeof useMoveQuadlet>;
 	onClose: () => void;
 }) {
-	const { data: machines } = useMachines();
-	// Only machines the caller can write to, source excluded: the backend
-	// refuses below-write targets with 403, so the picker never offers one.
-	const targets = (machines ?? []).filter(
-		(candidate) =>
-			candidate.id !== machine.id && can(candidate, "manage-quadlets"),
-	);
-	// The select starts on the first writable machine, so the preview loads
-	// immediately; empty means no writable target exists.
-	const [selectedTargetId, setSelectedTargetId] = useState("");
-	const targetId = selectedTargetId || targets[0]?.id || "";
-	const targetName =
-		targets.find((candidate) => candidate.id === targetId)?.name ?? targetId;
+	const transfer = useTransferState(machine, "manage-quadlets");
+	const { targetId, targetName, mode } = transfer;
 
-	const [mode, setMode] = useState<QuadletMoveMode>("move");
 	const [stopFirst, setStopFirst] = useState(true);
 	const [force, setForce] = useState(false);
 	// The volume acknowledgement (issue 207) is an answer to one target's
@@ -368,12 +346,6 @@ export function MoveQuadletDialog({
 		quadlet.id,
 		targetId || null,
 	);
-
-	const { reset } = moveQuadlet;
-	useEffect(() => {
-		reset();
-		return () => reset();
-	}, [reset]);
 
 	// copied/moved close the dialog — the plain transport only; a migrating
 	// transfer narrates its outcomes in place below, and so does a plain
@@ -442,18 +414,6 @@ export function MoveQuadletDialog({
 		: moveStream.error;
 	const partialResult = moveStream.result ?? result;
 
-	const confirmDisabled =
-		targetId === "" ||
-		moveQuadlet.isPending ||
-		moveStream.isRunning ||
-		preview.isPending ||
-		preview.isError ||
-		!!preview.data?.collision ||
-		// A differing companion fails the transfer with 409 (issue 217), so
-		// it blocks confirm exactly like a collision.
-		differsCompanions.length > 0 ||
-		(volumes.length > 0 && !volumesAcknowledged);
-
 	const confirmTransfer = () => {
 		// The builder owns the whole guard set (issue 228): which flags the
 		// current preview and mode still back, and whether a checked
@@ -483,159 +443,84 @@ export function MoveQuadletDialog({
 		}
 	};
 
+	// The stay-open report: a partial result, a migrating transfer's
+	// outcomes, or a plain transfer's secret outcomes — each narrates in
+	// place; anything else stays the form.
+	const report = isPartial ? (
+		<VStack align="flex-start" spacing={3} data-testid="move-partial-message">
+			<Text>
+				The quadlet was installed on “{targetName}” but could not be removed
+				from “{machine.name}”. It currently exists on both machines and must be
+				cleaned up manually.
+			</Text>
+			{partialResult?.error ? (
+				<Text color="red.500">{partialResult.error}</Text>
+			) : null}
+			{partialResult ? (
+				<>
+					<MigrationNarration result={partialResult} />
+					<SecretNarration result={partialResult} />
+				</>
+			) : null}
+		</VStack>
+	) : migrationReport ? (
+		<VStack align="flex-start" spacing={4} data-testid="move-migration-success">
+			<Text>
+				{migrationReport.status === "moved" ? "Moved" : "Copied"} “
+				{quadlet.name}” to “{targetName}”.
+			</Text>
+			<MigrationNarration result={migrationReport} />
+			<SecretNarration result={migrationReport} />
+		</VStack>
+	) : plainSecretReport ? (
+		<VStack align="flex-start" spacing={4} data-testid="move-secret-success">
+			<Text>
+				{plainSecretReport.status === "moved" ? "Moved" : "Copied"} “
+				{quadlet.name}” to “{targetName}”.
+			</Text>
+			<SecretNarration result={plainSecretReport} />
+		</VStack>
+	) : null;
+
 	return (
-		<Modal
-			isOpen
-			onClose={onClose}
-			title={`Move or copy ${quadlet.name}`}
-			footer={
-				isPartial || migrationReport || plainSecretReport ? (
-					<Button onClick={onClose} data-testid="close-move-report-button">
-						Close
-					</Button>
-				) : (
-					<>
-						<Button variant="ghost" onClick={onClose}>
-							Cancel
-						</Button>
-						<Button
-							colorScheme={mode === "move" ? "red" : "blue"}
-							onClick={confirmTransfer}
-							isDisabled={confirmDisabled}
-							isLoading={moveQuadlet.isPending || moveStream.isRunning}
-							data-testid="confirm-move-button"
-						>
-							{mode === "move" ? "Move quadlet" : "Copy quadlet"}
-						</Button>
-					</>
-				)
+		<TransferDialog
+			machine={machine}
+			transfer={transfer}
+			preview={preview}
+			noun="quadlet"
+			itemName={quadlet.name}
+			noTargetsMessage="No other machine you can write to."
+			isPending={moveQuadlet.isPending || moveStream.isRunning}
+			// A differing companion fails the transfer with 409 (issue 217), so
+			// it blocks confirm exactly like a collision; so does an
+			// unacknowledged stranded-data warning.
+			confirmDisabled={
+				differsCompanions.length > 0 ||
+				(volumes.length > 0 && !volumesAcknowledged)
 			}
-		>
-			{errorDisplay ? (
-				<Box mt={2}>
-					<ErrorDisplay
-						error={errorDisplay}
-						data-testid="mutation-dialog-error"
-					/>
-					{errorDisplay.code === TARGET_NOT_EMPTY_CODE ? (
+			error={errorDisplay}
+			renderHints={(error) => (
+				<>
+					{error.code === TARGET_NOT_EMPTY_CODE ? (
 						<Text mt={2} color="orange.500" data-testid="move-overwrite-hint">
 							The target volume already holds data. Tick “Overwrite existing
 							target volumes” and confirm again to merge the migrated data into
 							it.
 						</Text>
 					) : null}
-					{errorDisplay.code === SECRET_TRANSFER_FAILED_CODE ? (
+					{error.code === SECRET_TRANSFER_FAILED_CODE ? (
 						<Text mt={2} color="orange.500" data-testid="move-secret-hint">
 							Nothing was installed — the secret transfer runs before the
 							quadlet. Resolve the cause and confirm again; secrets already
 							delivered to the target are skipped, not duplicated.
 						</Text>
 					) : null}
-				</Box>
-			) : null}
-			{isPartial ? (
-				<VStack
-					align="flex-start"
-					spacing={3}
-					data-testid="move-partial-message"
-				>
-					<Text>
-						The quadlet was installed on “{targetName}” but could not be removed
-						from “{machine.name}”. It currently exists on both machines and must
-						be cleaned up manually.
-					</Text>
-					{partialResult?.error ? (
-						<Text color="red.500">{partialResult.error}</Text>
-					) : null}
-					{partialResult ? (
-						<>
-							<MigrationNarration result={partialResult} />
-							<SecretNarration result={partialResult} />
-						</>
-					) : null}
-				</VStack>
-			) : migrationReport ? (
-				<VStack
-					align="flex-start"
-					spacing={4}
-					data-testid="move-migration-success"
-				>
-					<Text>
-						{migrationReport.status === "moved" ? "Moved" : "Copied"} “
-						{quadlet.name}” to “{targetName}”.
-					</Text>
-					<MigrationNarration result={migrationReport} />
-					<SecretNarration result={migrationReport} />
-				</VStack>
-			) : plainSecretReport ? (
-				<VStack
-					align="flex-start"
-					spacing={4}
-					data-testid="move-secret-success"
-				>
-					<Text>
-						{plainSecretReport.status === "moved" ? "Moved" : "Copied"} “
-						{quadlet.name}” to “{targetName}”.
-					</Text>
-					<SecretNarration result={plainSecretReport} />
-				</VStack>
-			) : (
-				<VStack align="flex-start" spacing={4}>
-					<FormControl isRequired>
-						<FormLabel htmlFor="move-target">Target machine</FormLabel>
-						{targets.length > 0 ? (
-							<Select
-								id="move-target"
-								value={targetId}
-								onChange={(event) => setSelectedTargetId(event.target.value)}
-								data-testid="move-target-select"
-							>
-								{targets.map((candidate) => (
-									<option key={candidate.id} value={candidate.id}>
-										{candidate.name}
-									</option>
-								))}
-							</Select>
-						) : (
-							<Text color="gray.500" data-testid="move-no-targets">
-								No other machine you can write to.
-							</Text>
-						)}
-					</FormControl>
-					<FormControl>
-						<FormLabel>Mode</FormLabel>
-						<RadioGroup
-							value={mode}
-							onChange={(next) => setMode(next as QuadletMoveMode)}
-							data-testid="move-mode-radio"
-						>
-							<HStack spacing={4}>
-								<Radio value="move" data-testid="move-mode-move">
-									Move (remove from this machine)
-								</Radio>
-								<Radio value="copy" data-testid="move-mode-copy">
-									Copy (keep this machine&apos;s quadlet)
-								</Radio>
-							</HStack>
-						</RadioGroup>
-					</FormControl>
-					{preview.isPending ? (
-						<Text color="gray.500" data-testid="move-preview-pending">
-							Checking the target machine…
-						</Text>
-					) : null}
-					{preview.isError ? (
-						<ErrorDisplay
-							error={getApiError(preview.error)}
-							data-testid="move-preview-error"
-						/>
-					) : null}
-					{preview.data?.collision ? (
-						<Text color="red.500" data-testid="move-collision-warning">
-							A quadlet named “{quadlet.name}” already exists on {targetName}.
-							Choose another target or remove it there first.
-						</Text>
-					) : null}
+				</>
+			)}
+			report={report}
+			reset={moveQuadlet.reset}
+			warnings={
+				<>
 					{differsCompanions.length > 0 ? (
 						<Text color="red.500" data-testid="move-companion-conflict-warning">
 							A volume quadlet named “{differsNames.join("”, “")}” already
@@ -698,72 +583,74 @@ export function MoveQuadletDialog({
 							</VStack>
 						</Box>
 					) : null}
-					{migratable ? (
-						<Checkbox
-							isChecked={migrate}
-							onChange={(event) => setMigrate(event.target.checked)}
-							data-testid="move-migrate-option"
-						>
-							Migrate volume data to “{targetName}”
-						</Checkbox>
-					) : null}
-					{preview.data?.running && migrate ? (
-						<Text color="orange.500" data-testid="move-hot-export-warning">
-							The quadlet&apos;s resource is running. Exporting data from a live
-							volume is a best-effort snapshot without consistency guarantees.
-						</Text>
-					) : null}
-					{anyExistsOnTarget ? (
-						<Checkbox
-							isChecked={overwrite}
-							onChange={(event) => setOverwrite(event.target.checked)}
-							data-testid="move-overwrite-option"
-						>
-							Overwrite existing target volumes (merge the migrated data)
-						</Checkbox>
-					) : null}
-					{companions.length > 0 ? (
-						<Checkbox
-							isChecked={transferCompanions}
-							onChange={(event) => setTransferCompanions(event.target.checked)}
-							data-testid="move-companion-option"
-						>
-							Transfer the volume quadlet definitions (
-							{companionNames.join(", ")})
-						</Checkbox>
-					) : null}
-					{secretTransferOffered ? (
-						<Checkbox
-							isChecked={transferSecrets}
-							onChange={(event) => setTransferSecrets(event.target.checked)}
-							data-testid="move-transfer-secrets-option"
-						>
-							Transfer the secrets&apos; values to “{targetName}”
-						</Checkbox>
-					) : null}
-					{mode === "move" ? (
-						<VStack align="flex-start" spacing={2}>
-							<Checkbox
-								isChecked={stopFirst}
-								onChange={(event) => setStopFirst(event.target.checked)}
-								data-testid="move-stop-option"
-							>
-								Stop the unit before moving
-							</Checkbox>
-							<Checkbox
-								isChecked={force}
-								onChange={(event) => setForce(event.target.checked)}
-								data-testid="move-force-option"
-							>
-								Force
-							</Checkbox>
-						</VStack>
-					) : null}
-					{moveStream.isRunning ? (
-						<MigrationProgress progress={moveStream.progress} />
-					) : null}
+				</>
+			}
+			onConfirm={confirmTransfer}
+			onClose={onClose}
+		>
+			{migratable ? (
+				<Checkbox
+					isChecked={migrate}
+					onChange={(event) => setMigrate(event.target.checked)}
+					data-testid="move-migrate-option"
+				>
+					Migrate volume data to “{targetName}”
+				</Checkbox>
+			) : null}
+			{preview.data?.running && migrate ? (
+				<Text color="orange.500" data-testid="move-hot-export-warning">
+					The quadlet&apos;s resource is running. Exporting data from a live
+					volume is a best-effort snapshot without consistency guarantees.
+				</Text>
+			) : null}
+			{anyExistsOnTarget ? (
+				<Checkbox
+					isChecked={overwrite}
+					onChange={(event) => setOverwrite(event.target.checked)}
+					data-testid="move-overwrite-option"
+				>
+					Overwrite existing target volumes (merge the migrated data)
+				</Checkbox>
+			) : null}
+			{companions.length > 0 ? (
+				<Checkbox
+					isChecked={transferCompanions}
+					onChange={(event) => setTransferCompanions(event.target.checked)}
+					data-testid="move-companion-option"
+				>
+					Transfer the volume quadlet definitions ({companionNames.join(", ")})
+				</Checkbox>
+			) : null}
+			{secretTransferOffered ? (
+				<Checkbox
+					isChecked={transferSecrets}
+					onChange={(event) => setTransferSecrets(event.target.checked)}
+					data-testid="move-transfer-secrets-option"
+				>
+					Transfer the secrets&apos; values to “{targetName}”
+				</Checkbox>
+			) : null}
+			{mode === "move" ? (
+				<VStack align="flex-start" spacing={2}>
+					<Checkbox
+						isChecked={stopFirst}
+						onChange={(event) => setStopFirst(event.target.checked)}
+						data-testid="move-stop-option"
+					>
+						Stop the unit before moving
+					</Checkbox>
+					<Checkbox
+						isChecked={force}
+						onChange={(event) => setForce(event.target.checked)}
+						data-testid="move-force-option"
+					>
+						Force
+					</Checkbox>
 				</VStack>
-			)}
-		</Modal>
+			) : null}
+			{moveStream.isRunning ? (
+				<MigrationProgress progress={moveStream.progress} />
+			) : null}
+		</TransferDialog>
 	);
 }
