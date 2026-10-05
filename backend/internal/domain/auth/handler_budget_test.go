@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Homerus25/podland/backend/internal/failurebudget"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -45,9 +46,12 @@ func decodeErrorEnvelope(t *testing.T, resp *http.Response) (code string) {
 func TestAuthHandler_Login_FailureBudget429CarriesHeaders(t *testing.T) {
 	mockRepo := seedLoginUser(t, "testuser", "right-password")
 	budget := newFakeBudget(1)
-	service, err := NewTestAuthServiceWithFailureBudget(mockRepo, testutils.NewMockSessionRepository(), budget)
+	// One surface value handed to the service and the handler, the way
+	// internal/app wires it.
+	loginSurface := failurebudget.NewSurface("login", budget)
+	service, err := NewTestAuthServiceWithFailureBudget(mockRepo, testutils.NewMockSessionRepository(), loginSurface, nil)
 	require.NoError(t, err, "Should create auth service with failure budget")
-	handler := NewAuthHandler(service, mockRepo).WithFailureBudget(budget)
+	handler := NewAuthHandler(service, mockRepo).WithLoginBudget(loginSurface)
 
 	// In-budget failure: a plain 401, no rate-limit advertisement.
 	resp := performLogin(t, handler, "testuser", "wrong-password")
@@ -71,9 +75,12 @@ func TestAuthHandler_Login_FailureBudget429CarriesHeaders(t *testing.T) {
 func TestAuthHandler_ChangePassword_FailureBudget429CarriesHeaders(t *testing.T) {
 	repo, sessionRepo, _, userID := seedPasswordChangeUser(t, "testuser", "old-password-123")
 	budget := newFakeBudget(1)
-	service, err := NewTestAuthServiceWithFailureBudget(repo, sessionRepo, budget)
+	// One surface value handed to the service and the handler, the way
+	// internal/app wires it.
+	changeSurface := failurebudget.NewSurface("change-password", budget)
+	service, err := NewTestAuthServiceWithFailureBudget(repo, sessionRepo, nil, changeSurface)
 	require.NoError(t, err, "Should create auth service with failure budget")
-	handler := NewAuthHandler(service, repo).WithFailureBudget(budget)
+	handler := NewAuthHandler(service, repo).WithChangeBudget(changeSurface)
 
 	resp := performChangePassword(t, handler, userID, changePasswordBody{
 		CurrentPassword: "wrong-current",

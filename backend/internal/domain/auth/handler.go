@@ -2,20 +2,21 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"time"
 
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/failurebudget"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/web"
 )
 
 // AuthHandler handles authentication requests
 type AuthHandler struct {
-	service  *AuthService
-	userRepo models.UserRepositoryInterface
-	failures FailureBudget
+	service      *AuthService
+	userRepo     models.UserRepositoryInterface
+	loginBudget  *failurebudget.Surface
+	changeBudget *failurebudget.Surface
 }
 
 // NewAuthHandler creates a new AuthHandler
@@ -26,14 +27,24 @@ func NewAuthHandler(service *AuthService, userRepo models.UserRepositoryInterfac
 	}
 }
 
-// WithFailureBudget wires the shared credential-failure budget, so the
-// handler can advertise its X-RateLimit-* trio on the 429 answers the
-// service's budget rejections produce. The fluent shape mirrors the
-// volumes handler's WithMaxUploadBytes: an optional dependency layered
-// onto the two-argument constructor. Unwired, budget 429s (unreachable
-// when the service's brake is unwired too) carry no rate-limit headers.
-func (h *AuthHandler) WithFailureBudget(failures FailureBudget) *AuthHandler {
-	h.failures = failures
+// WithLoginBudget wires the login endpoint's credential-failure budget,
+// so the handler can advertise its X-RateLimit-* trio on the 429
+// answers the service's budget rejections produce. The fluent shape
+// mirrors the volumes handler's WithMaxUploadBytes: an optional
+// dependency layered onto the two-argument constructor. Unwired, budget
+// 429s (unreachable when the service's brake is unwired too) carry no
+// rate-limit headers.
+func (h *AuthHandler) WithLoginBudget(budget *failurebudget.Surface) *AuthHandler {
+	h.loginBudget = budget
+	return h
+}
+
+// WithChangeBudget wires the password-change endpoint's
+// credential-failure budget, the change twin of WithLoginBudget.
+// Unwired, budget 429s (unreachable when the service's brake is unwired
+// too) carry no rate-limit headers.
+func (h *AuthHandler) WithChangeBudget(budget *failurebudget.Surface) *AuthHandler {
+	h.changeBudget = budget
 	return h
 }
 
@@ -80,30 +91,13 @@ func setRefreshCookie(w http.ResponseWriter, refreshToken string) {
 	http.SetCookie(w, newRefreshCookie(refreshToken))
 }
 
-// setFailureBudgetHeaders advertises the credential-failure budget's
-// X-RateLimit-* trio when the service answered the budget's 429: the
-// configured limit, zero remaining, and the seconds until the key's
-// window resets — the same advertisement the per-IP auth middleware
-// makes for its own rejections, keyed by the endpoint-namespaced key
-// (loginBudgetKey / changeBudgetKey) so it reads the same map entry the
-// service checked and spent. Any other failure — and an unwired budget
-// — writes nothing.
-func (h *AuthHandler) setFailureBudgetHeaders(w http.ResponseWriter, key string, err error) {
-	if h.failures == nil {
-		return
-	}
-	appErr, ok := errors.AsType[*apperrors.AppError](err)
-	if !ok || appErr.Status != http.StatusTooManyRequests {
-		return
-	}
-	web.SetRateLimitHeaders(w, h.failures.Limit(), 0, h.failures.GetResetIn(key))
-}
-
 // Login handles user login: it shapes the request and response, while
 // credential verification, token issuance, and session persistence live
 // in AuthService.Login. The auth surface has no authenticated caller, so
 // the closure's user ID is unused; the refresh cookie is set inside the
 // closure (headers only) — the envelope owns the status line and body.
+// On the budget's 429 the login surface advertises the X-RateLimit
+// trio (failurebudget.Surface.Advertise owns the classification).
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (LoginResponse, error) {
 		var req LoginRequest
@@ -113,7 +107,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 		token, refreshToken, user, err := h.service.Login(req.Username, req.Password)
 		if err != nil {
-			h.setFailureBudgetHeaders(w, loginBudgetKey(req.Username), err)
+			h.loginBudget.Advertise(w, req.Username, err)
 			return LoginResponse{}, err
 		}
 
@@ -218,7 +212,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 		token, refreshToken, user, err := h.service.ChangePassword(userID, req.CurrentPassword, req.NewPassword)
 		if err != nil {
-			h.setFailureBudgetHeaders(w, changeBudgetKey(userID), err)
+			h.changeBudget.Advertise(w, userID, err)
 			return ChangePasswordResponse{}, err
 		}
 

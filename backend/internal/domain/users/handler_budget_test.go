@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/Homerus25/podland/backend/internal/failurebudget"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,7 +18,7 @@ import (
 // rate-limit headers.
 func TestUserHandler_ResetPassword_FailureBudget429CarriesHeaders(t *testing.T) {
 	budget := newFakeBudget(1)
-	router, authService, _ := newUsersTestRouterWithBudget(t, budget)
+	router, authService, _ := newUsersTestRouterWithBudget(t, failurebudget.NewSurface("reset-password", budget))
 
 	// In-budget failure: a plain 401, no rate-limit advertisement.
 	w := putUserPasswordAs(t, router, authService, "admin-1", "user-1",

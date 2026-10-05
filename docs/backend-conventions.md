@@ -271,22 +271,30 @@ already diverged, extraction triggers even below the third copy — the
 log-stream kit (`.scratch/380-log-stream-kit`) is the precedent, where
 two timestamp parsers that disagreed on a spaceless podman line made
 the streaming path un-changeable in one place. The threshold has been
-crossed six times and all six extractions are now the reference: the
+crossed seven times and all seven extractions are now the reference: the
 endpoint ritual became `internal/web.Handle`, the handler-test
 scaffolding became `testutils.Perform`, the decode+validate ritual
 became `web.Decode`, podman error classification became
 `internal/podmanerr` — one leaf adapter owning podman's error model
 (typed `ErrorModel` status first, phrase fallback over the lowercased
 text) for volumes, secrets, containers, images, and quadlets — the
-param ritual became `web.URLParam`/`web.QueryBool`/`web.QueryInt`, and
-the `X-RateLimit-*` header trio became `web.SetRateLimitHeaders`
-(both rate-limit middlewares and the failure-budget handlers write the
-same three headers through it; the type-assert preamble that decides
-whether to write them stays per handler at two copies).
+param ritual became `web.URLParam`/`web.QueryBool`/`web.QueryInt`, the
+`X-RateLimit-*` header trio became `web.SetRateLimitHeaders`
+(both rate-limit middlewares and the failure-budget surfaces write the
+same three headers through it), and the credential failure budget's
+check/spend/advertise contract became `internal/failurebudget`
+(issue 236) — one `Surface` per credential endpoint, a deep module that
+owns the endpoint-namespaced key (a username and a caller ID cannot
+collide), the nil-unwired semantics, and the 429 classification behind
+the header advertisement, sitting over the middleware limiter as its
+`Brake` seam; the type-assert preamble that decides whether to write
+the trio is module-owned (`Surface.Advertise`), no longer per handler.
 Domains classify through its predicates, check
 most-specific first, and map the results to their own sentinels; the
-adapter never imports `internal/errors`, so sentinels stay
-domain-owned. Two vocabularies deliberately stay quadlet-local: the
+podmanerr adapter never imports `internal/errors`, so sentinels stay
+domain-owned (the failurebudget module does import it — to classify
+the budget's own 429 — but returns no sentinel; the domains'
+ErrRateLimitExceeded stays theirs). Two vocabularies deliberately stay quadlet-local: the
 quadlet running-refusal phrases (podman phrases that refusal outside
 its shared conflict vocabulary) and lifecycle.go's systemctl/stderr
 classification (a different transport). A second consumer for either
