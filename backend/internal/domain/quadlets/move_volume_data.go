@@ -1,14 +1,13 @@
 package quadlets
 
 import (
-	"archive/tar"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/transfer"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -18,8 +17,9 @@ import (
 // and the one volume resolution derivation both the preview and the plan
 // read (issue 230), the migration plan projected from that derivation, the
 // target-emptiness and size preflight, and the machine-to-machine data
-// phase itself (podman export on the source spliced into podman import on
-// the target through an in-process pipe).
+// phase itself. The data splice and the emptiness probe are the shared
+// transfer kit's (§19): this file maps their outcomes onto the quadlet
+// move's wire vocabulary, the kit owns the pipe.
 
 // volumeRef is one parsed `Volume=` reference (issue 230): the source as
 // written (the part of the `Volume=` value before the first ":") and its
@@ -160,19 +160,6 @@ func deriveVolumeResolution(refs []volumeRef, list []*entities.ListQuadlet, comp
 	return resolution, nil
 }
 
-// errProbeNotEmpty terminates the emptiness probe's export once a content
-// entry shows up: closing the pipe with it unblocks the export goroutine
-// mid-stream — the probe is bounded and never reads a big volume to its end.
-var errProbeNotEmpty = errors.New("volume probe: content entry found")
-
-// errVolumeDataBoundExceeded trips the counting reader when the streamed
-// volume crosses the migration bound; the data phase maps it to 413.
-var errVolumeDataBoundExceeded = errors.New("volume data exceeds the migration bound")
-
-// volumeBytesReportIncrement is the counting reader's progress cadence: a
-// bytes event every 1 MiB actually streamed.
-const volumeBytesReportIncrement int64 = 1 << 20
-
 // volumeMigrationFailed wraps a data-phase engine failure as 500
 // VOLUME_MIGRATION_FAILED, the message naming the volume and the cause
 // (issue 214's error contract).
@@ -267,7 +254,7 @@ func (s *QuadletService) preflightVolumeMigration(ctx context.Context, userID, t
 			if inspected == nil || overwrite {
 				continue
 			}
-			empty, err := probeVolumeEmpty(e, entry.PodmanVolume)
+			empty, err := transfer.ProbeVolumeEmpty(e, entry.PodmanVolume)
 			if err != nil {
 				return volumeMigrationFailed(entry.PodmanVolume, err)
 			}
@@ -278,51 +265,6 @@ func (s *QuadletService) preflightVolumeMigration(ctx context.Context, userID, t
 		}
 		return nil
 	})
-}
-
-// probeVolumeEmpty answers whether the podman volume holds no content,
-// decided by exporting it and reading the tar: directory entries (the
-// always-framed volume root) and tar meta headers (x/g/L/K) are framing,
-// the first real entry proves content and stops the read mid-stream —
-// closing the pipe unblocks the export goroutine. A clean EOF after only
-// framing means empty: the export returned nil, so the tar was complete.
-func probeVolumeEmpty(e QuadletEngine, name string) (bool, error) {
-	pr, pw := io.Pipe()
-	defer pr.Close()
-
-	type exportOutcome struct{ err error }
-	done := make(chan exportOutcome, 1)
-	go func() {
-		err := e.VolumeExport(name, pw)
-		// CloseWithError(nil) is Close: the reader sees a clean EOF
-		// exactly when the export completed.
-		pw.CloseWithError(err)
-		done <- exportOutcome{err: err}
-	}()
-
-	tr := tar.NewReader(pr)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			outcome := <-done
-			if outcome.err != nil {
-				return false, fmt.Errorf("failed to export volume %s: %w", name, outcome.err)
-			}
-			return true, nil
-		}
-		if err != nil {
-			// The pipe reader surfaces the export's own failure.
-			<-done
-			return false, fmt.Errorf("failed to export volume %s: %w", name, err)
-		}
-		switch hdr.Typeflag {
-		case tar.TypeDir, tar.TypeXGlobalHeader, tar.TypeXHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
-			continue
-		}
-		pw.CloseWithError(errProbeNotEmpty)
-		<-done
-		return false, nil
-	}
 }
 
 // migrateVolumeData runs the data phase (issue 214, §18): one outcome per
@@ -353,12 +295,12 @@ func (s *QuadletService) migrateVolumeData(ctx context.Context, userID, sourceMa
 
 // migrateOneVolume carries one volume's data from the source machine into
 // the target (issue 214, §18): the target volume is created if absent, then
-// podman's export streams through an in-process pipe into podman's import.
-// The counting reader between them owns the migration bound — the always-on
-// backstop for engines that report no inspect sizes — and reports bytes
-// progress every volumeBytesReportIncrement. The source volume may have
-// vanished since the plan was derived; a dangling reference then skips with
-// a visible outcome instead of failing the transfer.
+// the shared transfer kit's splice streams the data across (§19) — podman's
+// export on the source into podman's import on the target, the kit's
+// counting reader owning the migration bound and reporting bytes progress
+// every 1 MiB actually streamed. The source volume may have vanished since
+// the plan was derived; a dangling reference then skips with a visible
+// outcome instead of failing the transfer.
 func (s *QuadletService) migrateOneVolume(ctx context.Context, src, tgt QuadletEngine, machineID string, entry volumeMigrationPlanEntry, onProgress func(QuadletMoveEvent)) (QuadletMoveVolumeOutcome, error) {
 	emit := func(phase string, bytes int64, reason string) {
 		if onProgress != nil {
@@ -392,30 +334,11 @@ func (s *QuadletService) migrateOneVolume(ctx context.Context, src, tgt QuadletE
 		return QuadletMoveVolumeOutcome{}, volumeMigrationFailed(entry.PodmanVolume, err)
 	}
 
-	pr, pw := io.Pipe()
-	counted := &countingVolumeReader{
-		r:          pr,
-		limit:      s.volumeDataLimit(),
-		nextReport: volumeBytesReportIncrement,
-		onBytes: func(count int64) {
-			emit(MoveVolumePhaseBytes, count, "")
-		},
-	}
-	// A cancelled stream (client disconnect) must end the export promptly:
-	// closing the pipe makes the goroutine's next write fail. stop()
-	// releases the registration when this function returns.
-	stop := context.AfterFunc(ctx, func() { pw.CloseWithError(context.Canceled) })
-	defer stop()
-
-	go func() {
-		// CloseWithError(nil) is Close: the import sees a clean EOF
-		// exactly when the export completed.
-		pw.CloseWithError(src.VolumeExport(entry.PodmanVolume, pw))
-	}()
-
-	importErr := tgt.VolumeImport(entry.PodmanVolume, counted)
-	if importErr == nil {
-		emit(MoveVolumePhaseDone, counted.count, "")
+	bytes, err := transfer.CopyVolumeData(ctx, src, tgt, entry.PodmanVolume, s.volumeDataLimit(), func(count int64) {
+		emit(MoveVolumePhaseBytes, count, "")
+	})
+	if err == nil {
+		emit(MoveVolumePhaseDone, bytes, "")
 		return QuadletMoveVolumeOutcome{
 			Ref:          entry.Ref,
 			PodmanVolume: entry.PodmanVolume,
@@ -423,50 +346,12 @@ func (s *QuadletService) migrateOneVolume(ctx context.Context, src, tgt QuadletE
 		}, nil
 	}
 
-	// The import stopped early — the export goroutine must not block on a
-	// pipe nobody reads any more. Closing pw unblocks it (a no-op once the
-	// goroutine already closed it on the success path).
-	pw.Close()
-
-	if counted.exceeded || errors.Is(importErr, errVolumeDataBoundExceeded) {
+	if errors.Is(err, transfer.ErrBoundExceeded) {
 		return QuadletMoveVolumeOutcome{}, appErrors.ErrVolumeUploadTooLarge.WithMessage(fmt.Sprintf(
-			"Volume %s exceeded the migration bound at %d bytes", entry.PodmanVolume, counted.count))
+			"Volume %s exceeded the migration bound at %d bytes", entry.PodmanVolume, bytes))
 	}
 	if ctx.Err() != nil {
 		return QuadletMoveVolumeOutcome{}, ctx.Err()
 	}
-	return QuadletMoveVolumeOutcome{}, volumeMigrationFailed(entry.PodmanVolume, importErr)
-}
-
-// countingVolumeReader counts the bytes actually crossing the
-// machine-to-machine splice (issue 214, §18). It owns the migration bound:
-// crossing limit fails the read (and so the import) with
-// errVolumeDataBoundExceeded — the backstop that holds even when the engine
-// reports no inspect size for a pre-check. onBytes fires at most once per
-// volumeBytesReportIncrement.
-type countingVolumeReader struct {
-	r          io.Reader
-	limit      int64
-	count      int64
-	nextReport int64
-	exceeded   bool
-	onBytes    func(count int64)
-}
-
-func (c *countingVolumeReader) Read(p []byte) (int, error) {
-	n, err := c.r.Read(p)
-	if n > 0 {
-		c.count += int64(n)
-		if c.limit > 0 && c.count > c.limit {
-			c.exceeded = true
-			return n, errVolumeDataBoundExceeded
-		}
-		if c.count >= c.nextReport {
-			c.nextReport = c.count + volumeBytesReportIncrement
-			if c.onBytes != nil {
-				c.onBytes(c.count)
-			}
-		}
-	}
-	return n, err
+	return QuadletMoveVolumeOutcome{}, volumeMigrationFailed(entry.PodmanVolume, err)
 }

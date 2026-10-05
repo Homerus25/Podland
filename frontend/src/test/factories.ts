@@ -11,9 +11,17 @@ import type {
 	QuadletMoveVolumeOutcome,
 	QuadletSummary,
 } from "@features/quadlets/services/quadletsApi";
-import type { SecretSummary } from "@features/secrets/services/secretsApi";
+import type {
+	SecretMovePreview,
+	SecretMoveResult,
+	SecretSummary,
+} from "@features/secrets/services/secretsApi";
 import type { UserSummary } from "@features/users/services/usersApi";
-import type { VolumeSummary } from "@features/volumes/services/volumesApi";
+import type {
+	VolumeMovePreview,
+	VolumeMoveResult,
+	VolumeSummary,
+} from "@features/volumes/services/volumesApi";
 import type { Machine } from "@shared/types/api";
 
 // Shared test fixture factories: one authoritative shape per DTO, imported
@@ -214,6 +222,65 @@ export function secretFixture(
 		driver: "file",
 		createdAt: "2026-08-20T10:00:00Z",
 		updatedAt: "2026-08-20T10:00:00Z",
+		...overrides,
+	};
+}
+
+// Secret copy/move preview (GET .../secrets/{id}/move-preview, issue 239):
+// default shape is a clean target and one referencing quadlet; tests
+// override `collision`/`referencingQuadlets` per scenario.
+export function secretMovePreviewFixture(
+	overrides: Partial<SecretMovePreview> = {},
+): SecretMovePreview {
+	return {
+		collision: false,
+		referencingQuadlets: [{ name: "web.container" }],
+		...overrides,
+	};
+}
+
+// Secret transfer envelope (POST .../secrets/{id}/move, issue 239): the
+// plain JSON answer. Default shape is a completed move of db-password from
+// m-1 to m-2.
+export function secretMoveResultFixture(
+	overrides: Partial<SecretMoveResult> = {},
+): SecretMoveResult {
+	return {
+		name: "db-password",
+		status: "moved",
+		sourceMachineId: "m-1",
+		targetMachineId: "m-2",
+		...overrides,
+	};
+}
+
+// Volume copy/move preview (GET .../volumes/{name}/move-preview, issue 238):
+// default shape is a clean target, an idle source, and one referencing
+// quadlet; tests override `collision`/`inUse`/`referencingQuadlets` per
+// scenario.
+export function volumeMovePreviewFixture(
+	overrides: Partial<VolumeMovePreview> = {},
+): VolumeMovePreview {
+	return {
+		collision: false,
+		inUse: false,
+		referencingQuadlets: [{ name: "web.container" }],
+		...overrides,
+	};
+}
+
+// Volume transfer envelope (POST .../volumes/{name}/move, issue 238): the
+// terminal complete event's result. Default shape is a completed move of
+// app-data from m-1 to m-2.
+export function volumeMoveResultFixture(
+	overrides: Partial<VolumeMoveResult> = {},
+): VolumeMoveResult {
+	return {
+		name: "app-data",
+		status: "moved",
+		sourceMachineId: "m-1",
+		targetMachineId: "m-2",
+		bytes: 2097152,
 		...overrides,
 	};
 }

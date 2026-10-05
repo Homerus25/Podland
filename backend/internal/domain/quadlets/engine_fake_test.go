@@ -142,6 +142,7 @@ func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, o
 // absent" and "no store consult for hostPath references".
 type fakeMoveSecretEngine struct {
 	namesFn  func() ([]string, error)
+	hasFn    func(name string) (bool, error)
 	revealFn func(name string) (string, error)
 	createFn func(name, value string) error
 }
@@ -151,6 +152,13 @@ func (f *fakeMoveSecretEngine) Names() ([]string, error) {
 		panic("unexpected moveSecretEngine.Names call")
 	}
 	return f.namesFn()
+}
+
+func (f *fakeMoveSecretEngine) Has(name string) (bool, error) {
+	if f.hasFn == nil {
+		panic("unexpected moveSecretEngine.Has call")
+	}
+	return f.hasFn(name)
 }
 
 func (f *fakeMoveSecretEngine) Reveal(name string) (string, error) {

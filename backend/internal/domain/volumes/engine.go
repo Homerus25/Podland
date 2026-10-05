@@ -29,7 +29,100 @@ type VolumeEngine interface {
 	Import(name string, r io.Reader) error
 }
 
-// VolumeEngineProvider is the volumes domain's slice of the connection
+// VolumeUsageEngine is the volumes domain's view of one machine's
+// in-use surface (issue 238): the exact reads the move/copy preview and
+// transfer need to decide whether a volume is in use and which quadlets
+// reference it. Podman reports no in-use flag on volume inspect and no
+// volume filter on container list, so in-use is derived here from the
+// container list's mounts alone; the quadlet files' `Volume=` lines feed
+// only the preview's referencing-quadlets warning, never the in-use
+// decision. Deliberately narrow: no container lifecycle, no quadlet
+// install — the move/copy never mutates either surface.
+type VolumeUsageEngine interface {
+	// ContainerMounts lists every container (all states) with its
+	// user-declared volume mounts, each as written (`name:/dest:opts`).
+	ContainerMounts() ([]ContainerMounts, error)
+	// ListQuadletNames lists the machine's quadlet file names.
+	ListQuadletNames() ([]string, error)
+	// PrintQuadlet returns one quadlet file's verbatim content.
+	PrintQuadlet(name string) (string, error)
+}
+
+// ContainerMounts is one listed container's name and its user-declared
+// volume mounts, each string the `Volume=` source as written (the part
+// before the first ":" is the volume name or host path).
+type ContainerMounts struct {
+	Name   string
+	Mounts []string
+}
+
+// VolumeUsageEngineProvider is the volumes domain's slice of the
+// connection seam for the usage surface (issue 238): it hands a closure
+// one machine's VolumeUsageEngine, delegating to connections.Manager.
+type VolumeUsageEngineProvider interface {
+	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e VolumeUsageEngine) error) error
+}
+
+// NewVolumeUsageEngineProvider returns the production usage provider: it
+// wraps the connection manager and builds the tunnel engine inside the
+// connection lease, like NewVolumeEngineProvider does for volumes.
+func NewVolumeUsageEngineProvider(conn connections.Manager) VolumeUsageEngineProvider {
+	return connectionUsageEngines{conn: conn}
+}
+
+// connectionUsageEngines is the production VolumeUsageEngineProvider.
+type connectionUsageEngines struct {
+	conn connections.Manager
+}
+
+func (p connectionUsageEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e VolumeUsageEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+		return fn(&podmanVolumeUsageEngine{ctx: connCtx})
+	})
+}
+
+// podmanVolumeUsageEngine implements VolumeUsageEngine against one live
+// connection.
+type podmanVolumeUsageEngine struct {
+	ctx context.Context
+}
+
+func (e *podmanVolumeUsageEngine) tunnelEngine() *tunnel.ContainerEngine {
+	return &tunnel.ContainerEngine{ClientCtx: e.ctx}
+}
+
+func (e *podmanVolumeUsageEngine) ContainerMounts() ([]ContainerMounts, error) {
+	list, err := e.tunnelEngine().ContainerList(e.ctx, entities.ContainerListOptions{All: true})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ContainerMounts, 0, len(list))
+	for _, container := range list {
+		name := ""
+		if len(container.Names) > 0 {
+			name = container.Names[0]
+		}
+		out = append(out, ContainerMounts{Name: name, Mounts: container.Mounts})
+	}
+	return out, nil
+}
+
+func (e *podmanVolumeUsageEngine) ListQuadletNames() ([]string, error) {
+	list, err := e.tunnelEngine().QuadletList(e.ctx, entities.QuadletListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(list))
+	for _, quadlet := range list {
+		names = append(names, quadlet.Name)
+	}
+	return names, nil
+}
+
+func (e *podmanVolumeUsageEngine) PrintQuadlet(name string) (string, error) {
+	return e.tunnelEngine().QuadletPrint(e.ctx, name)
+}
+
 // seam: it hands a closure one machine's VolumeEngine. It delegates to
 // connections.Manager.WithConnection, which owns acquisition, the
 // warn-and-502-sentinel failure contract, and the op tag.

@@ -57,13 +57,67 @@ func (f *fakeSecretEngine) Remove(name string) error {
 type fakeEngineProvider struct {
 	engine SecretEngine
 	err    error
+	// engines serves per-machine engines keyed by machine ID — the shape
+	// the cross-machine copy/move exercises. When non-nil it takes
+	// precedence over engine; a lookup miss panics, so a closure crossing
+	// an unexpected machine fails the test loudly.
+	engines map[string]SecretEngine
 }
 
 func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretEngine) error) error {
 	if p.err != nil {
 		return p.err
 	}
+	if p.engines != nil {
+		e, ok := p.engines[machineID]
+		if !ok {
+			panic("unexpected WithEngine machine: " + machineID)
+		}
+		return fn(e)
+	}
 	return fn(p.engine)
+}
+
+// fakeUsageEngine is the function-field fake for the SecretUsageEngine
+// seam. Each test arms only the operations its scenario needs; an
+// unarmed operation panics, so an unexpected engine call fails the test
+// loudly.
+type fakeUsageEngine struct {
+	listQuadletNamesFn func() ([]string, error)
+	printQuadletFn     func(name string) (string, error)
+}
+
+func (f *fakeUsageEngine) ListQuadletNames() ([]string, error) {
+	if f.listQuadletNamesFn == nil {
+		panic("unexpected SecretUsageEngine.ListQuadletNames call")
+	}
+	return f.listQuadletNamesFn()
+}
+
+func (f *fakeUsageEngine) PrintQuadlet(name string) (string, error) {
+	if f.printQuadletFn == nil {
+		panic("unexpected SecretUsageEngine.PrintQuadlet call")
+	}
+	return f.printQuadletFn(name)
+}
+
+// fakeUsageEngineProvider serves per-machine usage engines keyed by
+// machine ID; a lookup miss panics, so a closure crossing an unexpected
+// machine fails the test loudly.
+type fakeUsageEngineProvider struct {
+	engines map[string]SecretUsageEngine
+	err     error
+}
+
+func (p fakeUsageEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretUsageEngine) error) error {
+	if p.err != nil {
+		return p.err
+	}
+	e, ok := p.engines[machineID]
+	if !ok {
+		panic("unexpected usage WithEngine machine: " + machineID)
+	}
+	return fn(e)
 }
 
 // TestSecretService_AcquireFailureIsThe502Sentinel pins the service-side

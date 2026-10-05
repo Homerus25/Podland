@@ -77,11 +77,73 @@ func (f *fakeVolumeEngine) Import(name string, r io.Reader) error {
 type fakeEngineProvider struct {
 	engine VolumeEngine
 	err    error
+	// engines serves per-machine engines keyed by machine ID — the shape
+	// the cross-machine copy/move exercises. When non-nil it takes
+	// precedence over engine; a lookup miss panics, so a closure crossing
+	// an unexpected machine fails the test loudly.
+	engines map[string]VolumeEngine
 }
 
 func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e VolumeEngine) error) error {
 	if p.err != nil {
 		return p.err
 	}
+	if p.engines != nil {
+		e, ok := p.engines[machineID]
+		if !ok {
+			panic("unexpected WithEngine machine: " + machineID)
+		}
+		return fn(e)
+	}
 	return fn(p.engine)
+}
+
+// fakeUsageEngine is the function-field fake for the VolumeUsageEngine
+// seam. Each test arms only the operations its scenario needs; an
+// unarmed operation panics, so an unexpected engine call fails the test
+// loudly.
+type fakeUsageEngine struct {
+	containerMountsFn  func() ([]ContainerMounts, error)
+	listQuadletNamesFn func() ([]string, error)
+	printQuadletFn     func(name string) (string, error)
+}
+
+func (f *fakeUsageEngine) ContainerMounts() ([]ContainerMounts, error) {
+	if f.containerMountsFn == nil {
+		panic("unexpected VolumeUsageEngine.ContainerMounts call")
+	}
+	return f.containerMountsFn()
+}
+
+func (f *fakeUsageEngine) ListQuadletNames() ([]string, error) {
+	if f.listQuadletNamesFn == nil {
+		panic("unexpected VolumeUsageEngine.ListQuadletNames call")
+	}
+	return f.listQuadletNamesFn()
+}
+
+func (f *fakeUsageEngine) PrintQuadlet(name string) (string, error) {
+	if f.printQuadletFn == nil {
+		panic("unexpected VolumeUsageEngine.PrintQuadlet call")
+	}
+	return f.printQuadletFn(name)
+}
+
+// fakeUsageEngineProvider serves per-machine usage engines keyed by
+// machine ID; a lookup miss panics, so a closure crossing an unexpected
+// machine fails the test loudly.
+type fakeUsageEngineProvider struct {
+	engines map[string]VolumeUsageEngine
+	err     error
+}
+
+func (p fakeUsageEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e VolumeUsageEngine) error) error {
+	if p.err != nil {
+		return p.err
+	}
+	e, ok := p.engines[machineID]
+	if !ok {
+		panic("unexpected usage WithEngine machine: " + machineID)
+	}
+	return fn(e)
 }

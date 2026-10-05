@@ -6,15 +6,21 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"path"
 	"strings"
+	"time"
 
+	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -198,6 +204,92 @@ func (h *VolumeHandler) Populate(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(http.StatusNoContent)
 		return nil
+	})
+}
+
+// MovePreview answers the copy/move dialog's facts (issue 238,
+// doku/description_volumes_api.md): collision, in-use, referencing
+// quadlets. Route-level RequireMachineAccess (app.go) gates the subtree
+// at read; the target machine's read access is enforced inside the
+// service against the access store.
+func (h *VolumeHandler) MovePreview(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*VolumeMovePreviewResponse, error) {
+		volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
+		if guard != nil {
+			return nil, guard
+		}
+
+		targetMachineID, guard := web.QueryString(r, "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		return h.service.MovePreview(ctx, userID, machineID, volumeName, targetMachineID)
+	})
+}
+
+// Move handles the cross-machine copy/move transfer of a volume (issue
+// 238, doku/description_volumes_api.md). The route sits at the
+// subtree's write gate for the SOURCE machine; the target machine's
+// write-level access is enforced inside the service against the access
+// store.
+//
+// Transport: ALWAYS NDJSON — no plain/stream fork, one code path with
+// progress for free. The data phase can run minutes on real volumes, so
+// the caller gets progress events and one terminal event (complete
+// envelope or mapped error). Errors answered BEFORE the stream begins
+// (bad param, bad body) keep the plain envelope. The response carries
+// its own 10-minute write deadline — the data phase routinely exceeds
+// the global 30-second write timeout (the registry-pull precedent).
+func (h *VolumeHandler) Move(w http.ResponseWriter, r *http.Request) {
+	volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
+	if guard != nil {
+		errors.RespondWithError(w, guard, contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	// Decode answers its 400s before the stream begins; the streaming
+	// envelope takes over from there (the quadlet move's arrangement).
+	var request VolumeMoveRequest
+	if appErr := web.Decode(r, &request); appErr != nil {
+		errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	operationID := uuid.New().String()
+	slog.InfoContext(r.Context(), "Move volume across machines",
+		slog.String("requestID", contextutils.GetRequestID(r.Context())),
+		slog.String("machineID", chi.URLParam(r, "id")),
+		slog.String("volumeName", volumeName),
+		slog.String("operationID", operationID))
+
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(10 * time.Minute)); err != nil {
+		slog.WarnContext(r.Context(), "Failed to extend write deadline", slog.Any("error", err))
+	}
+
+	stream := streaming.Begin(w, r)
+	if stream == nil {
+		return
+	}
+
+	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[VolumeMoveEvent, *VolumeMoveResponse]{
+		Operation: func(ctx context.Context, onProgress func(VolumeMoveEvent)) (*VolumeMoveResponse, error) {
+			return h.service.Move(ctx, stream.UserID, stream.MachineID, volumeName, request, func(event VolumeMoveEvent) {
+				event.OperationID = operationID
+				event.MachineID = stream.MachineID
+				onProgress(event)
+			})
+		},
+		OnEvent: func(event VolumeMoveEvent) error {
+			return stream.Writer.Write(event)
+		},
+		CompleteEvent: func(response *VolumeMoveResponse) any {
+			return NewVolumeMoveCompleteEvent(operationID, stream.MachineID, *response)
+		},
+		ErrorDefault: errors.ErrConnectionFailed,
+		ErrorEvent: func(code, message string, _ bool) any {
+			return NewVolumeMoveErrorEvent(operationID, stream.MachineID, code, message)
+		},
 	})
 }
 

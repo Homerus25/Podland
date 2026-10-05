@@ -79,3 +79,83 @@ export async function deleteSecret(
 ): Promise<void> {
 	await api.delete(machineApiPath(machineId, "secrets", secretId));
 }
+
+// Mode of POST /api/machines/{id}/secrets/{secretId}/move
+// (backend/internal/domain/secrets/dto.go SecretMoveMode*): "copy" reveals
+// the value on the source (admin) and creates the secret on the target;
+// "move" additionally removes the source secret once the target holds it.
+export type SecretMoveMode = "copy" | "move";
+
+// Body of the secret transfer endpoint
+// (backend/internal/domain/secrets/dto.go SecretMoveRequest). The name is
+// preserved on both machines; there is no rename and no overwrite flag —
+// a same-named target secret refuses the transfer with 409.
+export interface SecretMoveInput {
+	targetMachineId: string;
+	mode: SecretMoveMode;
+}
+
+// Status of a secret transfer
+// (backend/internal/domain/secrets/dto.go SecretMoveStatus*): "copied" for
+// a completed copy, "moved" for a completed move, "partial" when the target
+// install succeeded but the source removal failed — the secret then exists
+// on both machines.
+export type SecretMoveStatus = "copied" | "moved" | "partial";
+
+// Response of POST /api/machines/{id}/secrets/{secretId}/move
+// (backend/internal/domain/secrets/dto.go SecretMoveResponse), a plain
+// JSON envelope — secret values are small, the NDJSON transport stays a
+// volume concern. error is the removal-failure detail, populated only when
+// status is "partial"; the value never appears here.
+export interface SecretMoveResult {
+	name: string;
+	status: SecretMoveStatus;
+	sourceMachineId: string;
+	targetMachineId: string;
+	error?: string;
+}
+
+// One quadlet file on the source machine whose `Secret=` lines resolve to
+// the secret (backend/internal/domain/secrets/dto.go
+// SecretMoveQuadletRef) — the preview's warning, never a block.
+export interface SecretMoveQuadletRef {
+	name: string;
+}
+
+// Response of GET /api/machines/{id}/secrets/{secretId}/move-preview
+// (backend/internal/domain/secrets/dto.go SecretMovePreviewResponse): the
+// dialog's facts. collision: the target already holds a same-named secret
+// (the transfer refuses, never overwrites). referencingQuadlets: the
+// source machine's quadlet files referencing the secret — a warning in
+// move mode, moving breaks them.
+export interface SecretMovePreview {
+	collision: boolean;
+	referencingQuadlets: SecretMoveQuadletRef[];
+}
+
+export async function getSecretMovePreview(
+	machineId: string,
+	secretId: string,
+	targetMachineId: string,
+): Promise<SecretMovePreview> {
+	const response = await api.get<SecretMovePreview>(
+		machineApiPath(machineId, "secrets", secretId, "move-preview"),
+		{ params: { targetMachineId } },
+	);
+	return response.data;
+}
+
+// POST /api/machines/{id}/secrets/{secretId}/move -> 200 with the plain
+// JSON transfer envelope. The secret is addressed by name, the row's key.
+// A same-named target secret surfaces as 409 SECRET_ALREADY_EXISTS.
+export async function moveSecret(
+	machineId: string,
+	secretId: string,
+	input: SecretMoveInput,
+): Promise<SecretMoveResult> {
+	const response = await api.post<SecretMoveResult>(
+		machineApiPath(machineId, "secrets", secretId, "move"),
+		input,
+	);
+	return response.data;
+}

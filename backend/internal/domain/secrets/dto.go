@@ -113,6 +113,85 @@ type SecretCreateResponse struct {
 	ID string `json:"id"`
 }
 
+// Mode labels for the cross-machine secret copy/move endpoint (issue 239):
+// "copy" reveals the value on the source and creates the secret on the
+// target; "move" additionally removes the source secret after the target
+// install succeeded.
+const (
+	SecretMoveModeCopy = "copy"
+	SecretMoveModeMove = "move"
+)
+
+// Transfer status labels for the cross-machine secret copy/move endpoint
+// (issue 239): copy answers "copied"; move answers "moved", or "partial"
+// when the target install succeeded but the source removal failed (the
+// secret then exists on both machines).
+const (
+	SecretMoveStatusCopied  = "copied"
+	SecretMoveStatusMoved   = "moved"
+	SecretMoveStatusPartial = "partial"
+)
+
+// SecretMoveRequest is the body of the cross-machine secret copy/move
+// endpoint (POST .../secrets/{secretId}/move, issue 239). The name is
+// preserved: the target secret carries the source's name, no rename, no
+// within-machine duplicate.
+type SecretMoveRequest struct {
+	// TargetMachineID is the machine the secret is transferred to. Required.
+	TargetMachineID string `json:"targetMachineId" validate:"required,min=1"`
+	// Mode selects the transfer semantics. "copy" reveals the value on
+	// the source and creates the secret on the target; "move"
+	// additionally removes the source after the target install
+	// succeeded. Required.
+	Mode string `json:"mode" validate:"required,oneof=copy move"`
+}
+
+// SecretMoveResponse is the transfer envelope both modes answer with
+// (issue 239). Status carries the outcome: "copied" for a completed copy,
+// "moved" for a completed move, and "partial" when a move's target
+// install succeeded but the source removal failed — the secret then
+// exists on both machines, and Error carries the removal failure's
+// detail. The value never appears here: it travelled source→target
+// inside the transfer, never through the response.
+type SecretMoveResponse struct {
+	// Name of the transferred secret (identical on both machines — the
+	// transfer carries no rename).
+	Name string `json:"name"`
+	// Status of the transfer: "copied", "moved", or "partial".
+	Status string `json:"status"`
+	// SourceMachineID is the machine the secret was transferred from.
+	SourceMachineID string `json:"sourceMachineId"`
+	// TargetMachineID is the machine the secret was created on.
+	TargetMachineID string `json:"targetMachineId"`
+	// Error details why the source removal failed when Status is
+	// "partial" — the secret exists on both machines and the source side
+	// must be cleaned up manually. Empty otherwise.
+	Error string `json:"error,omitempty"`
+}
+
+// SecretMovePreviewResponse answers everything the copy/move dialog must
+// show before confirming (GET .../secrets/{secretId}/move-preview, issue
+// 239): whether the target machine already holds a same-named secret (a
+// collision blocks the confirm), and which source quadlets reference the
+// secret (a warning in move mode — moving breaks those quadlets; the
+// confirm stays allowed).
+type SecretMovePreviewResponse struct {
+	// Collision reports a same-named secret on the target machine. The
+	// transfer never overwrites: the backend re-checks at execution time
+	// and answers 409 SECRET_ALREADY_EXISTS.
+	Collision bool `json:"collision"`
+	// ReferencingQuadlets lists the source machine's quadlet files whose
+	// `Secret=` lines resolve to the secret — a warning, never a block.
+	ReferencingQuadlets []SecretMoveQuadletRef `json:"referencingQuadlets"`
+}
+
+// SecretMoveQuadletRef names one source quadlet file referencing the
+// secret (issue 239).
+type SecretMoveQuadletRef struct {
+	// Name is the quadlet's file name, extension included.
+	Name string `json:"name"`
+}
+
 // formatSecretTime renders a podman timestamp as an ISO8601 string,
 // yielding "" for the zero time (mirroring the images DTO convention).
 func formatSecretTime(ts time.Time) string {

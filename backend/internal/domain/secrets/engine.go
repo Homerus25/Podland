@@ -7,6 +7,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/connections"
 	podmanSecrets "go.podman.io/podman/v6/pkg/bindings/secrets"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
 // SecretEngine is the secrets domain's view of one machine's podman: the
@@ -30,6 +31,70 @@ type SecretEngine interface {
 // warn-and-502-sentinel failure contract, and the op tag.
 type SecretEngineProvider interface {
 	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretEngine) error) error
+}
+
+// SecretUsageEngine is the secrets domain's view of one machine's
+// quadlet surface (issue 239): the exact reads the copy/move preview
+// needs to decide which quadlet files reference a secret. Deliberately
+// narrow: no quadlet install or lifecycle — the copy/move never mutates
+// the quadlet surface.
+type SecretUsageEngine interface {
+	// ListQuadletNames lists the machine's quadlet file names.
+	ListQuadletNames() ([]string, error)
+	// PrintQuadlet returns one quadlet file's verbatim content.
+	PrintQuadlet(name string) (string, error)
+}
+
+// SecretUsageEngineProvider is the secrets domain's slice of the
+// connection seam for the quadlet surface (issue 239): it hands a
+// closure one machine's SecretUsageEngine, delegating to
+// connections.Manager.
+type SecretUsageEngineProvider interface {
+	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretUsageEngine) error) error
+}
+
+// NewSecretUsageEngineProvider returns the production usage provider: it
+// wraps the connection manager and builds the tunnel engine inside the
+// connection lease, like NewSecretEngineProvider does for secrets.
+func NewSecretUsageEngineProvider(conn connections.Manager) SecretUsageEngineProvider {
+	return connectionUsageEngines{conn: conn}
+}
+
+// connectionUsageEngines is the production SecretUsageEngineProvider.
+type connectionUsageEngines struct {
+	conn connections.Manager
+}
+
+func (p connectionUsageEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretUsageEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+		return fn(&podmanSecretUsageEngine{ctx: connCtx})
+	})
+}
+
+// podmanSecretUsageEngine implements SecretUsageEngine against one live
+// connection.
+type podmanSecretUsageEngine struct {
+	ctx context.Context
+}
+
+func (e *podmanSecretUsageEngine) tunnelEngine() *tunnel.ContainerEngine {
+	return &tunnel.ContainerEngine{ClientCtx: e.ctx}
+}
+
+func (e *podmanSecretUsageEngine) ListQuadletNames() ([]string, error) {
+	list, err := e.tunnelEngine().QuadletList(e.ctx, entities.QuadletListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(list))
+	for _, quadlet := range list {
+		names = append(names, quadlet.Name)
+	}
+	return names, nil
+}
+
+func (e *podmanSecretUsageEngine) PrintQuadlet(name string) (string, error) {
+	return e.tunnelEngine().QuadletPrint(e.ctx, name)
 }
 
 // NewSecretEngineProvider returns the production provider: it wraps the

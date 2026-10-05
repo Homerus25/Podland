@@ -6,7 +6,9 @@ import (
 	"io"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/transfer"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
@@ -16,6 +18,23 @@ import (
 // service itself owns only domain mapping and composition.
 type VolumeService struct {
 	engines VolumeEngineProvider
+	// usageEngines resolves the in-use surface the cross-machine copy/move
+	// (issue 238) derives its facts from: container mounts and quadlet
+	// files. Wired via WithUsageEngines; production wiring always sets it
+	// — calling a move path on a service without it is a wiring bug and
+	// panics at the seam.
+	usageEngines VolumeUsageEngineProvider
+	// accessRepo resolves the caller's permission level for the
+	// cross-machine copy/move (issue 238): route middleware only sees the
+	// route's machine, so the target machine's access is checked here,
+	// against the store, before any podman call. Wired via WithAccessRepo.
+	accessRepo permission.PermissionGetter
+	// maxVolumeUploadBytes bounds the copy/move's data stream (issue 238,
+	// §19), enforced by the transfer kit's counting reader. Wired via
+	// WithMaxVolumeUploadBytes from the same config value populate
+	// uploads cap with; zero falls back to the transfer kit's
+	// DefaultMaxVolumeUploadBytes (the kit owns the default per §19).
+	maxVolumeUploadBytes int64
 }
 
 // NewVolumeService creates a new VolumeService
@@ -23,6 +42,46 @@ func NewVolumeService(engines VolumeEngineProvider) *VolumeService {
 	return &VolumeService{
 		engines: engines,
 	}
+}
+
+// WithUsageEngines wires the in-use surface seam the cross-machine
+// copy/move (issue 238) reads and returns the service for chaining.
+// Production wiring always sets it; calling a move path on a service
+// without it is a wiring bug and panics at the seam.
+func (s *VolumeService) WithUsageEngines(usageEngines VolumeUsageEngineProvider) *VolumeService {
+	s.usageEngines = usageEngines
+	return s
+}
+
+// WithAccessRepo wires the machine-access store the cross-machine
+// copy/move (issue 238) gates the target machine on, and returns the
+// service for chaining. Production wiring always sets it; calling a
+// move path on a service without it is a wiring bug and panics at the
+// gate.
+func (s *VolumeService) WithAccessRepo(accessRepo permission.PermissionGetter) *VolumeService {
+	s.accessRepo = accessRepo
+	return s
+}
+
+// WithMaxVolumeUploadBytes wires the copy/move data stream's bound
+// (issue 238, §19) and returns the service for chaining. The bound is
+// service-owned — the same VOLUME_UPLOAD_MAX_BYTES config value populate
+// uploads cap with — so a transfer cannot stream past what the
+// deployment already accepts for volume data.
+func (s *VolumeService) WithMaxVolumeUploadBytes(max int64) *VolumeService {
+	s.maxVolumeUploadBytes = max
+	return s
+}
+
+// volumeDataLimit answers the wired transfer bound; zero (unset in
+// tests) falls back to the transfer kit's DefaultMaxVolumeUploadBytes
+// — the kit owns the default (§19), so this fallback and the quadlets
+// domain's migration bound cannot drift apart.
+func (s *VolumeService) volumeDataLimit() int64 {
+	if s.maxVolumeUploadBytes == 0 {
+		return transfer.DefaultMaxVolumeUploadBytes
+	}
+	return s.maxVolumeUploadBytes
 }
 
 // List returns every volume on the specified machine, named and anonymous

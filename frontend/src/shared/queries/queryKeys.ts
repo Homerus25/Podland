@@ -57,8 +57,38 @@ export function quadletMovePreviewQueryKey(
 	] as const;
 }
 
+// The volume copy/move preview is a volume sub-resource keyed by the chosen
+// target, so changing the target refetches. Never an invalidation target of
+// its own: volumes-prefix invalidation (a transfer's success) covers it.
+export function volumeMovePreviewQueryKey(
+	machineId: string,
+	volumeName: string,
+	targetMachineId: string,
+) {
+	return [
+		...volumeQueryKey(machineId, volumeName),
+		"move-preview",
+		targetMachineId,
+	] as const;
+}
+
 export function secretQueryKey(machineId: string, secretId: string) {
 	return [...secretsQueryKey(machineId), secretId] as const;
+}
+
+// The secret copy/move preview is a secret sub-resource keyed by the chosen
+// target, so changing the target refetches. Never an invalidation target of
+// its own: secrets-prefix invalidation (a transfer's success) covers it.
+export function secretMovePreviewQueryKey(
+	machineId: string,
+	secretId: string,
+	targetMachineId: string,
+) {
+	return [
+		...secretQueryKey(machineId, secretId),
+		"move-preview",
+		targetMachineId,
+	] as const;
 }
 
 export function volumeQueryKey(machineId: string, volumeName: string) {

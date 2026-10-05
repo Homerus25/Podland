@@ -19,9 +19,17 @@ import (
 // domain mapping and the reveal gate.
 type SecretService struct {
 	engines SecretEngineProvider
+	// usageEngines resolves the quadlet surface the cross-machine
+	// copy/move preview (issue 239) derives its referencing-quadlet
+	// warning from. Wired via WithUsageEngines; production wiring
+	// always sets it — calling a move path on a service without it is a
+	// wiring bug and panics at the seam.
+	usageEngines SecretUsageEngineProvider
 	// accessRepo resolves the caller's permission level for the
 	// admin-only value reveal (?reveal=true): the gate is a query param,
 	// not a separate route, so it cannot ride on route-level middleware.
+	// The cross-machine copy/move (issue 239) gates the source's reveal
+	// and the target machine's level on it too.
 	accessRepo permission.PermissionGetter
 }
 
@@ -33,6 +41,15 @@ func NewSecretService(engines SecretEngineProvider, accessRepo permission.Permis
 		engines:    engines,
 		accessRepo: accessRepo,
 	}
+}
+
+// WithUsageEngines wires the quadlet surface seam the cross-machine
+// copy/move preview (issue 239) reads and returns the service for
+// chaining. Production wiring always sets it; calling a move path on a
+// service without it is a wiring bug and panics at the seam.
+func (s *SecretService) WithUsageEngines(usageEngines SecretUsageEngineProvider) *SecretService {
+	s.usageEngines = usageEngines
+	return s
 }
 
 // List returns the metadata of the secrets on the specified machine.

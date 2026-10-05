@@ -170,8 +170,12 @@ func New(cfg *config.Config) (*App, error) {
 		WithAccessRepo(accessRepo).
 		WithMaxVolumeUploadBytes(cfg.Volumes.MaxUploadBytes).
 		WithSecretEngines(quadlets.NewQuadletSecretEngineProvider(connectionManager))
-	secretService := secrets.NewSecretService(secrets.NewSecretEngineProvider(connectionManager), accessRepo)
-	volumeService := volumes.NewVolumeService(volumes.NewVolumeEngineProvider(connectionManager))
+	secretService := secrets.NewSecretService(secrets.NewSecretEngineProvider(connectionManager), accessRepo).
+		WithUsageEngines(secrets.NewSecretUsageEngineProvider(connectionManager))
+	volumeService := volumes.NewVolumeService(volumes.NewVolumeEngineProvider(connectionManager)).
+		WithAccessRepo(accessRepo).
+		WithUsageEngines(volumes.NewVolumeUsageEngineProvider(connectionManager)).
+		WithMaxVolumeUploadBytes(cfg.Volumes.MaxUploadBytes)
 
 	// Initialize handlers. Each credential endpoint's failure-budget
 	// surface is the same value its service checks and spends — the
@@ -352,6 +356,21 @@ func New(cfg *config.Config) (*App, error) {
 						r.With(requireWrite).Post("/", secretHandler.Create)
 						r.Route("/{secretId}", func(r chi.Router) {
 							r.Get("/", secretHandler.Get)
+							// Move/copy preview stays read-level: it mutates
+							// nothing and reveals nothing on the source, and
+							// the target machine's read access is enforced
+							// inside the service against the access store
+							// (issue 239).
+							r.Get("/move-preview", secretHandler.MovePreview)
+							// The transfer mutates remote state (it creates
+							// on the target machine) and the value leaving the
+							// source is a reveal, so the service gates the
+							// source at admin on top of this write gate; the
+							// target machine's write access is enforced inside
+							// the service against the access store — route
+							// middleware only sees the route's machine (issue
+							// 239).
+							r.With(requireWrite).Post("/move", secretHandler.Move)
 							r.With(requireWrite).Delete("/", secretHandler.Delete)
 						})
 					})
@@ -371,7 +390,19 @@ func New(cfg *config.Config) (*App, error) {
 							// Export stays read-level: users who can
 							// read a machine's state can read its data.
 							r.Get("/export", volumeHandler.Export)
+							// Move/copy preview stays read-level: it mutates
+							// nothing on the source, and the target machine's
+							// read access is enforced inside the service
+							// against the access store (issue 238).
+							r.Get("/move-preview", volumeHandler.MovePreview)
 							r.With(requireWrite).Post("/populate", volumeHandler.Populate)
+							// The transfer mutates remote state (it creates
+							// on the target machine), so it gates at write
+							// level on the source; the target machine's write
+							// access is enforced inside the service against
+							// the access store — route middleware only sees
+							// the route's machine (issue 238).
+							r.With(requireWrite).Post("/move", volumeHandler.Move)
 							r.With(requireWrite).Delete("/", volumeHandler.Delete)
 						})
 					})

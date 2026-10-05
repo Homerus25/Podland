@@ -12,6 +12,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/streaming"
+	"github.com/Homerus25/podland/backend/internal/transfer"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -54,8 +55,9 @@ type QuadletService struct {
 	// maxVolumeUploadBytes bounds the volume data migration's stream (issue
 	// 214, §18), enforced by the data phase's counting reader. Wired via
 	// WithMaxVolumeUploadBytes from the same config value the volumes
-	// domain caps populate uploads with; zero falls back to
-	// DefaultMaxVolumeUploadBytes.
+	// domain caps populate uploads with; zero falls back to the transfer
+	// kit's DefaultMaxVolumeUploadBytes (the kit owns the default per
+	// §19).
 	maxVolumeUploadBytes int64
 	// secretEngines resolves the podman secret stores the move/copy's
 	// secret surface crosses (issue 215): the existence reads for the
@@ -90,11 +92,6 @@ func (s *QuadletService) WithAccessRepo(accessRepo permission.PermissionGetter) 
 	return s
 }
 
-// DefaultMaxVolumeUploadBytes is the volume data migration's bound when no
-// explicit override is wired in: 2 GiB, matching VOLUME_UPLOAD_MAX_BYTES
-// (the same env value the volumes domain's populate upload cap reads).
-const DefaultMaxVolumeUploadBytes int64 = 2 << 30
-
 // WithMaxVolumeUploadBytes wires the volume data migration's bound (issue
 // 214, §18) and returns the service for chaining. The bound is
 // service-owned — the same VOLUME_UPLOAD_MAX_BYTES config value the
@@ -116,11 +113,13 @@ func (s *QuadletService) WithSecretEngines(secretEngines moveSecretEngineProvide
 	return s
 }
 
-// volumeDataLimit answers the wired migration bound; zero (unset in tests)
-// falls back to DefaultMaxVolumeUploadBytes.
+// volumeDataLimit answers the wired migration bound; zero (unset in
+// tests) falls back to the transfer kit's DefaultMaxVolumeUploadBytes
+// — the kit owns the default (§19), so this fallback and the volumes
+// domain's copy/move bound cannot drift apart.
 func (s *QuadletService) volumeDataLimit() int64 {
 	if s.maxVolumeUploadBytes == 0 {
-		return DefaultMaxVolumeUploadBytes
+		return transfer.DefaultMaxVolumeUploadBytes
 	}
 	return s.maxVolumeUploadBytes
 }

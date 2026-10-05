@@ -187,6 +187,17 @@ closest sibling that already exists. Rulings so far:
   `QuadletService.Delete` and the move source half
   (`removeSourceAfterInstall` in `move.go`) are its two callers, distinct
   only in op tag and terminal values. Settled 2026-10-05 (issue 231).
+- **Cross-machine transfer core** — `internal/transfer` is the one kit
+  behind every cross-machine copy/move (architecture-decisions §19):
+  `CopyVolumeData` (export→import splice, byte bound, progress),
+  `ProbeVolumeEmpty` (bounded tar probe), and `TransferSecrets`
+  (reveal/create with same-name skips). The quadlet move's volume-data
+  phase (`internal/domain/quadlets/move_volume_data.go`), the
+  volumes copy/move (`internal/domain/volumes/move.go`), and the
+  secrets copy/move (`internal/domain/secrets/move.go`) are its three
+  compositions; handlers, DTOs, and preview logic stay per-domain, and
+  each domain maps the kit's errors onto its own wire codes. Settled
+  2026-10-05 (issue 238; secrets composition issue 239).
 - **Prune endpoints** — volumes prune is the reference pattern:
   `internal/domain/volumes/service.go` (`Prune`), `handler.go`
   (`Prune`), `dto.go` (`FromPodmanPruneReports`), and
@@ -208,10 +219,15 @@ closest sibling that already exists. Rulings so far:
   HTTP-shaped machine-resolution ritual — 401/400/404 — and maps the
   returned sentinels onto the error envelope the way the web envelope
   unwraps AppErrors), the secrets reveal gate (admin level, fired
-  before the connection lease), and the quadlet move/copy secret-transfer
+  before the connection lease), the quadlet move/copy secret-transfer
   gate (admin on the SOURCE machine, fired in preflight when
   `transferSecrets` is set — issue 215; a secret's value leaving a
-  machine is a reveal). `models.HasAtLeast` and the level
+  machine is a reveal), and the cross-machine transfer gates of the
+  volumes and secrets copy/move (issues 238/239: the target machine's
+  level — read for a preview, write for a transfer — enforced
+  in-service, since route middleware only sees the route's machine;
+  the secrets transfer additionally re-gates the source at admin,
+  the reveal). `models.HasAtLeast` and the level
   constants stay in `models`; `RequireAdmin` is a different domain
   (role, not level) with its own single owner already.
 - **Runtime connection failures** — a persisted machine's podman socket

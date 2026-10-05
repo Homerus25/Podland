@@ -562,10 +562,11 @@ into carrying the referenced podman SECRETS — name and value — along:
 - The secret phase runs **before anything is installed** — after the
   volume preflight but before a migrating move's stop and the volume data
   phase (cheap key-value transfers that need no stopped source, so their
-  failures abort before any state is mutated or bytes move). Any secret
-  failure aborts the transfer with 500 `SECRET_TRANSFER_FAILED` (the
-  message names the secret and the cause) with nothing installed, nothing
-  stopped, and both machines' quadlet sets untouched.
+  failures abort before any state is mutated or bytes move). A per-secret
+  failure (a reveal or a create) aborts the transfer with 500
+  `SECRET_TRANSFER_FAILED` (the message names the secret and the cause);
+  a store-level failure answers the generic 500 — either way nothing is
+  installed, nothing stopped, and both machines' quadlet sets untouched.
 - The transport does not change: secrets alone never switch the response
   to NDJSON streaming — only `migrateVolumeData` does (issue 214). With
   both flags set, the `secretTransfer` block rides the terminal

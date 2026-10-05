@@ -3,11 +3,27 @@ import {
 	createSecret,
 	deleteSecret,
 	getSecret,
+	getSecretMovePreview,
 	listSecrets,
+	moveSecret,
+	type SecretMoveInput,
+	type SecretMoveResult,
 } from "@features/secrets/services/secretsApi";
-import { secretQueryKey, secretsQueryKey } from "@shared/queries/queryKeys";
-import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+	secretMovePreviewQueryKey,
+	secretQueryKey,
+	secretsQueryKey,
+} from "@shared/queries/queryKeys";
+import {
+	invalidateMachineResources,
+	useListInvalidatingMutation,
+} from "@shared/queries/useListInvalidatingMutation";
+import {
+	type QueryClient,
+	useMutation,
+	useQuery,
+	useQueryClient,
+} from "@tanstack/react-query";
 
 export function useSecrets(machineId: string) {
 	return useQuery({
@@ -52,4 +68,60 @@ export function useDeleteSecret(machineId: string) {
 	return useListInvalidatingMutation(machineId, "secrets", (secretId: string) =>
 		deleteSecret(machineId, secretId),
 	);
+}
+
+// The transfer dialog's fact payload, keyed by the chosen target so a
+// target change refetches. Disabled until a target exists — the dialog
+// defaults the select to the first writable machine once the machines list
+// arrives.
+export function useSecretMovePreview(
+	machineId: string,
+	secretId: string,
+	targetMachineId: string | null,
+) {
+	return useQuery({
+		queryKey: secretMovePreviewQueryKey(
+			machineId,
+			secretId,
+			targetMachineId ?? "",
+		),
+		queryFn: () => {
+			if (targetMachineId === null) {
+				throw new Error("secret move preview requires a target machine");
+			}
+			return getSecretMovePreview(machineId, secretId, targetMachineId);
+		},
+		enabled: targetMachineId !== null,
+	});
+}
+
+// A secret transfer touches two machines: the target gains the secret and
+// (in move mode) the source loses it. The envelope carries both machine
+// ids, so both lists invalidate from what the server answered rather than
+// from closure assumptions. A "partial" result is still a success-shaped
+// answer — the value crossed — so both lists refresh there too. One owner
+// for the rule (the quadlet move's invalidateMoveResult pattern).
+export function invalidateSecretMoveResult(
+	queryClient: QueryClient,
+	result: SecretMoveResult,
+) {
+	invalidateMachineResources(queryClient, result.sourceMachineId, "secrets");
+	invalidateMachineResources(queryClient, result.targetMachineId, "secrets");
+}
+
+// The plain mutation behind the transfer dialog: the endpoint answers one
+// JSON envelope (no stream), and onSuccess invalidates both machines'
+// secret lists through invalidateSecretMoveResult.
+export function useMoveSecret(machineId: string) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: ({
+			secretId,
+			...input
+		}: { secretId: string } & SecretMoveInput) =>
+			moveSecret(machineId, secretId, input),
+		onSuccess: (result) => {
+			invalidateSecretMoveResult(queryClient, result);
+		},
+	});
 }

@@ -8,8 +8,8 @@ serves the embedded UI and API on :8080.
 ## Documentation map
 
 - `docs/architecture-decisions.md` — all system-level decisions, §-numbered
-  (§1 podman integration … §18 quadlet volume data migration). Code comments
-  cite these numbers; keep them stable.
+  (§1 podman integration … §19 one transfer kit behind every cross-machine
+  copy/move). Code comments cite these numbers; keep them stable.
 - `docs/backend-conventions.md` — read before touching `backend/`:
   endpoint envelopes, streaming kit, connection seam, testing expectations.
 - `docs/frontend-conventions.md` — read before touching `frontend/src/`:
@@ -40,6 +40,7 @@ One line each; full detail in `docs/architecture-decisions.md`.
 16. **Machine registration** — dedicated endpoint, synchronous connection test
 17. **First-run bootstrap** — setup landing page creates the first admin (one-time endpoint); no baked-in credentials; container DB in the mounted `/app/data` volume
 18. **Quadlet volume data migration** — opt-in `migrateVolumeData` on move/copy: preflight (409 non-empty target / 413 bound) → stop → export-import through the streaming kit; data before installs so a failure installs nothing
+19. **One transfer kit behind every cross-machine copy/move** — `internal/transfer` owns the export→import splice, byte bound, emptiness probe, and secret transfer; quadlet move's data phase, the volumes copy/move, and the secrets copy/move are its three compositions (§19)
 
 ## Glossary
 
@@ -56,6 +57,8 @@ One line each; full detail in `docs/architecture-decisions.md`.
 | **Companion quadlet** | A quadlet file on the same machine that another quadlet references by filename (a container's `Volume=app-data.volume`). Move/copy may carry the definition along — installed on the target before the referencing quadlet, skipped when the target's file is byte-identical; the volume's DATA follows only when the request opts into `migrateVolumeData` (§18) |
 | **Volume data migration** | The move/copy transfer's opt-in data phase (§18): every volume-kind `Volume=` reference resolves (bare name, or the companion's `VolumeName=`, else `systemd-<name>`) and its content is exported from the source and imported into the target. Refuses non-empty target volumes (409) unless `overwriteVolumes` merges; answers as NDJSON progress events with one terminal event |
 | **Secret transfer** | The move/copy transfer's opt-in secret phase (issue 215): every `Secret=` reference resolves (token before the first comma; `source=` governs the all-options form) and — with `transferSecrets` — its value is revealed on the source (admin on the source, the secrets API's reveal gate) and recreated on the target. Same-name skips before the reveal, secrets are copy-only, and per-reference outcomes ride the envelope's `secretTransfer` block |
+| **Volume copy/move** | The volumes domain's cross-machine copy/move (issue 238, §19): a volume's content is exported from the source machine and imported into the target through the shared transfer kit. Always answers NDJSON progress events with one terminal event; refuses a same-name target volume (409 `VOLUME_ALREADY_EXISTS`) and an in-use source on a move (409 `VOLUME_IN_USE`, `force` overrides); a move removes the source volume after the data lands, a copy leaves it |
+| **Secret copy/move** | The secrets domain's cross-machine copy/move (issue 239, §19): a secret's value is revealed on the source machine (admin — the reveal gate) and recreated on the target through the shared transfer kit. Answers one plain JSON envelope (no stream); refuses a same-name target secret (409 `SECRET_ALREADY_EXISTS`, re-checked at execution); a move removes the source secret after the target install, answering `partial` with the detail when the removal fails |
 
 ---
 

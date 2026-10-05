@@ -148,3 +148,81 @@ export async function populateVolume(
 export function volumeExportUrl(machineId: string, volumeName: string): string {
 	return machineApiUrl(machineId, "volumes", volumeName, "export");
 }
+
+// Mode of POST /api/machines/{id}/volumes/{name}/move
+// (backend/internal/domain/volumes/dto.go VolumeMoveMode*): "copy" creates
+// the target volume and streams the data into it; "move" additionally
+// removes the source volume once the target holds the data.
+export type VolumeMoveMode = "copy" | "move";
+
+// Body of the volume transfer endpoint
+// (backend/internal/domain/volumes/dto.go VolumeMoveRequest). force is
+// move-mode vocabulary (the delete flow's flag): a move of an in-use source
+// refuses with 409 VOLUME_IN_USE without it; copy never removes anything
+// and omits it entirely.
+export interface VolumeMoveInput {
+	targetMachineId: string;
+	mode: VolumeMoveMode;
+	force?: boolean;
+}
+
+// Status of a volume transfer
+// (backend/internal/domain/volumes/dto.go VolumeMoveStatus*): "copied" for
+// a completed copy, "moved" for a completed move, "partial" when the data
+// crossed but the source removal failed — the volume then exists on both
+// machines.
+export type VolumeMoveStatus = "copied" | "moved" | "partial";
+
+// Response of POST /api/machines/{id}/volumes/{name}/move
+// (backend/internal/domain/volumes/dto.go VolumeMoveResponse), carried by
+// the NDJSON stream's terminal complete event. bytes is the data that
+// crossed; error is the removal-failure detail, populated only when
+// status is "partial".
+export interface VolumeMoveResult {
+	name: string;
+	status: VolumeMoveStatus;
+	sourceMachineId: string;
+	targetMachineId: string;
+	bytes: number;
+	error?: string;
+}
+
+// One quadlet file on the source machine whose `Volume=` lines resolve to
+// the volume (backend/internal/domain/volumes/dto.go
+// VolumeMoveQuadletRef) — the preview's warning, never a block.
+export interface VolumeMoveQuadletRef {
+	name: string;
+}
+
+// Response of GET /api/machines/{id}/volumes/{name}/move-preview
+// (backend/internal/domain/volumes/dto.go VolumeMovePreviewResponse): the
+// dialog's facts. collision: the target already holds a same-named volume
+// (the transfer refuses, never overwrites). inUse: a container on the
+// source machine mounts the volume (a move refuses without force).
+export interface VolumeMovePreview {
+	collision: boolean;
+	inUse: boolean;
+	referencingQuadlets: VolumeMoveQuadletRef[];
+}
+
+export async function getVolumeMovePreview(
+	machineId: string,
+	volumeName: string,
+	targetMachineId: string,
+): Promise<VolumeMovePreview> {
+	const response = await api.get<VolumeMovePreview>(
+		machineApiPath(machineId, "volumes", volumeName, "move-preview"),
+		{ params: { targetMachineId } },
+	);
+	return response.data;
+}
+
+// Full stream URL for POST .../volumes/{name}/move: the endpoint always
+// answers NDJSON progress events with one terminal event. The transfer
+// body travels in the request, so no query is appended.
+export function volumeMoveStreamUrl(
+	machineId: string,
+	volumeName: string,
+): string {
+	return machineApiUrl(machineId, "volumes", volumeName, "move");
+}

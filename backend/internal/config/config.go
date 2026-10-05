@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"log/slog"
+
+	"github.com/Homerus25/podland/backend/internal/transfer"
 )
 
 // Config holds all application configuration
@@ -140,7 +142,10 @@ func Load() (*Config, error) {
 	cfg.Encryption.Key = getEnv("ENCRYPTION_KEY", "")
 
 	// Volumes
-	cfg.Volumes.MaxUploadBytes = getEnvInt64("VOLUME_UPLOAD_MAX_BYTES", 2<<30)
+	// The default is the transfer kit's DefaultMaxVolumeUploadBytes —
+	// the same bound the cross-machine copy/move falls back to — so
+	// the uploads cap and the transfer bound share one 2 GiB policy.
+	cfg.Volumes.MaxUploadBytes = getEnvInt64("VOLUME_UPLOAD_MAX_BYTES", transfer.DefaultMaxVolumeUploadBytes)
 
 	return cfg, nil
 }

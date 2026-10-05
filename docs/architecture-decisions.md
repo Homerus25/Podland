@@ -194,6 +194,44 @@ target:
   ruling (preview deduped by reference string, plan by resolved name) is
   the incident that requires it.
 
+### 19. One Transfer Kit Behind Every Cross-Machine Copy/Move (2026-10-05, issue 238)
+The export→import splice that issue 214 built inside the quadlet move
+is extracted into `internal/transfer`, and every cross-machine
+copy/move composes it instead of re-deriving it:
+- **The kit owns the splice, callers own the wire**: `transfer.CopyVolumeData`
+  pipes the source engine's export into the target engine's import
+  through the in-process pipe (cancellation closes it), enforces the
+  byte bound with a counting reader (`ErrBoundExceeded` at the first
+  byte past the limit), and reports progress through `BytesReportIncrement`
+  (1 MiB) callbacks. `transfer.ProbeVolumeEmpty` is the bounded
+  tar probe (first real entry proves content). `transfer.TransferSecrets`
+  carries the issue-215 secret ritual (reveal on source, create on
+  target, same-name skips). Error mapping stays with the caller: the
+  kit returns engine errors unwrapped plus its own sentinels, and each
+  domain maps them onto its own wire codes. The kit owns the bound's
+  default too: `transfer.DefaultMaxVolumeUploadBytes` (2 GiB) is the
+  one constant both domains' zero-value fallbacks and the config
+  default for `VOLUME_UPLOAD_MAX_BYTES` read, so the uploads cap and
+  the transfer bound cannot drift apart.
+- **Three compositions, one kit**: the quadlet move's volume-data phase
+  (`quadlets/move_volume_data.go`), the volumes domain's copy/move
+  (`volumes/move.go`), and the secrets domain's copy/move
+  (`secrets/move.go`) are the three callers; handlers, DTOs,
+  and preview logic stay per-domain. The volume copy/move endpoint
+  always answers NDJSON (no plain/stream fork): the target access
+  gate fires inside the operation, so a 403 rides the terminal error
+  event. The secret copy/move endpoint answers the plain JSON
+  envelope instead — secret values are small, the NDJSON transport
+  stays a volume concern — and its target access gate fires before
+  any podman call, so a 403 keeps its HTTP status.
+- **Adapters widen, never wrap**: the kit's seams are narrow
+  interfaces (`VolumeDataSource`/`VolumeDataTarget`); a domain engine
+  whose methods already match satisfies them structurally, and where
+  the names differ a one-line adapter widens the engine to the seam
+  (`volumeExportAdapter`/`volumeImportAdapter` in `volumes/move.go`;
+  the quadlets domain has its own). A domain never re-implements the
+  pipe, the bound, or the probe.
+
 ## Technical Stack
 
 ### Backend (Go)

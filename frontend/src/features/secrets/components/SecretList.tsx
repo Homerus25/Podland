@@ -1,6 +1,7 @@
-import { Button, Td, Text, Tr } from "@chakra-ui/react";
+import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
 import { can } from "@features/machines/permissions";
 import { CreateSecretDialog } from "@features/secrets/components/CreateSecretDialog";
+import { MoveSecretDialog } from "@features/secrets/components/MoveSecretDialog";
 import { SecretDetailModal } from "@features/secrets/components/SecretDetailModal";
 import {
 	useCreateSecret,
@@ -25,15 +26,18 @@ function SecretRow({
 	machine,
 	secret,
 	canDelete,
+	canMove,
 }: {
 	machine: Machine;
 	secret: SecretSummary;
 	canDelete: boolean;
+	canMove: boolean;
 }) {
 	const machineId = machine.id;
 	const deleteSecret = useDeleteSecret(machineId);
 	const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 	const [isDetailOpen, setIsDetailOpen] = useState(false);
+	const [isMoveOpen, setIsMoveOpen] = useState(false);
 
 	return (
 		<>
@@ -52,16 +56,29 @@ function SecretRow({
 				<Td>{formatRelativeDate(secret.createdAt)}</Td>
 				{canDelete ? (
 					<Td>
-						<Button
-							size="xs"
-							colorScheme="red"
-							variant="outline"
-							aria-label={`Delete ${secret.name}`}
-							onClick={() => setIsDeleteOpen(true)}
-							data-testid="delete-secret-button"
-						>
-							Delete
-						</Button>
+						<HStack spacing={2}>
+							{canMove ? (
+								<Button
+									size="xs"
+									variant="outline"
+									aria-label={`Move or copy ${secret.name}`}
+									onClick={() => setIsMoveOpen(true)}
+									data-testid="move-secret-button"
+								>
+									Move/Copy
+								</Button>
+							) : null}
+							<Button
+								size="xs"
+								colorScheme="red"
+								variant="outline"
+								aria-label={`Delete ${secret.name}`}
+								onClick={() => setIsDeleteOpen(true)}
+								data-testid="delete-secret-button"
+							>
+								Delete
+							</Button>
+						</HStack>
 					</Td>
 				) : null}
 			</Tr>
@@ -70,6 +87,13 @@ function SecretRow({
 					machine={machine}
 					secret={secret}
 					onClose={() => setIsDetailOpen(false)}
+				/>
+			) : null}
+			{isMoveOpen ? (
+				<MoveSecretDialog
+					machine={machine}
+					secret={secret}
+					onClose={() => setIsMoveOpen(false)}
 				/>
 			) : null}
 			{isDeleteOpen ? (
@@ -98,6 +122,10 @@ export function SecretList({ machine }: { machine: Machine }) {
 	const createSecret = useCreateSecret(machineId);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const canManage = can(machine, "manage-secrets");
+	// The transfer's source gate is admin — the value leaving the machine is
+	// a reveal — so the row's Move/Copy affordance sits behind
+	// reveal-secrets (admin ⊆ write, so it lives in the manage cell).
+	const canMove = can(machine, "reveal-secrets");
 
 	return (
 		<>
@@ -118,6 +146,7 @@ export function SecretList({ machine }: { machine: Machine }) {
 						machine={machine}
 						secret={secret}
 						canDelete={canManage}
+						canMove={canMove}
 					/>
 				)}
 				toolbar={

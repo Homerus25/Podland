@@ -196,7 +196,7 @@ describe("QuadletList lifecycle", () => {
 				web,
 				quadletFixture({ id: "db", name: "db", unit: "db.service" }),
 			]),
-			captureLifecycle("start", 100),
+			captureLifecycle("start", 500),
 		);
 		const user = userEvent.setup();
 		renderQuadletList();

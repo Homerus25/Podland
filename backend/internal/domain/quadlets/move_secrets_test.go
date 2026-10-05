@@ -327,6 +327,18 @@ func (r *recordingSecretStore) Names() ([]string, error) {
 	return append([]string{}, r.names...), nil
 }
 
+// Has answers the same-name check over what the store holds — including
+// what an earlier run's Create installed, so the re-run skip keeps
+// working.
+func (r *recordingSecretStore) Has(name string) (bool, error) {
+	for _, existing := range r.names {
+		if existing == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *recordingSecretStore) Reveal(name string) (string, error) {
 	if err, failed := r.fails[name]; failed {
 		return "", err

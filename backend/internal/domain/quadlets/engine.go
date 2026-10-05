@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
+	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"go.podman.io/podman/v6/pkg/bindings/quadlets"
 	podmanSecrets "go.podman.io/podman/v6/pkg/bindings/secrets"
 	bindingsVolumes "go.podman.io/podman/v6/pkg/bindings/volumes"
@@ -189,9 +190,12 @@ func (e *podmanQuadletEngine) VolumeImport(name string, r io.Reader) error {
 // metadata Inspect.
 type moveSecretEngine interface {
 	// Names lists the machine's podman secret names — the preview's
-	// existence read (both machines) and the transfer's same-name check
-	// (target).
+	// existence read (both machines).
 	Names() ([]string, error)
+	// Has answers whether the store holds a secret of this name — the
+	// transfer's same-name check (target). A missing secret is a clean
+	// false, never an error.
+	Has(name string) (bool, error)
 	// Reveal fetches one secret's value; a missing secret answers a
 	// podman not-found error (the caller's admin gate is the service's).
 	Reveal(name string) (string, error)
@@ -244,6 +248,22 @@ func (e *podmanMoveSecretEngine) Names() ([]string, error) {
 		}
 	}
 	return names, nil
+}
+
+// Has answers the same-name check through the unrevealed Inspect — one
+// store read for the one name the transfer asks about, no name list
+// crossing the seam. A missing secret is a clean false; the presence
+// answer is the same predicate the secrets domain's adapter uses (a
+// non-nil report), so the kit's one question has one truth table.
+func (e *podmanMoveSecretEngine) Has(name string) (bool, error) {
+	report, err := podmanSecrets.Inspect(e.ctx, name, new(podmanSecrets.InspectOptions))
+	if err != nil {
+		if podmanerr.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return report != nil, nil
 }
 
 // Reveal asks podman for the value (WithShowSecret) and maps it to the

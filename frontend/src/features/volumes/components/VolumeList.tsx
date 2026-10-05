@@ -12,6 +12,7 @@ import {
 } from "@chakra-ui/react";
 import { can } from "@features/machines/permissions";
 import { CreateVolumeDialog } from "@features/volumes/components/CreateVolumeDialog";
+import { MoveVolumeDialog } from "@features/volumes/components/MoveVolumeDialog";
 import {
 	useCreateVolume,
 	useDeleteVolume,
@@ -46,6 +47,7 @@ function VolumeRow({
 	isExporting,
 	onExport,
 	onPopulate,
+	onMove,
 }: {
 	volume: VolumeSummary;
 	onSelect: (name: string) => void;
@@ -54,6 +56,7 @@ function VolumeRow({
 	isExporting: boolean;
 	onExport: (volume: VolumeSummary) => void;
 	onPopulate: (volume: VolumeSummary) => void;
+	onMove: (volume: VolumeSummary) => void;
 }) {
 	return (
 		<Tr
@@ -90,6 +93,18 @@ function VolumeRow({
 				</Button>
 				{canManage ? (
 					<>
+						<Button
+							size="xs"
+							variant="outline"
+							aria-label={`Move or copy ${volume.name}`}
+							onClick={(event) => {
+								event.stopPropagation();
+								onMove(volume);
+							}}
+							data-testid="move-volume-button"
+						>
+							Move/Copy
+						</Button>
 						<Button
 							size="xs"
 							variant="outline"
@@ -349,7 +364,7 @@ function PopulateVolumeModal({
 // The Volumes tab body. The toolbar/triad/table machinery, the plural
 // testids, and the hint swap are ResourceList's; this adapter owns only the
 // columns, the clickable row with its inspect drawer, and the create,
-// export, populate, delete, and prune feature code.
+// export, populate, move/copy, delete, and prune feature code.
 export function VolumeList({ machine }: { machine: Machine }) {
 	const machineId = machine.id;
 	const [selectedVolume, setSelectedVolume] = useState<string | null>(null);
@@ -366,6 +381,7 @@ export function VolumeList({ machine }: { machine: Machine }) {
 	const [pendingDelete, setPendingDelete] = useState<VolumeSummary | null>(
 		null,
 	);
+	const [moveTarget, setMoveTarget] = useState<VolumeSummary | null>(null);
 	const [exportingName, setExportingName] = useState<string | null>(null);
 	const toast = useToast();
 
@@ -415,6 +431,7 @@ export function VolumeList({ machine }: { machine: Machine }) {
 						isExporting={exportingName === volume.name}
 						onExport={handleExport}
 						onPopulate={setPopulateTarget}
+						onMove={setMoveTarget}
 					/>
 				)}
 				toolbar={
@@ -464,6 +481,13 @@ export function VolumeList({ machine }: { machine: Machine }) {
 					volume={pendingDelete}
 					onClose={() => setPendingDelete(null)}
 					deleteVolume={deleteVolume}
+				/>
+			) : null}
+			{moveTarget ? (
+				<MoveVolumeDialog
+					machine={machine}
+					volume={moveTarget}
+					onClose={() => setMoveTarget(null)}
 				/>
 			) : null}
 			{isCreateOpen ? (

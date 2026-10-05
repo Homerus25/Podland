@@ -211,6 +211,11 @@ var (
 	// ErrVolumeUploadTooLarge is 413: a populate upload exceeded
 	// VOLUME_UPLOAD_MAX_BYTES while streaming to disk.
 	ErrVolumeUploadTooLarge = NewAppError("VOLUME_UPLOAD_TOO_LARGE", "Upload exceeds the maximum allowed size", http.StatusRequestEntityTooLarge)
+	// ErrVolumeAlreadyExists is 409: the cross-machine volume copy/move
+	// (issue 238) refuses to overwrite a target machine's same-named
+	// volume. Re-checked at execution time, so a preview that raced a
+	// concurrent create still answers honestly.
+	ErrVolumeAlreadyExists = NewAppError("VOLUME_ALREADY_EXISTS", "Volume with this name already exists", http.StatusConflict)
 )
 
 // Access
