@@ -363,59 +363,15 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 //
 // Otherwise Remove is called with Force=force (systemd reload included)
 // so systemd picks up the removal.
+//
+// The whole ritual is the shared stopAndRemove (remove.go, issue 231);
+// Delete contributes its op tag and terminals — ErrQuadletNotFound for a
+// vanished quadlet, the bare ErrQuadletResourceRunning for a running
+// refusal — and nothing else.
 func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "quadlets.Delete", func(e QuadletEngine) error {
-		// Pre-check: locate the quadlet and evaluate the running guard so we map
-		// not-found / running-conflict before attempting the destructive call.
-		list, err := e.List(entities.QuadletListOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to list quadlets: %w", err)
-		}
-
-		target := findQuadletByName(list, name)
-		if err := checkDeletePreconditions(target, force, stop); err != nil {
-			return err
-		}
-
-		// Wire the contract's stop param: a running resource is stopped
-		// through the lifecycle seam before remove, unless force is set
-		// (the remove happens over the running resource) or stop=false
-		// refused the delete above. The stop crosses the SSH seam only —
-		// no nested engine lease — and its failure propagates so nothing
-		// is removed.
-		if parseStateFromStatus(target.Status) == "running" && !force {
-			if err := s.applyUnitAction(ctx, userID, machineID, actionStop, resolveUnitName(target, name), LifecycleOptions{}); err != nil {
-				return fmt.Errorf("failed to stop quadlet before remove: %w", err)
-			}
-		}
-
-		report, err := e.Remove(name, force)
-		if err != nil {
-			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrQuadletNotFound
-			}
-			if !force && isResourceRunningError(err) {
-				return appErrors.ErrQuadletResourceRunning
-			}
-			return fmt.Errorf("failed to remove quadlet: %w", err)
-		}
-
-		// A removal failure (e.g. a race where the quadlet vanished or its
-		// resource started between the pre-check and the remove) surfaces in the
-		// report's Errors map keyed by quadlet name.
-		if report != nil {
-			if qErr, ok := report.Errors[name]; ok && qErr != nil {
-				if podmanerr.IsNotFound(qErr) {
-					return appErrors.ErrQuadletNotFound
-				}
-				if !force && isResourceRunningError(qErr) {
-					return appErrors.ErrQuadletResourceRunning
-				}
-				return fmt.Errorf("failed to remove quadlet: %w", qErr)
-			}
-		}
-
-		return nil
+	return s.stopAndRemove(ctx, userID, machineID, name, force, stop, "quadlets.Delete", removeTerminals{
+		missing: appErrors.ErrQuadletNotFound,
+		running: appErrors.ErrQuadletResourceRunning,
 	})
 }
 
@@ -469,11 +425,17 @@ func findQuadletByName(quadlets []*entities.ListQuadlet, name string) *entities.
 // the managed resource is running and neither force nor the stop-before-remove
 // waiver applies, or nil when the delete may proceed (with a stop first when
 // the resource is running and stop is set).
+//
+// Its surviving caller is the move preflight (move.go); Delete's own
+// pre-check is the shared ritual in remove.go now. The running test
+// delegates to quadletResourceRunning, the one derivation the ritual's
+// body also evaluates, so the preflight and the ritual cannot drift
+// apart (issue 231).
 func checkDeletePreconditions(target *entities.ListQuadlet, force, stop bool) error {
 	if target == nil {
 		return appErrors.ErrQuadletNotFound
 	}
-	if parseStateFromStatus(target.Status) == "running" && !force && !stop {
+	if quadletResourceRunning(target) && !force && !stop {
 		return appErrors.ErrQuadletResourceRunning
 	}
 	return nil

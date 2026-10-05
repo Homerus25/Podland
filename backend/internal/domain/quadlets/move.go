@@ -568,68 +568,25 @@ func (s *QuadletService) MoveWithProgress(ctx context.Context, userID, machineID
 }
 
 // removeSourceAfterInstall performs the move mode's source-side half after
-// the target install succeeded: stop the managed resource when the stop
-// flag (and not force) asks for the delete flow's stop-before-remove, then
-// remove the quadlet file with force passed through, mapping failures the
-// way Delete maps them. Its error is the "partial" detail, never a request
+// the target install succeeded: the shared stop-and-remove ritual
+// (stopAndRemove, remove.go — issue 231) with the transfer's terminals. A
+// vanished source quadlet answers nil — the transfer's goal is met and a
+// "partial" would falsely claim the quadlet exists on both machines — and a
+// running-resource refusal answers the wrapped sentinel that becomes the
+// partial detail. Its error is the "partial" detail, never a request
 // failure — the install it follows cannot be rolled back.
 //
 // The removal rides its own source lease and re-lists first: the state the
 // precondition saw belongs to the earlier lease, and the honest decisions
 // (stop or not, nothing-to-remove or not) need the fresh one. A quadlet
-// that vanished in between answers nil — the transfer's goal is met and a
-// "partial" would falsely claim the quadlet exists on both machines.
+// that started since with stop=false now refuses up front in the ritual —
+// issue 231's accepted tightening: same partial status, byte-identical
+// detail, where the old path asked podman to refuse at the remove instead.
+// No existing test pinned the old path.
 func (s *QuadletService) removeSourceAfterInstall(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "quadlets.MoveSourceRemove", func(e QuadletEngine) error {
-		list, err := e.List(entities.QuadletListOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to list quadlets: %w", err)
-		}
-
-		source := findQuadletByName(list, quadletID)
-		if source == nil {
-			return nil
-		}
-
-		// The stop flag's stop-before-remove, gated on !force exactly like
-		// Delete (force removes over the running resource instead). The
-		// precondition already proved stop or force was set for a quadlet
-		// that was running then; a quadlet that started since with
-		// stop=false keeps its flag honored — the remove below refuses and
-		// the transfer reports partial.
-		if parseStateFromStatus(source.Status) == "running" && req.Stop && !req.Force {
-			if err := s.applyUnitAction(ctx, userID, machineID, actionStop, resolveUnitName(source, quadletID), LifecycleOptions{}); err != nil {
-				return fmt.Errorf("failed to stop quadlet before remove: %w", err)
-			}
-		}
-
-		report, err := e.Remove(quadletID, req.Force)
-		if err != nil {
-			if podmanerr.IsNotFound(err) {
-				return nil
-			}
-			if !req.Force && isResourceRunningError(err) {
-				return fmt.Errorf("failed to remove quadlet: %w", appErrors.ErrQuadletResourceRunning)
-			}
-			return fmt.Errorf("failed to remove quadlet: %w", err)
-		}
-
-		// A removal failure (e.g. a race where the quadlet's resource
-		// started between the re-list and the remove) surfaces in the
-		// report's Errors map keyed by quadlet name.
-		if report != nil {
-			if qErr, ok := report.Errors[quadletID]; ok && qErr != nil {
-				if podmanerr.IsNotFound(qErr) {
-					return nil
-				}
-				if !req.Force && isResourceRunningError(qErr) {
-					return fmt.Errorf("failed to remove quadlet: %w", appErrors.ErrQuadletResourceRunning)
-				}
-				return fmt.Errorf("failed to remove quadlet: %w", qErr)
-			}
-		}
-
-		return nil
+	return s.stopAndRemove(ctx, userID, machineID, quadletID, req.Force, req.Stop, "quadlets.MoveSourceRemove", removeTerminals{
+		missing: nil,
+		running: fmt.Errorf("failed to remove quadlet: %w", appErrors.ErrQuadletResourceRunning),
 	})
 }
 
