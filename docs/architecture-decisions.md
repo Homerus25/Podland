@@ -1,6 +1,6 @@
 # Architecture Decisions
 
-System-level decisions for Podland, moved out of `CONTEXT.md` (2026-09-20)
+System-level decisions for Podland, moved out of `GLOSSARY.md` (2026-09-20)
 so that file stays a lean glossary and index. The § numbers below are
 stable — code comments cite them (`docs/architecture-decisions.md §4`).
 
@@ -282,7 +282,7 @@ source, test kit) live in `docs/frontend-conventions.md`.
 
 ```
 Podland/
-├── AGENTS.md, CONTEXT.md, README.md
+├── AGENTS.md, GLOSSARY.md, README.md
 ├── Containerfile, Containerfile.dev, startDevbox.sh
 ├── docs/                    # conventions + these decisions
 ├── doku/                    # API contracts (description_*_api.md)
