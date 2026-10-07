@@ -12,7 +12,7 @@
 // seam instead of re-assembling the identity guards and error mapping
 // per endpoint.
 //
-// CONTEXT.md "endpoint envelope" is the glossary entry for this contract.
+// GLOSSARY.md "endpoint envelope" is the glossary entry for this contract.
 package web
 
 import (

@@ -1,6 +1,6 @@
 # Frontend Conventions
 
-How the React frontend (`frontend/src/`) is organized. System architecture lives in `docs/architecture-decisions.md`; domain language in `CONTEXT.md`; API contracts in `doku/`. This file covers the patterns a new feature slice needs, so slices start from knowledge instead of re-reading sibling features.
+How the React frontend (`frontend/src/`) is organized. System architecture lives in `docs/architecture-decisions.md`; domain language in `GLOSSARY.md`; API contracts in `doku/`. This file covers the patterns a new feature slice needs, so slices start from knowledge instead of re-reading sibling features.
 
 Formatting is automated: a Crush pre-edit hook (`.crushrc` → `.crush/hooks/biome-format.sh`) runs Biome on a file before every edit, so files are already formatted when you read them. Run `npx biome check <changed files>` once at the end as a gate; never interleave `--write` runs with your own reads and edits.
 
