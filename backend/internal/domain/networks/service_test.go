@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/common/libnetwork/types"
+	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
 // Service behaviour tests run the real NetworkService against the fake
@@ -59,6 +60,335 @@ func TestNetworkService_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewNetworkService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
 	_, err := service.List(context.Background(), "user", "machine")
+
+	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusBadGateway, appErr.Status)
+}
+
+func TestNetworkService_Create_ReturnsCreatedNetwork(t *testing.T) {
+	created := networkFixture("frontend", "bridge", "2026-10-08T10:00:00Z", "10.89.0.0/16")
+	var createdName string
+	engine := &fakeNetworkEngine{
+		createFn: func(name string) (*types.Network, error) {
+			createdName = name
+			return &created, nil
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{Name: "frontend"})
+
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "frontend", createdName, "the request's name must reach the machine")
+	assert.Equal(t, created, *got)
+}
+
+func TestNetworkService_Create_AttachesListedContainers(t *testing.T) {
+	created := networkFixture("frontend", "bridge", "2026-10-08T10:00:00Z", "10.89.0.0/16")
+	var attached []string
+	engine := &fakeNetworkEngine{
+		createFn: func(name string) (*types.Network, error) {
+			return &created, nil
+		},
+		connectFn: func(networkName, containerID string) error {
+			assert.Equal(t, "frontend", networkName, "attaches run against the created network")
+			attached = append(attached, containerID)
+			return nil
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	_, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{
+		Name:       "frontend",
+		Containers: []string{"ctr-a", "ctr-b"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"ctr-a", "ctr-b"}, attached, "every listed container must be attached after the create")
+}
+
+func TestNetworkService_Create_MapsDuplicateNameTo409(t *testing.T) {
+	engine := &fakeNetworkEngine{
+		createFn: func(name string) (*types.Network, error) {
+			return nil, &errorhandling.ErrorModel{
+				ResponseCode: http.StatusConflict,
+				Message:      "network already exists",
+			}
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{Name: "frontend"})
+
+	require.ErrorIs(t, err, appErrors.ErrNetworkAlreadyExists)
+	assert.Nil(t, got)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusConflict, appErr.Status)
+	assert.Equal(t, "NETWORK_ALREADY_EXISTS", appErr.Code)
+}
+
+func TestNetworkService_Create_MapsClientErrorsToInvalidRequest(t *testing.T) {
+	engine := &fakeNetworkEngine{
+		createFn: func(name string) (*types.Network, error) {
+			return nil, &errorhandling.ErrorModel{
+				ResponseCode: http.StatusBadRequest,
+				Message:      "network name invalid",
+			}
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{Name: "bad"})
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Equal(t, "INVALID_REQUEST", appErr.Code)
+	assert.Contains(t, appErr.Message, "network name invalid", "podman's rejection text must reach the frontend")
+}
+
+func TestNetworkService_Create_WrapsEngineFailure(t *testing.T) {
+	engine := &fakeNetworkEngine{
+		createFn: func(name string) (*types.Network, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{Name: "frontend"})
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.Contains(t, err.Error(), "failed to create network", "engine failures must be wrapped consistently")
+}
+
+// TestNetworkService_Create_AttachFailureNamesContainerAndLeavesNetwork
+// pins the create-with-attach failure contract: the error names the
+// failing container, and the network stays created — the create call
+// happened and nothing rolls it back (the engine seam has no remove
+// operation, so rollback is impossible by construction).
+func TestNetworkService_Create_AttachFailureNamesContainerAndLeavesNetwork(t *testing.T) {
+	created := networkFixture("frontend", "bridge", "2026-10-08T10:00:00Z", "10.89.0.0/16")
+	createCalled := false
+	var attached []string
+	engine := &fakeNetworkEngine{
+		createFn: func(name string) (*types.Network, error) {
+			createCalled = true
+			return &created, nil
+		},
+		connectFn: func(networkName, containerID string) error {
+			if containerID == "bad-ctr" {
+				return &errorhandling.ErrorModel{
+					ResponseCode: http.StatusInternalServerError,
+					Message:      "container is not running",
+				}
+			}
+			attached = append(attached, containerID)
+			return nil
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{
+		Name:       "frontend",
+		Containers: []string{"good-ctr", "bad-ctr"},
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, got)
+	assert.True(t, createCalled, "the network stays created: the create is not rolled back")
+	assert.Equal(t, []string{"good-ctr"}, attached, "attaches run in order until the failing one")
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusConflict, appErr.Status)
+	assert.Equal(t, "NETWORK_ATTACH_FAILED", appErr.Code)
+	assert.Contains(t, appErr.Message, "bad-ctr", "the error must name the failing container")
+	assert.Contains(t, appErr.Message, "container is not running", "podman's rejection text must reach the frontend")
+}
+
+func TestNetworkService_Create_AttachUnknownContainerMapsTo404(t *testing.T) {
+	created := networkFixture("frontend", "bridge", "2026-10-08T10:00:00Z", "10.89.0.0/16")
+	engine := &fakeNetworkEngine{
+		createFn: func(name string) (*types.Network, error) {
+			return &created, nil
+		},
+		connectFn: func(networkName, containerID string) error {
+			return &errorhandling.ErrorModel{
+				ResponseCode: http.StatusNotFound,
+				Message:      "no such container",
+			}
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	_, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{
+		Name:       "frontend",
+		Containers: []string{"ghost-ctr"},
+	})
+
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusNotFound, appErr.Status)
+	assert.Equal(t, "CONTAINER_NOT_FOUND", appErr.Code)
+	assert.Contains(t, appErr.Message, "ghost-ctr", "the error must name the failing container")
+}
+
+func TestNetworkService_Create_AcquireFailureIsThe502Sentinel(t *testing.T) {
+	service := NewNetworkService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
+
+	_, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{Name: "frontend"})
+
+	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusBadGateway, appErr.Status)
+}
+
+func TestNetworkService_Connect_AttachesContainer(t *testing.T) {
+	networks := []types.Network{
+		networkFixture("podman", "bridge", "2026-08-30T10:00:00Z", "10.88.0.0/16"),
+		networkFixture("frontend", "bridge", "2026-09-01T12:30:00Z", "10.89.0.0/16"),
+	}
+	var connectedNetwork, connectedContainer string
+	engine := &fakeNetworkEngine{
+		listFn: func() ([]types.Network, error) {
+			return networks, nil
+		},
+		connectFn: func(networkName, containerID string) error {
+			connectedNetwork = networkName
+			connectedContainer = containerID
+			return nil
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	err := service.Connect(context.Background(), "user", "machine", "frontend", "ctr-a")
+
+	require.NoError(t, err)
+	assert.Equal(t, "frontend", connectedNetwork)
+	assert.Equal(t, "ctr-a", connectedContainer)
+}
+
+func TestNetworkService_Connect_MapsUnknownNetworkTo404(t *testing.T) {
+	networks := []types.Network{
+		networkFixture("podman", "bridge", "2026-08-30T10:00:00Z", "10.88.0.0/16"),
+	}
+	engine := &fakeNetworkEngine{
+		listFn: func() ([]types.Network, error) {
+			return networks, nil
+		},
+		// connectFn stays unarmed: an unknown network must never reach
+		// the connect call.
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	err := service.Connect(context.Background(), "user", "machine", "ghost-net", "ctr-a")
+
+	require.ErrorIs(t, err, appErrors.ErrNetworkNotFound)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusNotFound, appErr.Status)
+	assert.Equal(t, "NETWORK_NOT_FOUND", appErr.Code)
+}
+
+func TestNetworkService_Connect_MapsUnknownContainerTo404(t *testing.T) {
+	networks := []types.Network{
+		networkFixture("frontend", "bridge", "2026-09-01T12:30:00Z", "10.89.0.0/16"),
+	}
+	engine := &fakeNetworkEngine{
+		listFn: func() ([]types.Network, error) {
+			return networks, nil
+		},
+		connectFn: func(networkName, containerID string) error {
+			return &errorhandling.ErrorModel{
+				ResponseCode: http.StatusNotFound,
+				Message:      "no such container",
+			}
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	err := service.Connect(context.Background(), "user", "machine", "frontend", "ghost-ctr")
+
+	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusNotFound, appErr.Status)
+	assert.Equal(t, "CONTAINER_NOT_FOUND", appErr.Code)
+}
+
+func TestNetworkService_Connect_MapsClientErrorsToInvalidRequest(t *testing.T) {
+	networks := []types.Network{
+		networkFixture("frontend", "bridge", "2026-09-01T12:30:00Z", "10.89.0.0/16"),
+	}
+	engine := &fakeNetworkEngine{
+		listFn: func() ([]types.Network, error) {
+			return networks, nil
+		},
+		connectFn: func(networkName, containerID string) error {
+			return &errorhandling.ErrorModel{
+				ResponseCode: http.StatusBadRequest,
+				Message:      "invalid container",
+			}
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	err := service.Connect(context.Background(), "user", "machine", "frontend", "ctr-a")
+
+	require.Error(t, err)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Equal(t, "INVALID_REQUEST", appErr.Code)
+	assert.Contains(t, appErr.Message, "invalid container", "podman's rejection text must reach the frontend")
+}
+
+func TestNetworkService_Connect_WrapsEngineFailure(t *testing.T) {
+	networks := []types.Network{
+		networkFixture("frontend", "bridge", "2026-09-01T12:30:00Z", "10.89.0.0/16"),
+	}
+	engine := &fakeNetworkEngine{
+		listFn: func() ([]types.Network, error) {
+			return networks, nil
+		},
+		connectFn: func(networkName, containerID string) error {
+			return errors.New("boom")
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	err := service.Connect(context.Background(), "user", "machine", "frontend", "ctr-a")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to connect container to network", "engine failures must be wrapped consistently")
+}
+
+func TestNetworkService_Connect_WrapsListFailure(t *testing.T) {
+	engine := &fakeNetworkEngine{
+		listFn: func() ([]types.Network, error) {
+			return nil, errors.New("boom")
+		},
+		// connectFn stays unarmed: the target resolution fails first.
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	err := service.Connect(context.Background(), "user", "machine", "frontend", "ctr-a")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to list networks", "the resolution failure must be wrapped consistently")
+}
+
+func TestNetworkService_Connect_AcquireFailureIsThe502Sentinel(t *testing.T) {
+	service := NewNetworkService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
+
+	err := service.Connect(context.Background(), "user", "machine", "frontend", "ctr-a")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	var appErr *appErrors.AppError

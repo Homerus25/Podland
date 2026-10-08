@@ -5,6 +5,7 @@ import { machineFixture } from "@/test/factories";
 
 const manageCapabilities: readonly Capability[] = [
 	"manage-containers",
+	"manage-networks",
 	"manage-volumes",
 	"manage-images",
 	"manage-quadlets",

@@ -410,11 +410,13 @@ func New(cfg *config.Config) (*App, error) {
 						})
 					})
 
-					// Networks — read-only for now: the list stays at
-					// the subtree's read level (issue 244); mutations
-					// are a follow-up issue.
+					// Networks — the list stays at the subtree's read
+					// level; create and connect mutate remote state,
+					// so they gate at write (issue 252).
 					r.Route("/networks", func(r chi.Router) {
 						r.Get("/", networkHandler.List)
+						r.With(requireWrite).Post("/", networkHandler.Create)
+						r.With(requireWrite).Post("/{networkName}/connect", networkHandler.Connect)
 					})
 				})
 			})

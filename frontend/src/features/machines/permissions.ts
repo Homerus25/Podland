@@ -31,6 +31,7 @@ const CAPABILITY_TABLE = {
 	// Resource management (create/delete/lifecycle/prune/populate/pull)
 	// mutates the machine's remote state; write by rank.
 	"manage-containers": "write",
+	"manage-networks": "write",
 	"manage-volumes": "write",
 	"manage-images": "write",
 	"manage-quadlets": "write",

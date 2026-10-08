@@ -18,6 +18,11 @@ type NetworkEngine interface {
 	// List returns every network podman reports on the machine —
 	// including the default bridge network; no filtering.
 	List() ([]types.Network, error)
+	// Create creates a network by name with podman's defaults (bridge
+	// driver, auto-assigned subnet) and returns the created network.
+	Create(name string) (*types.Network, error)
+	// Connect attaches a container (by ID) to a network by name.
+	Connect(networkName, containerID string) error
 }
 
 // NetworkEngineProvider is the networks domain's slice of the connection
@@ -59,4 +64,12 @@ func (e *podmanNetworkEngine) tunnelEngine() *tunnel.ContainerEngine {
 
 func (e *podmanNetworkEngine) List() ([]types.Network, error) {
 	return e.tunnelEngine().NetworkList(e.ctx, entities.NetworkListOptions{})
+}
+
+func (e *podmanNetworkEngine) Create(name string) (*types.Network, error) {
+	return e.tunnelEngine().NetworkCreate(e.ctx, types.Network{Name: name}, &types.NetworkCreateOptions{})
+}
+
+func (e *podmanNetworkEngine) Connect(networkName, containerID string) error {
+	return e.tunnelEngine().NetworkConnect(e.ctx, networkName, entities.NetworkConnectOptions{Container: containerID})
 }

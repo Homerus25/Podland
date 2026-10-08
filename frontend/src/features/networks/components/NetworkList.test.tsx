@@ -1,11 +1,12 @@
 import { NetworkList } from "@features/networks/components/NetworkList";
 import type { NetworkSummary } from "@features/networks/services/networksApi";
 import { networksQueryKey } from "@shared/queries/queryKeys";
+import type { Machine } from "@shared/types/api";
 import { screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { networkFixture } from "@/test/factories";
+import { machineFixture, networkFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -15,8 +16,8 @@ function mockNetworks(networks: NetworkSummary[]) {
 	);
 }
 
-function renderNetworkList() {
-	return renderWithQuery(<NetworkList machineId="m-1" />);
+function renderNetworkList(machine: Machine = machineFixture()) {
+	return renderWithQuery(<NetworkList machine={machine} />);
 }
 
 afterEach(() => {
@@ -82,7 +83,7 @@ describe("NetworkList", () => {
 		expect(cached?.[0].name).toBe("app-net");
 	});
 
-	it("shows a loading state before networks arrive", async () => {
+	it("shows a loading state before networks arrive, with the toolbar above it", async () => {
 		server.use(
 			http.get("*/api/machines/m-1/networks", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
@@ -92,6 +93,7 @@ describe("NetworkList", () => {
 		renderNetworkList();
 
 		expect(screen.getByTestId("networks-loading")).toBeInTheDocument();
+		expect(screen.getByTestId("create-network-button")).toBeInTheDocument();
 	});
 
 	it("shows the empty state when the machine has no networks", async () => {
@@ -117,7 +119,7 @@ describe("NetworkList", () => {
 		expect(screen.queryByTestId("network-row")).not.toBeInTheDocument();
 	});
 
-	it("renders a row's cells in column order", async () => {
+	it("renders a row's cells in column order, actions column last", async () => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		vi.setSystemTime(new Date("2026-08-23T12:00:00Z"));
 		mockNetworks([networkFixture()]);
@@ -130,16 +132,32 @@ describe("NetworkList", () => {
 			"bridge",
 			"10.88.0.0/16",
 			"3 days ago",
+			"Connect container",
 		]);
 	});
 
-	it("renders no toolbar and no permission hint — the surface is ungated", async () => {
+	it("shows the create-network toolbar button at write level", async () => {
 		mockNetworks([networkFixture()]);
 		renderNetworkList();
 
 		await screen.findByTestId("network-row");
+		expect(screen.getByTestId("create-network-button")).toBeInTheDocument();
 		expect(
 			screen.queryByTestId("networks-permission-hint"),
+		).not.toBeInTheDocument();
+	});
+
+	it("renders the permission hint and no mutation controls at read level", async () => {
+		mockNetworks([networkFixture()]);
+		renderNetworkList(machineFixture({ permission: "read", isOwner: false }));
+
+		await screen.findByTestId("network-row");
+		expect(screen.getByTestId("networks-permission-hint")).toBeInTheDocument();
+		expect(
+			screen.queryByTestId("create-network-button"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", { name: /connect container/i }),
 		).not.toBeInTheDocument();
 	});
 });

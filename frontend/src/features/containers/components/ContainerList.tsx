@@ -1,5 +1,7 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
+import { ConnectNetworkDialog } from "@features/containers/components/ConnectNetworkDialog";
 import { CreateContainerDialog } from "@features/containers/components/CreateContainerDialog";
+import { containerDisplayName } from "@features/containers/components/containerDisplayName";
 import {
 	useContainers,
 	useCreateContainer,
@@ -9,6 +11,7 @@ import {
 } from "@features/containers/hooks/useContainers";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { can } from "@features/machines/permissions";
+import { useConnectContainer } from "@features/networks/hooks/useNetworks";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
@@ -16,15 +19,7 @@ import { StateBadge } from "@shared/components/StateBadge";
 import { useOpenLogs } from "@shared/logs/logRoute";
 import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
-import { shortImageId } from "@shared/utils/format";
 import { useState } from "react";
-
-// Podman reports container names with a leading slash; display them bare and
-// fall back to the short id when a container has no name at all.
-function displayName(container: ContainerSummary): string {
-	const name = container.names?.[0]?.replace(/^\//, "");
-	return name ? name : shortImageId(container.id);
-}
 
 // No delete request leaves the browser until the user explicitly confirms.
 // The shell, reset lifecycle, danger footer, pending wiring, close-on-success,
@@ -50,8 +45,8 @@ function DeleteContainerModal({
 			onClose={onClose}
 			body={
 				<Text>
-					Delete “{displayName(container)}” ({container.image})? This cannot be
-					undone.
+					Delete “{containerDisplayName(container)}” ({container.image})? This
+					cannot be undone.
 				</Text>
 			}
 		/>
@@ -64,18 +59,22 @@ function ContainerRow({
 	machineId,
 	container,
 	canManage,
+	canManageNetworks,
 	onDelete,
 	onShowLogs,
+	onConnect,
 }: {
 	machineId: string;
 	container: ContainerSummary;
 	canManage: boolean;
+	canManageNetworks: boolean;
 	onDelete: (container: ContainerSummary) => void;
 	onShowLogs: (container: ContainerSummary) => void;
+	onConnect: (container: ContainerSummary) => void;
 }) {
 	const startContainer = useStartContainer(machineId);
 	const stopContainer = useStopContainer(machineId);
-	const name = displayName(container);
+	const name = containerDisplayName(container);
 	const action =
 		container.state === "running"
 			? {
@@ -94,7 +93,7 @@ function ContainerRow({
 	return (
 		<>
 			<Tr data-testid="container-row">
-				<Td fontFamily="mono">{displayName(container)}</Td>
+				<Td fontFamily="mono">{containerDisplayName(container)}</Td>
 				<Td fontFamily="mono">{container.image}</Td>
 				<Td>
 					<StateBadge state={container.state} />
@@ -111,6 +110,16 @@ function ContainerRow({
 								data-testid={action.testId}
 							>
 								{action.label}
+							</Button>
+						) : null}
+						{canManageNetworks ? (
+							<Button
+								size="xs"
+								variant="outline"
+								aria-label={`Connect to network ${name}`}
+								onClick={() => onConnect(container)}
+							>
+								Connect to network
 							</Button>
 						) : null}
 						<Button
@@ -152,16 +161,23 @@ function ContainerRow({
 // backend routes, so below manage level the module swaps the whole toolbar
 // for the canonical read hint and the rows drop their start/stop/delete
 // affordances; logs reads at read level, so the row keeps its logs button.
-// The toolbar/triad/table machinery and the derived testids are
-// ResourceList's; this adapter owns only the columns, the row, and the
-// create/delete modals.
+// Connect-to-network is gated on the separate manage-networks capability
+// (issue 256): the row button hides below it while Logs stays visible. The
+// toolbar/triad/table machinery and the derived testids are ResourceList's;
+// this adapter owns only the columns, the row, and the create/delete/connect
+// modals.
 export function ContainerList({ machine }: { machine: Machine }) {
 	const machineId = machine.id;
 	const { data: containers, isPending, error } = useContainers(machineId);
 	const deleteContainer = useDeleteContainer(machineId);
 	const createContainer = useCreateContainer(machineId);
+	const connectContainer = useConnectContainer(machineId);
 	const canManage = can(machine, "manage-containers");
+	const canManageNetworks = can(machine, "manage-networks");
 	const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(
+		null,
+	);
+	const [pendingConnect, setPendingConnect] = useState<ContainerSummary | null>(
 		null,
 	);
 	const openLogs = useOpenLogs(machineId, "container");
@@ -187,13 +203,15 @@ export function ContainerList({ machine }: { machine: Machine }) {
 						machineId={machineId}
 						container={container}
 						canManage={canManage}
+						canManageNetworks={canManageNetworks}
 						onDelete={setPendingDelete}
 						onShowLogs={(container) =>
 							openLogs({
 								targetId: container.id,
-								name: displayName(container),
+								name: containerDisplayName(container),
 							})
 						}
+						onConnect={setPendingConnect}
 					/>
 				)}
 				toolbar={
@@ -219,6 +237,14 @@ export function ContainerList({ machine }: { machine: Machine }) {
 				<CreateContainerDialog
 					mutation={createContainer}
 					onClose={() => setIsCreateOpen(false)}
+				/>
+			) : null}
+			{pendingConnect ? (
+				<ConnectNetworkDialog
+					machineId={machineId}
+					container={pendingConnect}
+					mutation={connectContainer}
+					onClose={() => setPendingConnect(null)}
 				/>
 			) : null}
 		</>

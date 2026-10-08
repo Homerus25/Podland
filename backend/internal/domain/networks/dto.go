@@ -6,6 +6,23 @@ import (
 	"go.podman.io/common/libnetwork/types"
 )
 
+// NetworkCreateRequest is the POST /api/machines/{id}/networks body.
+// Name is required; containers optionally lists container IDs to attach
+// to the new network in the same call.
+type NetworkCreateRequest struct {
+	// Network name
+	Name string `json:"name" validate:"required"`
+	// Container IDs to attach after the create (optional)
+	Containers []string `json:"containers,omitempty"`
+}
+
+// NetworkConnectRequest is the
+// POST /api/machines/{id}/networks/{networkName}/connect body.
+type NetworkConnectRequest struct {
+	// Container ID to attach to the network
+	Container string `json:"container" validate:"required"`
+}
+
 // NetworkResponse represents a network in the list API response. It
 // carries exactly the rendered fields — name, driver, subnets (CIDR
 // strings), createdAt (RFC3339); no id, labels, options, or flags.

@@ -218,6 +218,22 @@ var (
 	ErrVolumeAlreadyExists = NewAppError("VOLUME_ALREADY_EXISTS", "Volume with this name already exists", http.StatusConflict)
 )
 
+// Networks
+var (
+	// ErrNetworkNotFound is 404: the named network does not exist on the
+	// machine (connect's target resolution).
+	ErrNetworkNotFound = NewAppError("NETWORK_NOT_FOUND", "Network not found", http.StatusNotFound)
+	// ErrNetworkAlreadyExists is 409: podman refused the create because a
+	// network with the name already exists.
+	ErrNetworkAlreadyExists = NewAppError("NETWORK_ALREADY_EXISTS", "Network with this name already exists", http.StatusConflict)
+	// ErrNetworkAttachFailed is 409: the create-with-attach path's
+	// failure — the network was created but attaching one of the listed
+	// containers failed. The message names the failing container; the
+	// network stays created (no rollback). Non-5xx so the naming message
+	// survives the envelope's 5xx rewrite.
+	ErrNetworkAttachFailed = NewAppError("NETWORK_ATTACH_FAILED", "Failed to attach container to network", http.StatusConflict)
+)
+
 // Access
 var (
 	ErrAccessDenied         = NewAppError("ACCESS_DENIED", "User does not have permission to access this resource", http.StatusForbidden)

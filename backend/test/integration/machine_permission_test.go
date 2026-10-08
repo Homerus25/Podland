@@ -157,6 +157,14 @@ func Test_Integration_MachinePermission_ReadUserRejectedOnMutatingRoutes(t *test
 		expectAPIError(t, client, http.MethodPost, base+"/secrets/", `{"name":"it-denied","value":"nope"}`,
 			http.StatusForbidden, "ACCESS_DENIED")
 	})
+	t.Run("CreateNetworkDenied", func(t *testing.T) {
+		expectAPIError(t, client, http.MethodPost, base+"/networks/", `{}`,
+			http.StatusForbidden, "ACCESS_DENIED")
+	})
+	t.Run("ConnectNetworkDenied", func(t *testing.T) {
+		expectAPIError(t, client, http.MethodPost, base+"/networks/no-such-network/connect", `{}`,
+			http.StatusForbidden, "ACCESS_DENIED")
+	})
 }
 
 // Test_Integration_MachinePermission_ReadUserKeepsReadRoutes pins the

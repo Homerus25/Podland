@@ -11,7 +11,9 @@ import (
 // unarmed operation panics, so an unexpected engine call fails the test
 // loudly.
 type fakeNetworkEngine struct {
-	listFn func() ([]types.Network, error)
+	listFn    func() ([]types.Network, error)
+	createFn  func(name string) (*types.Network, error)
+	connectFn func(networkName, containerID string) error
 }
 
 func (f *fakeNetworkEngine) List() ([]types.Network, error) {
@@ -19,6 +21,20 @@ func (f *fakeNetworkEngine) List() ([]types.Network, error) {
 		panic("unexpected NetworkEngine.List call")
 	}
 	return f.listFn()
+}
+
+func (f *fakeNetworkEngine) Create(name string) (*types.Network, error) {
+	if f.createFn == nil {
+		panic("unexpected NetworkEngine.Create call")
+	}
+	return f.createFn(name)
+}
+
+func (f *fakeNetworkEngine) Connect(networkName, containerID string) error {
+	if f.connectFn == nil {
+		panic("unexpected NetworkEngine.Connect call")
+	}
+	return f.connectFn(networkName, containerID)
 }
 
 // fakeEngineProvider arms the provider seam: engine is handed to the

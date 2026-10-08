@@ -71,7 +71,7 @@ export function MachineDetailPage() {
 						<ImageList machine={machine} />
 					</TabPanel>
 					<TabPanel>
-						<NetworkList machineId={machine.id} />
+						<NetworkList machine={machine} />
 					</TabPanel>
 					<TabPanel>
 						<QuadletList machine={machine} />

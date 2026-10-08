@@ -2,7 +2,7 @@
 
 Part of the [API contract](description_api.md). See the main document for base URL, common headers, and the error response format.
 
-Networks live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. The networks surface is read-only: listing is available at `read` level, and there are no create/delete/prune endpoints (a follow-up issue).
+Networks live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. Listing is available at `read` level; creating a network and connecting a container to one mutate remote state and gate at `write` level. Disconnect, delete, and prune remain follow-up issues.
 
 ---
 
@@ -37,5 +37,65 @@ Notes:
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
 - 404: `MACHINE_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+### POST /api/machines/{id}/networks
+
+Create a network on the machine. The body carries the network's `name` (required); podman's defaults fill the driver (bridge) and subnet. An optional `containers` list (container IDs) is attached to the new network in the same call: each attach runs after the create, and an attach failure fails the request naming the failing container — the network stays created (no rollback).
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Request body:**
+```json
+{
+  "name": "string (required)",
+  "containers": ["string (container ID, optional)"]
+}
+```
+
+**Response (Success - 201):** the created network, in the same shape as the list DTO.
+```json
+{
+  "name": "string",
+  "driver": "string (e.g. \"bridge\", \"macvlan\", \"host\")",
+  "subnets": ["string (CIDR, e.g. \"10.88.0.0/16\")"],
+  "createdAt": "RFC3339 timestamp"
+}
+```
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body; podman-rejected names), `VALIDATION_FAILED` (missing name)
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row or read-level grantee)
+- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND` (attach listed an unknown container)
+- 409: `NETWORK_ALREADY_EXISTS` (duplicate name), `NETWORK_ATTACH_FAILED` (attach failure; the message names the failing container and the network stays created)
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+### POST /api/machines/{id}/networks/{networkName}/connect
+
+Attach a container to a network on the machine. The body carries the container's ID.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Request body:**
+```json
+{
+  "container": "string (container ID, required)"
+}
+```
+
+**Response (Success - 200):** an empty JSON object (`{}`).
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body; podman-rejected attach), `VALIDATION_FAILED` (missing container), `MISSING_NETWORK_NAME`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row or read-level grantee)
+- 404: `MACHINE_NOT_FOUND`, `NETWORK_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`

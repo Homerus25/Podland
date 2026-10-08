@@ -21,3 +21,47 @@ export async function listNetworks(
 	);
 	return response.data;
 }
+
+// Body of POST /api/machines/{id}/networks
+// (backend/internal/domain/networks/dto.go NetworkCreateRequest).
+export interface CreateNetworkInput {
+	name: string;
+	// Container IDs to attach to the new network in the same call (optional)
+	containers?: string[];
+}
+
+// Variables of useConnectContainer: both connect surfaces (the Networks
+// tab's row dialog and the Containers tab's, issue 256) pass the target
+// network and the container at mutate time.
+export interface ConnectContainerVariables {
+	networkName: string;
+	containerId: string;
+}
+
+// POST /api/machines/{id}/networks -> 201 with the created network in the
+// list DTO shape (backend/internal/domain/networks handler Create).
+export async function createNetwork(
+	machineId: string,
+	input: CreateNetworkInput,
+): Promise<NetworkSummary> {
+	const response = await api.post<NetworkSummary>(
+		machineApiPath(machineId, "networks"),
+		input,
+	);
+	return response.data;
+}
+
+// POST /api/machines/{id}/networks/{networkName}/connect -> 200, empty body
+// (backend/internal/domain/networks handler Connect).
+export async function connectContainer(
+	machineId: string,
+	networkName: string,
+	containerId: string,
+): Promise<void> {
+	await api.post(
+		machineApiPath(machineId, "networks", networkName, "connect"),
+		{
+			container: containerId,
+		},
+	);
+}
