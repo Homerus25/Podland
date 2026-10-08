@@ -269,3 +269,21 @@ func TestApp_Handler_SecretsRouteIsProtected(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
 		"GET /api/machines/{id}/secrets must sit behind the JWT middleware (401, not 404)")
 }
+
+func TestApp_Handler_NetworksRouteIsProtected(t *testing.T) {
+	cfg := newTestConfig(t)
+
+	a, err := app.New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = a.Close() })
+
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/api/machines/some-machine/networks")
+	require.NoError(t, err, "GET /api/machines/{id}/networks must connect")
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"GET /api/machines/{id}/networks must sit behind the JWT middleware (401, not 404)")
+}

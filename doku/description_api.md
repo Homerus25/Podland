@@ -11,6 +11,7 @@ Endpoint documentation is split by domain:
 - [Machines](description_machines_api.md) - Machine CRUD, access management, event stream (SSE)
 - [Containers](description_containers_api.md) - Container CRUD, lifecycle, logs
 - [Images](description_images_api.md) - Image listing, pull, removal
+- [Networks](description_networks_api.md) - Network listing (read-only)
 - [Quadlets](description_quadlets_api.md) - Quadlet CRUD, lifecycle, generate, import
 - [Secrets](description_secrets_api.md) - Secret list/inspect/create/delete with admin-only value reveal
 

@@ -1,6 +1,7 @@
 import type { AuthStatusResponse } from "@features/auth/services/authApi";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import type { ImageSummary } from "@features/images/services/imagesApi";
+import type { NetworkSummary } from "@features/networks/services/networksApi";
 import type {
 	QuadletMoveCompanionState,
 	QuadletMovePreview,
@@ -209,6 +210,18 @@ export function quadletMoveSecretOutcomeFixture(
 	return {
 		name: "db-password",
 		outcome: "transferred",
+		...overrides,
+	};
+}
+
+export function networkFixture(
+	overrides: Partial<NetworkSummary> = {},
+): NetworkSummary {
+	return {
+		name: "app-net",
+		driver: "bridge",
+		subnets: ["10.88.0.0/16"],
+		createdAt: "2026-08-20T10:00:00Z",
 		...overrides,
 	};
 }

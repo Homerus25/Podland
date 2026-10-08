@@ -10,6 +10,7 @@ export type MachineResource =
 	| "containers"
 	| "volumes"
 	| "images"
+	| "networks"
 	| "quadlets"
 	| "secrets";
 
@@ -28,6 +29,10 @@ export function volumesQueryKey(machineId: string) {
 
 export function imagesQueryKey(machineId: string) {
 	return ["machines", machineId, "images"] as const;
+}
+
+export function networksQueryKey(machineId: string) {
+	return ["machines", machineId, "networks"] as const;
 }
 
 export function quadletsQueryKey(machineId: string) {

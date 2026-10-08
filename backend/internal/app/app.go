@@ -28,6 +28,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/domain/containers"
 	"github.com/Homerus25/podland/backend/internal/domain/images"
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
+	"github.com/Homerus25/podland/backend/internal/domain/networks"
 	"github.com/Homerus25/podland/backend/internal/domain/quadlets"
 	"github.com/Homerus25/podland/backend/internal/domain/secrets"
 	"github.com/Homerus25/podland/backend/internal/domain/users"
@@ -176,6 +177,7 @@ func New(cfg *config.Config) (*App, error) {
 		WithAccessRepo(accessRepo).
 		WithUsageEngines(volumes.NewVolumeUsageEngineProvider(connectionManager)).
 		WithMaxVolumeUploadBytes(cfg.Volumes.MaxUploadBytes)
+	networkService := networks.NewNetworkService(networks.NewNetworkEngineProvider(connectionManager))
 
 	// Initialize handlers. Each credential endpoint's failure-budget
 	// surface is the same value its service checks and spends — the
@@ -191,6 +193,7 @@ func New(cfg *config.Config) (*App, error) {
 	secretHandler := secrets.NewSecretHandler(secretService)
 	volumeHandler := volumes.NewVolumeHandler(volumeService).
 		WithMaxUploadBytes(cfg.Volumes.MaxUploadBytes)
+	networkHandler := networks.NewNetworkHandler(networkService)
 
 	// Initialize middleware
 	rateLimiter := appmiddleware.NewRateLimiter(
@@ -270,8 +273,8 @@ func New(cfg *config.Config) (*App, error) {
 				// caller's machine_access row: 403 ACCESS_DENIED for a
 				// machine the user cannot use, 404 MACHINE_NOT_FOUND
 				// for an unknown ID. One seam covers the machines
-				// endpoints and the containers/images/quadlets/secrets/volumes
-				// families that ride on a machine.
+				// endpoints and the containers/images/quadlets/secrets/
+				// volumes/networks families that ride on a machine.
 				r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
 					r.Get("/", machineHandler.Get)
 					r.Get("/status", machineHandler.Status)
@@ -405,6 +408,13 @@ func New(cfg *config.Config) (*App, error) {
 							r.With(requireWrite).Post("/move", volumeHandler.Move)
 							r.With(requireWrite).Delete("/", volumeHandler.Delete)
 						})
+					})
+
+					// Networks — read-only for now: the list stays at
+					// the subtree's read level (issue 244); mutations
+					// are a follow-up issue.
+					r.Route("/networks", func(r chi.Router) {
+						r.Get("/", networkHandler.List)
 					})
 				})
 			})

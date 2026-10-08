@@ -14,6 +14,7 @@ import { ImageList } from "@features/images/components/ImageList";
 import { MachineSettingsTab } from "@features/machines/components/MachineSettingsTab";
 import { PermissionBadge } from "@features/machines/components/PermissionBadge";
 import { useMachine } from "@features/machines/hooks/useMachines";
+import { NetworkList } from "@features/networks/components/NetworkList";
 import { QuadletList } from "@features/quadlets/components/QuadletList";
 import { SecretList } from "@features/secrets/components/SecretList";
 import { VolumeList } from "@features/volumes/components/VolumeList";
@@ -54,6 +55,7 @@ export function MachineDetailPage() {
 					<Tab>Containers</Tab>
 					<Tab>Volumes</Tab>
 					<Tab>Images</Tab>
+					<Tab>Networks</Tab>
 					<Tab>Quadlets</Tab>
 					<Tab>Secrets</Tab>
 					<Tab>Settings</Tab>
@@ -67,6 +69,9 @@ export function MachineDetailPage() {
 					</TabPanel>
 					<TabPanel>
 						<ImageList machine={machine} />
+					</TabPanel>
+					<TabPanel>
+						<NetworkList machineId={machine.id} />
 					</TabPanel>
 					<TabPanel>
 						<QuadletList machine={machine} />

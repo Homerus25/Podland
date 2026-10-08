@@ -30,6 +30,10 @@ const emptySecretsHandler = http.get("*/api/machines/m-1/secrets", () =>
 	HttpResponse.json([]),
 );
 
+const emptyNetworksHandler = http.get("*/api/machines/m-1/networks", () =>
+	HttpResponse.json([]),
+);
+
 function renderMachineDetailPage(id = "m-1") {
 	return renderApp(`/machines/${id}`, {
 		resolveInitialState: async () => ({ username: "alice", role: "user" }),
@@ -83,12 +87,13 @@ describe("MachineDetailPage", () => {
 		expect(screen.getByTestId("machine-permission")).toHaveTextContent("admin");
 	});
 
-	it("switches between the Containers, Images, Quadlets, Secrets, and Settings tabs", async () => {
+	it("switches between the Containers, Images, Networks, Quadlets, Secrets, and Settings tabs", async () => {
 		server.use(
 			machineHandler(machineFixture()),
 			emptyContainersHandler,
 			emptyQuadletsHandler,
 			emptySecretsHandler,
+			emptyNetworksHandler,
 		);
 		server.use(
 			http.get("*/api/machines/m-1/images", () => HttpResponse.json([])),
@@ -103,6 +108,9 @@ describe("MachineDetailPage", () => {
 
 		await userEvent.click(screen.getByRole("tab", { name: /images/i }));
 		expect(await screen.findByTestId("images-empty")).toBeInTheDocument();
+
+		await userEvent.click(screen.getByRole("tab", { name: /networks/i }));
+		expect(await screen.findByTestId("networks-empty")).toBeInTheDocument();
 
 		await userEvent.click(screen.getByRole("tab", { name: /quadlets/i }));
 		expect(await screen.findByTestId("quadlets-empty")).toBeInTheDocument();
@@ -172,6 +180,34 @@ describe("MachineDetailPage", () => {
 			await screen.findByText("docker.io/library/nginx:1.27"),
 		).toBeInTheDocument();
 		expect(screen.getByText("157.3 MB")).toBeInTheDocument();
+	});
+
+	it("renders the network list inside the Networks tab", async () => {
+		server.use(
+			machineHandler(machineFixture()),
+			emptyContainersHandler,
+			emptyQuadletsHandler,
+		);
+		server.use(
+			http.get("*/api/machines/m-1/networks", () =>
+				HttpResponse.json([
+					{
+						name: "app-net",
+						driver: "bridge",
+						subnets: ["10.88.0.0/16"],
+						createdAt: "2026-08-20T10:00:00Z",
+					},
+				]),
+			),
+		);
+		renderMachineDetailPage();
+
+		await userEvent.click(
+			await screen.findByRole("tab", { name: /networks/i }),
+		);
+		expect(await screen.findByText("app-net")).toBeInTheDocument();
+		expect(screen.getByText("bridge")).toBeInTheDocument();
+		expect(screen.getByText("10.88.0.0/16")).toBeInTheDocument();
 	});
 
 	it("renders the quadlet list inside the Quadlets tab", async () => {

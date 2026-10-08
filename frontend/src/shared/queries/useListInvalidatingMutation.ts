@@ -2,6 +2,7 @@ import type { MachineResource } from "@shared/queries/queryKeys";
 import {
 	containersQueryKey,
 	imagesQueryKey,
+	networksQueryKey,
 	quadletsQueryKey,
 	secretsQueryKey,
 	volumesQueryKey,
@@ -16,6 +17,7 @@ const resourceKeys: Record<
 	containers: containersQueryKey,
 	volumes: volumesQueryKey,
 	images: imagesQueryKey,
+	networks: networksQueryKey,
 	quadlets: quadletsQueryKey,
 	secrets: secretsQueryKey,
 };
