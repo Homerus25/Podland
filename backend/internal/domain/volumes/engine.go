@@ -37,7 +37,10 @@ type VolumeEngine interface {
 // container list's mounts alone; the quadlet files' `Volume=` lines feed
 // only the preview's referencing-quadlets warning, never the in-use
 // decision. Deliberately narrow: no container lifecycle, no quadlet
-// install — the move/copy never mutates either surface.
+// install — the move/copy never mutates either surface. The two quadlet
+// reads satisfy the transfer kit's QuadletReader structurally (§19,
+// issue 259): the move preview hands the engine to the kit's scan
+// directly — no adapter.
 type VolumeUsageEngine interface {
 	// ContainerMounts lists every container (all states) with its
 	// user-declared volume mounts, each as written (`name:/dest:opts`).

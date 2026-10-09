@@ -246,6 +246,20 @@ type VolumeMoveQuadletRef struct {
 	Name string `json:"name"`
 }
 
+// toVolumeMoveQuadletRefs maps the shared transfer kit's quadlet scan
+// result onto the preview's wire rows (§19, issue 259): the kit owns the
+// list → print → match ritual and answers file-ordered quadlet file
+// names, never nil; this maps them onto the wire DTO. The result is
+// never nil, so a machine without referencing quadlets renders an empty
+// JSON array, not null.
+func toVolumeMoveQuadletRefs(names []string) []VolumeMoveQuadletRef {
+	refs := make([]VolumeMoveQuadletRef, 0, len(names))
+	for _, name := range names {
+		refs = append(refs, VolumeMoveQuadletRef{Name: name})
+	}
+	return refs
+}
+
 // Stream-event type labels for the volume copy/move's NDJSON transport
 // (issue 238): progress events, then exactly one terminal event — the
 // transfer envelope on success, the mapped error otherwise. The quadlet

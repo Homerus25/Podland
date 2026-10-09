@@ -207,8 +207,11 @@ copy/move composes it instead of re-deriving it:
   tar probe (first real entry proves content). `transfer.TransferSecrets`
   carries the issue-215 secret ritual (reveal on source, create on
   target, same-name skips). Error mapping stays with the caller: the
-  kit returns engine errors unwrapped plus its own sentinels, and each
-  domain maps them onto its own wire codes. The kit owns the bound's
+  kit returns engine errors unwrapped plus its own sentinels and the
+  quadlet scan's list-failure wrap (issue 259: the scan wraps a list
+  failure exactly once as the kit's own error — the one wrap the kit
+  mints), and each domain maps them onto its own wire codes. The kit
+  owns the bound's
   default too: `transfer.DefaultMaxVolumeUploadBytes` (2 GiB) is the
   one constant both domains' zero-value fallbacks and the config
   default for `VOLUME_UPLOAD_MAX_BYTES` read, so the uploads cap and

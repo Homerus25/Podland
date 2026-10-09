@@ -191,12 +191,17 @@ closest sibling that already exists. Rulings so far:
   behind every cross-machine copy/move (architecture-decisions §19):
   `CopyVolumeData` (export→import splice, byte bound, progress),
   `ProbeVolumeEmpty` (bounded tar probe), `TransferSecrets`
-  (reveal/create with same-name skips), and the quadlet reference
+  (reveal/create with same-name skips), the quadlet reference
   resolution (`transfer/quadlet.go`, issue 242: the `Volume=`/`Secret=`
   line parse and the source→name rules, one seam for the quadlet move's
   preview/plan and the volumes and secrets move previews — the parse
   ritual is pinned once in the kit's suite, the domains pin their
-  projections). The quadlet move's volume-data phase
+  projections), and the machine-wide quadlet scan
+  (`transfer/quadlet_scan.go`, issue 259: the list → print-each →
+  match ritual the volumes and secrets move previews read their
+  referencing-quadlet warnings from — the scan ritual is pinned once in
+  the kit's suite, the domains pin their projections). The quadlet
+  move's volume-data phase
   (`internal/domain/quadlets/move_volume_data.go`), the
   volumes copy/move (`internal/domain/volumes/move.go`), and the
   secrets copy/move (`internal/domain/secrets/move.go`) are its three
@@ -257,7 +262,10 @@ closest sibling that already exists. Rulings so far:
   inside, return its error untouched. Each domain declares its own
   caller-width engine interface (no context parameter, single names,
   plain flags — the volumes engine in
-  `internal/domain/volumes/engine.go` is the reference) plus a
+  `internal/domain/volumes/engine.go` is the reference; carve-out:
+  when a kit interface IS the width, the domain adopts it instead of
+  declaring its own — the secrets usage provider hands out the kit's
+  `transfer.QuadletReader`, issue 260) plus a
   one-method `WithEngine` provider that delegates to
   `Manager.WithConnection`. The production adapter lives in one
   `engine.go` per domain package — the only file in the package

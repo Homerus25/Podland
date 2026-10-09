@@ -52,13 +52,20 @@ func (s *SecretService) MovePreview(ctx context.Context, userID, machineID, secr
 		return nil, err
 	}
 
-	// Usage lease: the referencing-quadlet scan — the source machine's
-	// quadlet files whose `Secret=` lines resolve to the secret, read
-	// through the usage seam.
+	// Usage lease: the referencing-quadlet scan — the kit's machine-wide
+	// quadlet scan (issue 260, §19) answers the source machine's quadlet
+	// files whose `Secret=` lines resolve to the secret, read through
+	// the usage seam.
 	var referencing []SecretMoveQuadletRef
-	err = s.usageEngines.WithEngine(ctx, userID, machineID, "secrets.MovePreviewUsage", func(e SecretUsageEngine) error {
-		referencing, err = scanReferencingQuadlets(e, name)
-		return err
+	err = s.usageEngines.WithEngine(ctx, userID, machineID, "secrets.MovePreviewUsage", func(e transfer.QuadletReader) error {
+		names, err := transfer.QuadletsReferencingSecret(e, name)
+		if err != nil {
+			// The kit's wrap is internal — the 500 fallback answers the
+			// generic INTERNAL_ERROR; the error crosses untouched.
+			return err
+		}
+		referencing = toSecretMoveQuadletRefs(names)
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -267,47 +274,6 @@ func secretNames(e SecretEngine) (map[string]bool, error) {
 		}
 	}
 	return names, nil
-}
-
-// scanReferencingQuadlets lists the machine's quadlet files whose
-// `Secret=` lines resolve to the secret (issue 239) — the preview's
-// warning, never a block. Every quadlet is printed once; a listed but
-// unprintable file (it vanished mid-lease) cannot be scanned and is
-// skipped rather than failing the preview. The `Secret=` parse and the
-// reference naming are the shared transfer kit's quadlet reference seam
-// (§19, issue 242) — the same ritual the quadlet move's preview reads,
-// so this preview cannot drift from what a quadlet move would report.
-func scanReferencingQuadlets(e SecretUsageEngine, secretName string) ([]SecretMoveQuadletRef, error) {
-	names, err := e.ListQuadletNames()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list quadlets: %w", err)
-	}
-	contents := make(map[string]string, len(names))
-	for _, name := range names {
-		content, err := e.PrintQuadlet(name)
-		if err != nil {
-			continue
-		}
-		contents[name] = content
-	}
-
-	referencing := []SecretMoveQuadletRef{}
-	for _, name := range names {
-		content, ok := contents[name]
-		if !ok {
-			continue
-		}
-		for _, ref := range transfer.ParseQuadletSecrets(content) {
-			// Only a kind secret reference names a store secret — a
-			// hostPath source is read off the host filesystem at run
-			// time and never consults the store.
-			if ref.Kind == transfer.QuadletRefKindSecret && ref.Name == secretName {
-				referencing = append(referencing, SecretMoveQuadletRef{Name: name})
-				break
-			}
-		}
-	}
-	return referencing, nil
 }
 
 // secretSourceAdapter widens the secrets engine's Inspect to the shared

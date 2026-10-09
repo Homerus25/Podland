@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/transfer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -78,10 +79,11 @@ func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, o
 	return fn(p.engine)
 }
 
-// fakeUsageEngine is the function-field fake for the SecretUsageEngine
-// seam. Each test arms only the operations its scenario needs; an
-// unarmed operation panics, so an unexpected engine call fails the test
-// loudly.
+// fakeUsageEngine is the function-field fake for the kit's
+// transfer.QuadletReader seam (issue 260, §19) — the width the usage
+// provider hands out. Each test arms only the operations its scenario
+// needs; an unarmed operation panics, so an unexpected engine call
+// fails the test loudly.
 type fakeUsageEngine struct {
 	listQuadletNamesFn func() ([]string, error)
 	printQuadletFn     func(name string) (string, error)
@@ -89,27 +91,27 @@ type fakeUsageEngine struct {
 
 func (f *fakeUsageEngine) ListQuadletNames() ([]string, error) {
 	if f.listQuadletNamesFn == nil {
-		panic("unexpected SecretUsageEngine.ListQuadletNames call")
+		panic("unexpected QuadletReader.ListQuadletNames call")
 	}
 	return f.listQuadletNamesFn()
 }
 
 func (f *fakeUsageEngine) PrintQuadlet(name string) (string, error) {
 	if f.printQuadletFn == nil {
-		panic("unexpected SecretUsageEngine.PrintQuadlet call")
+		panic("unexpected QuadletReader.PrintQuadlet call")
 	}
 	return f.printQuadletFn(name)
 }
 
-// fakeUsageEngineProvider serves per-machine usage engines keyed by
+// fakeUsageEngineProvider serves per-machine quadlet readers keyed by
 // machine ID; a lookup miss panics, so a closure crossing an unexpected
 // machine fails the test loudly.
 type fakeUsageEngineProvider struct {
-	engines map[string]SecretUsageEngine
+	engines map[string]transfer.QuadletReader
 	err     error
 }
 
-func (p fakeUsageEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretUsageEngine) error) error {
+func (p fakeUsageEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e transfer.QuadletReader) error) error {
 	if p.err != nil {
 		return p.err
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
+	"github.com/Homerus25/podland/backend/internal/transfer"
 	podmanSecrets "go.podman.io/podman/v6/pkg/bindings/secrets"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
@@ -33,24 +34,16 @@ type SecretEngineProvider interface {
 	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretEngine) error) error
 }
 
-// SecretUsageEngine is the secrets domain's view of one machine's
-// quadlet surface (issue 239): the exact reads the copy/move preview
-// needs to decide which quadlet files reference a secret. Deliberately
-// narrow: no quadlet install or lifecycle — the copy/move never mutates
-// the quadlet surface.
-type SecretUsageEngine interface {
-	// ListQuadletNames lists the machine's quadlet file names.
-	ListQuadletNames() ([]string, error)
-	// PrintQuadlet returns one quadlet file's verbatim content.
-	PrintQuadlet(name string) (string, error)
-}
-
 // SecretUsageEngineProvider is the secrets domain's slice of the
 // connection seam for the quadlet surface (issue 239): it hands a
-// closure one machine's SecretUsageEngine, delegating to
-// connections.Manager.
+// closure one machine's quadlet reader — the kit's
+// transfer.QuadletReader (issue 260, §19), the exact reads the
+// copy/move preview's referencing-quadlet scan needs — delegating to
+// connections.Manager. The domain declares no usage-engine interface
+// of its own: the kit's reader IS the width, and the podman adapter
+// below satisfies it structurally.
 type SecretUsageEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretUsageEngine) error) error
+	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e transfer.QuadletReader) error) error
 }
 
 // NewSecretUsageEngineProvider returns the production usage provider: it
@@ -65,14 +58,14 @@ type connectionUsageEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionUsageEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretUsageEngine) error) error {
+func (p connectionUsageEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e transfer.QuadletReader) error) error {
 	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
 		return fn(&podmanSecretUsageEngine{ctx: connCtx})
 	})
 }
 
-// podmanSecretUsageEngine implements SecretUsageEngine against one live
-// connection.
+// podmanSecretUsageEngine satisfies the kit's transfer.QuadletReader
+// against one live connection (issue 260, §19).
 type podmanSecretUsageEngine struct {
 	ctx context.Context
 }

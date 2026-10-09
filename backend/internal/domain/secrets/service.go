@@ -21,9 +21,11 @@ type SecretService struct {
 	engines SecretEngineProvider
 	// usageEngines resolves the quadlet surface the cross-machine
 	// copy/move preview (issue 239) derives its referencing-quadlet
-	// warning from. Wired via WithUsageEngines; production wiring
-	// always sets it — calling a move path on a service without it is a
-	// wiring bug and panics at the seam.
+	// warning from — the kit's machine-wide quadlet scan (issue 260,
+	// §19) reads it through the provider's transfer.QuadletReader.
+	// Wired via WithUsageEngines; production wiring always sets it —
+	// calling a move path on a service without it is a wiring bug and
+	// panics at the seam.
 	usageEngines SecretUsageEngineProvider
 	// accessRepo resolves the caller's permission level for the
 	// admin-only value reveal (?reveal=true): the gate is a query param,
@@ -44,9 +46,11 @@ func NewSecretService(engines SecretEngineProvider, accessRepo permission.Permis
 }
 
 // WithUsageEngines wires the quadlet surface seam the cross-machine
-// copy/move preview (issue 239) reads and returns the service for
-// chaining. Production wiring always sets it; calling a move path on a
-// service without it is a wiring bug and panics at the seam.
+// copy/move preview (issue 239) reads — the kit's quadlet scan (issue
+// 260, §19) through the provider's transfer.QuadletReader — and
+// returns the service for chaining. Production wiring always sets it;
+// calling a move path on a service without it is a wiring bug and
+// panics at the seam.
 func (s *SecretService) WithUsageEngines(usageEngines SecretUsageEngineProvider) *SecretService {
 	s.usageEngines = usageEngines
 	return s

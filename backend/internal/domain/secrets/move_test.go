@@ -8,6 +8,7 @@ import (
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/transfer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -55,7 +56,7 @@ func newMoveTestService(sourceEngine, targetEngine *fakeSecretEngine, usage *fak
 		"machine-a": sourceEngine,
 		"machine-b": targetEngine,
 	}}, access).
-		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]SecretUsageEngine{
+		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]transfer.QuadletReader{
 			"machine-a": usage,
 		}})
 }
@@ -176,7 +177,7 @@ func TestSecretService_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
 
 func TestSecretService_MovePreview_SourceUnreachableIsConnectionFailed(t *testing.T) {
 	service := NewSecretService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}, &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetRead}).
-		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]SecretUsageEngine{}})
+		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]transfer.QuadletReader{}})
 
 	preview, err := service.MovePreview(context.Background(), "user", "machine-a", "db-password", "machine-b")
 
@@ -350,7 +351,7 @@ func TestSecretService_Move_VanishedSourceIsMoved(t *testing.T) {
 
 func TestSecretService_Move_SourceUnreachableIsConnectionFailed(t *testing.T) {
 	service := NewSecretService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}, &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetWrite}).
-		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]SecretUsageEngine{}})
+		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]transfer.QuadletReader{}})
 
 	response, err := service.Move(context.Background(), "user", "machine-a", "db-password",
 		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeCopy})

@@ -63,8 +63,18 @@ func (s *VolumeService) MovePreview(ctx context.Context, userID, machineID, volu
 		if err != nil {
 			return err
 		}
-		referencing, err = scanReferencingQuadlets(e, volumeName)
-		return err
+		// The referencing-quadlets warning rides the shared transfer
+		// kit's machine-wide quadlet scan (§19, issue 259): the usage
+		// engine satisfies the kit's QuadletReader structurally, so it
+		// is handed over directly — no adapter. The kit's error rides
+		// untouched: the envelope's 500 fallback answers the generic
+		// INTERNAL_ERROR, the wrap message is internal.
+		names, err := transfer.QuadletsReferencingVolume(e, volumeName)
+		if err != nil {
+			return err
+		}
+		referencing = toVolumeMoveQuadletRefs(names)
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -362,50 +372,6 @@ func volumeMountSource(mount string) string {
 		return mount[:idx]
 	}
 	return mount
-}
-
-// scanReferencingQuadlets lists the machine's quadlet files whose
-// `Volume=` lines resolve to the volume (issue 238) — the preview's
-// warning, never a block. Every quadlet is printed once into a
-// name→content map: a bare-name source matches directly, a `.volume`
-// companion source resolves through its companion file's VolumeName=
-// (first non-empty wins, podman's systemd-<name> default otherwise), and
-// host paths never match. The `Volume=` parse and the source→volume
-// resolution are the shared transfer kit's quadlet reference seam (§19,
-// issue 242) — the same ritual the quadlet move's preview and plan read,
-// so this preview cannot drift from what a quadlet move would report.
-func scanReferencingQuadlets(e VolumeUsageEngine, volumeName string) ([]VolumeMoveQuadletRef, error) {
-	names, err := e.ListQuadletNames()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list quadlets: %w", err)
-	}
-	contents := make(map[string]string, len(names))
-	for _, name := range names {
-		content, err := e.PrintQuadlet(name)
-		if err != nil {
-			// Listed but unprintable — the file vanished mid-lease. It
-			// cannot be scanned; skip it rather than fail the preview.
-			continue
-		}
-		contents[name] = content
-	}
-
-	referencing := []VolumeMoveQuadletRef{}
-	for _, name := range names {
-		content, ok := contents[name]
-		if !ok {
-			continue
-		}
-		for _, ref := range transfer.ParseQuadletVolumes(content) {
-			// A host bind path never resolves — the seam answers "" for
-			// it, so it can never equal a volume name.
-			if resolved, _ := transfer.ResolveQuadletVolumeName(ref.Source, contents); resolved == volumeName {
-				referencing = append(referencing, VolumeMoveQuadletRef{Name: name})
-				break
-			}
-		}
-	}
-	return referencing, nil
 }
 
 // volumeExportAdapter widens the volumes engine's Export to the shared

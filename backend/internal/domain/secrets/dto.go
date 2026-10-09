@@ -192,6 +192,20 @@ type SecretMoveQuadletRef struct {
 	Name string `json:"name"`
 }
 
+// toSecretMoveQuadletRefs maps the shared transfer kit's quadlet scan
+// result onto the preview's wire rows (§19, issue 260): the kit owns the
+// list → print → match ritual and answers file-ordered quadlet file
+// names, never nil; this maps them onto the wire DTO. The result is
+// never nil, so a machine without referencing quadlets renders an empty
+// JSON array, not null.
+func toSecretMoveQuadletRefs(names []string) []SecretMoveQuadletRef {
+	refs := make([]SecretMoveQuadletRef, 0, len(names))
+	for _, name := range names {
+		refs = append(refs, SecretMoveQuadletRef{Name: name})
+	}
+	return refs
+}
+
 // formatSecretTime renders a podman timestamp as an ISO8601 string,
 // yielding "" for the zero time (mirroring the images DTO convention).
 func formatSecretTime(ts time.Time) string {
