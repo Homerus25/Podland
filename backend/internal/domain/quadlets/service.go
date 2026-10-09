@@ -298,7 +298,13 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 		// 2. Remove the existing quadlet. Force: true so an active managed resource
 		//    does not block the replace (the PUT contract has no running-conflict
 		//    error). ReloadSystemd: true so systemd drops the old unit.
-		if _, err := e.Remove(name, true); err != nil {
+		//    The remove is best-effort: an error that arrived in the report (the
+		//    race window where the quadlet vanished or its removal failed between
+		//    the locate and the remove) never blocked the replace on master (the
+		//    install below overwrites the unit file anyway), so it still does not;
+		//    only a call-level failure fails the update (issue 263's byte-identical
+		//    wire behavior).
+		if err := e.Remove(name, true); err != nil && !isReportError(err) {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrQuadletNotFound
 			}
@@ -366,11 +372,14 @@ func (s *QuadletService) Update(ctx context.Context, userID, machineID, name str
 // The whole ritual is the shared stopAndRemove (remove.go, issue 231);
 // Delete contributes its op tag and terminals — ErrQuadletNotFound for a
 // vanished quadlet, the bare ErrQuadletResourceRunning for a running
-// refusal — and nothing else.
+// refusal (a dropping closure: the cause is dropped today) — and nothing
+// else.
 func (s *QuadletService) Delete(ctx context.Context, userID, machineID, name string, force, stop bool) error {
 	return s.stopAndRemove(ctx, userID, machineID, name, force, stop, "quadlets.Delete", removeTerminals{
 		missing: appErrors.ErrQuadletNotFound,
-		running: appErrors.ErrQuadletResourceRunning,
+		// The running refusal's cause (podman's text) is dropped today:
+		// the wire answers the bare sentinel.
+		running: func(string) error { return appErrors.ErrQuadletResourceRunning },
 	})
 }
 

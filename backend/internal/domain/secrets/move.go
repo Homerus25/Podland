@@ -10,6 +10,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/removal"
 	"github.com/Homerus25/podland/backend/internal/transfer"
 )
 
@@ -243,20 +244,20 @@ func (s *SecretService) resolveSecretName(ctx context.Context, userID, machineID
 // target install it follows cannot be rolled back.
 func (s *SecretService) removeSourceAfterTransfer(ctx context.Context, userID, machineID, secretName string) error {
 	return s.engines.WithEngine(ctx, userID, machineID, "secrets.MoveSourceRemove", func(e SecretEngine) error {
-		if err := e.Remove(secretName); err != nil {
-			if podmanerr.IsNotFound(err) {
-				// The source vanished between the transfer and the
-				// removal — the transfer's goal is met.
-				return nil
-			}
-			if podmanerr.IsConflict(err) {
+		// A vanished source answers nil — the transfer's goal is met and
+		// a "partial" would falsely claim the secret exists on both
+		// machines (the nil-legal missing terminal).
+		return removal.Run(func() error {
+			return e.Remove(secretName)
+		}, removal.Terminals{
+			Missing: nil,
+			Refusal: func(cause string) error {
 				// Podman's own refusal (which container holds the
 				// secret) is the honest partial detail.
-				return appErrors.ErrSecretInUse.WithMessage(podmanerr.Message(err))
-			}
-			return fmt.Errorf("failed to delete secret: %w", err)
-		}
-		return nil
+				return appErrors.ErrSecretInUse.WithMessage(cause)
+			},
+			IsRefusal: podmanerr.IsConflict,
+		}, "failed to delete secret")
 	})
 }
 

@@ -15,7 +15,7 @@ type fakeVolumeEngine struct {
 	listFn    func(opts entities.VolumeListOptions) ([]*entities.VolumeListReport, error)
 	inspectFn func(name string) (*entities.VolumeInspectReport, error)
 	createFn  func(opts entities.VolumeCreateOptions) (*entities.IDOrNameResponse, error)
-	removeFn  func(name string, force bool) ([]*entities.VolumeRmReport, error)
+	removeFn  func(name string, force bool) error
 	pruneFn   func() ([]*reports.PruneReport, error)
 	exportFn  func(name string, w io.Writer) error
 	importFn  func(name string, r io.Reader) error
@@ -42,7 +42,7 @@ func (f *fakeVolumeEngine) Create(opts entities.VolumeCreateOptions) (*entities.
 	return f.createFn(opts)
 }
 
-func (f *fakeVolumeEngine) Remove(name string, force bool) ([]*entities.VolumeRmReport, error) {
+func (f *fakeVolumeEngine) Remove(name string, force bool) error {
 	if f.removeFn == nil {
 		panic("unexpected VolumeEngine.Remove call")
 	}

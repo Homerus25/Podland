@@ -8,6 +8,7 @@ import (
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/removal"
 	"github.com/Homerus25/podland/backend/internal/transfer"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
@@ -161,38 +162,31 @@ func (s *VolumeService) Create(ctx context.Context, userID, machineID string, re
 // 409 VOLUME_IN_USE carrying podman's message; with force, podman stops
 // dependent containers first (its own semantics) and removes the volume.
 // Unknown names surface as the same clean 404 as inspect.
+//
+// The classification covers the remove call's own failure too (issue
+// 263's accepted tightening): a remove that errors at the call rather
+// than in podman's per-volume report — the race window where the volume
+// vanished or came into use between the request and podman's execution —
+// answers the same terminals (404 VOLUME_NOT_FOUND / 409 VOLUME_IN_USE)
+// instead of a wrapped unclassified error. The remove-and-classify
+// ritual itself rides internal/removal (issue 264).
 func (s *VolumeService) Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error {
 	return s.engines.WithEngine(ctx, userID, machineID, "volumes.Delete", func(e VolumeEngine) error {
-		removed, err := e.Remove(volumeName, force)
-		if err != nil {
-			return fmt.Errorf("failed to remove volume: %w", err)
-		}
-		for _, report := range removed {
-			if report == nil || report.Err == nil {
-				continue
-			}
-			if podmanerr.IsNotFound(report.Err) {
-				return appErrors.ErrVolumeNotFound
-			}
-			if appErr := mapInUseError(report.Err); appErr != nil {
-				return appErr
-			}
-			return fmt.Errorf("failed to remove volume: %w", report.Err)
-		}
-		return nil
+		return removal.Run(func() error {
+			return e.Remove(volumeName, force)
+		}, removal.Terminals{
+			Missing: appErrors.ErrVolumeNotFound,
+			// Podman's compat layer reports the in-use refusal as a 409
+			// ErrorModel or a plain "in use" error depending on version;
+			// the predicate owns both shapes, and the builder threads
+			// podman's message so the UI can explain what depends on the
+			// volume.
+			Refusal: func(cause string) error {
+				return appErrors.ErrVolumeInUse.WithMessage(cause)
+			},
+			IsRefusal: podmanerr.IsConflict,
+		}, "failed to remove volume")
 	})
-}
-
-// mapInUseError converts podman's in-use refusal into 409 VOLUME_IN_USE
-// carrying podman's message, so the UI can explain what depends on the
-// volume. Podman's compat layer reports the refusal as a 409 ErrorModel
-// or a plain "in use" error depending on version; the adapter owns both
-// shapes (podmanerr.IsConflict).
-func mapInUseError(err error) *appErrors.AppError {
-	if podmanerr.IsConflict(err) {
-		return appErrors.ErrVolumeInUse.WithMessage(podmanerr.Message(err))
-	}
-	return nil
 }
 
 // mapCreateError converts podman's client-side rejections into 4xx app

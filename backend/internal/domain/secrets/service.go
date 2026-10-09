@@ -9,6 +9,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/removal"
 )
 
 // SecretService provides business logic for secrets. Secrets live only in
@@ -165,18 +166,17 @@ func (s *SecretService) Create(ctx context.Context, userID, machineID string, re
 // is empty too — the frontend series (170) invalidates the list on the 204.
 func (s *SecretService) Delete(ctx context.Context, userID, machineID, secretID string) error {
 	return s.engines.WithEngine(ctx, userID, machineID, "secrets.Delete", func(e SecretEngine) error {
-		if err := e.Remove(secretID); err != nil {
-			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrSecretNotFound
-			}
-			if podmanerr.IsConflict(err) {
-				// Surface podman's own refusal text (which container holds the
-				// secret) — a 4xx, so the message reaches the frontend.
-				return appErrors.ErrSecretInUse.WithMessage(podmanerr.Message(err))
-			}
-			return fmt.Errorf("failed to delete secret: %w", err)
-		}
-
-		return nil
+		return removal.Run(func() error {
+			return e.Remove(secretID)
+		}, removal.Terminals{
+			Missing: appErrors.ErrSecretNotFound,
+			Refusal: func(cause string) error {
+				// Surface podman's own refusal text (which container
+				// holds the secret) — a 4xx, so the message reaches
+				// the frontend.
+				return appErrors.ErrSecretInUse.WithMessage(cause)
+			},
+			IsRefusal: podmanerr.IsConflict,
+		}, "failed to delete secret")
 	})
 }

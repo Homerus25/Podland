@@ -1,16 +1,12 @@
 package volumes
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.podman.io/podman/v6/pkg/domain/entities"
-	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
 // deleteRequest serves DELETE
@@ -42,10 +38,10 @@ func TestVolumeHandler_Delete_Success(t *testing.T) {
 			var gotName string
 			var gotForce bool
 			engine := &fakeVolumeEngine{
-				removeFn: func(name string, force bool) ([]*entities.VolumeRmReport, error) {
+				removeFn: func(name string, force bool) error {
 					gotName = name
 					gotForce = force
-					return nil, nil
+					return nil
 				},
 			}
 
@@ -66,9 +62,9 @@ func TestVolumeHandler_Delete_Success(t *testing.T) {
 func TestVolumeHandler_Delete_NonBooleanForceIsIgnored(t *testing.T) {
 	var gotForce bool
 	engine := &fakeVolumeEngine{
-		removeFn: func(name string, force bool) ([]*entities.VolumeRmReport, error) {
+		removeFn: func(name string, force bool) error {
 			gotForce = force
-			return nil, nil
+			return nil
 		},
 	}
 
@@ -76,22 +72,4 @@ func TestVolumeHandler_Delete_NonBooleanForceIsIgnored(t *testing.T) {
 
 	assert.Equal(t, 204, w.Code, "a non-boolean force deletes as unforced, not as a client error")
 	assert.False(t, gotForce, "the non-boolean force must reach the machine as false")
-}
-
-// TestMapInUseError pins the in-use mapping: podman's 409 ErrorModel and
-// its plain "in use" text both map to VOLUME_IN_USE, while other errors
-// stay unmapped (wrapped 5xx at the handler).
-func TestMapInUseError(t *testing.T) {
-	appErr := mapInUseError(&errorhandling.ErrorModel{ResponseCode: http.StatusConflict, Message: "volume in use"})
-	require.NotNil(t, appErr, "podman 409 must map to the in-use client error")
-	assert.Equal(t, http.StatusConflict, appErr.Status)
-	assert.Equal(t, "VOLUME_IN_USE", appErr.Code)
-	assert.Equal(t, "volume in use", appErr.Message)
-
-	appErr = mapInUseError(fmt.Errorf("volume is in use by a container"))
-	require.NotNil(t, appErr, "plain in-use text must map to the in-use client error")
-	assert.Equal(t, http.StatusConflict, appErr.Status)
-
-	assert.Nil(t, mapInUseError(&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound}), "404 must not map to in-use")
-	assert.Nil(t, mapInUseError(assert.AnError), "unrelated errors must not map to in-use")
 }

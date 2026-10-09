@@ -288,9 +288,9 @@ func TestQuadletHandler_Update(t *testing.T) {
 			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
 				return listFixture(), nil
 			},
-			removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+			removeFn: func(name string, force bool) error {
 				removedName, removedForce = name, force
-				return &entities.QuadletRemoveReport{}, nil
+				return nil
 			},
 			installFn: func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {
 				gotFileName, gotContent, gotReplace = fileName, content, replace
@@ -386,9 +386,9 @@ func TestQuadletHandler_Delete(t *testing.T) {
 						quadletFixture(tt.quadletID, "/etc/containers/systemd/"+tt.quadletID, "stopped"),
 					}, nil
 				},
-				removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+				removeFn: func(name string, force bool) error {
 					capturedName, capturedForce = name, force
-					return &entities.QuadletRemoveReport{}, nil
+					return nil
 				},
 			}
 
@@ -425,8 +425,8 @@ func TestQuadletHandler_Delete(t *testing.T) {
 			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
 				return runningContainerFixture(), nil
 			},
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return &entities.QuadletRemoveReport{}, nil
+			removeFn: func(string, bool) error {
+				return nil
 			},
 		}
 

@@ -14,7 +14,7 @@ import (
 type fakeQuadletEngine struct {
 	listFn             func(opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error)
 	printFn            func(name string) (string, error)
-	removeFn           func(name string, force bool) (*entities.QuadletRemoveReport, error)
+	removeFn           func(name string, force bool) error
 	installFn          func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error)
 	logsFn             func(containerName string, opts entities.ContainerLogsOptions) error
 	inspectContainerFn func(id string) ([]*entities.ContainerInspectReport, []error, error)
@@ -39,7 +39,7 @@ func (f *fakeQuadletEngine) Print(name string) (string, error) {
 	return f.printFn(name)
 }
 
-func (f *fakeQuadletEngine) Remove(name string, force bool) (*entities.QuadletRemoveReport, error) {
+func (f *fakeQuadletEngine) Remove(name string, force bool) error {
 	if f.removeFn == nil {
 		panic("unexpected QuadletEngine.Remove call")
 	}

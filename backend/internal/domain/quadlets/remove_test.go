@@ -17,29 +17,37 @@ import (
 )
 
 // The stop-and-remove ritual's own suite (issue 231): a table over the
-// terminal matrix — missing × running × force × stop × remove-error ×
-// report-error — driving stopAndRemove directly over the fake engine with
+// terminal matrix — missing × running × force × stop × remove-error —
+// driving stopAndRemove directly over the fake engine with
 // both callers' terminal shapes. The callers themselves stay pinned by
 // their own suites (Delete's service and handler tests, the move
 // source-removal tests); this suite pins the ritual's decisions so both
-// callers inherit them from one place.
+// callers inherit them from one place. The remove arms plain errors: the
+// adapter owns folding podman's report shapes into the call's single
+// error (issue 263), so the report shape no longer exists at this seam —
+// except the adapter's reportError marker, which the two marker-armed
+// cases below pin: classification (not-found, running refusal) works
+// through the marker exactly as through the bare error.
 
 // deleteRemoveTerminals is Delete's terminal shape: a vanished quadlet is
-// the 404 sentinel, a running refusal the bare 400 sentinel.
+// the 404 sentinel, a running refusal the bare 400 sentinel (the cause
+// dropped today — a dropping closure).
 func deleteRemoveTerminals() removeTerminals {
 	return removeTerminals{
 		missing: appErrors.ErrQuadletNotFound,
-		running: appErrors.ErrQuadletResourceRunning,
+		running: func(string) error { return appErrors.ErrQuadletResourceRunning },
 	}
 }
 
 // moveRemoveTerminals is the move source half's terminal shape: a vanished
 // quadlet is success (nil), a running refusal the wrapped sentinel that
-// becomes the transfer's partial detail.
+// becomes the transfer's partial detail (the cause dropped today).
 func moveRemoveTerminals() removeTerminals {
 	return removeTerminals{
 		missing: nil,
-		running: fmt.Errorf("failed to remove quadlet: %w", appErrors.ErrQuadletResourceRunning),
+		running: func(string) error {
+			return fmt.Errorf("failed to remove quadlet: %w", appErrors.ErrQuadletResourceRunning)
+		},
 	}
 }
 
@@ -64,7 +72,7 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 		stopFails bool
 		// removeFn arms the engine's remove; nil leaves it unarmed so an
 		// unexpected remove panics the test loudly.
-		removeFn func(name string, force bool) (*entities.QuadletRemoveReport, error)
+		removeFn func(name string, force bool) error
 		wantErr  func(t *testing.T, err error)
 		// wantStops is the number of systemctl calls expected.
 		wantStops int
@@ -120,10 +128,10 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 			force:     false,
 			stop:      true,
 			terminals: deleteRemoveTerminals(),
-			removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+			removeFn: func(name string, force bool) error {
 				assert.Equal(t, "web.container", name)
 				assert.False(t, force, "the remove follows an explicit stop and must not be forced")
-				return &entities.QuadletRemoveReport{}, nil
+				return nil
 			},
 			wantErr: func(t *testing.T, err error) {
 				require.NoError(t, err)
@@ -140,9 +148,9 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 			force:     true,
 			stop:      true,
 			terminals: deleteRemoveTerminals(),
-			removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+			removeFn: func(name string, force bool) error {
 				assert.True(t, force, "force must reach the remove")
-				return &entities.QuadletRemoveReport{}, nil
+				return nil
 			},
 			wantErr: func(t *testing.T, err error) {
 				require.NoError(t, err)
@@ -171,8 +179,8 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 			force:     false,
 			stop:      true,
 			terminals: deleteRemoveTerminals(),
-			removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
-				return &entities.QuadletRemoveReport{}, nil
+			removeFn: func(name string, force bool) error {
+				return nil
 			},
 			wantErr: func(t *testing.T, err error) {
 				require.NoError(t, err)
@@ -188,8 +196,8 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 			force:     false,
 			stop:      true,
 			terminals: deleteRemoveTerminals(),
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return nil, &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such quadlet"}
+			removeFn: func(string, bool) error {
+				return &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such quadlet"}
 			},
 			wantErr: func(t *testing.T, err error) {
 				require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
@@ -201,11 +209,39 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 			force:     false,
 			stop:      true,
 			terminals: moveRemoveTerminals(),
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return nil, &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such quadlet"}
+			removeFn: func(string, bool) error {
+				return &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such quadlet"}
 			},
 			wantErr: func(t *testing.T, err error) {
 				require.NoError(t, err)
+			},
+		},
+		{
+			name:      "report-carried not-found answers the delete missing terminal",
+			listed:    stoppedQuadlet(),
+			force:     false,
+			stop:      true,
+			terminals: deleteRemoveTerminals(),
+			removeFn: func(string, bool) error {
+				return reportError{err: &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such quadlet"}}
+			},
+			wantErr: func(t *testing.T, err error) {
+				require.ErrorIs(t, err, appErrors.ErrQuadletNotFound,
+					"the adapter's reportError marker must classify through to the missing terminal")
+			},
+		},
+		{
+			name:      "report-carried running refusal answers the running terminal",
+			listed:    stoppedQuadlet(),
+			force:     false,
+			stop:      true,
+			terminals: deleteRemoveTerminals(),
+			removeFn: func(string, bool) error {
+				return reportError{err: errors.New("quadlet web.container is running and force is not set, refusing to remove")}
+			},
+			wantErr: func(t *testing.T, err error) {
+				require.ErrorIs(t, err, appErrors.ErrQuadletResourceRunning,
+					"the adapter's reportError marker must classify through to the running terminal")
 			},
 		},
 		{
@@ -214,8 +250,8 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 			force:     false,
 			stop:      true,
 			terminals: deleteRemoveTerminals(),
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return nil, errors.New("quadlet web.container is running and force is not set, refusing to remove")
+			removeFn: func(string, bool) error {
+				return errors.New("quadlet web.container is running and force is not set, refusing to remove")
 			},
 			wantErr: func(t *testing.T, err error) {
 				require.ErrorIs(t, err, appErrors.ErrQuadletResourceRunning)
@@ -227,8 +263,8 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 			force:     true,
 			stop:      true,
 			terminals: deleteRemoveTerminals(),
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return nil, errors.New("quadlet web.container is running and force is not set, refusing to remove")
+			removeFn: func(string, bool) error {
+				return errors.New("quadlet web.container is running and force is not set, refusing to remove")
 			},
 			wantErr: func(t *testing.T, err error) {
 				require.Error(t, err)
@@ -244,77 +280,8 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 			force:     false,
 			stop:      true,
 			terminals: deleteRemoveTerminals(),
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return nil, errors.New("source read-only")
-			},
-			wantErr: func(t *testing.T, err error) {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), "failed to remove quadlet: source read-only")
-			},
-		},
-		{
-			name:      "report not-found answers the delete missing terminal",
-			listed:    stoppedQuadlet(),
-			force:     false,
-			stop:      true,
-			terminals: deleteRemoveTerminals(),
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return &entities.QuadletRemoveReport{
-					Errors: map[string]error{
-						"web.container": &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such quadlet"},
-					},
-				}, nil
-			},
-			wantErr: func(t *testing.T, err error) {
-				require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
-			},
-		},
-		{
-			name:      "report not-found answers the move missing terminal (nil)",
-			listed:    stoppedQuadlet(),
-			force:     false,
-			stop:      true,
-			terminals: moveRemoveTerminals(),
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return &entities.QuadletRemoveReport{
-					Errors: map[string]error{
-						"web.container": &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such quadlet"},
-					},
-				}, nil
-			},
-			wantErr: func(t *testing.T, err error) {
-				require.NoError(t, err)
-			},
-		},
-		{
-			name:      "report running refusal answers the running terminal",
-			listed:    stoppedQuadlet(),
-			force:     false,
-			stop:      true,
-			terminals: deleteRemoveTerminals(),
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return &entities.QuadletRemoveReport{
-					Errors: map[string]error{
-						"web.container": errors.New("quadlet web.container is running and force is not set, refusing to remove"),
-					},
-				}, nil
-			},
-			wantErr: func(t *testing.T, err error) {
-				require.ErrorIs(t, err, appErrors.ErrQuadletResourceRunning)
-			},
-		},
-		{
-			name:      "report generic failure wraps",
-			listed:    stoppedQuadlet(),
-			force:     false,
-			stop:      true,
-			terminals: deleteRemoveTerminals(),
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return &entities.QuadletRemoveReport{
-					Errors: map[string]error{
-						"web.container": errors.New("source read-only"),
-					},
-				}, nil
+			removeFn: func(string, bool) error {
+				return errors.New("source read-only")
 			},
 			wantErr: func(t *testing.T, err error) {
 				require.Error(t, err)
@@ -337,7 +304,7 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 			}
 			if tt.removeFn != nil {
 				inner := tt.removeFn
-				engine.removeFn = func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+				engine.removeFn = func(name string, force bool) error {
 					removed, removedForce = true, force
 					return inner(name, force)
 				}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
 // fakeAccessRepo is the function-field fake for the permission.PermissionGetter
@@ -338,9 +340,9 @@ func TestVolumeService_Move_ImportFailureRollsTargetBack(t *testing.T) {
 	target.importFn = func(string, io.Reader) error {
 		return errors.New("import refused")
 	}
-	target.removeFn = func(name string, force bool) ([]*entities.VolumeRmReport, error) {
+	target.removeFn = func(name string, force bool) error {
 		removed = name
-		return []*entities.VolumeRmReport{}, nil
+		return nil
 	}
 	service := newMoveTestService(moveSourceFixture(t), target, idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
@@ -365,9 +367,9 @@ func TestVolumeService_Move_BoundTripsAndRollsBack(t *testing.T) {
 	}
 	target := emptyTargetFixture()
 	removed := ""
-	target.removeFn = func(name string, force bool) ([]*entities.VolumeRmReport, error) {
+	target.removeFn = func(name string, force bool) error {
 		removed = name
-		return []*entities.VolumeRmReport{}, nil
+		return nil
 	}
 	service := NewVolumeService(fakeEngineProvider{engines: map[string]VolumeEngine{
 		"machine-a": source,
@@ -400,8 +402,8 @@ func TestVolumeService_Move_BoundWithFailedRollbackNamesBoth(t *testing.T) {
 		return err
 	}
 	target := emptyTargetFixture()
-	target.removeFn = func(string, bool) ([]*entities.VolumeRmReport, error) {
-		return nil, errors.New("remove refused")
+	target.removeFn = func(string, bool) error {
+		return errors.New("remove refused")
 	}
 	service := NewVolumeService(fakeEngineProvider{engines: map[string]VolumeEngine{
 		"machine-a": source,
@@ -445,9 +447,9 @@ func TestVolumeService_Move_CancelledContextRollsTargetBack(t *testing.T) {
 		cancel()
 		return errors.New("import refused")
 	}
-	target.removeFn = func(name string, force bool) ([]*entities.VolumeRmReport, error) {
+	target.removeFn = func(name string, force bool) error {
 		removed = name
-		return []*entities.VolumeRmReport{}, nil
+		return nil
 	}
 	service := newMoveTestService(moveSourceFixture(t), target, idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
@@ -465,8 +467,8 @@ func TestVolumeService_Move_CancelledContextRollsTargetBack(t *testing.T) {
 // movableSourceFixture arms the source's remove: a successful removal.
 func movableSourceFixture(t *testing.T) *fakeVolumeEngine {
 	source := moveSourceFixture(t)
-	source.removeFn = func(string, bool) ([]*entities.VolumeRmReport, error) {
-		return []*entities.VolumeRmReport{}, nil
+	source.removeFn = func(string, bool) error {
+		return nil
 	}
 	return source
 }
@@ -474,9 +476,9 @@ func movableSourceFixture(t *testing.T) *fakeVolumeEngine {
 func TestVolumeService_Move_MoveRemovesSourceAfterCopy(t *testing.T) {
 	removedWith := ""
 	source := movableSourceFixture(t)
-	source.removeFn = func(name string, force bool) ([]*entities.VolumeRmReport, error) {
+	source.removeFn = func(name string, force bool) error {
 		removedWith = name
-		return []*entities.VolumeRmReport{}, nil
+		return nil
 	}
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
@@ -530,8 +532,8 @@ func TestVolumeService_Move_InUseSourceForceProceeds(t *testing.T) {
 
 func TestVolumeService_Move_RemoveFailureIsPartial(t *testing.T) {
 	source := movableSourceFixture(t)
-	source.removeFn = func(string, bool) ([]*entities.VolumeRmReport, error) {
-		return nil, errors.New("source read-only")
+	source.removeFn = func(string, bool) error {
+		return errors.New("source read-only")
 	}
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
@@ -545,11 +547,40 @@ func TestVolumeService_Move_RemoveFailureIsPartial(t *testing.T) {
 	assert.Contains(t, got.Error, "source read-only", "partial carries the removal failure's detail")
 }
 
+// TestVolumeService_Move_InUseSourceRemovalIsPartial pins the doku's move
+// sentence (doku/description_volumes_api.md): an in-use refusal at the
+// source removal answers status "partial" with the 409 VOLUME_IN_USE
+// detail. The removal module's conflict classification (issue 264) maps
+// podman's 409 onto ErrVolumeInUse and threads the refusal text, which the
+// envelope carries as the partial detail.
+func TestVolumeService_Move_InUseSourceRemovalIsPartial(t *testing.T) {
+	source := movableSourceFixture(t)
+	source.removeFn = func(string, bool) error {
+		return &errorhandling.ErrorModel{
+			ResponseCode: http.StatusConflict,
+			Message:      "volume is in use by container web",
+		}
+	}
+	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
+		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
+
+	got, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
+		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeMove}, nil)
+
+	require.NoError(t, err, "a partial transfer is not a request failure")
+	require.NotNil(t, got)
+	assert.Equal(t, VolumeMoveStatusPartial, got.Status)
+	assert.Contains(t, got.Error, "VOLUME_IN_USE", "partial carries the 409 detail's code")
+	assert.Contains(t, got.Error, "volume is in use by container web",
+		"partial carries podman's refusal text")
+}
+
 func TestVolumeService_Move_VanishedSourceIsMoved(t *testing.T) {
 	source := movableSourceFixture(t)
-	source.removeFn = func(string, bool) ([]*entities.VolumeRmReport, error) {
-		// Podman's remove answers not-found per-item.
-		return []*entities.VolumeRmReport{{Err: errors.New("no such volume")}}, nil
+	source.removeFn = func(string, bool) error {
+		// The adapter folds podman's per-item not-found into the call's
+		// error.
+		return errors.New("no such volume")
 	}
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})

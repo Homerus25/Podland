@@ -203,6 +203,12 @@ Remove a volume by exact name. Query flag `force` (default false): with
 volume anyway. A non-boolean `force` value is ignored (treated as
 false), matching every other boolean query flag in the API.
 
+A remove failing at the call itself — the race window where the volume
+vanished or came into use between the request and podman's execution, no
+per-volume report involved — is classified the same way: not-found
+answers 404 `VOLUME_NOT_FOUND`, an in-use refusal 409 `VOLUME_IN_USE`
+carrying podman's message.
+
 **Authentication:** Required
 
 **Access:** Write level on `{id}`.
@@ -327,6 +333,12 @@ for the source machine in the path.
   must be cleaned up manually. There is no rollback of the target's data.
 - A source volume that vanished between the data phase and the removal
   needs no removal — the answer is `status: "moved"`.
+
+The source removal classifies its own failure exactly like the delete
+flow: a not-found at the call (the race window where the volume vanished
+between the data phase and the removal) is the vanished-source success
+(`status: "moved"`), and an in-use refusal answers `status: "partial"`
+with the 409 `VOLUME_IN_USE` detail.
 
 **Request:**
 ```json

@@ -11,6 +11,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/removal"
 	"github.com/Homerus25/podland/backend/internal/transfer"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -262,7 +263,7 @@ func (s *VolumeService) copyVolumeData(ctx context.Context, userID, sourceMachin
 			// The rollback: a half-populated volume must not survive —
 			// it would block a retry with a false collision. Its own
 			// failure cannot mask the transfer's; both ride the message.
-			_, rollbackErr := tgt.Remove(volumeName, false)
+			rollbackErr := tgt.Remove(volumeName, false)
 			if errors.Is(err, transfer.ErrBoundExceeded) {
 				if rollbackErr != nil {
 					return appErrors.ErrVolumeUploadTooLarge.WithMessage(fmt.Sprintf(
@@ -304,27 +305,27 @@ func (s *VolumeService) copyVolumeData(ctx context.Context, userID, sourceMachin
 // met and a "partial" would falsely claim the volume exists on both
 // machines. Its error is the "partial" detail, never a request failure —
 // the data phase it follows cannot be rolled back.
+//
+// The classification covers the remove call's own failure too (issue
+// 263's accepted tightening): a not-found at the call — the race window
+// where the volume vanished between the data phase and the removal — is
+// the vanished-source success, and an in-use refusal answers the 409
+// detail, exactly like the delete flow. The remove-and-classify ritual
+// rides internal/removal (issue 264).
 func (s *VolumeService) removeSourceAfterCopy(ctx context.Context, userID, machineID, volumeName string, force bool) error {
 	return s.engines.WithEngine(ctx, userID, machineID, "volumes.MoveSourceRemove", func(e VolumeEngine) error {
-		removed, err := e.Remove(volumeName, force)
-		if err != nil {
-			return fmt.Errorf("failed to remove volume: %w", err)
-		}
-		for _, report := range removed {
-			if report == nil || report.Err == nil {
-				continue
-			}
-			if podmanerr.IsNotFound(report.Err) {
-				// The source vanished between the data phase and the
-				// removal — the transfer's goal is met.
-				return nil
-			}
-			if appErr := mapInUseError(report.Err); appErr != nil {
-				return appErr
-			}
-			return fmt.Errorf("failed to remove volume: %w", report.Err)
-		}
-		return nil
+		// A vanished source answers nil — the transfer's goal is met and
+		// a "partial" would falsely claim the volume exists on both
+		// machines (the nil-legal missing terminal).
+		return removal.Run(func() error {
+			return e.Remove(volumeName, force)
+		}, removal.Terminals{
+			Missing: nil,
+			Refusal: func(cause string) error {
+				return appErrors.ErrVolumeInUse.WithMessage(cause)
+			},
+			IsRefusal: podmanerr.IsConflict,
+		}, "failed to remove volume")
 	})
 }
 

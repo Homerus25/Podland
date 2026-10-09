@@ -489,9 +489,9 @@ func TestQuadletService_MoveVolumeData_MoveStopsBeforeTheDataPhase(t *testing.T)
 		_, err := w.Write(buildVolumeTar(t, nil))
 		return err
 	}
-	source.removeFn = func(string, bool) (*entities.QuadletRemoveReport, error) {
+	source.removeFn = func(string, bool) error {
 		sequence = append(sequence, "remove")
-		return &entities.QuadletRemoveReport{}, nil
+		return nil
 	}
 	target := &fakeQuadletEngine{
 		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) { return nil, nil },

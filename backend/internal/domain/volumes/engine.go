@@ -22,7 +22,13 @@ type VolumeEngine interface {
 	// service's.
 	Inspect(name string) (*entities.VolumeInspectReport, error)
 	Create(opts entities.VolumeCreateOptions) (*entities.IDOrNameResponse, error)
-	Remove(name string, force bool) ([]*entities.VolumeRmReport, error)
+	// Remove uninstalls one volume by exact name and answers one error:
+	// the adapter folds podman's one-entry report slice into the single
+	// error the service classifies — a transport error, or the report's
+	// own per-volume error (the race window where the volume vanished or
+	// came into use between the call's checks and its execution), becomes
+	// the error; a clean removal answers nil.
+	Remove(name string, force bool) error
 	// Prune removes every unused volume (podman's own selection).
 	Prune() ([]*reports.PruneReport, error)
 	Export(name string, w io.Writer) error
@@ -189,8 +195,23 @@ func (e *podmanVolumeEngine) Create(opts entities.VolumeCreateOptions) (*entitie
 	return e.tunnelEngine().VolumeCreate(e.ctx, opts)
 }
 
-func (e *podmanVolumeEngine) Remove(name string, force bool) ([]*entities.VolumeRmReport, error) {
-	return e.tunnelEngine().VolumeRm(e.ctx, []string{name}, entities.VolumeRmOptions{Force: force})
+// Remove narrows podman's report-slice remove to the single error the
+// service classifies, mirroring the Inspect narrowing above: a transport
+// error becomes the error, and the one-entry report slice's per-volume
+// error — the race window where the volume vanished or came into use
+// between the call's checks and its execution — becomes the error too; a
+// clean removal answers nil.
+func (e *podmanVolumeEngine) Remove(name string, force bool) error {
+	reports, err := e.tunnelEngine().VolumeRm(e.ctx, []string{name}, entities.VolumeRmOptions{Force: force})
+	if err != nil {
+		return err
+	}
+	for _, report := range reports {
+		if report != nil && report.Err != nil {
+			return report.Err
+		}
+	}
+	return nil
 }
 
 func (e *podmanVolumeEngine) Prune() ([]*reports.PruneReport, error) {

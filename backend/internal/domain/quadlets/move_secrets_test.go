@@ -316,9 +316,9 @@ func TestQuadletService_Move_MoveKeepsSourceSecretsAndRemovesOnlyTheQuadlet(t *t
 				{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: "stopped"},
 			}, nil
 		},
-		removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+		removeFn: func(name string, force bool) error {
 			removed = append(removed, name)
-			return &entities.QuadletRemoveReport{}, nil
+			return nil
 		},
 	}
 	sourceStore := newRecordingSecretStore(nil, map[string]string{"dbpass": "s3cret-value"})

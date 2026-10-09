@@ -183,10 +183,27 @@ closest sibling that already exists. Rulings so far:
   here to jwt). Settled 2026-10-01 (architecture-review candidate C6).
 - **Quadlet stop-and-remove ritual** — `internal/domain/quadlets/remove.go`
   (`stopAndRemove`) owns the whole quadlet removal lease (list → locate →
-  caller terminals → running refusal → stop gate → remove → report scan);
+  caller terminals → running refusal → stop gate → remove), composing the
+  removal-terminals module for its remove-and-classify tail (the adapter
+  folds the remove report into the call's single error, issue 263);
   `QuadletService.Delete` and the move source half
   (`removeSourceAfterInstall` in `move.go`) are its two callers, distinct
-  only in op tag and terminal values. Settled 2026-10-05 (issue 231).
+  only in op tag and terminal values. Settled 2026-10-05 (issue 231; the
+  tail composed of the removal module, issue 264).
+- **Removal-terminals module** — `internal/removal` (`Run`) is the one kit
+  behind every remove-and-classify tail (issue 264): one entry point
+  taking a remove closure, the caller's removal terminals (GLOSSARY:
+  "Removal terminals" — the vanished-source terminal as a plain,
+  nil-legal value; the refusal terminal as a builder threading podman's
+  refusal text where the domain's wire shows it; the refusal predicate
+  alongside, the domain's refusal phrases staying domain-local), and the
+  wrap text. The six call sites: volumes Delete and the volumes move
+  source half, secrets Delete and the secrets move source half, and the
+  quadlets' stop-and-remove tail (whose list/locate/running-gate/stop
+  preflight stays quadlet-local). The module imports no domain
+  vocabulary; the classification matrix is pinned once in its suite, the
+  domains keep their composition pins. Settled 2026-10-09 (issue 264,
+  riding the seam flattened by issue 263).
 - **Cross-machine transfer core** — `internal/transfer` is the one kit
   behind every cross-machine copy/move (architecture-decisions §19):
   `CopyVolumeData` (export→import splice, byte bound, progress),
@@ -301,13 +318,16 @@ already diverged, extraction triggers even below the third copy — the
 log-stream kit (`.scratch/380-log-stream-kit`) is the precedent, where
 two timestamp parsers that disagreed on a spaceless podman line made
 the streaming path un-changeable in one place. The threshold has been
-crossed seven times and all seven extractions are now the reference: the
+crossed eight times and all eight extractions are now the reference: the
 endpoint ritual became `internal/web.Handle`, the handler-test
 scaffolding became `testutils.Perform`, the decode+validate ritual
 became `web.Decode`, podman error classification became
 `internal/podmanerr` — one leaf adapter owning podman's error model
 (typed `ErrorModel` status first, phrase fallback over the lowercased
 text) for volumes, secrets, containers, images, and quadlets — the
+remove-and-classify ritual became `internal/removal` (issue 264: one
+`Run` per removal call site, the caller's terminals passed in, the
+refusal phrases staying domain-local) — the
 param ritual became `web.URLParam`/`web.QueryBool`/`web.QueryInt`, the
 `X-RateLimit-*` header trio became `web.SetRateLimitHeaders`
 (both rate-limit middlewares and the failure-budget surfaces write the

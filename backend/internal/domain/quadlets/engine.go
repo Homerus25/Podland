@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -27,8 +28,14 @@ type QuadletEngine interface {
 	List(opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error)
 	// Print returns the quadlet unit file's content.
 	Print(name string) (string, error)
-	// Remove uninstalls the quadlet; systemd is always reloaded.
-	Remove(name string, force bool) (*entities.QuadletRemoveReport, error)
+	// Remove uninstalls the quadlet and answers one error; systemd is
+	// always reloaded. The adapter folds the remove report's error map for
+	// the named quadlet into the single error the service classifies — a
+	// transport error, or the named quadlet's entry in the report's
+	// Errors map (the race window where the quadlet vanished or its
+	// resource started between the locate and the remove), becomes the
+	// error; a clean removal answers nil.
+	Remove(name string, force bool) error
 	// Install installs one quadlet file: the adapter owns the tar framing
 	// podman's install primitive requires. replace overwrites an existing
 	// installation; systemd is always reloaded.
@@ -109,11 +116,45 @@ func (e *podmanQuadletEngine) Print(name string) (string, error) {
 	return e.tunnelEngine.QuadletPrint(e.ctx, name)
 }
 
-func (e *podmanQuadletEngine) Remove(name string, force bool) (*entities.QuadletRemoveReport, error) {
-	return e.tunnelEngine.QuadletRemove(e.ctx, []string{name}, entities.QuadletRemoveOptions{
+// Remove narrows podman's report-shaped remove to the single error the
+// service classifies: a transport error becomes the error, and the
+// report's Errors map entry for the named quadlet — the race window
+// where the quadlet vanished or its resource started between the locate
+// and the remove — becomes the error too; a clean removal answers nil.
+func (e *podmanQuadletEngine) Remove(name string, force bool) error {
+	report, err := e.tunnelEngine.QuadletRemove(e.ctx, []string{name}, entities.QuadletRemoveOptions{
 		Force:         force,
 		ReloadSystemd: true,
 	})
+	if err != nil {
+		return err
+	}
+	if report != nil {
+		if qErr, ok := report.Errors[name]; ok && qErr != nil {
+			return reportError{err: qErr}
+		}
+	}
+	return nil
+}
+
+// reportError marks an error that arrived in the remove report's Errors
+// map rather than at the call itself — the race window where the quadlet
+// vanished or its removal failed between the locate and the remove. The
+// adapter owns the report shape; the marker lets a caller that
+// historically discarded the report keep doing so (Update's best-effort
+// replace proceeds to its install) while classifying callers classify
+// through it — podmanerr's predicates and the removal module's wrap both
+// unwrap.
+type reportError struct{ err error }
+
+func (e reportError) Error() string { return e.err.Error() }
+func (e reportError) Unwrap() error { return e.err }
+
+// isReportError reports whether err arrived in the remove report rather
+// than at the call.
+func isReportError(err error) bool {
+	var rErr reportError
+	return errors.As(err, &rErr)
 }
 
 func (e *podmanQuadletEngine) Install(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {

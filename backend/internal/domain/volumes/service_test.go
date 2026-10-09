@@ -156,10 +156,15 @@ func TestVolumeService_Create_MapsClientErrorsToInvalidRequest(t *testing.T) {
 	assert.Equal(t, "INVALID_REQUEST", appErr.Code)
 }
 
-func TestVolumeService_Delete_MapsMissingVolumeTo404(t *testing.T) {
+// TestVolumeService_Delete_MapsCallLevelNotFoundTo404 pins issue 263's
+// accepted tightening: a remove that errors at the call itself — the
+// race window where the volume vanished between the request and podman's
+// execution, no per-volume report involved — answers the classified 404
+// terminal, not a wrapped unclassified error.
+func TestVolumeService_Delete_MapsCallLevelNotFoundTo404(t *testing.T) {
 	engine := &fakeVolumeEngine{
-		removeFn: func(string, bool) ([]*entities.VolumeRmReport, error) {
-			return []*entities.VolumeRmReport{{Err: notFoundErr()}}, nil
+		removeFn: func(string, bool) error {
+			return notFoundErr()
 		},
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
@@ -171,13 +176,11 @@ func TestVolumeService_Delete_MapsMissingVolumeTo404(t *testing.T) {
 
 func TestVolumeService_Delete_MapsInUseTo409(t *testing.T) {
 	engine := &fakeVolumeEngine{
-		removeFn: func(string, bool) ([]*entities.VolumeRmReport, error) {
-			return []*entities.VolumeRmReport{{
-				Err: &errorhandling.ErrorModel{
-					ResponseCode: http.StatusConflict,
-					Message:      "volume is in use by a container",
-				},
-			}}, nil
+		removeFn: func(string, bool) error {
+			return &errorhandling.ErrorModel{
+				ResponseCode: http.StatusConflict,
+				Message:      "volume is in use by a container",
+			}
 		},
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
@@ -193,8 +196,8 @@ func TestVolumeService_Delete_MapsInUseTo409(t *testing.T) {
 
 func TestVolumeService_Delete_PropagatesEngineFailure(t *testing.T) {
 	engine := &fakeVolumeEngine{
-		removeFn: func(string, bool) ([]*entities.VolumeRmReport, error) {
-			return nil, errors.New("boom")
+		removeFn: func(string, bool) error {
+			return errors.New("boom")
 		},
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})

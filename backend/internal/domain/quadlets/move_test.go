@@ -749,10 +749,10 @@ func recordingSourceFixture(status string, sequence *[]string, gotForce *bool) *
 				{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: status},
 			}, nil
 		},
-		removeFn: func(_ string, force bool) (*entities.QuadletRemoveReport, error) {
+		removeFn: func(_ string, force bool) error {
 			*gotForce = force
 			*sequence = append(*sequence, "remove")
-			return &entities.QuadletRemoveReport{}, nil
+			return nil
 		},
 	}
 }
@@ -837,11 +837,11 @@ func TestQuadletService_Move_StopStopsThenMoves(t *testing.T) {
 				{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: "running"},
 			}, nil
 		},
-		removeFn: func(_ string, force bool) (*entities.QuadletRemoveReport, error) {
+		removeFn: func(_ string, force bool) error {
 			sshCallsAtRemove = len(sshExec.Calls())
 			gotForce = force
 			sequence = append(sequence, "remove")
-			return &entities.QuadletRemoveReport{}, nil
+			return nil
 		},
 	}
 	target := recordingTargetEngine(t, &sequence)
@@ -961,7 +961,7 @@ func TestQuadletService_Move_InstallFailureLeavesSourceUntouched(t *testing.T) {
 				{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: "stopped"},
 			}, nil
 		},
-		removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
+		removeFn: func(string, bool) error {
 			panic("a failed install must leave the source untouched")
 		},
 	}
@@ -1000,9 +1000,9 @@ func TestQuadletService_Move_RemoveFailureAfterInstallReturnsPartial(t *testing.
 				{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: "stopped"},
 			}, nil
 		},
-		removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
+		removeFn: func(string, bool) error {
 			sequence = append(sequence, "remove")
-			return nil, errors.New("source read-only")
+			return errors.New("source read-only")
 		},
 	}
 	target := recordingTargetEngine(t, &sequence)
@@ -1045,7 +1045,7 @@ func TestQuadletService_Move_SourceVanishedBeforeRemovalIsMoved(t *testing.T) {
 			}
 			return nil, nil
 		},
-		removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
+		removeFn: func(string, bool) error {
 			panic("a vanished source quadlet needs no removal")
 		},
 	}
@@ -1078,7 +1078,7 @@ func TestQuadletService_Move_CollisionOnTargetRemovesNothing(t *testing.T) {
 				{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: "stopped"},
 			}, nil
 		},
-		removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
+		removeFn: func(string, bool) error {
 			panic("a colliding move must not remove the source")
 		},
 	}
@@ -1118,7 +1118,7 @@ func TestQuadletService_Move_CopyIgnoresStopAndForce(t *testing.T) {
 				{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: "running"},
 			}, nil
 		},
-		removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
+		removeFn: func(string, bool) error {
 			panic("a copy must never remove the source")
 		},
 	}
@@ -1475,7 +1475,7 @@ func TestQuadletService_Move_DifferingCompanionOnTargetIs409(t *testing.T) {
 	// A move-mode request whose source removal must never fire: the 409
 	// precedes it.
 	source := companionSourceFixture(companionContent)
-	source.removeFn = func(string, bool) (*entities.QuadletRemoveReport, error) {
+	source.removeFn = func(string, bool) error {
 		panic("a refused transfer must not remove the source")
 	}
 	service := newMoveTransferTestService(
@@ -1523,7 +1523,7 @@ Volume=beta.volume:/b
 				{Name: "beta.volume", Path: "/x/beta.volume", Status: "stopped"},
 			}, nil
 		},
-		removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
+		removeFn: func(string, bool) error {
 			panic("a failed transfer must leave the source untouched")
 		},
 	}
@@ -1606,9 +1606,9 @@ func TestQuadletService_Move_MoveRemovesOnlyMainQuadlet(t *testing.T) {
 	removed := []string{}
 	installs := []string{}
 	source := companionSourceFixture(companionContent)
-	source.removeFn = func(name string, _ bool) (*entities.QuadletRemoveReport, error) {
+	source.removeFn = func(name string, _ bool) error {
 		removed = append(removed, name)
-		return &entities.QuadletRemoveReport{}, nil
+		return nil
 	}
 	target := &fakeQuadletEngine{
 		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {

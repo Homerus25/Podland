@@ -4,32 +4,37 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/removal"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // removeTerminals carries the two caller-owned terminal errors of the
-// stop-and-remove ritual (issue 231). The ritual's shape is identical for
-// both callers; what a vanished quadlet or a running-resource refusal MEANS
-// is the caller's vocabulary, so the terminals are plain values the caller
-// passes in. nil is a legal terminal — the move source half answers nil for
-// a vanished quadlet because the transfer's goal is met — and the running
-// cause is dropped today in both callers, so a value, not a builder.
+// stop-and-remove ritual (issues 231 and 264). The ritual's shape is
+// identical for both callers; what a vanished quadlet or a
+// running-resource refusal MEANS is the caller's vocabulary, so the
+// terminals are the caller's to pass in. nil is a legal missing
+// terminal — the move source half answers nil for a vanished quadlet
+// because the transfer's goal is met. The running terminal is a dropping
+// closure: the cause (podman's refusal text) is dropped today in both
+// callers, so the wire answers the bare terminal — the fact stays
+// visible here, and the up-front gate calls the closure with no cause
+// text.
 type removeTerminals struct {
-	// missing answers a quadlet that is not there — at the locate, at the
-	// remove call, and in the report scan.
+	// missing answers a quadlet that is not there — at the locate and at
+	// the remove call (the adapter folds the report's error map into the
+	// call's single error, issue 263).
 	missing error
-	// running answers the managed resource being up where the flags refuse
-	// the removal — up front (no force, no stop) and in the remove's own
-	// refusal mapping.
-	running error
+	// running answers the managed resource being up where the flags
+	// refuse the removal — up front (no force, no stop) and in the
+	// remove's own refusal mapping.
+	running func(cause string) error
 }
 
 // stopAndRemove is the one stop-and-remove ritual both quadlet removal
 // callers cross (issue 231): QuadletService.Delete and the move source half
 // (removeSourceAfterInstall in move.go). It owns the whole engine lease —
 // list, locate, the caller's terminals, the running refusal, the
-// stop-before-remove gate, the remove, and the report scan — parameterised
+// stop-before-remove gate, and the remove — parameterised
 // by the op tag (so the two callers stay distinct in logs) and the
 // terminals (so both stay byte-identical on the wire):
 //
@@ -49,11 +54,13 @@ type removeTerminals struct {
 //     already proved stop was set whenever a running quadlet gets here
 //     without force.
 //   - The remove is called with the caller's force (systemd reload
-//     included) so systemd picks up the removal; its not-found and
+//     included) so systemd picks up the removal; the remove-and-classify
+//     tail composes internal/removal (issue 264) — its not-found and
 //     running-refusal answers map to the terminals, everything else to a
-//     "failed to remove quadlet" wrap. A failure that surfaces in the
-//     report's Errors map (a race where the quadlet vanished or its
-//     resource started between the locate and the remove) maps the same
+//     "failed to remove quadlet" wrap. The adapter folds the remove
+//     report's error map for the named quadlet into the call's single
+//     error (issue 263), so a race where the quadlet vanished or its
+//     resource started between the locate and the remove maps the same
 //     way.
 func (s *QuadletService) stopAndRemove(ctx context.Context, userID, machineID, name string, force, stop bool, op string, terminals removeTerminals) error {
 	return s.engines.WithEngine(ctx, userID, machineID, op, func(e QuadletEngine) error {
@@ -70,7 +77,9 @@ func (s *QuadletService) stopAndRemove(ctx context.Context, userID, machineID, n
 		running := quadletResourceRunning(target)
 
 		if running && !force && !stop {
-			return terminals.running
+			// The gate's refusal carries no podman text; the closure
+			// drops the cause anyway.
+			return terminals.running("")
 		}
 
 		if running && stop && !force {
@@ -79,30 +88,18 @@ func (s *QuadletService) stopAndRemove(ctx context.Context, userID, machineID, n
 			}
 		}
 
-		report, err := e.Remove(name, force)
-		if err != nil {
-			if podmanerr.IsNotFound(err) {
-				return terminals.missing
-			}
-			if !force && isResourceRunningError(err) {
-				return terminals.running
-			}
-			return fmt.Errorf("failed to remove quadlet: %w", err)
-		}
-
-		if report != nil {
-			if qErr, ok := report.Errors[name]; ok && qErr != nil {
-				if podmanerr.IsNotFound(qErr) {
-					return terminals.missing
-				}
-				if !force && isResourceRunningError(qErr) {
-					return terminals.running
-				}
-				return fmt.Errorf("failed to remove quadlet: %w", qErr)
-			}
-		}
-
-		return nil
+		// The remove-and-classify tail rides the shared removal module
+		// (issue 264): the adapter's folded single error maps to the
+		// caller's terminals — not-found to missing, the running refusal
+		// (quadlet-local phrases, passed as the predicate) to running,
+		// anything else to the wrap.
+		return removal.Run(func() error {
+			return e.Remove(name, force)
+		}, removal.Terminals{
+			Missing:   terminals.missing,
+			Refusal:   terminals.running,
+			IsRefusal: func(err error) bool { return !force && isResourceRunningError(err) },
+		}, "failed to remove quadlet")
 	})
 }
 

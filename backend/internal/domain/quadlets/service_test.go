@@ -341,10 +341,10 @@ func TestQuadletService_Update_ReplacesViaRemoveThenInstall(t *testing.T) {
 				Status:   "stopped",
 			}}, nil
 		},
-		removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+		removeFn: func(name string, force bool) error {
 			order = append(order, "remove")
 			removedName, removedForce = name, force
-			return &entities.QuadletRemoveReport{}, nil
+			return nil
 		},
 		installFn: func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {
 			order = append(order, "install")
@@ -394,8 +394,8 @@ func TestQuadletService_Update_InstallFailureLeavesQuadletRemoved(t *testing.T) 
 				Status:   "stopped",
 			}}, nil
 		},
-		removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-			return &entities.QuadletRemoveReport{}, nil
+		removeFn: func(string, bool) error {
+			return nil
 		},
 		installFn: func(string, []byte, bool) (*entities.QuadletInstallReport, error) {
 			return nil, errors.New("systemd reload failed")
@@ -419,6 +419,119 @@ func TestQuadletService_Update_MissingQuadletIs404BeforeAnyMutation(t *testing.T
 		},
 		// removeFn/installFn stay unarmed: a missing quadlet must not
 		// touch the machine.
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
+
+	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+		Content: "c",
+	})
+
+	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
+	assert.Nil(t, got)
+}
+
+// TestQuadletService_Update_ReportCarriedNotFoundStillInstalls pins the
+// race window's master behavior (issue 263's byte-identical wire): the
+// quadlet vanishes between the locate and the remove, so podman's remove
+// answers the not-found in the report's Errors map — the adapter marks it
+// (reportError) — and the update proceeds to its install, which overwrites
+// the unit file anyway. Master discarded the report and answered 200; the
+// folded error must not turn this race into a 404.
+func TestQuadletService_Update_ReportCarriedNotFoundStillInstalls(t *testing.T) {
+	var installedFile, installedContent string
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{
+				Name:     "web.container",
+				UnitName: "web.service",
+				Path:     "/etc/containers/systemd/web.container",
+				Status:   "stopped",
+			}}, nil
+		},
+		removeFn: func(string, bool) error {
+			return reportError{err: &errorhandling.ErrorModel{
+				ResponseCode: http.StatusNotFound,
+				Message:      "no such quadlet",
+			}}
+		},
+		installFn: func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {
+			installedFile, installedContent = fileName, string(content)
+			return &entities.QuadletInstallReport{
+				InstalledQuadlets: map[string]string{"/tmp/web.container": "/etc/containers/systemd/web.container"},
+			}, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core"))
+
+	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+		Content: "[Container]\nImage=nginx:1.25\n",
+	})
+
+	require.NoError(t, err, "a report-carried not-found is the race window, not a failed update")
+	require.NotNil(t, got)
+	assert.Equal(t, "web.container", installedFile, "the install half still runs")
+	assert.Equal(t, "[Container]\nImage=nginx:1.25\n", installedContent)
+	assert.Equal(t, "[Container]\nImage=nginx:1.25\n", got.Content)
+}
+
+// TestQuadletService_Update_ReportCarriedRemoveFailureStillInstalls pins
+// the report-carried half of the best-effort remove: a removal failure that
+// arrived in the report's Errors map (here podman's stop of the managed
+// resource dying on a dbus error under force) never blocked the replace on
+// master, so the update proceeds to its install.
+func TestQuadletService_Update_ReportCarriedRemoveFailureStillInstalls(t *testing.T) {
+	var installedFile string
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{
+				Name:     "web.container",
+				UnitName: "web.service",
+				Path:     "/etc/containers/systemd/web.container",
+				Status:   "stopped",
+			}}, nil
+		},
+		removeFn: func(string, bool) error {
+			return reportError{err: errors.New("stopping quadlet web.container: dbus: connection closed")}
+		},
+		installFn: func(fileName string, _ []byte, _ bool) (*entities.QuadletInstallReport, error) {
+			installedFile = fileName
+			return &entities.QuadletInstallReport{
+				InstalledQuadlets: map[string]string{"/tmp/web.container": "/etc/containers/systemd/web.container"},
+			}, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core"))
+
+	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+		Content: "[Container]\nImage=nginx:1.25\n",
+	})
+
+	require.NoError(t, err, "a report-carried removal failure is best-effort, not a failed update")
+	require.NotNil(t, got)
+	assert.Equal(t, "web.container", installedFile, "the install half still runs")
+}
+
+// TestQuadletService_Update_CallLevelNotFoundIs404 pins the retained
+// call-level branch: a not-found that arrives AT the remove call (a
+// transport-level answer, unmarked) still fails the update with
+// ErrQuadletNotFound — only report-carried errors are best-effort.
+func TestQuadletService_Update_CallLevelNotFoundIs404(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{{
+				Name:     "web.container",
+				UnitName: "web.service",
+				Path:     "/etc/containers/systemd/web.container",
+				Status:   "stopped",
+			}}, nil
+		},
+		removeFn: func(string, bool) error {
+			return &errorhandling.ErrorModel{
+				ResponseCode: http.StatusNotFound,
+				Message:      "no such quadlet",
+			}
+		},
+		// installFn stays unarmed: a call-level not-found must not install.
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
@@ -469,10 +582,10 @@ func TestQuadletService_Delete_PreconditionsRunBeforeRemove(t *testing.T) {
 				order = append(order, "list")
 				return []*entities.ListQuadlet{{Name: "web.container", UnitName: "web.service", Status: "running (5s ago)"}}, nil
 			},
-			removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+			removeFn: func(name string, force bool) error {
 				order = append(order, "remove")
 				removedName, removedForce = name, force
-				return &entities.QuadletRemoveReport{}, nil
+				return nil
 			},
 		}
 		sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
@@ -517,10 +630,10 @@ func TestQuadletService_Delete_PreconditionsRunBeforeRemove(t *testing.T) {
 				order = append(order, "list")
 				return []*entities.ListQuadlet{{Name: "web.container", Status: "running (5s ago)"}}, nil
 			},
-			removeFn: func(name string, force bool) (*entities.QuadletRemoveReport, error) {
+			removeFn: func(name string, force bool) error {
 				order = append(order, "remove")
 				removedForce = force
-				return &entities.QuadletRemoveReport{}, nil
+				return nil
 			},
 		}
 		// The SSH exec stays unarmed: force deletes must not spend a stop.
@@ -540,8 +653,8 @@ func TestQuadletService_Delete_MapsRemoveRefusals(t *testing.T) {
 			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
 				return []*entities.ListQuadlet{{Name: "web.container", Status: "stopped"}}, nil
 			},
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return nil, errors.New("quadlet web.container is running and force is not set, refusing to remove")
+			removeFn: func(string, bool) error {
+				return errors.New("quadlet web.container is running and force is not set, refusing to remove")
 			},
 		}
 		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
@@ -549,26 +662,6 @@ func TestQuadletService_Delete_MapsRemoveRefusals(t *testing.T) {
 		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
 
 		require.ErrorIs(t, err, appErrors.ErrQuadletResourceRunning)
-	})
-
-	t.Run("per-name report refusal maps too", func(t *testing.T) {
-		engine := &fakeQuadletEngine{
-			listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
-				return []*entities.ListQuadlet{{Name: "web.container", Status: "stopped"}}, nil
-			},
-			removeFn: func(string, bool) (*entities.QuadletRemoveReport, error) {
-				return &entities.QuadletRemoveReport{
-					Errors: map[string]error{
-						"web.container": &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such quadlet"},
-					},
-				}, nil
-			},
-		}
-		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
-
-		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
-
-		require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	})
 }
 

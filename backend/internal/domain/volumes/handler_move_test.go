@@ -316,8 +316,8 @@ func TestVolumeHandler_Move_RollbackRidesTerminalErrorEvent(t *testing.T) {
 	target.importFn = func(string, io.Reader) error {
 		return errors.New("import refused")
 	}
-	target.removeFn = func(string, bool) ([]*entities.VolumeRmReport, error) {
-		return []*entities.VolumeRmReport{}, nil
+	target.removeFn = func(string, bool) error {
+		return nil
 	}
 	handler := newMoveTestHandler(moveSourceFixture(t), target, idleUsageFixture())
 
@@ -341,8 +341,8 @@ func TestVolumeHandler_Move_RollbackRidesTerminalErrorEvent(t *testing.T) {
 // failure's detail — the stream succeeds.
 func TestVolumeHandler_Move_PartialRidesCompleteEvent(t *testing.T) {
 	source := movableSourceFixture(t)
-	source.removeFn = func(string, bool) ([]*entities.VolumeRmReport, error) {
-		return nil, errors.New("source read-only")
+	source.removeFn = func(string, bool) error {
+		return errors.New("source read-only")
 	}
 	handler := newMoveTestHandler(source, emptyTargetFixture(), idleUsageFixture())
 

@@ -358,8 +358,8 @@ func TestQuadletHandler_Move_MissingSourceQuadletIs404(t *testing.T) {
 // that succeeds.
 func movableSourceFixture() *fakeQuadletEngine {
 	source := moveTransferSourceFixture()
-	source.removeFn = func(string, bool) (*entities.QuadletRemoveReport, error) {
-		return &entities.QuadletRemoveReport{}, nil
+	source.removeFn = func(string, bool) error {
+		return nil
 	}
 	return source
 }
@@ -425,8 +425,8 @@ func TestQuadletHandler_Move_RunningSourceWithoutStopOrForceIs400(t *testing.T) 
 // envelope answers 200 with status "partial" and the failure's detail.
 func TestQuadletHandler_Move_RemoveFailureReturnsPartialEnvelope(t *testing.T) {
 	source := moveSourceFixture("web.container", "/x/web.container", "stopped", moveTransferContent)
-	source.removeFn = func(string, bool) (*entities.QuadletRemoveReport, error) {
-		return nil, errors.New("source read-only")
+	source.removeFn = func(string, bool) error {
+		return errors.New("source read-only")
 	}
 
 	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"move"}`)

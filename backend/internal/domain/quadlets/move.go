@@ -574,8 +574,9 @@ func (s *QuadletService) MoveWithProgress(ctx context.Context, userID, machineID
 // vanished source quadlet answers nil — the transfer's goal is met and a
 // "partial" would falsely claim the quadlet exists on both machines — and a
 // running-resource refusal answers the wrapped sentinel that becomes the
-// partial detail. Its error is the "partial" detail, never a request
-// failure — the install it follows cannot be rolled back.
+// partial detail (a dropping closure: the cause is dropped today). Its
+// error is the "partial" detail, never a request failure — the install it
+// follows cannot be rolled back.
 //
 // The removal rides its own source lease and re-lists first: the state the
 // precondition saw belongs to the earlier lease, and the honest decisions
@@ -587,7 +588,12 @@ func (s *QuadletService) MoveWithProgress(ctx context.Context, userID, machineID
 func (s *QuadletService) removeSourceAfterInstall(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest) error {
 	return s.stopAndRemove(ctx, userID, machineID, quadletID, req.Force, req.Stop, "quadlets.MoveSourceRemove", removeTerminals{
 		missing: nil,
-		running: fmt.Errorf("failed to remove quadlet: %w", appErrors.ErrQuadletResourceRunning),
+		// The running refusal's cause (podman's text) is dropped today:
+		// the wire answers the wrapped sentinel that becomes the partial
+		// detail.
+		running: func(string) error {
+			return fmt.Errorf("failed to remove quadlet: %w", appErrors.ErrQuadletResourceRunning)
+		},
 	})
 }
 
