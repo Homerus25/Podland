@@ -80,7 +80,7 @@ func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, 
 	err := s.engines.WithEngine(ctx, userID, machineID, "images.Pull", func(e ImageEngine) error {
 		// Cancellation is passed through, not mapped: the errors.Is
 		// check below returns Cancellable's sentinel untouched — the
-		// kit owns cancellation, and streaming Run's cancelled-wins
+		// kit owns cancellation, and the run loop's cancelled-wins
 		// rule answers OPERATION_CANCELLED whatever the operation
 		// returns. A real pull failure still maps to
 		// ErrImagePullFailed. Cancellable abandons the

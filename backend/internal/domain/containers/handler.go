@@ -14,8 +14,8 @@ import (
 //
 // JSON endpoints cross the endpoint envelope (internal/web): extraction,
 // error envelope, and encoding live there. Follow-mode logs cross the
-// streaming envelope (internal/streaming): Begin + Run own headers,
-// identity, disconnect, and the terminal-event mapping.
+// streaming kit's log seam (internal/streaming): RunLogStream owns
+// headers, identity, disconnect, and the terminal-event mapping.
 type ContainerHandler struct {
 	service *ContainerService
 }

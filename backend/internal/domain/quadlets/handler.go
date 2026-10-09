@@ -4,21 +4,20 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 )
 
 // QuadletHandler handles quadlet requests
 //
 // JSON endpoints cross the endpoint envelope (internal/web). AutoUpdate
-// keeps its own shape — it streams NDJSON rather than encoding one DTO.
+// and the move's migrateVolumeData half stream NDJSON through the
+// streaming kit's progress seam (internal/streaming.HandleProgress)
+// rather than encoding one DTO.
 type QuadletHandler struct {
 	service *QuadletService
 }
@@ -220,11 +219,12 @@ func (h *QuadletHandler) MovePreview(w http.ResponseWriter, r *http.Request) {
 //
 // Transport (issue 214): a plain file-only transfer answers one JSON
 // envelope exactly as before. A transfer with migrateVolumeData set
-// streams NDJSON instead — the data phase can run minutes on real
-// volumes, so the caller gets per-volume progress events and one terminal
-// event (complete envelope or mapped error) rather than a held-open
-// silence; registry pulls set the same precedent. Errors answered BEFORE
-// the stream begins (bad param, bad body) keep the plain envelope.
+// streams NDJSON instead through the streaming kit's progress seam
+// (HandleProgress) — the data phase can run minutes on real volumes, so
+// the caller gets per-volume progress events and one terminal event
+// (complete envelope or mapped error) rather than a held-open silence;
+// registry pulls set the same precedent. Errors answered BEFORE the
+// stream begins (bad param, bad body) keep the plain envelope.
 func (h *QuadletHandler) Move(w http.ResponseWriter, r *http.Request) {
 	quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
 	if guard != nil {
@@ -247,42 +247,20 @@ func (h *QuadletHandler) Move(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	operationID := uuid.New().String()
-	slog.InfoContext(r.Context(), "Move quadlet with volume data migration",
-		slog.String("requestID", contextutils.GetRequestID(r.Context())),
-		slog.String("machineID", chi.URLParam(r, "id")),
-		slog.String("quadletID", quadletID),
-		slog.String("operationID", operationID))
-
-	// Registry pulls set the deadline precedent: the data phase routinely
-	// exceeds the global 30-second write timeout, so this response carries
-	// its own 10-minute one.
-	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(10 * time.Minute)); err != nil {
-		slog.WarnContext(r.Context(), "Failed to extend write deadline", slog.Any("error", err))
-	}
-
-	stream := streaming.Begin(w, r)
-	if stream == nil {
-		return
-	}
-
-	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[QuadletMoveEvent, *QuadletMoveResponse]{
-		Operation: func(ctx context.Context, onProgress func(QuadletMoveEvent)) (*QuadletMoveResponse, error) {
-			return h.service.MoveWithProgress(ctx, stream.UserID, stream.MachineID, quadletID, request, func(event QuadletMoveEvent) {
-				event.OperationID = operationID
-				event.MachineID = stream.MachineID
+	streaming.HandleProgress(w, r, "Move quadlet with volume data migration", []slog.Attr{slog.String("quadletID", quadletID)}, streaming.ProgressConfig[QuadletMoveEvent, *QuadletMoveResponse]{
+		Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(QuadletMoveEvent)) (*QuadletMoveResponse, error) {
+			return h.service.MoveWithProgress(ctx, op.UserID, op.MachineID, quadletID, request, func(event QuadletMoveEvent) {
+				event.OperationID = op.OperationID
+				event.MachineID = op.MachineID
 				onProgress(event)
 			})
 		},
-		OnEvent: func(event QuadletMoveEvent) error {
-			return stream.Writer.Write(event)
-		},
-		CompleteEvent: func(response *QuadletMoveResponse) any {
-			return NewQuadletMoveCompleteEvent(operationID, stream.MachineID, *response)
+		CompleteEvent: func(op streaming.OperationContext, response *QuadletMoveResponse) any {
+			return NewQuadletMoveCompleteEvent(op.OperationID, op.MachineID, *response)
 		},
 		ErrorDefault: errors.ErrConnectionFailed,
-		ErrorEvent: func(code, message string, _ bool) any {
-			return NewQuadletMoveErrorEvent(operationID, stream.MachineID, code, message)
+		ErrorEvent: func(op streaming.OperationContext, code, message string, _ bool) any {
+			return NewQuadletMoveErrorEvent(op.OperationID, op.MachineID, code, message)
 		},
 	})
 }
@@ -313,45 +291,24 @@ func (h *QuadletHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 // AutoUpdate handles running `podman auto-update` on the machine with live
 // NDJSON streaming of remote output, terminating in a parsed report event.
-// Registry pulls make runs routinely exceed the global 30-second write
-// timeout, so this handler extends its own per-response write deadline to
-// 10 minutes without touching the server-wide setting. An operation-duration
-// fact like that stays handler-side; the streaming envelope (Begin + Run)
-// owns everything else.
+// The streaming kit's progress seam (HandleProgress) owns the handler-side
+// ritual, including the 10-minute write-deadline extension: registry pulls
+// make runs routinely exceed the global 30-second write timeout.
 func (h *QuadletHandler) AutoUpdate(w http.ResponseWriter, r *http.Request) {
 	dryRun := web.QueryBool(r, "dryRun", false)
 
-	operationID := uuid.New().String()
-	slog.InfoContext(r.Context(), "AutoUpdate quadlets",
-		slog.String("requestID", contextutils.GetRequestID(r.Context())),
-		slog.String("machineID", chi.URLParam(r, "id")),
-		slog.String("operationID", operationID),
-		slog.Bool("dryRun", dryRun))
-
-	if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(10 * time.Minute)); err != nil {
-		slog.WarnContext(r.Context(), "Failed to extend write deadline", slog.Any("error", err))
-	}
-
-	stream := streaming.Begin(w, r)
-	if stream == nil {
-		return
-	}
-
-	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[AutoUpdateEvent, AutoUpdateReport]{
-		Operation: func(ctx context.Context, onProgress func(AutoUpdateEvent)) (AutoUpdateReport, error) {
-			return h.service.AutoUpdate(ctx, stream.UserID, stream.MachineID, dryRun, func(line sshexec.OutputLine) {
-				onProgress(NewAutoUpdateLogEvent(operationID, stream.MachineID, line))
+	streaming.HandleProgress(w, r, "AutoUpdate quadlets", []slog.Attr{slog.Bool("dryRun", dryRun)}, streaming.ProgressConfig[AutoUpdateEvent, AutoUpdateReport]{
+		Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(AutoUpdateEvent)) (AutoUpdateReport, error) {
+			return h.service.AutoUpdate(ctx, op.UserID, op.MachineID, dryRun, func(line sshexec.OutputLine) {
+				onProgress(NewAutoUpdateLogEvent(op.OperationID, op.MachineID, line))
 			})
 		},
-		OnEvent: func(event AutoUpdateEvent) error {
-			return stream.Writer.Write(event)
-		},
-		CompleteEvent: func(report AutoUpdateReport) any {
-			return NewAutoUpdateCompleteEvent(operationID, stream.MachineID, report)
+		CompleteEvent: func(op streaming.OperationContext, report AutoUpdateReport) any {
+			return NewAutoUpdateCompleteEvent(op.OperationID, op.MachineID, report)
 		},
 		ErrorDefault: errors.ErrConnectionFailed,
-		ErrorEvent: func(code, message string, _ bool) any {
-			return NewAutoUpdateErrorEvent(operationID, stream.MachineID, code, message)
+		ErrorEvent: func(op streaming.OperationContext, code, message string, _ bool) any {
+			return NewAutoUpdateErrorEvent(op.OperationID, op.MachineID, code, message)
 		},
 	})
 }

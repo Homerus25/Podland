@@ -127,7 +127,7 @@ Exec=sh -c "sleep 3600"
 		require.Equalf(t, http.StatusOK, resp.StatusCode,
 			"dry-run auto-update must answer 200")
 		require.Contains(t, resp.Header.Get("Content-Type"), "application/json",
-			"the NDJSON stream must be served as JSON (shared SetNDJSONHeaders contract)")
+			"the NDJSON stream must be served as JSON (shared NDJSON header contract)")
 
 		scanner := bufio.NewScanner(resp.Body)
 		var completeEvents, logEvents, errorEvents int

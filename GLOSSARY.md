@@ -8,8 +8,8 @@ serves the embedded UI and API on :8080.
 ## Documentation map
 
 - `docs/architecture-decisions.md` — all system-level decisions, §-numbered
-  (§1 podman integration … §19 one transfer kit behind every cross-machine
-  copy/move). Code comments cite these numbers; keep them stable.
+  (§1 podman integration … §20 one progress-stream handler seam). Code
+  comments cite these numbers; keep them stable.
 - `docs/backend-conventions.md` — read before touching `backend/`:
   endpoint envelopes, streaming kit, connection seam, testing expectations.
 - `docs/frontend-conventions.md` — read before touching `frontend/src/`:
@@ -41,6 +41,7 @@ One line each; full detail in `docs/architecture-decisions.md`.
 17. **First-run bootstrap** — setup landing page creates the first admin (one-time endpoint); no baked-in credentials; container DB in the mounted `/app/data` volume
 18. **Quadlet volume data migration** — opt-in `migrateVolumeData` on move/copy: preflight (409 non-empty target / 413 bound) → stop → export-import through the streaming kit; data before installs so a failure installs nothing
 19. **One transfer kit behind every cross-machine copy/move** — `internal/transfer` owns the export→import splice, byte bound, emptiness probe, secret transfer, and the quadlet `Volume=`/`Secret=` reference resolution (one seam for the quadlet move and both move previews); quadlet move's data phase, the volumes copy/move, and the secrets copy/move are its three compositions (§19)
+20. **One progress-stream handler seam** — `streaming.HandleProgress` owns the handler-side ritual of every progress stream (operationID minting, the 10-minute write deadline, the operation slog line, the envelope, the run loop); domains pass an operation name, attrs, and their event vocabulary (§20)
 
 ## Glossary
 
@@ -54,6 +55,7 @@ One line each; full detail in `docs/architecture-decisions.md`.
 | **Network** | A named podman network (bridge/macvlan/host…) containers attach to; podman pre-creates a default bridge network; quadlets can define `.network` files |
 | **SSE** | Server-Sent Events, a standard for push notifications from server to client |
 | **Endpoint envelope** | The uniform response contract every JSON endpoint speaks — failures as `{requestId, error{code, message}}`, successes as a DTO with an explicit status. _Avoid_: error wrapper, response helper |
+| **Progress stream** | An NDJSON endpoint whose response is a stream of progress events plus exactly one terminal event (image pull, quadlet auto-update, the move/copy transfers). The kit owns the handler-side ritual — operationID minting, the 10-minute write deadline, the operation slog line, the envelope, the run loop (`streaming.HandleProgress`, §20); domains adapt (operation name, attrs, event vocabulary), never re-assemble |
 | **Kit** | A shared module owning one ritual end to end (log-stream kit, logs route kit, stream transport, test kit); features and domains adapt to it, never copy it |
 | **Companion quadlet** | A quadlet file on the same machine that another quadlet references by filename (a container's `Volume=app-data.volume`). Move/copy may carry the definition along — installed on the target before the referencing quadlet, skipped when the target's file is byte-identical; the volume's DATA follows only when the request opts into `migrateVolumeData` (§18) |
 | **Volume data migration** | The move/copy transfer's opt-in data phase (§18): every volume-kind `Volume=` reference resolves (bare name, or the companion's `VolumeName=`, else `systemd-<name>`) and its content is exported from the source and imported into the target. Refuses non-empty target volumes (409) unless `overwriteVolumes` merges; answers as NDJSON progress events with one terminal event |

@@ -15,14 +15,14 @@ const (
 	StreamEndedMessage = "STREAM_ENDED"
 )
 
-// StreamConfig describes a streaming operation to be orchestrated by Run.
-type StreamConfig[Event, Result any] struct {
+// streamConfig describes a streaming operation to be orchestrated by run.
+type streamConfig[Event, Result any] struct {
 	// Operation runs the long-running work. It must honour ctx cancellation
 	// and report progress through the provided callback.
 	Operation func(ctx context.Context, onProgress func(Event)) (Result, error)
 
 	// OnEvent forwards one progress event to the response (typically via
-	// NDJSONWriter.Write). A returned error aborts the stream without a
+	// ndjsonWriter.Write). A returned error aborts the stream without a
 	// terminal event, since the response is no longer writable.
 	OnEvent func(Event) error
 
@@ -38,7 +38,7 @@ type StreamConfig[Event, Result any] struct {
 	// module-mapped vocabulary: code and message resolve cancelled /
 	// (wrapped) AppError / unknown per the shared mapping, and cancelled
 	// is true when the operation ended because the request context was
-	// cancelled (including client disconnects detected by Run).
+	// cancelled (including client disconnects detected by the run loop).
 	ErrorEvent func(code, message string, cancelled bool) any
 }
 
@@ -48,7 +48,7 @@ type StreamConfig[Event, Result any] struct {
 // wrapped) *AppError carries its own code and message. Anything else is
 // unmapped: the cause is logged once, centrally, and the domain's default
 // sentinel answers — causes never ride wire payloads.
-func (cfg StreamConfig[Event, Result]) terminalError(ctx context.Context, err error, cancelled bool) (string, string, bool) {
+func (cfg streamConfig[Event, Result]) terminalError(ctx context.Context, err error, cancelled bool) (string, string, bool) {
 	if cancelled {
 		return appErrors.ErrOperationCancelled.Code, appErrors.ErrOperationCancelled.Message, true
 	}
@@ -83,14 +83,14 @@ func flushProgress[Event any](ctx context.Context, progress <-chan Event, onEven
 	}
 }
 
-// Run executes cfg.Operation with progress streaming over the given NDJSON
+// run executes cfg.Operation with progress streaming over the given NDJSON
 // writer. It runs the operation in a goroutine, forwards progress events via
 // cfg.OnEvent, cancels the operation when the client disconnects, and writes
 // exactly one terminal event (complete or error) before returning.
 //
-// If a progress-event write fails, the operation is cancelled and Run returns
+// If a progress-event write fails, the operation is cancelled and run returns
 // without writing a terminal event, because the response is gone.
-func Run[Event, Result any](ctx context.Context, w *NDJSONWriter, cfg StreamConfig[Event, Result]) {
+func run[Event, Result any](ctx context.Context, w *ndjsonWriter, cfg streamConfig[Event, Result]) {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -104,7 +104,7 @@ func Run[Event, Result any](ctx context.Context, w *NDJSONWriter, cfg StreamConf
 		result, err := cfg.Operation(runCtx, func(event Event) {
 			// Prefer enqueueing: a buffered send must not race the done
 			// branch, or an event emitted just before cancellation can be
-			// dropped even though Run's exit paths still flush it. The
+			// dropped even though the run loop's exit paths still flush it. The
 			// blocking fallback keeps the escape hatch for a full buffer
 			// after the consumer has stopped reading.
 			select {

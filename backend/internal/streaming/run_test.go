@@ -12,12 +12,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func newTestWriter(t *testing.T) (*NDJSONWriter, *httptest.ResponseRecorder) {
+func newTestWriter(t *testing.T) (*ndjsonWriter, *httptest.ResponseRecorder) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	w, err := NewNDJSONWriter(rec)
+	w, err := newNDJSONWriter(rec)
 	if err != nil {
-		t.Fatalf("NewNDJSONWriter: %v", err)
+		t.Fatalf("newNDJSONWriter: %v", err)
 	}
 	return w, rec
 }
@@ -45,7 +45,7 @@ func TestRunStreamsProgressAndCompletes(t *testing.T) {
 	w, rec := newTestWriter(t)
 
 	delivered := make(chan struct{}, 2)
-	Run(context.Background(), w, StreamConfig[int, string]{
+	run(context.Background(), w, streamConfig[int, string]{
 		Operation: func(ctx context.Context, onProgress func(int)) (string, error) {
 			onProgress(1)
 			onProgress(2)
@@ -81,7 +81,7 @@ func TestRunWritesExactlyOneTerminalErrorEvent(t *testing.T) {
 	fallback := appErrors.NewAppError("TEST_FAILED", "test operation failed", 500)
 
 	var gotCancelled bool
-	Run(context.Background(), w, StreamConfig[int, string]{
+	run(context.Background(), w, streamConfig[int, string]{
 		Operation: func(ctx context.Context, onProgress func(int)) (string, error) {
 			onProgress(1)
 			return "", terminal
@@ -112,7 +112,7 @@ func TestRunCancelsOperationOnClientDisconnect(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	operationCancelled := false
-	Run(ctx, w, StreamConfig[int, string]{
+	run(ctx, w, streamConfig[int, string]{
 		Operation: func(ctx context.Context, onProgress func(int)) (string, error) {
 			defer wg.Done()
 			<-ctx.Done()
@@ -151,7 +151,7 @@ func TestRunStopsWithoutTerminalEventWhenWriteFails(t *testing.T) {
 
 	completed := false
 	finished := make(chan struct{})
-	Run(context.Background(), w, StreamConfig[int, string]{
+	run(context.Background(), w, streamConfig[int, string]{
 		Operation: func(ctx context.Context, onProgress func(int)) (string, error) {
 			defer close(finished)
 			onProgress(1)
@@ -232,7 +232,7 @@ func TestRunErrorMapping(t *testing.T) {
 			w, rec := newTestWriter(t)
 
 			var gotCancelled bool
-			Run(context.Background(), w, StreamConfig[int, string]{
+			run(context.Background(), w, streamConfig[int, string]{
 				Operation:     tt.operation,
 				OnEvent:       func(event int) error { return nil },
 				CompleteEvent: func(result string) any { return result },
@@ -257,7 +257,7 @@ func TestRunErrorMapping(t *testing.T) {
 func TestRunForwardQueuedProgressBeforeTerminal(t *testing.T) {
 	w, rec := newTestWriter(t)
 
-	Run(context.Background(), w, StreamConfig[int, string]{
+	run(context.Background(), w, streamConfig[int, string]{
 		Operation: func(ctx context.Context, onProgress func(int)) (string, error) {
 			onProgress(1)
 			onProgress(2)

@@ -93,9 +93,9 @@ type LogStreamOp struct {
 }
 
 // RunLogStream is the entry point for follow-mode log streams: one call
-// that owns the follow=true ritual end to end. Begin runs the streaming
+// that owns the follow=true ritual end to end. begin runs the streaming
 // envelope (headers, writer, identity — a failure answers through the
-// envelope itself and RunLogStream returns silently); Run wires the
+// envelope itself and RunLogStream returns silently); run wires the
 // select loop, disconnect cancellation, the clean-end terminal INFO
 // STREAM_ENDED event, and the error mapping — a (possibly wrapped)
 // AppError surfaces as one "CODE: message" ERROR event, a cancelled
@@ -105,12 +105,12 @@ type LogStreamOp struct {
 func RunLogStream(w http.ResponseWriter, r *http.Request, op LogStreamOp) {
 	slog.InfoContext(r.Context(), "log stream starting", slog.Bool("follow", true))
 
-	stream := Begin(w, r)
+	stream := begin(w, r)
 	if stream == nil {
 		return
 	}
 
-	Run(r.Context(), stream.Writer, StreamConfig[LogEvent, struct{}]{
+	run(r.Context(), stream.Writer, streamConfig[LogEvent, struct{}]{
 		Operation: func(ctx context.Context, onEvent func(LogEvent)) (struct{}, error) {
 			return struct{}{}, op.Stream(ctx, stream.UserID, stream.MachineID, onEvent)
 		},

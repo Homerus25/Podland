@@ -25,7 +25,7 @@ import (
 // failure default); LogEventWriter pins the line handling every log
 // domain's podman writers share.
 
-// serveLogStream drives RunLogStream through a chi route so Begin's
+// serveLogStream drives RunLogStream through a chi route so begin's
 // identity extraction sees a real {id} URL param, the way the router
 // wires it in production.
 func serveLogStream(t *testing.T, ctx context.Context, op LogStreamOp) *httptest.ResponseRecorder {
@@ -86,9 +86,9 @@ func TestRunLogStreamBeginFailureReturnsSilently(t *testing.T) {
 		return nil
 	}))
 
-	assert.False(t, opCalled, "a Begin failure must not reach the stream callback")
-	assert.NotContains(t, w.Body.String(), "STREAM_ENDED", "a Begin failure must not open a stream")
-	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR", "Begin answers through the envelope itself")
+	assert.False(t, opCalled, "a begin failure must not reach the stream callback")
+	assert.NotContains(t, w.Body.String(), "STREAM_ENDED", "a begin failure must not open a stream")
+	assert.Contains(t, w.Body.String(), "INTERNAL_ERROR", "begin answers through the envelope itself")
 }
 
 func TestRunLogStreamMapsAppErrorToCodeMessageErrorEvent(t *testing.T) {

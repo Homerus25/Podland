@@ -63,6 +63,7 @@ Pull an image from a registry.
 **Response (Streaming - 200):**
 - **Content-Type**: `application/json`
 - **Format**: Newline-delimited JSON (NDJSON)
+- **Write deadline**: the stream carries its own 10-minute write deadline — registry pulls routinely exceed the global write timeout — and stays open until the pull finishes
 - Each line is a JSON object with the following structure:
 
 ```json

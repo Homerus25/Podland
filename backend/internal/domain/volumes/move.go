@@ -280,7 +280,7 @@ func (s *VolumeService) copyVolumeData(ctx context.Context, userID, sourceMachin
 				// removal whatever happened to the request. No
 				// narration rides this error, by design — the handler
 				// streams through the kit whose cancelled-wins rule
-				// (streaming.Run's terminalError) answers a cancelled
+				// (the run loop's terminalError) answers a cancelled
 				// stream with the generic OPERATION_CANCELLED terminal
 				// event whatever the operation returns, so a rollback
 				// note here could never reach the wire.

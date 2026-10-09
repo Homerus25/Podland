@@ -10,7 +10,7 @@ import (
 
 func TestSetNDJSONHeaders(t *testing.T) {
 	w := httptest.NewRecorder()
-	SetNDJSONHeaders(w)
+	setNDJSONHeaders(w)
 
 	if contentType := w.Header().Get("Content-Type"); contentType != "application/json" {
 		t.Errorf("Expected Content-Type 'application/json', got '%s'", contentType)
@@ -28,7 +28,7 @@ func TestSetNDJSONHeaders(t *testing.T) {
 
 func TestNewNDJSONWriter(t *testing.T) {
 	w := httptest.NewRecorder()
-	writer, err := NewNDJSONWriter(w)
+	writer, err := newNDJSONWriter(w)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -39,7 +39,7 @@ func TestNewNDJSONWriter(t *testing.T) {
 
 func TestNewNDJSONWriter_NonFlusher(t *testing.T) {
 	w := &nonFlusher{}
-	_, err := NewNDJSONWriter(w)
+	_, err := newNDJSONWriter(w)
 	if err == nil {
 		t.Fatal("Expected error for non-flusher, got nil")
 	}
@@ -47,7 +47,7 @@ func TestNewNDJSONWriter_NonFlusher(t *testing.T) {
 
 func TestNDJSONWriter_Write(t *testing.T) {
 	w := httptest.NewRecorder()
-	writer, err := NewNDJSONWriter(w)
+	writer, err := newNDJSONWriter(w)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}

@@ -249,6 +249,31 @@ copy/move composes it instead of re-deriving it:
   rituals are pinned once in the kit's suite; the domains' suites pin
   their projections.
 
+### 20. One Progress-Stream Handler Seam (2026-10-09, issue 265)
+The streaming kit owns the handler-side ritual of every progress stream
+through one entry point, `streaming.HandleProgress` — the streaming twin
+of `web.Handle` (architecture review 2026-10-08, candidate 3):
+- **The kit owns the ritual**: operationID minting, the operation slog
+  line (assembled from the handler's operation name and attrs over the
+  kit's requestID/machineID/operationID base), the write-deadline
+  extension, the streaming envelope (headers, writer, identity), and the
+  run loop. The deadline is one kit-level constant (10 minutes) applied
+  to every progress stream — the operation-duration fact §18 ruled
+  handler-side, now settled as a kit fact so no handler can forget it;
+  the images pull truncation under the server's 30-second WriteTimeout
+  dies with the copy.
+- **The operation context rides every domain callback**: the kit mints
+  the operationID and passes `OperationContext{OperationID, MachineID,
+  UserID}` into `Operation`, `CompleteEvent`, and `ErrorEvent`; domains
+  stamp their events from it and never mint IDs themselves.
+- **The pre-stream ritual stays handler-side**: URL-param guards,
+  `web.Decode` 400s, and the quadlet move's plain/stream fork on
+  `migrateVolumeData` are endpoint-envelope and domain policy, not the
+  kit's.
+- **The kit's external interface** is `HandleProgress`, `RunLogStream`,
+  the query helpers, and the `LogEvent` vocabulary; `begin`/`run` and
+  their configs stay in-package, pinned by the kit's own suite.
+
 ## Technical Stack
 
 ### Backend (Go)

@@ -99,8 +99,8 @@ func Test_Integration_Containers_Logs(t *testing.T) {
 		defer cancel()
 		defer resp.Body.Close()
 
-		// The NDJSON stream is served by the shared streaming helper
-		// (streaming.SetNDJSONHeaders), which pins Content-Type to
+		// The NDJSON stream is served by the streaming kit's shared
+		// header helper, which pins Content-Type to
 		// application/json across the images/containers/quadlets domains
 		// (unit-tested in streaming/ndjson_test.go).
 		require.Contains(t, resp.Header.Get("Content-Type"), "application/json",

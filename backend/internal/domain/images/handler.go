@@ -10,15 +10,16 @@ import (
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
-	"github.com/google/uuid"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // ImageHandler handles image requests
 //
 // JSON endpoints cross the endpoint envelope (internal/web). Pull streams
-// NDJSON progress through the streaming envelope (internal/streaming):
-// Begin + Run own headers, identity, disconnect, and error mapping.
+// NDJSON progress through the streaming kit's progress seam
+// (internal/streaming): HandleProgress owns the handler-side ritual —
+// operationID, write deadline, slog line, headers, identity, disconnect,
+// and error mapping.
 type ImageHandler struct {
 	service *ImageService
 }
@@ -57,25 +58,13 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Pull handles pulling an image with streaming progress
+// Pull handles pulling an image with streaming progress. Decode answers
+// 400s before the stream begins; the streaming kit's progress seam
+// (HandleProgress) owns the rest of the handler-side ritual.
 func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
-	slog.InfoContext(r.Context(), "Pull")
-
-	// Decode answers 400s before the stream begins; the streaming
-	// envelope takes over from there.
 	var request ImagePullRequest
 	if appErr := web.Decode(r, &request); appErr != nil {
 		errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
-		return
-	}
-
-	slog.InfoContext(r.Context(), "pull", slog.Any("request", request))
-
-	// Generate a unique operation ID for this pull
-	operationID := uuid.New().String()
-
-	stream := streaming.Begin(w, r)
-	if stream == nil {
 		return
 	}
 
@@ -92,23 +81,20 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 		pullOpts.Variant = variant
 	}
 
-	streaming.Run(r.Context(), stream.Writer, streaming.StreamConfig[PullProgressEvent, *entities.ImagePullReport]{
-		Operation: func(pullCtx context.Context, onProgress func(PullProgressEvent)) (*entities.ImagePullReport, error) {
-			return h.service.PullWithProgress(pullCtx, stream.UserID, stream.MachineID, request.Image, pullOpts, func(event PullProgressEvent) {
-				event.OperationID = operationID
-				event.MachineID = stream.MachineID
+	streaming.HandleProgress(w, r, "pull", []slog.Attr{slog.Any("request", request)}, streaming.ProgressConfig[PullProgressEvent, *entities.ImagePullReport]{
+		Operation: func(pullCtx context.Context, op streaming.OperationContext, onProgress func(PullProgressEvent)) (*entities.ImagePullReport, error) {
+			return h.service.PullWithProgress(pullCtx, op.UserID, op.MachineID, request.Image, pullOpts, func(event PullProgressEvent) {
+				event.OperationID = op.OperationID
+				event.MachineID = op.MachineID
 				onProgress(event)
 			})
 		},
-		OnEvent: func(event PullProgressEvent) error {
-			return stream.Writer.Write(event)
-		},
-		CompleteEvent: func(*entities.ImagePullReport) any {
-			return NewCompleteEvent(operationID, stream.MachineID)
+		CompleteEvent: func(op streaming.OperationContext, _ *entities.ImagePullReport) any {
+			return NewCompleteEvent(op.OperationID, op.MachineID)
 		},
 		ErrorDefault: errors.ErrImagePullFailed,
-		ErrorEvent: func(code, message string, _ bool) any {
-			return NewErrorEvent(operationID, stream.MachineID, code, message)
+		ErrorEvent: func(op streaming.OperationContext, code, message string, _ bool) any {
+			return NewErrorEvent(op.OperationID, op.MachineID, code, message)
 		},
 	})
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// serveBegin runs a Begin endpoint the way the router does: request-scoped
+// serveBegin runs a begin endpoint the way the router does: request-scoped
 // context values plus chi URL params (mirrors the web envelope test setup).
 func serveBegin(t *testing.T, w http.ResponseWriter, userID, machineID string, endpoint http.HandlerFunc) {
 	t.Helper()
@@ -34,20 +34,20 @@ func serveBegin(t *testing.T, w http.ResponseWriter, userID, machineID string, e
 	endpoint(w, req)
 }
 
-// captureBegin is an endpoint that records the stream handle Begin returned.
-func captureBegin(out **Stream) http.HandlerFunc {
+// captureBegin is an endpoint that records the stream handle begin returned.
+func captureBegin(out **streamHandle) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		*out = Begin(w, r)
+		*out = begin(w, r)
 	}
 }
 
 func TestBegin_SetsHeadersAndReturnsIdentities(t *testing.T) {
 	rec := httptest.NewRecorder()
 
-	var gotStream *Stream
+	var gotStream *streamHandle
 	serveBegin(t, rec, "test-user", "test-machine", captureBegin(&gotStream))
 
-	require.NotNil(t, gotStream, "Begin must return a stream handle")
+	require.NotNil(t, gotStream, "begin must return a stream handle")
 	assert.Equal(t, "test-user", gotStream.UserID)
 	assert.Equal(t, "test-machine", gotStream.MachineID)
 	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -57,7 +57,7 @@ func TestBegin_SetsHeadersAndReturnsIdentities(t *testing.T) {
 func TestBegin_WriterEmitsNDJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 
-	var gotStream *Stream
+	var gotStream *streamHandle
 	serveBegin(t, rec, "test-user", "test-machine", captureBegin(&gotStream))
 	require.NotNil(t, gotStream)
 
@@ -68,11 +68,11 @@ func TestBegin_WriterEmitsNDJSON(t *testing.T) {
 func TestBegin_MissingUserIDIsAnInvariantViolation(t *testing.T) {
 	rec := httptest.NewRecorder()
 
-	var gotStream *Stream
+	var gotStream *streamHandle
 	serveBegin(t, rec, "", "test-machine", captureBegin(&gotStream))
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Nil(t, gotStream, "Begin must return nil after writing the error response")
+	assert.Nil(t, gotStream, "begin must return nil after writing the error response")
 	var body struct {
 		Error struct {
 			Code string `json:"code"`
@@ -85,11 +85,11 @@ func TestBegin_MissingUserIDIsAnInvariantViolation(t *testing.T) {
 func TestBegin_MissingMachineIDIsAnInvariantViolation(t *testing.T) {
 	rec := httptest.NewRecorder()
 
-	var gotStream *Stream
+	var gotStream *streamHandle
 	serveBegin(t, rec, "test-user", "", captureBegin(&gotStream))
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	assert.Nil(t, gotStream, "Begin must return nil after writing the error response")
+	assert.Nil(t, gotStream, "begin must return nil after writing the error response")
 	var body struct {
 		Error struct {
 			Code string `json:"code"`
@@ -99,7 +99,7 @@ func TestBegin_MissingMachineIDIsAnInvariantViolation(t *testing.T) {
 	assert.Equal(t, "INTERNAL_ERROR", body.Error.Code)
 }
 
-// noFlushWriter is a ResponseWriter that cannot flush, so Begin must answer
+// noFlushWriter is a ResponseWriter that cannot flush, so begin must answer
 // with the early 500 STREAMING_NOT_SUPPORTED response.
 type noFlushWriter struct {
 	header http.Header
@@ -113,11 +113,11 @@ func (w *noFlushWriter) WriteHeader(code int)        { w.code = code }
 
 func TestBegin_UnsupportedFlushingWrites500(t *testing.T) {
 	w := &noFlushWriter{header: http.Header{}}
-	var gotStream *Stream
+	var gotStream *streamHandle
 
 	serveBegin(t, w, "test-user", "test-machine", captureBegin(&gotStream))
 
 	assert.Equal(t, http.StatusInternalServerError, w.code)
 	assert.Contains(t, w.body.String(), "STREAMING_NOT_SUPPORTED")
-	assert.Nil(t, gotStream, "Begin must return nil after writing the error response")
+	assert.Nil(t, gotStream, "begin must return nil after writing the error response")
 }

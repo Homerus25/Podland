@@ -8,29 +8,29 @@ import (
 	"sync"
 )
 
-// SetNDJSONHeaders sets the standard headers for NDJSON streaming responses
-func SetNDJSONHeaders(w http.ResponseWriter) {
+// setNDJSONHeaders sets the standard headers for NDJSON streaming responses
+func setNDJSONHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Transfer-Encoding", "chunked")
 }
 
-// NDJSONWriter handles writing NDJSON (newline-delimited JSON) responses with flushing
-type NDJSONWriter struct {
+// ndjsonWriter handles writing NDJSON (newline-delimited JSON) responses with flushing
+type ndjsonWriter struct {
 	writer  http.ResponseWriter
 	flusher http.Flusher
 	mu      sync.Mutex
 	stopped bool
 }
 
-// NewNDJSONWriter creates a new NDJSONWriter after asserting the response writer supports flushing
-func NewNDJSONWriter(w http.ResponseWriter) (*NDJSONWriter, error) {
+// newNDJSONWriter creates a new ndjsonWriter after asserting the response writer supports flushing
+func newNDJSONWriter(w http.ResponseWriter) (*ndjsonWriter, error) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		return nil, fmt.Errorf("streaming not supported")
 	}
-	return &NDJSONWriter{
+	return &ndjsonWriter{
 		writer:  w,
 		flusher: flusher,
 	}, nil
@@ -43,7 +43,7 @@ func NewNDJSONWriter(w http.ResponseWriter) (*NDJSONWriter, error) {
 // terminal event, and writing or flushing after the client disconnected can
 // panic inside net/http. A failed write (or recovered panic) permanently
 // stops the writer — the response is gone, so further writes cannot succeed.
-func (nw *NDJSONWriter) Write(v any) (err error) {
+func (nw *ndjsonWriter) Write(v any) (err error) {
 	nw.mu.Lock()
 	defer nw.mu.Unlock()
 	if nw.stopped {

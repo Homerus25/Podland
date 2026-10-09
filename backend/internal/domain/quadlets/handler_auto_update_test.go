@@ -40,27 +40,13 @@ func parseNDJSON(t *testing.T, body string) []AutoUpdateEvent {
 	return events
 }
 
-// deadlineRecorder wraps httptest.ResponseRecorder so the handler's
-// SetWriteDeadline call (via http.NewResponseController) can be observed.
-type deadlineRecorder struct {
-	*httptest.ResponseRecorder
-	deadline    time.Time
-	gotDeadline bool
-}
-
-func (d *deadlineRecorder) SetWriteDeadline(t time.Time) error {
-	d.deadline = t
-	d.gotDeadline = true
-	return nil
-}
-
-func newAutoUpdateTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*chi.Mux, *deadlineRecorder) {
+func newAutoUpdateTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*chi.Mux, *httptest.ResponseRecorder) {
 	t.Helper()
 	engine := &fakeQuadletEngine{}
 	handler := NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core")))
 	r := chi.NewRouter()
 	r.Post("/api/machines/{id}/quadlets/auto-update", handler.AutoUpdate)
-	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	rec := httptest.NewRecorder()
 	return r, rec
 }
 
@@ -170,17 +156,6 @@ func TestQuadletHandler_AutoUpdate_DryRunForwarded(t *testing.T) {
 	require.Len(t, events, 1)
 	require.NotNil(t, events[0].Report)
 	assert.Equal(t, AutoUpdateDryRun, events[0].Report.Overall)
-}
-
-func TestQuadletHandler_AutoUpdate_ExtendsWriteDeadline(t *testing.T) {
-	sshExec := testutils.NewMockSSHExecWithResult(sshexec.ExecResult{ExitCode: 0, Stdout: reportJSON})
-
-	router, rec := newAutoUpdateTestServer(t, sshExec)
-	router.ServeHTTP(rec, autoUpdateRequest(t, "/api/machines/machine-1/quadlets/auto-update"))
-
-	assert.True(t, rec.gotDeadline, "handler must extend the per-response write deadline")
-	assert.True(t, time.Until(rec.deadline) > 9*time.Minute,
-		"deadline must be roughly now+10min, got %v", rec.deadline)
 }
 
 // --- Route wiring: the quadlet subtree gates auto-update at write level ---

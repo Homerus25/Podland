@@ -31,7 +31,7 @@ closest sibling that already exists. Rulings so far:
   per handler. The
   one body-bearing endpoint outside the envelope (images Pull, the
   pre-stream reference) responds the returned AppError itself before
-  `streaming.Begin`.
+  `streaming.HandleProgress`.
   Every domain has migrated (volumes, containers, quadlets, secrets,
   images, machines subtree): the subtree handlers are envelope closures
   across the board, machines update/delete/status/access included.
@@ -49,35 +49,49 @@ closest sibling that already exists. Rulings so far:
   only — the envelope owns the status line and body). The decode
   ritual is settled 2026-09-15 (architecture-review candidate C9).
 - **NDJSON streaming endpoints (the streaming envelope)** —
-  `streaming.Begin` + `streaming.Run` (`internal/streaming/`) are the
-  single entry point for every NDJSON endpoint (container logs follow
-  mode, quadlet logs follow mode, image pull, quadlet auto-update).
-  `Begin` owns the NDJSON headers, writer creation (including the early
-  500 `STREAMING_NOT_SUPPORTED`), and identity extraction — a missing
+  `streaming.HandleProgress` (`internal/streaming/progress.go`) is the
+  single entry point for every progress-stream endpoint (image pull,
+  quadlet auto-update, the quadlet and volumes move/copy transfers);
+  `streaming.RunLogStream` (`internal/streaming/logs.go`) is the single
+  entry point for follow-mode log streams (container logs, quadlet
+  logs). `HandleProgress` owns the whole handler-side ritual: the
+  operationID minting, the operation slog line (assembled from the
+  handler's operation name and attrs over the kit's
+  requestID/machineID/operationID base), the 10-minute write-deadline
+  extension (one kit-level constant — an operation-duration fact, §18 —
+  applied to every progress stream, so no handler can forget it), the
+  NDJSON headers, writer creation (including the early 500
+  `STREAMING_NOT_SUPPORTED`), and identity extraction — a missing
   identity there is the same wiring-bug ruling as `web.Handle`: 500
-  `INTERNAL_ERROR` plus a loud log. `Run` owns the select loop,
-  disconnect cancellation, the error→event mapping, and the
-  exactly-one-terminal invariant — for log streams including `INFO`
-  `STREAM_ENDED` on a clean end, for progress streams the domain's own
-  complete event; the invariant is pinned once in the `streaming`
-  package tests, not per domain. Handlers shrink to config plus event
-  vocabulary: the config carries the domain's default error sentinel
-  (`ErrorDefault`), the error-event builder receives already-mapped
-  `(code, message, cancelled)` — never the raw error — and non-AppError
-  causes are logged once by the module, never surfaced on the wire. Log
-  streams use `Result = struct{}` and speak the shared terminal
-  contract: `"CODE: message"` log events (`ERROR` level; `WARN` when
+  `INTERNAL_ERROR` plus a loud log — and the select loop, disconnect
+  cancellation, the error→event mapping, and the exactly-one-terminal
+  invariant (for log streams including `INFO` `STREAM_ENDED` on a clean
+  end, for progress streams the domain's own complete event; the
+  invariant is pinned once in the `streaming` package tests, not per
+  domain). The kit mints the operationID and passes the operation
+  context (`OperationContext`: `OperationID`, `MachineID`, `UserID`)
+  into every domain callback (`Operation`, `CompleteEvent`,
+  `ErrorEvent`); handlers shrink to their pre-stream ritual (URL-param
+  guards, `web.Decode` 400s, domain forks like the quadlet move's
+  plain/stream split) plus one `HandleProgress` call carrying the
+  domain's config and event vocabulary: the config carries the
+  domain's default error sentinel (`ErrorDefault`), the error-event
+  builder receives already-mapped `(code, message, cancelled)` — never
+  the raw error — and non-AppError causes are logged once by the
+  module, never surfaced on the wire. Log streams use
+  `Result = struct{}` and speak the shared terminal contract:
+  `"CODE: message"` log events (`ERROR` level; `WARN` when
   cancelled). For log streams the kit owns the follow ritual:
-  `streaming.RunLogStream` (`internal/streaming/logs.go`) is the
-  reference, owning the terminal events (`INFO` `STREAM_ENDED` on a
-  clean end, `"CODE: message"` errors) and the `ErrConnectionFailed`
-  error default; a log handler is query parse + follow dispatch + two
-  closures (the `LogStreamOp.Stream` callback and the buffered
-  `web.Handle` service call). The kit owns the buffered fetch too:
+  `streaming.RunLogStream` is the reference, owning the terminal
+  events (`INFO` `STREAM_ENDED` on a clean end, `"CODE: message"`
+  errors) and the `ErrConnectionFailed` error default; a log handler is
+  query parse + follow dispatch + two closures (the `LogStreamOp.Stream`
+  callback and the buffered `web.Handle` service call). The kit owns the
+  buffered fetch too:
   `streaming.FetchLogs` (same file) builds the podman logs options
   itself (`Follow=false`, `Timestamps=false`, the `Since`/`Tail` window
   through), installs the stdout/stderr writer pair, combines the
-  output, and maps the failure mirroring `Run`'s terminal mapping:
+  output, and maps the failure mirroring the run loop's terminal mapping:
   cancelled ctx → `OPERATION_CANCELLED`, else podman not-found → the
   op's caller-supplied sentinel, else one kit-owned
   `failed to get logs` wrap. A buffered log service is validate +
@@ -94,7 +108,7 @@ closest sibling that already exists. Rulings so far:
   acquisition + target resolution + the `FollowLogsOp` (containers
   and quadlets `GetLogsWithStream` are the references). Cancellation
   mapping lives nowhere below the kit: no service hand-copies
-  `ctx.Err() == context.Canceled` — `Run`'s cancelled-wins decides for
+  `ctx.Err() == context.Canceled` — the run loop's cancelled-wins decides for
   every streaming call, `FetchLogs` and `FollowLogs` for every log
   fetch. Under both sits the kit's abandonment contract,
   `streaming.Cancellable` (`internal/streaming/cancellable.go`): the
@@ -109,13 +123,13 @@ closest sibling that already exists. Rulings so far:
   `Cancellable` is called inside the `WithEngine` closure —
   abandonment only helps if it makes that closure return, and the
   closure returning is what releases the connection lease; abandoning
-  at `Run`'s level would leave the closure blocked on the engine call
+  at the run loop's level would leave the closure blocked on the engine call
   with the lease pinned. `FetchLogs` and `FollowLogs` route their
   fetch through it, and images pull wraps exactly the engine pull call
   in it inside the closure (`PullWithProgress` in
   `internal/domain/images/service.go` is the reference — a real pull
   failure still maps to the image-pull-failed sentinel, the helper's
-  sentinel passes through for `Run` to map). Quadlet auto-update is
+  sentinel passes through for the run loop to map). Quadlet auto-update is
   deliberately outside the contract: its seam is the SSH-exec stream,
   which takes the request context directly, so its own transport
   already honours cancellation. The
@@ -128,7 +142,7 @@ closest sibling that already exists. Rulings so far:
   Settled 2026-09-13 (architecture-review candidate C7); the buffered
   fetch settled 2026-09-18 (candidate C16); the follow fetch and the
   `Cancellable` abandonment contract settled 2026-09-22 (candidate
-  C21).
+  C21); the progress-stream seam settled 2026-10-09 (issue 265, §20).
 - **Binary endpoints (the binary envelope)** — `web.HandleStream`
   (`internal/web`) is the seam every machine-scoped endpoint whose
   success is a byte stream or multipart upload rather than a DTO
@@ -231,9 +245,10 @@ closest sibling that already exists. Rulings so far:
   (`Prune`), `dto.go` (`FromPodmanPruneReports`), and
   `internal/domain/volumes/handler_prune_test.go` plus
   `test/integration/volumes_test.go` (`Test_Integration_Volumes_Prune`).
-- **Streaming progress (pull/logs)** — images pull is the reference:
-  `internal/domain/images/handler.go` (`Pull`) and
-  `internal/streaming/`.
+- **Streaming progress (pull/logs)** — `streaming.HandleProgress`
+  (`internal/streaming/progress.go`) is the seam; images pull
+  (`internal/domain/images/handler.go`, `Pull`) is the reference
+  handler.
 - **Permission gating** — list/inspect at read level; anything that
   mutates remote state at write level via `r.With(requireWrite)` in
   `internal/app/app.go`. Bulk operations (prune) are write-level even
