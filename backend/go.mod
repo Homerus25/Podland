@@ -2,7 +2,7 @@ module github.com/Homerus25/podland/backend
 
 go 1.26.4
 
-replace go.podman.io/podman/v6 => /home/homerus/repos/podman/
+replace go.podman.io/podman/v6 => ../../podman
 
 require (
 	github.com/go-chi/chi/v5 v5.0.10
