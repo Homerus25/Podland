@@ -98,8 +98,12 @@ export function useTransferState(
 // options. The `warnings` slot renders between the collision block and the
 // referencing warning, `children` after it, so an adapter with referencing
 // quadlets keeps its own warning order. The module never touches
-// react-query: the feature keeps its preview hook, its mutation or stream
-// hook, and its invalidation choices.
+// react-query: the feature keeps its preview hook and its mutation or
+// stream hook as thin adapters over the shared transfer-hooks module
+// (`@shared/transfers`, issue 273), which owns the preview ritual, the
+// both-machines invalidation, and the move-stream lifecycle; the feature
+// keeps its domain — the key constructor and fetcher, the event
+// vocabulary, shape guard, progress fold, and URL builder.
 export function TransferDialog({
 	machine,
 	transfer,
