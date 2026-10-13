@@ -1,13 +1,18 @@
 import { useVolumeMoveStream } from "@features/volumes/hooks/useVolumeMoveStream";
 import type { VolumeMoveResult } from "@features/volumes/services/volumesApi";
-import { volumesQueryKey } from "@shared/queries/queryKeys";
 import { act, waitFor } from "@testing-library/react";
 import { type DefaultBodyType, type HttpResponse, http } from "msw";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { volumeMoveResultFixture } from "@/test/factories";
 import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import { ndjsonResponse } from "@/test/stream";
+
+// The volume move stream's domain assertions: the request shape (the
+// surface's URL builder and transfer body) and the single-value progress
+// fold. The ritual — the both-machines invalidation, the terminal handling,
+// the malformed-event skip — is pinned once in the transfer-hooks module's
+// suite (shared/transfers/transferHooks.test.tsx).
 
 type MoveResponse = HttpResponse<DefaultBodyType>;
 type MoveHandler = (request: Request) => MoveResponse | Promise<MoveResponse>;
@@ -37,15 +42,6 @@ function completeEvent(result: VolumeMoveResult): MoveStreamEvent {
 		type: "complete",
 		machineId: "m-1",
 		result,
-	};
-}
-
-function errorEvent(code: string, message: string): MoveStreamEvent {
-	return {
-		operationId: "op-1",
-		type: "error",
-		machineId: "m-1",
-		error: { code, message },
 	};
 }
 
@@ -125,76 +121,5 @@ describe("useVolumeMoveStream", () => {
 			bytes: 2097152,
 		});
 		expect(result.current.result?.bytes).toBe(2097152);
-	});
-
-	it("invalidates the volume queries of both machines on the terminal complete event", async () => {
-		mockMoveStream(() =>
-			streamResponse([completeEvent(volumeMoveResultFixture())]),
-		);
-		const { result, queryClient } = renderMoveStreamHook();
-		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-
-		await act(async () => {
-			result.current.run("app-data", transferInput);
-		});
-
-		await waitFor(() => expect(result.current.isRunning).toBe(false));
-		expect(invalidateSpy).toHaveBeenCalledWith({
-			queryKey: volumesQueryKey("m-1"),
-		});
-		expect(invalidateSpy).toHaveBeenCalledWith({
-			queryKey: volumesQueryKey("m-2"),
-		});
-	});
-
-	it("invalidates both machines on a partial result too — the data crossed", async () => {
-		mockMoveStream(() =>
-			streamResponse([
-				completeEvent(
-					volumeMoveResultFixture({
-						status: "partial",
-						error: "failed to remove volume: volume is in use",
-					}),
-				),
-			]),
-		);
-		const { result, queryClient } = renderMoveStreamHook();
-		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-
-		await act(async () => {
-			result.current.run("app-data", transferInput);
-		});
-
-		await waitFor(() => expect(result.current.isRunning).toBe(false));
-		expect(invalidateSpy).toHaveBeenCalledWith({
-			queryKey: volumesQueryKey("m-1"),
-		});
-		expect(invalidateSpy).toHaveBeenCalledWith({
-			queryKey: volumesQueryKey("m-2"),
-		});
-	});
-
-	it("surfaces a terminal error event with its code and message, without a result", async () => {
-		mockMoveStream(() =>
-			streamResponse([
-				volumeEvent({ phase: "start" }),
-				errorEvent(
-					"VOLUME_ALREADY_EXISTS",
-					"Volume app-data already exists on the target machine",
-				),
-			]),
-		);
-		const { result } = renderMoveStreamHook();
-
-		await act(async () => {
-			result.current.run("app-data", transferInput);
-		});
-
-		await waitFor(() => expect(result.current.isRunning).toBe(false));
-		expect(result.current.error).toEqual({
-			code: "VOLUME_ALREADY_EXISTS",
-			message: "Volume app-data already exists on the target machine",
-		});
-		expect(result.current.result).toBeNull();
 	});
 });

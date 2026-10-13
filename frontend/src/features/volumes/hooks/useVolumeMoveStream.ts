@@ -1,12 +1,13 @@
-import { invalidateVolumeMoveResult } from "@features/volumes/hooks/useVolumes";
 import type {
 	VolumeMoveInput,
 	VolumeMoveResult,
 } from "@features/volumes/services/volumesApi";
 import { volumeMoveStreamUrl } from "@features/volumes/services/volumesApi";
-import { useNdjsonOperation } from "@shared/streaming/streamTransport";
-import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import {
+	type MoveStreamConfig,
+	useMoveStream,
+} from "@shared/transfers/transferHooks";
+import { useMemo } from "react";
 
 // The transfer's live data-phase state, folded from the stream's progress
 // events (backend/internal/domain/volumes/dto.go VolumeMoveEvent): one
@@ -44,6 +45,15 @@ function isVolumeMoveStreamEvent(
 	);
 }
 
+// The single-value fold: the latest phase wins, and the bytes ride along
+// when the event carries them.
+function foldProgress(event: VolumeMoveStreamEvent): VolumeMoveProgress | null {
+	return {
+		phase: event.phase ?? "start",
+		...(event.bytes !== undefined ? { bytes: event.bytes } : {}),
+	};
+}
+
 export interface UseVolumeMoveStreamResult {
 	isRunning: boolean;
 	// The data phase's latest state. Null until the first progress event
@@ -60,57 +70,30 @@ export interface UseVolumeMoveStreamResult {
 }
 
 // The volume copy/move transfer (issue 238): the endpoint always answers
-// NDJSON, so the dialog drives it through the stream transport. Progress
-// events fold into the single-volume progress state; the terminal complete
-// event yields the envelope and invalidates both machines' volume queries
-// (a partial result is success-shaped — the data crossed); a terminal
-// error event surfaces as error.
+// NDJSON, so the dialog drives it through the stream transport. The
+// run/cancel lifecycle, reset-on-run, the malformed-event and
+// complete-without-envelope skips, the terminal handling, and the
+// both-machines invalidation are the shared transfer-hooks module's (issue
+// 273); this adapter keeps the volume domain — the event vocabulary, shape
+// guard, and single-value progress fold — and supplies the URL builder.
 export function useVolumeMoveStream(
 	machineId: string,
 ): UseVolumeMoveStreamResult {
-	const queryClient = useQueryClient();
-	const [progress, setProgress] = useState<VolumeMoveProgress | null>(null);
-	const [result, setResult] = useState<VolumeMoveResult | null>(null);
-	const { isRunning, error, start, cancel } = useNdjsonOperation();
-
-	const run = useCallback(
-		(volumeName: string, input: VolumeMoveInput) => {
-			setProgress(null);
-			setResult(null);
-			start({
-				url: volumeMoveStreamUrl(machineId, volumeName),
-				init: { method: "POST", body: JSON.stringify(input) },
-				onEvent: (value) => {
-					if (!isVolumeMoveStreamEvent(value)) {
-						console.warn(
-							"Skipping malformed stream event (unexpected shape):",
-							value,
-						);
-						return;
-					}
-					if (value.type === "volume") {
-						setProgress({
-							phase: value.phase ?? "start",
-							...(value.bytes !== undefined ? { bytes: value.bytes } : {}),
-						});
-					} else if (value.type === "complete") {
-						if (value.result) {
-							setResult(value.result);
-							// The both-machines invalidation — one owner for the
-							// rule (useVolumes.invalidateVolumeMoveResult).
-							invalidateVolumeMoveResult(queryClient, value.result);
-						} else {
-							console.warn(
-								"Skipping complete event without a transfer envelope:",
-								value,
-							);
-						}
-					}
-				},
-			});
-		},
-		[machineId, queryClient, start],
+	const config = useMemo<
+		MoveStreamConfig<VolumeMoveStreamEvent, VolumeMoveProgress | null>
+	>(
+		() => ({
+			resource: "volumes",
+			url: (volumeName) => volumeMoveStreamUrl(machineId, volumeName),
+			isEvent: isVolumeMoveStreamEvent,
+			foldProgress,
+			initialProgress: null,
+		}),
+		[machineId],
 	);
-
-	return { isRunning, progress, result, error, run, cancel };
+	return useMoveStream<
+		VolumeMoveStreamEvent,
+		VolumeMoveProgress | null,
+		VolumeMoveResult
+	>(config);
 }

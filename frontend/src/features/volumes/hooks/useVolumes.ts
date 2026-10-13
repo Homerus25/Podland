@@ -6,17 +6,14 @@ import {
 	populateVolume,
 	pruneVolumes,
 	type VolumeCreateInput,
-	type VolumeMoveResult,
 } from "@features/volumes/services/volumesApi";
 import {
 	volumeMovePreviewQueryKey,
 	volumesQueryKey,
 } from "@shared/queries/queryKeys";
-import {
-	invalidateMachineResources,
-	useListInvalidatingMutation,
-} from "@shared/queries/useListInvalidatingMutation";
-import { type QueryClient, useQuery } from "@tanstack/react-query";
+import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
+import { useMovePreview } from "@shared/transfers/transferHooks";
+import { useQuery } from "@tanstack/react-query";
 
 export function useVolumes(machineId: string) {
 	return useQuery({
@@ -70,41 +67,18 @@ export function usePopulateVolume(machineId: string) {
 }
 
 // The transfer dialog's fact payload, keyed by the chosen target so a
-// target change refetches. Disabled until a target exists — the dialog
-// defaults the select to the first writable machine once the machines list
-// arrives.
+// target change refetches. The ritual — the null-target guard, the
+// empty-string placeholder key, the enabled gate — is the shared
+// transfer-hooks module's (issue 273); this adapter supplies the key
+// constructor and fetcher.
 export function useVolumeMovePreview(
 	machineId: string,
 	volumeName: string,
 	targetMachineId: string | null,
 ) {
-	return useQuery({
-		queryKey: volumeMovePreviewQueryKey(
-			machineId,
-			volumeName,
-			targetMachineId ?? "",
-		),
-		queryFn: () => {
-			if (targetMachineId === null) {
-				throw new Error("volume move preview requires a target machine");
-			}
-			return getVolumeMovePreview(machineId, volumeName, targetMachineId);
-		},
-		enabled: targetMachineId !== null,
-	});
-}
-
-// A volume transfer touches two machines: the target gains the volume's
-// data and (in move mode) the source loses the volume. The envelope
-// carries both machine ids, so both lists invalidate from what the server
-// answered rather than from closure assumptions. A "partial" result is
-// still a success-shaped answer — the data crossed — so both lists refresh
-// there too. One owner for the rule: the stream transport's complete
-// handler calls this (the quadlet move's invalidateMoveResult pattern).
-export function invalidateVolumeMoveResult(
-	queryClient: QueryClient,
-	result: VolumeMoveResult,
-) {
-	invalidateMachineResources(queryClient, result.sourceMachineId, "volumes");
-	invalidateMachineResources(queryClient, result.targetMachineId, "volumes");
+	return useMovePreview(
+		(target) => volumeMovePreviewQueryKey(machineId, volumeName, target),
+		(target) => getVolumeMovePreview(machineId, volumeName, target),
+		targetMachineId,
+	);
 }
