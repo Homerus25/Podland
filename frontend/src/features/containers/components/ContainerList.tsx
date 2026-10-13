@@ -1,5 +1,4 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
-import { ConnectNetworkDialog } from "@features/containers/components/ConnectNetworkDialog";
 import { CreateContainerDialog } from "@features/containers/components/CreateContainerDialog";
 import { containerDisplayName } from "@features/containers/components/containerDisplayName";
 import {
@@ -11,7 +10,7 @@ import {
 } from "@features/containers/hooks/useContainers";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { can } from "@features/machines/permissions";
-import { useConnectContainer } from "@features/networks/hooks/useNetworks";
+import { ConnectDialog } from "@features/networks/components/ConnectDialog";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
@@ -164,14 +163,15 @@ function ContainerRow({
 // Connect-to-network is gated on the separate manage-networks capability
 // (issue 256): the row button hides below it while Logs stays visible. The
 // toolbar/triad/table machinery and the derived testids are ResourceList's;
-// this adapter owns only the columns, the row, and the create/delete/connect
-// modals.
+// this adapter owns only the columns, the row, and the create/delete
+// modals. The row's connect button opens the networks feature's one
+// connect dialog (issue 274) with the container fixed — the containers
+// feature calls into networks for connect, never the reverse.
 export function ContainerList({ machine }: { machine: Machine }) {
 	const machineId = machine.id;
 	const { data: containers, isPending, error } = useContainers(machineId);
 	const deleteContainer = useDeleteContainer(machineId);
 	const createContainer = useCreateContainer(machineId);
-	const connectContainer = useConnectContainer(machineId);
 	const canManage = can(machine, "manage-containers");
 	const canManageNetworks = can(machine, "manage-networks");
 	const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(
@@ -240,10 +240,9 @@ export function ContainerList({ machine }: { machine: Machine }) {
 				/>
 			) : null}
 			{pendingConnect ? (
-				<ConnectNetworkDialog
+				<ConnectDialog
 					machineId={machineId}
 					container={pendingConnect}
-					mutation={connectContainer}
 					onClose={() => setPendingConnect(null)}
 				/>
 			) : null}

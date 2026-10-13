@@ -1,9 +1,8 @@
 import { Button, Td, Tr } from "@chakra-ui/react";
 import { can } from "@features/machines/permissions";
-import { ConnectContainerDialog } from "@features/networks/components/ConnectContainerDialog";
+import { ConnectDialog } from "@features/networks/components/ConnectDialog";
 import { CreateNetworkDialog } from "@features/networks/components/CreateNetworkDialog";
 import {
-	useConnectContainer,
 	useCreateNetwork,
 	useNetworks,
 } from "@features/networks/hooks/useNetworks";
@@ -18,12 +17,13 @@ import { useState } from "react";
 // manage-networks: below write level ResourceList swaps the toolbar for the
 // canonical read hint and the rows drop their connect button. The
 // toolbar/triad/table machinery and the derived testids are ResourceList's;
-// this adapter owns only the columns, the row, and the two dialogs.
+// this adapter owns only the columns, the row, and the create dialog. The
+// row's connect button opens the one connect dialog (issue 274) with the
+// network fixed — the dialog owns the ritual: its options and the mutation.
 export function NetworkList({ machine }: { machine: Machine }) {
 	const machineId = machine.id;
 	const { data: networks, isPending, error } = useNetworks(machineId);
 	const createNetwork = useCreateNetwork(machineId);
-	const connectContainer = useConnectContainer(machineId);
 	const canManage = can(machine, "manage-networks");
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [pendingConnect, setPendingConnect] = useState<NetworkSummary | null>(
@@ -84,10 +84,9 @@ export function NetworkList({ machine }: { machine: Machine }) {
 				/>
 			) : null}
 			{pendingConnect ? (
-				<ConnectContainerDialog
+				<ConnectDialog
 					machineId={machineId}
 					network={pendingConnect}
-					mutation={connectContainer}
 					onClose={() => setPendingConnect(null)}
 				/>
 			) : null}
