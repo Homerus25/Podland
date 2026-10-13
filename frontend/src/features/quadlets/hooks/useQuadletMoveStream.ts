@@ -1,12 +1,13 @@
-import { invalidateMoveResult } from "@features/quadlets/hooks/useQuadlets";
 import type {
 	QuadletMoveInput,
 	QuadletMoveResult,
 } from "@features/quadlets/services/quadletsApi";
 import { moveQuadletStreamUrl } from "@features/quadlets/services/quadletsApi";
-import { useNdjsonOperation } from "@shared/streaming/streamTransport";
-import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import {
+	type MoveStreamConfig,
+	useMoveStream,
+} from "@shared/transfers/transferHooks";
+import { useMemo } from "react";
 
 // One volume's live data-phase state, folded from the stream's per-volume
 // progress events (backend/internal/domain/quadlets/dto.go QuadletMoveEvent):
@@ -50,9 +51,11 @@ function isQuadletMoveStreamEvent(
 	);
 }
 
+// The first-seen-order fold: the latest phase per volume wins, and a
+// volume's first event fixes its position in the list.
 function foldProgress(
-	current: QuadletMoveVolumeProgress[],
 	event: QuadletMoveStreamEvent,
+	current: QuadletMoveVolumeProgress[],
 ): QuadletMoveVolumeProgress[] {
 	const key = event.podmanVolume ?? event.ref ?? "";
 	const entry: QuadletMoveVolumeProgress = {
@@ -84,56 +87,31 @@ export interface UseQuadletMoveStreamResult {
 
 // The migrating half of the move/copy transfer (issue 214): the same move
 // endpoint, answered as an NDJSON operation because migrateVolumeData
-// switches the transport. Per-volume progress events fold into the progress
-// list; the terminal complete event yields the envelope and invalidates both
-// machines' quadlet queries exactly like the plain mutation's onSuccess (a
-// partial result is success-shaped — the target install stands); a terminal
-// error event surfaces as error. The file-only path keeps riding the plain
-// mutation — this hook exists only for the checked checkbox.
+// switches the transport. The run/cancel lifecycle, reset-on-run, the
+// malformed-event and complete-without-envelope skips, the terminal
+// handling, and the both-machines invalidation are the shared transfer-hooks
+// module's (issue 273); this adapter keeps the quadlet domain — the event
+// vocabulary, shape guard, and first-seen-order progress fold — and supplies
+// the URL builder. The file-only path keeps riding the plain mutation — this
+// hook exists only for the checked checkbox.
 export function useQuadletMoveStream(
 	machineId: string,
 ): UseQuadletMoveStreamResult {
-	const queryClient = useQueryClient();
-	const [progress, setProgress] = useState<QuadletMoveVolumeProgress[]>([]);
-	const [result, setResult] = useState<QuadletMoveResult | null>(null);
-	const { isRunning, error, start, cancel } = useNdjsonOperation();
-
-	const run = useCallback(
-		(quadletId: string, input: QuadletMoveInput) => {
-			setProgress([]);
-			setResult(null);
-			start({
-				url: moveQuadletStreamUrl(machineId, quadletId),
-				init: { method: "POST", body: JSON.stringify(input) },
-				onEvent: (value) => {
-					if (!isQuadletMoveStreamEvent(value)) {
-						console.warn(
-							"Skipping malformed stream event (unexpected shape):",
-							value,
-						);
-						return;
-					}
-					if (value.type === "volume") {
-						setProgress((current) => foldProgress(current, value));
-					} else if (value.type === "complete") {
-						if (value.result) {
-							setResult(value.result);
-							// The same both-machines invalidation the plain
-							// mutation's onSuccess performs — one owner for
-							// the rule (useQuadlets.invalidateMoveResult).
-							invalidateMoveResult(queryClient, value.result);
-						} else {
-							console.warn(
-								"Skipping complete event without a transfer envelope:",
-								value,
-							);
-						}
-					}
-				},
-			});
-		},
-		[machineId, queryClient, start],
+	const config = useMemo<
+		MoveStreamConfig<QuadletMoveStreamEvent, QuadletMoveVolumeProgress[]>
+	>(
+		() => ({
+			resource: "quadlets",
+			url: (quadletId) => moveQuadletStreamUrl(machineId, quadletId),
+			isEvent: isQuadletMoveStreamEvent,
+			foldProgress,
+			initialProgress: [],
+		}),
+		[machineId],
 	);
-
-	return { isRunning, progress, result, error, run, cancel };
+	return useMoveStream<
+		QuadletMoveStreamEvent,
+		QuadletMoveVolumeProgress[],
+		QuadletMoveResult
+	>(config);
 }

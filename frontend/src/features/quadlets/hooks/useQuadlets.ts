@@ -3,7 +3,6 @@ import type {
 	DeleteQuadletOptions,
 	QuadletLifecycleOptions,
 	QuadletMoveInput,
-	QuadletMoveResult,
 	UpdateQuadletInput,
 } from "@features/quadlets/services/quadletsApi";
 import {
@@ -23,16 +22,12 @@ import {
 	quadletQueryKey,
 	quadletsQueryKey,
 } from "@shared/queries/queryKeys";
+import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import {
-	invalidateMachineResources,
-	useListInvalidatingMutation,
-} from "@shared/queries/useListInvalidatingMutation";
-import {
-	type QueryClient,
-	useMutation,
-	useQuery,
-	useQueryClient,
-} from "@tanstack/react-query";
+	invalidateMoveResult,
+	useMovePreview,
+} from "@shared/transfers/transferHooks";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function useQuadlets(machineId: string) {
 	return useQuery({
@@ -117,45 +112,30 @@ export function useRestartQuadlet(machineId: string) {
 }
 
 // The transfer dialog's warning payload, keyed by the chosen target so a
-// target change refetches. Disabled until a target exists — the dialog
-// defaults the select to the first writable machine once the machines list
-// arrives.
+// target change refetches. The ritual — the null-target guard, the
+// empty-string placeholder key, the enabled gate — is the shared
+// transfer-hooks module's (issue 273); this adapter supplies the key
+// constructor and fetcher.
 export function useQuadletMovePreview(
 	machineId: string,
 	quadletId: string,
 	targetMachineId: string | null,
 ) {
-	return useQuery({
-		queryKey: quadletMovePreviewQueryKey(
-			machineId,
-			quadletId,
-			targetMachineId ?? "",
-		),
-		queryFn: () => {
-			if (targetMachineId === null) {
-				throw new Error("move preview requires a target machine");
-			}
-			return quadletMovePreview(machineId, quadletId, targetMachineId);
-		},
-		enabled: targetMachineId !== null,
-	});
+	return useMovePreview(
+		(target) => quadletMovePreviewQueryKey(machineId, quadletId, target),
+		(target) => quadletMovePreview(machineId, quadletId, target),
+		targetMachineId,
+	);
 }
 
 // A move/copy touches two machines: the quadlet leaves the source and (in
 // move mode) is gone from it, while the target gains it. The response carries
 // both machine ids, so both lists invalidate from what the server answered
-// rather than from closure assumptions. A "partial" result is still a
+// rather than from closure assumptions — the both-machines rule the shared
+// transfer-hooks module owns (issue 273), called from this onSuccess and from
+// the stream factory's complete handler alike. A "partial" result is still a
 // success-shaped answer — the target install stands — so both lists refresh
-// there too. One owner for the rule (issue 222 review): the plain mutation's
-// onSuccess and the stream transport's complete handler both call this.
-export function invalidateMoveResult(
-	queryClient: QueryClient,
-	result: QuadletMoveResult,
-) {
-	invalidateMachineResources(queryClient, result.sourceMachineId, "quadlets");
-	invalidateMachineResources(queryClient, result.targetMachineId, "quadlets");
-}
-
+// there too.
 export function useMoveQuadlet(machineId: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
@@ -165,7 +145,7 @@ export function useMoveQuadlet(machineId: string) {
 		}: { quadletId: string } & QuadletMoveInput) =>
 			moveQuadlet(machineId, quadletId, input),
 		onSuccess: (result) => {
-			invalidateMoveResult(queryClient, result);
+			invalidateMoveResult(queryClient, result, "quadlets");
 		},
 	});
 }

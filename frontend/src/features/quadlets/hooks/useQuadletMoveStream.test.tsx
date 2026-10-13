@@ -1,13 +1,18 @@
 import { useQuadletMoveStream } from "@features/quadlets/hooks/useQuadletMoveStream";
 import type { QuadletMoveResult } from "@features/quadlets/services/quadletsApi";
-import { quadletsQueryKey } from "@shared/queries/queryKeys";
 import { act, waitFor } from "@testing-library/react";
 import { type DefaultBodyType, type HttpResponse, http } from "msw";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { quadletMoveResultFixture } from "@/test/factories";
 import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import { ndjsonResponse } from "@/test/stream";
+
+// The quadlet move stream's domain assertions: the request shape (the
+// surface's URL builder and transfer body) and the first-seen-order progress
+// fold. The ritual — the both-machines invalidation, the terminal handling,
+// the malformed-event skip — is pinned once in the transfer-hooks module's
+// suite (shared/transfers/transferHooks.test.tsx).
 
 type MoveResponse = HttpResponse<DefaultBodyType>;
 type MoveHandler = (request: Request) => MoveResponse | Promise<MoveResponse>;
@@ -38,15 +43,6 @@ function completeEvent(result: QuadletMoveResult): MoveStreamEvent {
 		type: "complete",
 		machineId: "m-1",
 		result,
-	};
-}
-
-function errorEvent(code: string, message: string): MoveStreamEvent {
-	return {
-		operationId: "op-1",
-		type: "error",
-		machineId: "m-1",
-		error: { code, message },
 	};
 }
 
@@ -143,55 +139,5 @@ describe("useQuadletMoveStream", () => {
 			},
 		]);
 		expect(result.current.result?.status).toBe("copied");
-	});
-
-	it("invalidates the quadlet queries of both machines on the terminal complete event", async () => {
-		mockMoveStream(() =>
-			streamResponse([
-				completeEvent(
-					quadletMoveResultFixture({
-						volumeMigration: { volumes: [] },
-					}),
-				),
-			]),
-		);
-		const { result, queryClient } = renderMoveStreamHook();
-		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
-
-		await act(async () => {
-			result.current.run("web", transferInput);
-		});
-
-		await waitFor(() => expect(result.current.isRunning).toBe(false));
-		expect(invalidateSpy).toHaveBeenCalledWith({
-			queryKey: quadletsQueryKey("m-1"),
-		});
-		expect(invalidateSpy).toHaveBeenCalledWith({
-			queryKey: quadletsQueryKey("m-2"),
-		});
-	});
-
-	it("surfaces a terminal error event with its code and message, without a result", async () => {
-		mockMoveStream(() =>
-			streamResponse([
-				volumeEvent({ phase: "start" }),
-				errorEvent(
-					"VOLUME_MIGRATION_TARGET_NOT_EMPTY",
-					"target volume pgdata is not empty",
-				),
-			]),
-		);
-		const { result } = renderMoveStreamHook();
-
-		await act(async () => {
-			result.current.run("web", transferInput);
-		});
-
-		await waitFor(() => expect(result.current.isRunning).toBe(false));
-		expect(result.current.error).toEqual({
-			code: "VOLUME_MIGRATION_TARGET_NOT_EMPTY",
-			message: "target volume pgdata is not empty",
-		});
-		expect(result.current.result).toBeNull();
 	});
 });
