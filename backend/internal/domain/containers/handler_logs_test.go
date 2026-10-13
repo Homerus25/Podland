@@ -7,10 +7,29 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
+
+// logsRequest serves GET
+// /api/machines/{id}/containers/{containerId}/logs{query} through the
+// handler with an authenticated test identity.
+func logsRequest(handler http.HandlerFunc, containerID, query string) *httptest.ResponseRecorder {
+	return logsRequestWithBase(handler, context.Background(), containerID, query)
+}
+
+// logsRequestWithBase serves the same request over a caller-supplied
+// base context (a cancelled one, for the cancellation pin).
+func logsRequestWithBase(handler http.HandlerFunc, base context.Context, containerID, query string) *httptest.ResponseRecorder {
+	return testutils.Perform(handler, testutils.Request{
+		Method:    http.MethodGet,
+		Path:      "/api/machines/test-machine/containers/" + containerID + "/logs" + query,
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+		Context:   base,
+	})
+}
 
 // TestContainerHandler_Logs_Success tests successful buffered log retrieval
 // through the real service: the machine's log lines land in the response.
@@ -22,13 +41,7 @@ func TestContainerHandler_Logs_Success(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
-	r.ServeHTTP(w, req)
+	w := logsRequest(newTestHandler(engine).Logs, "container-123", "")
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
 	assert.Contains(t, w.Body.String(), `"id":"container-123"`, "Response should contain container ID")
@@ -41,13 +54,7 @@ func TestContainerHandler_Logs_Success(t *testing.T) {
 func TestContainerHandler_Logs_QueryErrorWithFollowRidesJSONEnvelope(t *testing.T) {
 	engine := &fakeContainerEngine{}
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true&since=invalid-date", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
-	r.ServeHTTP(w, req)
+	w := logsRequest(newTestHandler(engine).Logs, "container-123", "?follow=true&since=invalid-date")
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid since even with follow=true")
 	assert.Contains(t, w.Body.String(), "INVALID_SINCE_PARAM", "Response should contain INVALID_SINCE_PARAM error code")
@@ -58,7 +65,7 @@ func TestContainerHandler_Logs_QueryErrorWithFollowRidesJSONEnvelope(t *testing.
 // buffered cancellation contract end to end: a cancelled context maps to
 // 504 OPERATION_CANCELLED even when the engine returns a generic error.
 func TestContainerHandler_Logs_BufferedCancellationAnswers504(t *testing.T) {
-	ctx, cancel := context.WithCancel(authedContext())
+	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	engine := &fakeContainerEngine{
 		logsFn: func(string, entities.ContainerLogsOptions) error {
@@ -66,13 +73,7 @@ func TestContainerHandler_Logs_BufferedCancellationAnswers504(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs", nil).
-		WithContext(ctx)
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
-	r.ServeHTTP(w, req)
+	w := logsRequestWithBase(newTestHandler(engine).Logs, ctx, "container-123", "")
 
 	assert.Equal(t, http.StatusGatewayTimeout, w.Code,
 		"a cancelled buffered fetch must answer the 504 cancellation sentinel, not a wrapped 500")
@@ -96,13 +97,7 @@ func TestContainerHandler_Logs_StreamingHappyPath(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=true&tail=0", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
-	r.ServeHTTP(w, req)
+	w := logsRequest(newTestHandler(engine).Logs, "container-123", "?follow=true&tail=0")
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on streaming success")
 	output := w.Body.String()
@@ -120,13 +115,7 @@ func TestContainerHandler_Logs_NonStreamingUnchanged(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123/logs?follow=false", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", newTestHandler(engine).Logs)
-	r.ServeHTTP(w, req)
+	w := logsRequest(newTestHandler(engine).Logs, "container-123", "?follow=false")
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
 	assert.Contains(t, w.Body.String(), `"id":"container-123"`, "Response should contain container ID")

@@ -7,13 +7,25 @@ import (
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
+
+// stopRequest serves POST
+// /api/machines/{id}/containers/{containerId}/stop through the handler
+// with an authenticated test identity.
+func stopRequest(handler http.HandlerFunc, containerID string) *httptest.ResponseRecorder {
+	return testutils.Perform(handler, testutils.Request{
+		Method:    http.MethodPost,
+		Path:      "/api/machines/test-machine/containers/" + containerID + "/stop",
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+	})
+}
 
 // TestContainerHandler_Stop_Success pins the stop contract through the
 // real service: 200 with the stopped container's ID, its inspect-resolved
@@ -35,13 +47,7 @@ func TestContainerHandler_Stop_Success(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers/container-123/stop", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/containers/{containerId}/stop", newTestHandler(engine).Stop)
-	r.ServeHTTP(w, req)
+	w := stopRequest(newTestHandler(engine).Stop, "container-123")
 
 	require.Equal(t, 200, w.Code, "Should return 200 on success")
 	assert.Equal(t, "container-123", gotID, "the URL param must be the stopped container")
@@ -71,13 +77,7 @@ func TestContainerHandler_Stop_NotRunningAnswers400(t *testing.T) {
 		// before the action call, and an unexpected call panics.
 	}
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers/container-123/stop", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/containers/{containerId}/stop", newTestHandler(engine).Stop)
-	r.ServeHTTP(w, req)
+	w := stopRequest(newTestHandler(engine).Stop, "container-123")
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "a stopped container must answer 400, not 200")
 	var got appErrors.ErrorResponse
@@ -105,13 +105,7 @@ func TestContainerHandler_Stop_MissingContainerAnswers404(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers/container-123/stop", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/containers/{containerId}/stop", newTestHandler(engine).Stop)
-	r.ServeHTTP(w, req)
+	w := stopRequest(newTestHandler(engine).Stop, "container-123")
 
 	require.Equal(t, http.StatusNotFound, w.Code, "a missing container must answer 404, not 500")
 	var got appErrors.ErrorResponse
@@ -138,13 +132,7 @@ func TestContainerHandler_Stop_PerItemFailureAnswers500(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers/container-123/stop", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/containers/{containerId}/stop", newTestHandler(engine).Stop)
-	r.ServeHTTP(w, req)
+	w := stopRequest(newTestHandler(engine).Stop, "container-123")
 
 	require.Equal(t, http.StatusInternalServerError, w.Code, "a failed stop must not answer state stopped")
 	var got appErrors.ErrorResponse

@@ -7,12 +7,24 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/specgen"
 )
+
+// createRequest serves POST /api/machines/{id}/containers with the given
+// JSON body through the handler with an authenticated test identity.
+func createRequest(create http.HandlerFunc, body string) *httptest.ResponseRecorder {
+	return testutils.Perform(create, testutils.Request{
+		Method:    http.MethodPost,
+		Path:      "/api/machines/test-machine/containers",
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine"},
+		Body:      strings.NewReader(body),
+	})
+}
 
 // TestContainerHandler_Create_Success pins the create contract through the
 // real service: 201 with the created container's ID, name, state, and
@@ -46,14 +58,7 @@ func TestContainerHandler_Create_Success(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers", strings.NewReader(requestBody)).
-		WithContext(authedContext())
-	req.Header.Set("Content-Type", "application/json")
-
-	rr := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/containers", newTestHandler(engine).Create)
-	r.ServeHTTP(rr, req)
+	rr := createRequest(newTestHandler(engine).Create, requestBody)
 
 	assert.Equal(t, http.StatusCreated, rr.Code, "Should return 201 Created for successful container creation")
 	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"), "Should return JSON content type")
@@ -79,14 +84,7 @@ func TestContainerHandler_Create_Success(t *testing.T) {
 func TestContainerHandler_Create_MissingImage(t *testing.T) {
 	engine := &fakeContainerEngine{}
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/containers", strings.NewReader(`{"name":"x"}`)).
-		WithContext(authedContext())
-	req.Header.Set("Content-Type", "application/json")
-
-	rr := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/containers", newTestHandler(engine).Create)
-	r.ServeHTTP(rr, req)
+	rr := createRequest(newTestHandler(engine).Create, `{"name":"x"}`)
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code, "a create without an image must be refused with 400")
 	assert.Contains(t, rr.Body.String(), "VALIDATION_FAILED")

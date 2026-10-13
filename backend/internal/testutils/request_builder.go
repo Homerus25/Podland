@@ -27,6 +27,12 @@ type Request struct {
 	// an identity-less context.
 	UserID string
 
+	// Context is the base context the request carries; it defaults to
+	// context.Background(). Set it to inject a pre-arranged context
+	// (a cancelled one, say) — identity and chi params are layered on
+	// top, so a cancelled base stays cancelled.
+	Context context.Context
+
 	// RequestID defaults to "test-request-id".
 	RequestID string
 
@@ -52,7 +58,11 @@ func Perform(handler http.HandlerFunc, req Request) *httptest.ResponseRecorder {
 		req.RequestID = "test-request-id"
 	}
 
-	ctx := contextutils.SetRequestID(context.Background(), req.RequestID)
+	base := req.Context
+	if base == nil {
+		base = context.Background()
+	}
+	ctx := contextutils.SetRequestID(base, req.RequestID)
 	if req.UserID != "" {
 		ctx = contextutils.SetUserID(ctx, req.UserID)
 	}

@@ -1,13 +1,11 @@
 package containers
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
@@ -16,10 +14,16 @@ func newTestHandler(engine *fakeContainerEngine) *ContainerHandler {
 	return NewContainerHandler(NewContainerService(fakeEngineProvider{engine: engine}))
 }
 
-func authedContext() context.Context {
-	ctx := context.Background()
-	ctx = contextutils.SetUserID(ctx, "test-user")
-	return contextutils.SetRequestID(ctx, "test-request-id")
+// deleteRequest serves DELETE
+// /api/machines/{id}/containers/{containerId}{query} through the handler
+// with an authenticated test identity.
+func deleteRequest(handler http.HandlerFunc, containerID, query string) *httptest.ResponseRecorder {
+	return testutils.Perform(handler, testutils.Request{
+		Method:    http.MethodDelete,
+		Path:      "/api/machines/test-machine/containers/" + containerID + query,
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+	})
 }
 
 // TestContainerHandler_Delete_Success tests successful container deletion,
@@ -34,13 +38,7 @@ func TestContainerHandler_Delete_Success(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/containers/container-123", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/containers/{containerId}", newTestHandler(engine).Delete)
-	r.ServeHTTP(w, req)
+	w := deleteRequest(newTestHandler(engine).Delete, "container-123", "")
 
 	assert.Equal(t, http.StatusNoContent, w.Code, "Should return 204 on success")
 	assert.Equal(t, "container-123", gotID)
@@ -57,13 +55,7 @@ func TestContainerHandler_Delete_Force(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/containers/container-123?force=true", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/containers/{containerId}", newTestHandler(engine).Delete)
-	r.ServeHTTP(w, req)
+	w := deleteRequest(newTestHandler(engine).Delete, "container-123", "?force=true")
 
 	assert.Equal(t, http.StatusNoContent, w.Code, "Should return 204 on success with force=true")
 	assert.True(t, gotForce, "force=true must reach the machine")

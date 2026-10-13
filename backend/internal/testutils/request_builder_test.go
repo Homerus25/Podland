@@ -1,6 +1,7 @@
 package testutils
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -53,6 +54,28 @@ func TestPerform_BodyDefaultsToJSONContentType(t *testing.T) {
 
 	assert.Equal(t, "application/json", contentType)
 	assert.Equal(t, `{"name":"v"}`, body)
+}
+
+func TestPerform_LayersIdentityOntoInjectedContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var gotUserID string
+	var gotErr error
+
+	Perform(func(w http.ResponseWriter, r *http.Request) {
+		gotUserID = contextutils.GetUserIDFromContext(r.Context())
+		gotErr = r.Context().Err()
+		w.WriteHeader(http.StatusOK)
+	}, Request{
+		Method:  http.MethodGet,
+		Path:    "/api/machines/test-machine/volumes",
+		UserID:  "test-user",
+		Context: ctx,
+	})
+
+	assert.Equal(t, "test-user", gotUserID, "identity must layer onto the injected context")
+	assert.ErrorIs(t, gotErr, context.Canceled, "a cancelled base context must stay cancelled")
 }
 
 func TestPerform_AllowsAnonymousContext(t *testing.T) {

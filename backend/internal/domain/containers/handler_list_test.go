@@ -6,13 +6,24 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	netTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	define "go.podman.io/podman/v6/pkg/ps/define"
 )
+
+// listRequest serves GET /api/machines/{id}/containers{query} through
+// the handler with an authenticated test identity.
+func listRequest(list http.HandlerFunc, query string) *httptest.ResponseRecorder {
+	return testutils.Perform(list, testutils.Request{
+		Method:    http.MethodGet,
+		Path:      "/api/machines/test-machine/containers" + query,
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine"},
+	})
+}
 
 // TestContainerHandler_List_Success pins the list contract through the
 // real service: 200 with the count, the mapped container fields, and the
@@ -44,13 +55,7 @@ func TestContainerHandler_List_Success(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers?all=true", nil).
-		WithContext(authedContext())
-
-	rr := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers", newTestHandler(engine).List)
-	r.ServeHTTP(rr, req)
+	rr := listRequest(newTestHandler(engine).List, "?all=true")
 
 	assert.Equal(t, http.StatusOK, rr.Code, "Should return 200 OK for successful request")
 	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"), "Should return JSON content type")
@@ -73,31 +78,31 @@ func TestContainerHandler_List_QueryParameters(t *testing.T) {
 	// Test different query parameter combinations
 	testCases := []struct {
 		name         string
-		url          string
+		query        string
 		expectedOpts entities.ContainerListOptions
 		description  string
 	}{
 		{
 			name:         "all parameter",
-			url:          "/api/machines/test-machine/containers?all=true",
+			query:        "?all=true",
 			expectedOpts: entities.ContainerListOptions{All: true},
 			description:  "Should parse all parameter correctly",
 		},
 		{
 			name:         "size parameter",
-			url:          "/api/machines/test-machine/containers?size=true",
+			query:        "?size=true",
 			expectedOpts: entities.ContainerListOptions{Size: true},
 			description:  "Should parse size parameter correctly",
 		},
 		{
 			name:         "namespace parameter",
-			url:          "/api/machines/test-machine/containers?namespace=true",
+			query:        "?namespace=true",
 			expectedOpts: entities.ContainerListOptions{Namespace: true},
 			description:  "Should parse namespace parameter correctly",
 		},
 		{
-			name: "multiple parameters",
-			url:  "/api/machines/test-machine/containers?all=true&size=true&last=5",
+			name:  "multiple parameters",
+			query: "?all=true&size=true&last=5",
 			expectedOpts: entities.ContainerListOptions{
 				All:  true,
 				Size: true,
@@ -117,12 +122,7 @@ func TestContainerHandler_List_QueryParameters(t *testing.T) {
 				},
 			}
 
-			req := httptest.NewRequest("GET", tc.url, nil).WithContext(authedContext())
-
-			rr := httptest.NewRecorder()
-			r := chi.NewRouter()
-			r.Get("/api/machines/{id}/containers", newTestHandler(engine).List)
-			r.ServeHTTP(rr, req)
+			rr := listRequest(newTestHandler(engine).List, tc.query)
 
 			assert.Equal(t, http.StatusOK, rr.Code, tc.description)
 			assert.Equal(t, tc.expectedOpts, gotOpts, "the parsed query options must reach the machine")
@@ -138,12 +138,7 @@ func TestContainerHandler_List_EmptyResponse(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers", nil).WithContext(authedContext())
-
-	rr := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers", newTestHandler(engine).List)
-	r.ServeHTTP(rr, req)
+	rr := listRequest(newTestHandler(engine).List, "")
 
 	assert.Equal(t, http.StatusOK, rr.Code, "Should return 200 OK for empty container list")
 
@@ -196,12 +191,7 @@ func TestContainerHandler_List_ContainerWithOptionalFields(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers", nil).WithContext(authedContext())
-
-	rr := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers", newTestHandler(engine).List)
-	r.ServeHTTP(rr, req)
+	rr := listRequest(newTestHandler(engine).List, "")
 
 	assert.Equal(t, http.StatusOK, rr.Code, "Should return 200 OK")
 

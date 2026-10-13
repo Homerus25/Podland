@@ -8,11 +8,22 @@ import (
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
+
+// getRequest serves GET /api/machines/{id}/containers/{containerId}
+// through the handler with an authenticated test identity.
+func getRequest(handler http.HandlerFunc, containerID string) *httptest.ResponseRecorder {
+	return testutils.Perform(handler, testutils.Request{
+		Method:    http.MethodGet,
+		Path:      "/api/machines/test-machine/containers/" + containerID,
+		UserID:    "test-user",
+		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+	})
+}
 
 // TestContainerHandler_Get_MissingContainerAnswers404 pins the documented
 // 404 envelope end to end: the real service classifies the tunnel's
@@ -24,13 +35,7 @@ func TestContainerHandler_Get_MissingContainerAnswers404(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/container-123", nil).
-		WithContext(authedContext())
-
-	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}", newTestHandler(engine).Get)
-	r.ServeHTTP(w, req)
+	w := getRequest(newTestHandler(engine).Get, "container-123")
 
 	require.Equal(t, http.StatusNotFound, w.Code, "a missing container must answer 404")
 	var body appErrors.ErrorResponse
