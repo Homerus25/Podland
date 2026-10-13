@@ -164,6 +164,21 @@ type ContainerCreateResponse struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// FromContainerCreateReport maps podman's create report and the create
+// request to the create response DTO. The report carries only the
+// container ID; name and image come from the request, and the state and
+// timestamp are stamped at mapping time.
+func FromContainerCreateReport(report *entities.ContainerCreateReport, request ContainerCreateRequest) ContainerCreateResponse {
+	return ContainerCreateResponse{
+		ID:        report.Id,
+		Name:      request.Name,
+		State:     "created",
+		Image:     request.Image,
+		ImageID:   "", // ImageID is not available in ContainerCreateReport
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
 // ContainerListResult wraps the list of containers with metadata
 // This provides a consistent response structure for the API
 type ContainerListResult struct {
@@ -396,6 +411,50 @@ type ContainerStopResponse struct {
 	State string `json:"state"`
 	// Operation timestamp
 	Timestamp string `json:"timestamp"`
+}
+
+// ContainerStartResult is the service-layer outcome of a start: the
+// container's identity only. The response DTO's state and timestamp are
+// stamped by the handler's mapping, not by the service.
+type ContainerStartResult struct {
+	// Container ID
+	ID string
+	// Container name (inspect-resolved, leading slash trimmed)
+	Name string
+}
+
+// ContainerStopResult is the service-layer outcome of a stop: the
+// container's identity only. The response DTO's state and timestamp are
+// stamped by the handler's mapping, not by the service.
+type ContainerStopResult struct {
+	// Container ID
+	ID string
+	// Container name (inspect-resolved, leading slash trimmed)
+	Name string
+}
+
+// FromContainerStartResult maps the service's start result to the
+// response DTO, stamping the post-start state and the operation
+// timestamp at mapping time.
+func FromContainerStartResult(result ContainerStartResult) ContainerStartResponse {
+	return ContainerStartResponse{
+		ID:        result.ID,
+		Name:      result.Name,
+		State:     "running",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// FromContainerStopResult maps the service's stop result to the
+// response DTO, stamping the post-stop state and the operation
+// timestamp at mapping time.
+func FromContainerStopResult(result ContainerStopResult) ContainerStopResponse {
+	return ContainerStopResponse{
+		ID:        result.ID,
+		Name:      result.Name,
+		State:     "stopped",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
 }
 
 // ContainerLogsResponse represents the response for container logs

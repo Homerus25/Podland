@@ -81,11 +81,11 @@ All error responses follow this structure:
 
 | Status Code | Error Code Category | Description |
 |-------------|---------------------|-------------|
-| 400 | `VALIDATION_FAILED`, `INVALID_REQUEST`, `INVALID_SSH_KEY` | Bad request |
+| 400 | `VALIDATION_FAILED`, `INVALID_REQUEST`, `INVALID_SSH_KEY`, `CONTAINER_ALREADY_RUNNING` | Bad request |
 | 401 | `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `INVALID_CREDENTIALS` | Unauthorized |
 | 403 | `ACCESS_DENIED`, `PERMISSION_DENIED` | Forbidden |
 | 404 | `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`, `IMAGE_NOT_FOUND` | Not found |
-| 409 | `MACHINE_ALREADY_EXISTS`, `CONTAINER_ALREADY_RUNNING` | Conflict |
+| 409 | `MACHINE_ALREADY_EXISTS` | Conflict |
 | 429 | `RATE_LIMIT_EXCEEDED` | Too many requests |
 | 500 | `INTERNAL_ERROR` | Internal server error |
 | 502 | `SERVICE_UNAVAILABLE`, `CONNECTION_FAILED` | Bad gateway |
@@ -107,7 +107,7 @@ All error responses follow this structure:
 | `ACCESS_DENIED` | 403 | User does not have access to this resource |
 | `PERMISSION_DENIED` | 403 | User lacks required permission for action |
 | `CONTAINER_NOT_FOUND` | 404 | Container does not exist |
-| `CONTAINER_ALREADY_RUNNING` | 409 | Container cannot be started (already running) |
+| `CONTAINER_ALREADY_RUNNING` | 400 | Container cannot be started (already running) |
 | `CONTAINER_NOT_RUNNING` | 400 | Container cannot be stopped (not running) |
 | `IMAGE_NOT_FOUND` | 404 | Image does not exist |
 | `IMAGE_PULL_FAILED` | 500 | Failed to pull image |

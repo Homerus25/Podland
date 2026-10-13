@@ -69,10 +69,7 @@ func TestContainerService_Create_BuildsSpecFromRequest(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	assert.Equal(t, "c-123", got.ID)
-	assert.Equal(t, "test-container", got.Name)
-	assert.Equal(t, "created", got.State)
-	assert.Equal(t, "nginx:latest", got.Image)
+	assert.Equal(t, "c-123", got.Id, "the service returns podman's create report untouched")
 
 	require.NotNil(t, captured)
 	assert.Equal(t, "nginx:latest", captured.Image)

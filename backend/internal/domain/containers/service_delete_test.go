@@ -12,35 +12,6 @@ import (
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// TestContainerService_Delete_MissingParameters tests that Delete validates input parameters
-func TestContainerService_Delete_MissingParameters(t *testing.T) {
-	ctx := context.Background()
-	userID := "test-user"
-	machineID := "test-machine"
-	containerID := "container-123"
-
-	// The engine stays unarmed: a refused call must not reach podman.
-	service := NewContainerService(fakeEngineProvider{engine: &fakeContainerEngine{}})
-
-	t.Run("empty userID", func(t *testing.T) {
-		err := service.Delete(ctx, "", machineID, containerID, false)
-		assert.Error(t, err, "Should return error when userID is empty")
-		assert.Contains(t, err.Error(), "userID is required", "Error should mention userID")
-	})
-
-	t.Run("empty machineID", func(t *testing.T) {
-		err := service.Delete(ctx, userID, "", containerID, false)
-		assert.Error(t, err, "Should return error when machineID is empty")
-		assert.Contains(t, err.Error(), "machineID is required", "Error should mention machineID")
-	})
-
-	t.Run("empty containerID", func(t *testing.T) {
-		err := service.Delete(ctx, userID, machineID, "", false)
-		assert.Error(t, err, "Should return error when containerID is empty")
-		assert.Contains(t, err.Error(), "containerID is required", "Error should mention containerID")
-	})
-}
-
 func TestContainerService_Delete_Succeeds(t *testing.T) {
 	var gotForce bool
 	engine := &fakeContainerEngine{

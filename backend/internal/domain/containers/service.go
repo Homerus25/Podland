@@ -43,9 +43,10 @@ func (s *ContainerService) List(ctx context.Context, userID, machineID string, o
 	return containers, err
 }
 
-// Create creates a new container on the specified machine
-func (s *ContainerService) Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*ContainerCreateResponse, error) {
-	var response *ContainerCreateResponse
+// Create creates a new container on the specified machine. The service
+// returns podman's create report; the handler maps the response DTO.
+func (s *ContainerService) Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*entities.ContainerCreateReport, error) {
+	var report *entities.ContainerCreateReport
 	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Create", func(e ContainerEngine) error {
 		// Create a basic spec generator with the image
 		spec := specgen.NewSpecGenerator(request.Image, false)
@@ -86,70 +87,58 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 		// These can be added in a future enhancement.
 
 		// Create the container using Podman API
-		createResponse, err := e.Create(spec)
+		createReport, err := e.Create(spec)
 		if err != nil {
 			return fmt.Errorf("failed to create container: %w", err)
 		}
 
-		// Convert the response to our DTO format
-		response = &ContainerCreateResponse{
-			ID:        createResponse.Id,
-			Name:      request.Name,
-			State:     "created",
-			Image:     request.Image,
-			ImageID:   "", // ImageID is not available in ContainerCreateReport
-			CreatedAt: time.Now().UTC().Format(time.RFC3339),
-		}
-
+		report = createReport
 		return nil
 	})
-	return response, err
+	return report, err
 }
 
 // Get returns detailed information about a specific container
 func (s *ContainerService) Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
 	var report *entities.ContainerInspectReport
 	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Get", func(e ContainerEngine) error {
-		// Call the official podman ContainerInspect method
-		containerReports, _, err := e.Inspect(containerID)
+		inspectReport, err := inspectContainer(e, containerID)
 		if err != nil {
-			return fmt.Errorf("failed to inspect container: %w", err)
+			return err
 		}
 
-		if len(containerReports) == 0 {
-			return fmt.Errorf("no container found with ID: %s", containerID)
-		}
-
-		report = containerReports[0]
+		report = inspectReport
 		return nil
 	})
 	return report, err
 }
 
-// validateContainerOperationParams validates common parameters for container operations
-func validateContainerOperationParams(userID, machineID, containerID string) error {
-	if userID == "" {
-		return fmt.Errorf("userID is required")
-	}
-	if machineID == "" {
-		return fmt.Errorf("machineID is required")
-	}
-	if containerID == "" {
-		return fmt.Errorf("containerID is required")
-	}
-	return nil
-}
-
-// Start starts a container by ID on the specified machine
-func (s *ContainerService) Start(ctx context.Context, userID, machineID, containerID string) (*ContainerStartResponse, error) {
-	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
-		return nil, err
-	}
-
-	var response *ContainerStartResponse
+// Start starts a container by ID on the specified machine. The service
+// inspects the container first — one inspect serves existence, state,
+// and name — and answers the documented wrong-state terminal before
+// any start call: podman's already-running refusal produces no error
+// shape through the tunnel (verified live, issue #270), so the
+// precondition is state-based, mirroring the quadlets
+// checkPrecondition. A missing container answers ErrContainerNotFound,
+// a per-item report error is classified and wrapped, never answered as
+// a running success; the handler maps the result to the response DTO.
+func (s *ContainerService) Start(ctx context.Context, userID, machineID, containerID string) (*ContainerStartResult, error) {
+	var result *ContainerStartResult
 	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Start", func(e ContainerEngine) error {
+		report, err := inspectContainer(e, containerID)
+		if err != nil {
+			return err
+		}
+
+		if containerRunning(report) {
+			return appErrors.ErrContainerAlreadyRunning
+		}
+
 		startReports, err := e.Start(containerID)
 		if err != nil {
+			if podmanerr.IsNotFound(err) {
+				return appErrors.ErrContainerNotFound
+			}
 			return fmt.Errorf("failed to start container: %w", err)
 		}
 
@@ -157,35 +146,48 @@ func (s *ContainerService) Start(ctx context.Context, userID, machineID, contain
 			return fmt.Errorf("no start report returned for container: %s", containerID)
 		}
 
-		containerReports, _, err := e.Inspect(containerID)
-		containerName := containerID
-		if err == nil && len(containerReports) > 0 {
-			if len(containerReports[0].Name) > 0 {
-				containerName = strings.TrimPrefix(containerReports[0].Name, "/")
+		if startReports[0].Err != nil {
+			if podmanerr.IsNotFound(startReports[0].Err) {
+				return appErrors.ErrContainerNotFound
 			}
+			return fmt.Errorf("failed to start container: %w", startReports[0].Err)
 		}
 
-		response = &ContainerStartResponse{
-			ID:        containerID,
-			Name:      containerName,
-			State:     "running",
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		result = &ContainerStartResult{
+			ID:   containerID,
+			Name: containerName(report, containerID),
 		}
 		return nil
 	})
-	return response, err
+	return result, err
 }
 
-// Stop stops a container by ID on the specified machine
-func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containerID string) (*ContainerStopResponse, error) {
-	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
-		return nil, err
-	}
-
-	var response *ContainerStopResponse
+// Stop stops a container by ID on the specified machine. The service
+// inspects the container first — one inspect serves existence, state,
+// and name — and answers the documented wrong-state terminal before
+// any stop call: podman's not-running refusal produces no error shape
+// through the tunnel (verified live, issue #270), so the precondition
+// is state-based, mirroring the quadlets checkPrecondition. A missing
+// container answers ErrContainerNotFound, a per-item report error is
+// classified and wrapped, never answered as a stopped success; the
+// handler maps the result to the response DTO.
+func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containerID string) (*ContainerStopResult, error) {
+	var result *ContainerStopResult
 	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Stop", func(e ContainerEngine) error {
+		report, err := inspectContainer(e, containerID)
+		if err != nil {
+			return err
+		}
+
+		if !containerRunning(report) {
+			return appErrors.ErrContainerNotRunning
+		}
+
 		stopReports, err := e.Stop(containerID)
 		if err != nil {
+			if podmanerr.IsNotFound(err) {
+				return appErrors.ErrContainerNotFound
+			}
 			return fmt.Errorf("failed to stop container: %w", err)
 		}
 
@@ -193,32 +195,76 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 			return fmt.Errorf("no stop report returned for container: %s", containerID)
 		}
 
-		containerReports, _, err := e.Inspect(containerID)
-		containerName := containerID
-		if err == nil && len(containerReports) > 0 {
-			if len(containerReports[0].Name) > 0 {
-				containerName = strings.TrimPrefix(containerReports[0].Name, "/")
+		if stopReports[0].Err != nil {
+			if podmanerr.IsNotFound(stopReports[0].Err) {
+				return appErrors.ErrContainerNotFound
 			}
+			return fmt.Errorf("failed to stop container: %w", stopReports[0].Err)
 		}
 
-		response = &ContainerStopResponse{
-			ID:        containerID,
-			Name:      containerName,
-			State:     "stopped",
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		result = &ContainerStopResult{
+			ID:   containerID,
+			Name: containerName(report, containerID),
 		}
 		return nil
 	})
-	return response, err
+	return result, err
+}
+
+// inspectContainer resolves one container's inspect report, classifying
+// podman's not-found shapes — a top-level 404 ErrorModel or the
+// tunnel's per-item "no such container" error — into
+// ErrContainerNotFound. It is the pre-action read for Start and Stop:
+// one inspect serves existence, state, and name.
+func inspectContainer(e ContainerEngine, containerID string) (*entities.ContainerInspectReport, error) {
+	reports, inspectErrs, err := e.Inspect(containerID)
+	if err != nil {
+		if podmanerr.IsNotFound(err) {
+			return nil, appErrors.ErrContainerNotFound
+		}
+		return nil, fmt.Errorf("failed to inspect container: %w", err)
+	}
+
+	// The tunnel's not-found answer for inspect arrives as a
+	// per-item error with zero reports.
+	for _, inspectErr := range inspectErrs {
+		if podmanerr.IsNotFound(inspectErr) {
+			return nil, appErrors.ErrContainerNotFound
+		}
+	}
+
+	if len(reports) == 0 {
+		// Zero reports with per-item errors means the inspect failed
+		// for a real cause the not-found loop above did not classify;
+		// surface it instead of dropping it behind the anomaly message.
+		if len(inspectErrs) > 0 {
+			return nil, fmt.Errorf("failed to inspect container: %w", inspectErrs[0])
+		}
+		return nil, fmt.Errorf("no inspect report returned for container: %s", containerID)
+	}
+
+	return reports[0], nil
+}
+
+// containerRunning reports the container's running state, nil-safe
+// through the embedded inspect data. A paused container counts as
+// running: podman's State.Running is true for it.
+func containerRunning(report *entities.ContainerInspectReport) bool {
+	return report != nil && report.InspectContainerData != nil && report.State != nil && report.State.Running
+}
+
+// containerName resolves the container's name from the inspect report,
+// trimming podman's leading slash and falling back to the container ID.
+func containerName(report *entities.ContainerInspectReport, containerID string) string {
+	if report != nil && report.InspectContainerData != nil && len(report.Name) > 0 {
+		return strings.TrimPrefix(report.Name, "/")
+	}
+	return containerID
 }
 
 // Delete removes a container by ID on the specified machine.
 // The force option allows removing running containers.
 func (s *ContainerService) Delete(ctx context.Context, userID, machineID, containerID string, force bool) error {
-	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
-		return err
-	}
-
 	return s.engines.WithEngine(ctx, userID, machineID, "containers.Delete", func(e ContainerEngine) error {
 		rmReports, err := e.Remove(containerID, force)
 		if err != nil {
@@ -248,10 +294,6 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 // not-found and cancellation mapping) belongs to the kit's FetchLogs;
 // the service keeps validation, engine acquisition, and dispatch.
 func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64) (*ContainerLogsResponse, error) {
-	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
-		return nil, err
-	}
-
 	var response *ContainerLogsResponse
 	err := s.engines.WithEngine(ctx, userID, machineID, "containers.GetLogs", func(e ContainerEngine) error {
 		logs, err := streaming.FetchLogs(ctx, streaming.FetchLogsOp{
@@ -279,10 +321,6 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 // not-found and cancellation mapping) belongs to the kit's FollowLogs;
 // the service keeps validation, engine acquisition, and target dispatch.
 func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64, logCallback func(event streaming.LogEvent)) error {
-	if err := validateContainerOperationParams(userID, machineID, containerID); err != nil {
-		return err
-	}
-
 	return s.engines.WithEngine(ctx, userID, machineID, "containers.GetLogsWithStream", func(e ContainerEngine) error {
 		return streaming.FollowLogs(ctx, streaming.FollowLogsOp{
 			Target:   containerID,

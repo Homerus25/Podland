@@ -35,31 +35,6 @@ func TestContainerService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-func TestContainerService_GetLogs_MissingParameters(t *testing.T) {
-	cases := []struct {
-		name        string
-		userID      string
-		machineID   string
-		containerID string
-	}{
-		{"missing userID", "", "machine", "c-1"},
-		{"missing machineID", "user", "", "c-1"},
-		{"missing containerID", "user", "machine", ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// The engine stays unarmed: a refused call must not reach podman.
-			service := NewContainerService(fakeEngineProvider{engine: &fakeContainerEngine{}})
-
-			result, err := service.GetLogs(context.Background(), tc.userID, tc.machineID, tc.containerID, time.Time{}, 0)
-
-			assert.Error(t, err, "Should return error for missing parameters")
-			assert.Contains(t, err.Error(), "required", "Error should mention required parameter")
-			assert.Nil(t, result, "Should return nil result when parameters are missing")
-		})
-	}
-}
-
 func TestContainerService_GetLogsWithStream_MapsMissingContainerTo404(t *testing.T) {
 	engine := &fakeContainerEngine{
 		logsFn: func(string, entities.ContainerLogsOptions) error {

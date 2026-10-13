@@ -72,7 +72,13 @@ func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return nil, appErr
 		}
 
-		return h.service.Create(ctx, userID, machineID, request)
+		report, err := h.service.Create(ctx, userID, machineID, request)
+		if err != nil {
+			return nil, err
+		}
+
+		response := FromContainerCreateReport(report, request)
+		return &response, nil
 	})
 }
 
@@ -92,7 +98,9 @@ func (h *ContainerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Start handles starting a container
+// Start handles starting a container. The service returns the
+// container's identity; the response DTO's state and timestamp are
+// stamped here, at mapping time.
 func (h *ContainerHandler) Start(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerStartResponse, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
@@ -100,11 +108,18 @@ func (h *ContainerHandler) Start(w http.ResponseWriter, r *http.Request) {
 			return nil, guard
 		}
 
-		return h.service.Start(ctx, userID, machineID, containerID)
+		result, err := h.service.Start(ctx, userID, machineID, containerID)
+		if err != nil {
+			return nil, err
+		}
+		response := FromContainerStartResult(*result)
+		return &response, nil
 	})
 }
 
-// Stop handles stopping a container
+// Stop handles stopping a container. The service returns the
+// container's identity; the response DTO's state and timestamp are
+// stamped here, at mapping time.
 func (h *ContainerHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerStopResponse, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
@@ -112,7 +127,12 @@ func (h *ContainerHandler) Stop(w http.ResponseWriter, r *http.Request) {
 			return nil, guard
 		}
 
-		return h.service.Stop(ctx, userID, machineID, containerID)
+		result, err := h.service.Stop(ctx, userID, machineID, containerID)
+		if err != nil {
+			return nil, err
+		}
+		response := FromContainerStopResult(*result)
+		return &response, nil
 	})
 }
 
