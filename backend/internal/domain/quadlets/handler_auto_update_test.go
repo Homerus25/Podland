@@ -158,6 +158,45 @@ func TestQuadletHandler_AutoUpdate_DryRunForwarded(t *testing.T) {
 	assert.Equal(t, AutoUpdateDryRun, events[0].Report.Overall)
 }
 
+// TestQuadletHandler_AutoUpdate_FilterForwarded pins the filter query
+// decoding under the write gate: the unit name must reach the machine as
+// podman auto-update's positional argument, composing with --dry-run, and
+// an absent or empty filter must behave exactly as without one.
+func TestQuadletHandler_AutoUpdate_FilterForwarded(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    string
+		wantArgs []string
+	}{
+		{name: "filter forwarded as positional arg", query: "?filter=web.service", wantArgs: []string{"auto-update", "--format", "json", "web.service"}},
+		{name: "filter composes with dry-run", query: "?filter=web.service&dryRun=true", wantArgs: []string{"auto-update", "--format", "json", "--dry-run", "web.service"}},
+		{name: "absent filter behaves as today", query: "", wantArgs: []string{"auto-update", "--format", "json"}},
+		{name: "empty filter behaves as today", query: "?filter=", wantArgs: []string{"auto-update", "--format", "json"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			machineRepo := testutils.NewMockMachineRepository()
+			machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
+			accessRepo := testutils.NewMockMachineAccessRepository()
+			accessRepo.AddAccess("machine-1", "grantee-1", models.PermissionWrite, time.Now())
+			var gotOpts sshexec.ExecOptions
+			sshExec := testutils.NewMockSSHExecWithStreamFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions, _ func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
+				gotOpts = opts
+				return sshexec.ExecResult{ExitCode: 0, Stdout: "[]"}, nil
+			})
+			engine := &fakeQuadletEngine{}
+			service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
+			router := autoUpdateAccessRouter(machineRepo, accessRepo, service)
+
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, requestAsUserForAutoUpdate(http.MethodPost, "/api/machines/machine-1/quadlets/auto-update"+tt.query, "grantee-1"))
+
+			assert.Equal(t, http.StatusOK, w.Result().StatusCode, "write-level grantee must pass the gate")
+			assert.Equal(t, tt.wantArgs, gotOpts.Args, "query %q must assemble the podman args", tt.query)
+		})
+	}
+}
+
 // --- Route wiring: the quadlet subtree gates auto-update at write level ---
 //
 // These tests mount the auto-update route on a chi subtree exactly the way

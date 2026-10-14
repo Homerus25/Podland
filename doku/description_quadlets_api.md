@@ -842,6 +842,12 @@ skipped by podman.
   `--dry-run` so podman checks for updates and reports what it *would* do
   without pulling or restarting anything. The report's `overall` is
   `dry-run` in that case.
+- `filter` (string, optional, default empty): the systemd unit name to
+  update, forwarded as `podman auto-update`'s positional argument; it
+  composes with `dryRun`. Absent or empty updates every quadlet-managed
+  container with an update policy, exactly as without the parameter. The
+  value is not validated — an unknown unit surfaces podman's own error
+  through the stream.
 
 **Response (Success - 200):** a live NDJSON stream (`Content-Type: application/json`),
 one JSON event per line. Because registry pulls routinely exceed the global

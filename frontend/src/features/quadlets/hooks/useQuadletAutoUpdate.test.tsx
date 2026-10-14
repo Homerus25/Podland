@@ -96,6 +96,7 @@ describe("useQuadletAutoUpdate", () => {
 			"/api/machines/m-1/quadlets/auto-update",
 		);
 		expect(new URL(requests[0].url).searchParams.get("dryRun")).toBe("true");
+		expect(new URL(requests[0].url).searchParams.has("filter")).toBe(false);
 		await waitFor(() => expect(result.current.isRunning).toBe(false));
 		expect(result.current.connectionError).toBeNull();
 	});
@@ -109,7 +110,46 @@ describe("useQuadletAutoUpdate", () => {
 		});
 
 		expect(new URL(requests[0].url).searchParams.has("dryRun")).toBe(false);
+		expect(new URL(requests[0].url).searchParams.has("filter")).toBe(false);
 		await waitFor(() => expect(result.current.isRunning).toBe(false));
+	});
+
+	it("POSTs with the filter argument for a filtered run and exposes the filter state", async () => {
+		mockAutoUpdate(() => streamResponse([report()]));
+		const { result } = renderAutoUpdateHook();
+
+		await act(async () => {
+			result.current.run(false, "web.service");
+		});
+
+		expect(requests).toHaveLength(1);
+		expect(new URL(requests[0].url).searchParams.get("filter")).toBe(
+			"web.service",
+		);
+		expect(new URL(requests[0].url).searchParams.has("dryRun")).toBe(false);
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.filter).toBe("web.service");
+	});
+
+	it("clears the filter state when a later run is unfiltered", async () => {
+		mockAutoUpdate(() => streamResponse([report()]));
+		const { result } = renderAutoUpdateHook();
+
+		await act(async () => {
+			result.current.run(false, "web.service");
+		});
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.filter).toBe("web.service");
+
+		await act(async () => {
+			result.current.run(true);
+		});
+
+		expect(requests).toHaveLength(2);
+		expect(new URL(requests[1].url).searchParams.has("filter")).toBe(false);
+		expect(new URL(requests[1].url).searchParams.get("dryRun")).toBe("true");
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.filter).toBeNull();
 	});
 
 	it("collects log lines as they arrive and exposes the terminal report", async () => {
@@ -201,5 +241,92 @@ describe("useQuadletAutoUpdate", () => {
 			message: "Machine unreachable",
 		});
 		expect(result.current.report).toBeNull();
+	});
+
+	it("switches from a completed dry run to a real run with fresh state and invalidation", async () => {
+		let releaseRealRun: (() => void) | undefined;
+		requests = [];
+		server.use(
+			http.post(autoUpdateUrl, async ({ request }) => {
+				requests.push(request);
+				if (requests.length === 1) {
+					return streamResponse([
+						report({
+							containers: [
+								{
+									containerName: "web",
+									imageName: "nginx:1.27",
+									updated: "pending",
+								},
+							],
+							overall: "dry-run",
+						}),
+					]);
+				}
+				// The real run's response is held back until released, so the
+				// post-switch state (reset lines/report, flipped dryRun) is
+				// observable mid-run, exactly as the check window's Update
+				// button finds it.
+				await new Promise<void>((resolve) => {
+					releaseRealRun = resolve;
+				});
+				return streamResponse([
+					logEvent("Updating web"),
+					report({
+						containers: [
+							{
+								containerName: "web",
+								imageName: "nginx:1.28",
+								updated: "updated",
+							},
+						],
+						overall: "completed",
+					}),
+				]);
+			}),
+		);
+		const { result, queryClient } = renderAutoUpdateHook();
+		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+		await act(async () => {
+			result.current.run(true);
+		});
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.dryRun).toBe(true);
+		expect(result.current.report?.containers).toEqual([
+			{ containerName: "web", imageName: "nginx:1.27", updated: "pending" },
+		]);
+		expect(invalidateSpy).not.toHaveBeenCalled();
+
+		await act(async () => {
+			result.current.run(false);
+		});
+
+		expect(requests).toHaveLength(2);
+		expect(new URL(requests[1].url).searchParams.has("dryRun")).toBe(false);
+		expect(result.current.dryRun).toBe(false);
+		expect(result.current.lines).toEqual([]);
+		expect(result.current.report).toBeNull();
+		expect(result.current.isRunning).toBe(true);
+
+		await act(async () => {
+			releaseRealRun?.();
+		});
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.lines).toEqual([
+			expect.objectContaining({ line: "Updating web" }),
+		]);
+		expect(result.current.report?.containers).toEqual([
+			{ containerName: "web", imageName: "nginx:1.28", updated: "updated" },
+		]);
+		expect(invalidateSpy).toHaveBeenCalledWith({
+			queryKey: quadletsQueryKey("m-1"),
+		});
+		expect(invalidateSpy).toHaveBeenCalledWith({
+			queryKey: containersQueryKey("m-1"),
+		});
+		expect(invalidateSpy).toHaveBeenCalledWith({
+			queryKey: imagesQueryKey("m-1"),
+		});
 	});
 });

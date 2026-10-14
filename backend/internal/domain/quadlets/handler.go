@@ -296,10 +296,11 @@ func (h *QuadletHandler) Import(w http.ResponseWriter, r *http.Request) {
 // make runs routinely exceed the global 30-second write timeout.
 func (h *QuadletHandler) AutoUpdate(w http.ResponseWriter, r *http.Request) {
 	dryRun := web.QueryBool(r, "dryRun", false)
+	filter := r.URL.Query().Get("filter")
 
-	streaming.HandleProgress(w, r, "AutoUpdate quadlets", []slog.Attr{slog.Bool("dryRun", dryRun)}, streaming.ProgressConfig[AutoUpdateEvent, AutoUpdateReport]{
+	streaming.HandleProgress(w, r, "AutoUpdate quadlets", []slog.Attr{slog.Bool("dryRun", dryRun), slog.String("filter", filter)}, streaming.ProgressConfig[AutoUpdateEvent, AutoUpdateReport]{
 		Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(AutoUpdateEvent)) (AutoUpdateReport, error) {
-			return h.service.AutoUpdate(ctx, op.UserID, op.MachineID, dryRun, func(line sshexec.OutputLine) {
+			return h.service.AutoUpdate(ctx, op.UserID, op.MachineID, dryRun, filter, func(line sshexec.OutputLine) {
 				onProgress(NewAutoUpdateLogEvent(op.OperationID, op.MachineID, line))
 			})
 		},

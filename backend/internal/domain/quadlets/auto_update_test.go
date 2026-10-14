@@ -22,10 +22,14 @@ func TestQuadletService_AutoUpdate_CommandAssembly(t *testing.T) {
 	tests := []struct {
 		name     string
 		dryRun   bool
+		filter   string
 		wantArgs []string
 	}{
 		{name: "without dry-run", dryRun: false, wantArgs: []string{"auto-update", "--format", "json"}},
 		{name: "with dry-run", dryRun: true, wantArgs: []string{"auto-update", "--format", "json", "--dry-run"}},
+		{name: "with filter", filter: "web.service", wantArgs: []string{"auto-update", "--format", "json", "web.service"}},
+		{name: "with dry-run and filter", dryRun: true, filter: "web.service", wantArgs: []string{"auto-update", "--format", "json", "--dry-run", "web.service"}},
+		{name: "empty filter adds no positional arg", filter: "", wantArgs: []string{"auto-update", "--format", "json"}},
 	}
 
 	for _, tt := range tests {
@@ -33,7 +37,7 @@ func TestQuadletService_AutoUpdate_CommandAssembly(t *testing.T) {
 			mockSSH := testutils.NewMockSSHExecWithStreamResult(sshexec.ExecResult{Stdout: "[]", ExitCode: 0})
 			svc := newAutoUpdateService(mockSSH)
 
-			_, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", tt.dryRun, func(sshexec.OutputLine) {})
+			_, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", tt.dryRun, tt.filter, func(sshexec.OutputLine) {})
 
 			require.NoError(t, err)
 			require.Len(t, mockSSH.StreamCalls(), 1)
@@ -56,7 +60,7 @@ func TestQuadletService_AutoUpdate_LinesForwardedInArrivalOrder(t *testing.T) {
 	svc := newAutoUpdateService(mockSSH)
 
 	var got []sshexec.OutputLine
-	_, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, func(line sshexec.OutputLine) {
+	_, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(line sshexec.OutputLine) {
 		got = append(got, line)
 	})
 
@@ -74,7 +78,7 @@ func TestQuadletService_AutoUpdate_ParsesReportExitZero(t *testing.T) {
 	mockSSH := testutils.NewMockSSHExecWithStreamResult(sshexec.ExecResult{Stdout: stdout, ExitCode: 0})
 	svc := newAutoUpdateService(mockSSH)
 
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, func(sshexec.OutputLine) {})
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(sshexec.OutputLine) {})
 
 	require.NoError(t, err)
 	assert.Equal(t, AutoUpdateCompleted, report.Overall)
@@ -94,7 +98,7 @@ func TestQuadletService_AutoUpdate_NonZeroExitWithFailuresIsData(t *testing.T) {
 	mockSSH := testutils.NewMockSSHExecWithStreamResult(sshexec.ExecResult{Stdout: stdout, ExitCode: 3})
 	svc := newAutoUpdateService(mockSSH)
 
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, func(sshexec.OutputLine) {})
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(sshexec.OutputLine) {})
 
 	require.NoError(t, err)
 	assert.Equal(t, AutoUpdateWithFailures, report.Overall)
@@ -110,7 +114,7 @@ func TestQuadletService_AutoUpdate_DryRunReportsPendingAndDryRunOverall(t *testi
 	mockSSH := testutils.NewMockSSHExecWithStreamResult(sshexec.ExecResult{Stdout: stdout, ExitCode: 0})
 	svc := newAutoUpdateService(mockSSH)
 
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", true, func(sshexec.OutputLine) {})
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", true, "", func(sshexec.OutputLine) {})
 
 	require.NoError(t, err)
 	assert.Equal(t, AutoUpdateDryRun, report.Overall)
@@ -122,7 +126,7 @@ func TestQuadletService_AutoUpdate_UnparsableOutputCompletesWithoutError(t *test
 	mockSSH := testutils.NewMockSSHExecWithStreamResult(sshexec.ExecResult{Stdout: "not json at all", ExitCode: 0})
 	svc := newAutoUpdateService(mockSSH)
 
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, func(sshexec.OutputLine) {})
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(sshexec.OutputLine) {})
 
 	require.NoError(t, err)
 	assert.Equal(t, AutoUpdateUnparsable, report.Overall)
@@ -133,7 +137,7 @@ func TestQuadletService_AutoUpdate_SSHErrorPropagates(t *testing.T) {
 	mockSSH := testutils.NewMockSSHExecWithStreamError(errors.New("dial failed"))
 	svc := newAutoUpdateService(mockSSH)
 
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, func(sshexec.OutputLine) {})
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(sshexec.OutputLine) {})
 
 	require.Error(t, err)
 	assert.Equal(t, AutoUpdateReport{}, report)

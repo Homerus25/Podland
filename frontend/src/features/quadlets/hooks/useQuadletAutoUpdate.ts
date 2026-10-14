@@ -50,12 +50,15 @@ function isAutoUpdateEvent(value: unknown): value is AutoUpdateEvent {
 export interface UseQuadletAutoUpdateResult {
 	isRunning: boolean;
 	dryRun: boolean;
+	// The systemd unit the current or last run was filtered to; null for an
+	// unfiltered run.
+	filter: string | null;
 	lines: AutoUpdateLine[];
 	report: AutoUpdateReport | null;
 	// A terminal error event (machine unreachable, SSH failure) or an HTTP
 	// failure — distinct from per-container failures inside the report.
 	connectionError: ApiError | null;
-	run: (dryRun: boolean) => void;
+	run: (dryRun: boolean, filter?: string) => void;
 	cancel: () => void;
 }
 
@@ -68,6 +71,7 @@ export function useQuadletAutoUpdate(
 ): UseQuadletAutoUpdateResult {
 	const queryClient = useQueryClient();
 	const [dryRun, setDryRun] = useState(false);
+	const [filter, setFilter] = useState<string | null>(null);
 	const [lines, setLines] = useState<AutoUpdateLine[]>([]);
 	const [report, setReport] = useState<AutoUpdateReport | null>(null);
 	const {
@@ -78,12 +82,16 @@ export function useQuadletAutoUpdate(
 	} = useNdjsonOperation();
 
 	const run = useCallback(
-		(runDryRun: boolean) => {
+		(runDryRun: boolean, runFilter?: string) => {
 			setDryRun(runDryRun);
+			setFilter(runFilter ?? null);
 			setLines([]);
 			setReport(null);
 			start({
-				url: autoUpdateStreamUrl(machineId, { dryRun: runDryRun }),
+				url: autoUpdateStreamUrl(machineId, {
+					dryRun: runDryRun,
+					filter: runFilter,
+				}),
 				init: { method: "POST" },
 				onEvent: (value) => {
 					if (!isAutoUpdateEvent(value)) {
@@ -118,5 +126,14 @@ export function useQuadletAutoUpdate(
 		[machineId, queryClient, start],
 	);
 
-	return { isRunning, dryRun, lines, report, connectionError, run, cancel };
+	return {
+		isRunning,
+		dryRun,
+		filter,
+		lines,
+		report,
+		connectionError,
+		run,
+		cancel,
+	};
 }

@@ -93,6 +93,11 @@ export function QuadletList({ machine }: { machine: Machine }) {
 	const canManage = can(machine, "manage-quadlets");
 	const [isConfirmUpdateOpen, setIsConfirmUpdateOpen] = useState(false);
 	const [isAutoUpdateOpen, setIsAutoUpdateOpen] = useState(false);
+	// How the auto-update modal was opened: the check button starts a dry run,
+	// the update-all confirm starts a real run. The hook's state after an
+	// in-modal run switch is identical to a toolbar-opened real run, so the
+	// modal cannot derive this — the list tracks it and hands it down.
+	const [openedAsCheck, setOpenedAsCheck] = useState(false);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<QuadletSummary | null>(null);
@@ -146,6 +151,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 							size="sm"
 							colorScheme="purple"
 							onClick={() => {
+								setOpenedAsCheck(true);
 								autoUpdate.run(true);
 								setIsAutoUpdateOpen(true);
 							}}
@@ -196,6 +202,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 					confirmColorScheme="orange"
 					onConfirm={() => {
 						setIsConfirmUpdateOpen(false);
+						setOpenedAsCheck(false);
 						autoUpdate.run(false);
 						setIsAutoUpdateOpen(true);
 					}}
@@ -211,6 +218,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 			{isAutoUpdateOpen ? (
 				<AutoUpdateModal
 					dryRun={autoUpdate.dryRun}
+					openedAsCheck={openedAsCheck}
 					autoUpdate={autoUpdate}
 					onClose={() => {
 						if (autoUpdate.isRunning) autoUpdate.cancel();

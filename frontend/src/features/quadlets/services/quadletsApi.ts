@@ -203,14 +203,20 @@ export function quadletLogs(machineId: string, quadletId: string): LogSource {
 	);
 }
 
-// Full stream URL for POST .../quadlets/auto-update; the ?dryRun=true query
-// is the builder's, not the caller's (no query on a real run).
+// Full stream URL for POST .../quadlets/auto-update; the query is the
+// builder's, not the caller's: ?dryRun=true on a dry run, ?filter=<unit> on
+// a filtered run, both when they compose, and no query when neither applies.
 export function autoUpdateStreamUrl(
 	machineId: string,
-	options: { dryRun: boolean },
+	options: { dryRun: boolean; filter?: string },
 ): string {
-	const query = options.dryRun ? "?dryRun=true" : "";
-	return `${machineApiUrl(machineId, "quadlets", "auto-update")}${query}`;
+	const query = new URLSearchParams();
+	if (options.dryRun) query.set("dryRun", "true");
+	if (options.filter) query.set("filter", options.filter);
+	const queryString = query.toString();
+	return `${machineApiUrl(machineId, "quadlets", "auto-update")}${
+		queryString ? `?${queryString}` : ""
+	}`;
 }
 
 // Kind label of one previewed volume source

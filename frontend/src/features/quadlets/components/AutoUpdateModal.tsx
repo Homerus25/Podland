@@ -21,8 +21,22 @@ import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
 
 // How one report line renders, keyed by the backend's AutoUpdateItem
-// outcome vocabulary ("updated", "failed", "pending", "up-to-date").
-function ReportItem({ item }: { item: AutoUpdateItem }) {
+// outcome vocabulary ("updated", "failed", "pending", "up-to-date"). A
+// pending line in a check window carries an inline Update button that runs
+// a real auto-update filtered to the line's unit. The button renders only
+// when the modal was opened as a check and the line names a unit: a
+// pending line without a unit renders no inline button, because there is
+// no unit to filter to. The button needs no disabled state of its own:
+// while any run is in progress the modal replaces the report (per-service
+// buttons included) with the live output, and the footer Update button
+// stays rendered and disabled.
+function ReportItem({
+	item,
+	onUpdateUnit,
+}: {
+	item: AutoUpdateItem;
+	onUpdateUnit: ((unit: string) => void) | null;
+}) {
 	const testId = `auto-update-item-${item.updated}-${item.containerName}`;
 	if (item.updated === "failed") {
 		return (
@@ -34,11 +48,23 @@ function ReportItem({ item }: { item: AutoUpdateItem }) {
 		);
 	}
 	if (item.updated === "pending") {
+		const unit = item.unit;
 		return (
 			<ListItem data-testid={testId} color="orange.300">
 				<ListIcon as={TimeIcon} color="orange.400" />
 				<strong>{item.containerName}</strong> has a pending update for{" "}
 				{item.imageName}
+				{onUpdateUnit && unit ? (
+					<Button
+						size="xs"
+						ml={2}
+						colorScheme="orange"
+						onClick={() => onUpdateUnit(unit)}
+						data-testid={`auto-update-item-update-${item.containerName}`}
+					>
+						Update
+					</Button>
+				) : null}
 			</ListItem>
 		);
 	}
@@ -58,7 +84,13 @@ function ReportItem({ item }: { item: AutoUpdateItem }) {
 	);
 }
 
-function Report({ report }: { report: AutoUpdateReport }) {
+function Report({
+	report,
+	onUpdateUnit,
+}: {
+	report: AutoUpdateReport;
+	onUpdateUnit: ((unit: string) => void) | null;
+}) {
 	const failed = report.containers.filter((item) => item.updated === "failed");
 	if (report.containers.length === 0) {
 		return <Text>No auto-update containers found on this machine.</Text>;
@@ -75,6 +107,7 @@ function Report({ report }: { report: AutoUpdateReport }) {
 					<ReportItem
 						key={`${item.containerName}-${item.updated}`}
 						item={item}
+						onUpdateUnit={onUpdateUnit}
 					/>
 				))}
 			</List>
@@ -84,30 +117,74 @@ function Report({ report }: { report: AutoUpdateReport }) {
 
 // Live view of one auto-update run. Dry runs say so outright; a terminal
 // error event is a connection problem (the run never produced a report)
-// and is shown apart from per-container failures.
+// and is shown apart from per-container failures. A modal opened as a check
+// (a dry run) offers a footer Update button that turns the same window into
+// a real run, and an inline Update button on every pending report line that
+// names a unit, running a real auto-update filtered to that line's unit; a
+// modal opened as a real run from the toolbar never renders either. A
+// filtered run names its unit in the title, while it runs and after it
+// completes.
 export function AutoUpdateModal({
 	onClose,
 	dryRun,
+	openedAsCheck,
 	autoUpdate,
 }: {
 	onClose: () => void;
 	dryRun: boolean;
+	openedAsCheck: boolean;
 	autoUpdate: UseQuadletAutoUpdateResult;
 }) {
-	const title = dryRun ? "Check for updates" : "Update all";
+	const title = autoUpdate.filter
+		? `Update ${autoUpdate.filter}`
+		: dryRun
+			? "Check for updates"
+			: "Update all";
+	const pendingCount = autoUpdate.report
+		? autoUpdate.report.containers.filter((item) => item.updated === "pending")
+				.length
+		: 0;
+	// Enabled iff a completed report has at least one pending container; a
+	// running check, a connection error, a missing or unparsable report, and
+	// zero pending containers all keep it disabled (it stays rendered, so
+	// there is no layout jump between runs).
+	const updateDisabled =
+		autoUpdate.isRunning ||
+		autoUpdate.connectionError !== null ||
+		!autoUpdate.report ||
+		autoUpdate.report.overall === "unparsable-report" ||
+		pendingCount === 0;
+	// Per-service updates exist only in a check window: each is a real run
+	// filtered to the line's unit. Null when the modal was opened as a real
+	// run from the toolbar, so no report line renders an inline button.
+	const onUpdateUnit = openedAsCheck
+		? (unit: string) => autoUpdate.run(false, unit)
+		: null;
 	return (
 		<Modal
 			isOpen
 			onClose={onClose}
 			title={title}
 			footer={
-				<Button
-					variant="ghost"
-					onClick={onClose}
-					data-testid="auto-update-close-button"
-				>
-					{autoUpdate.isRunning ? "Cancel" : "Close"}
-				</Button>
+				<>
+					{openedAsCheck ? (
+						<Button
+							colorScheme="orange"
+							isDisabled={updateDisabled}
+							onClick={() => autoUpdate.run(false)}
+							data-testid="auto-update-button"
+						>
+							Update ({pendingCount})
+						</Button>
+					) : null}
+					<Button
+						variant="ghost"
+						onClick={onClose}
+						data-testid="auto-update-close-button"
+					>
+						{autoUpdate.isRunning ? "Cancel" : "Close"}
+					</Button>
+				</>
 			}
 		>
 			<HStack>
@@ -154,7 +231,7 @@ export function AutoUpdateModal({
 				</Box>
 			) : null}
 			{!autoUpdate.isRunning && autoUpdate.report ? (
-				<Report report={autoUpdate.report} />
+				<Report report={autoUpdate.report} onUpdateUnit={onUpdateUnit} />
 			) : null}
 			{!autoUpdate.isRunning &&
 			!autoUpdate.report &&

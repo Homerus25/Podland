@@ -106,10 +106,16 @@ type rawAutoUpdateItem struct {
 // the streaming SSH seam, forwarding each output line as it arrives. A
 // non-zero exit code is data (failed per-container entries), not an error;
 // only an SSH-level failure (dial/session/cancellation) returns an error.
-func (s *QuadletService) AutoUpdate(ctx context.Context, userID, machineID string, dryRun bool, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
+// A non-empty filter is forwarded as podman's positional unit-name argument;
+// the value rides the exec args unvalidated, so a bogus unit surfaces
+// podman's own error through the stream.
+func (s *QuadletService) AutoUpdate(ctx context.Context, userID, machineID string, dryRun bool, filter string, onLine func(sshexec.OutputLine)) (AutoUpdateReport, error) {
 	args := []string{"auto-update", "--format", "json"}
 	if dryRun {
 		args = append(args, "--dry-run")
+	}
+	if filter != "" {
+		args = append(args, filter)
 	}
 
 	result, err := s.sshExec.ExecStream(ctx, machineID, userID, "podman", sshexec.ExecOptions{Args: args}, onLine)
