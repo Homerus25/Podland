@@ -90,13 +90,19 @@ backend/
 | `JWT_PUBLIC_KEY_PATH` | `./jwt-public.pem` | No | Path to JWT public key (PEM format) |
 | `JWT_EXPIRATION_MINUTES` | `60` | No | JWT token expiration in minutes |
 | `JWT_ISSUER` | `podland` | No | JWT issuer claim |
+| `SESSION_TTL_DAYS` | `30` | No | Days a login's refresh session stays redeemable |
 | `SSH_IDLE_TIMEOUT_SECONDS` | `900` | No | SSH connection idle timeout (15 minutes) |
 | `MAX_CONCURRENT_MACHINES` | `100` | No | Maximum concurrent machine connections |
 | `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | No | Timeout for machine connection test during registration |
 | `RATE_LIMIT_REQUESTS_PER_USER_PER_MINUTE` | `60` | No | Rate limit: requests per minute per user |
+| `RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE` | `10` | No | Rate limit: login/refresh requests per minute per client IP |
+| `RATE_LIMIT_AUTH_FAILURE_BUDGET` | `5` | No | Failed password attempts allowed per window before throttling (HTTP 429) |
+| `RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES` | `15` | No | Credential-failure window in minutes |
 | `ALLOWED_ORIGINS` | (empty) | No | CORS allowed origins (comma-separated) |
 | `LOG_LEVEL` | `info` | No | Logging level: debug, info, warn, error |
 | `LOG_FORMAT` | `json` | No | Logging format: json, text |
+| `ENCRYPTION_KEY` | (empty) | Yes | Base64-encoded 32-byte key (AES-256-GCM) encrypting stored SSH private keys |
+| `VOLUME_UPLOAD_MAX_BYTES` | `2147483648` (2 GiB) | No | Maximum size of a volume populate upload |
 
 ---
 
