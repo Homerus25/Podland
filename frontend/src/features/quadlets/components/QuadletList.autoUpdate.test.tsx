@@ -549,6 +549,64 @@ describe("QuadletList auto-update", () => {
 		);
 	});
 
+	it("keeps the window alive when the real run's report carries no container list", async () => {
+		// The backend serializes an empty or unparsable report's container
+		// list as null (a Go nil slice; AutoUpdateReport.Containers has no
+		// omitempty) — e.g. podman printed no JSON array on the real run.
+		// Clicking Update must not crash the window on that payload: the
+		// tree stays mounted (a render crash unmounts it — the black tab),
+		// the empty report renders, and the footer Update button stays
+		// rendered but disabled on an unparsable report.
+		autoUpdateRequests = [];
+		let runCount = 0;
+		server.use(
+			http.post("*/api/machines/m-1/quadlets/auto-update", ({ request }) => {
+				autoUpdateRequests.push(request);
+				runCount += 1;
+				const events: AutoUpdateEvent[] =
+					runCount === 1
+						? [completeEvent([item({ updated: "pending" })], "dry-run")]
+						: [
+								{
+									operationId: "op-1",
+									type: "complete",
+									machineId: "m-1",
+									report: {
+										containers: null,
+										overall: "unparsable-report",
+										exitCode: 0,
+									},
+								},
+							];
+				return new HttpResponse(frameEvents(events), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				});
+			}),
+		);
+		renderWithQuery(<QuadletList machine={machineFixture()} />, {
+			router: true,
+		});
+		const user = userEvent.setup();
+
+		await user.click(await screen.findByTestId("check-updates-button"));
+		expect(
+			await screen.findByTestId("auto-update-item-pending-web"),
+		).toBeInTheDocument();
+		await user.click(screen.getByTestId("auto-update-button"));
+
+		await waitFor(() => expect(runCount).toBe(2));
+		expect(
+			await screen.findByText(
+				"No auto-update containers found on this machine.",
+			),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("modal")).toBeInTheDocument();
+		const updateButton = screen.getByTestId("auto-update-button");
+		expect(updateButton).toBeDisabled();
+		expect(updateButton).toHaveTextContent("Update (0)");
+	});
+
 	it("keeps the update actions disabled while any run is in progress", async () => {
 		const releaseRealRun = mockTwoRunAutoUpdate(
 			[

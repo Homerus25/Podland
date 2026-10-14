@@ -225,6 +225,30 @@ describe("useQuadletAutoUpdate", () => {
 		expect(invalidateSpy).not.toHaveBeenCalled();
 	});
 
+	it("normalizes a null container list in the terminal report to an empty array", async () => {
+		// The backend serializes an empty or unparsable report's container
+		// list as null (a Go nil slice; AutoUpdateReport.Containers has no
+		// omitempty). The hook owns the report shape and normalizes it at
+		// the event seam, so consumers never dereference null.
+		mockAutoUpdate(() =>
+			streamResponse([
+				report({ containers: null, overall: "unparsable-report" }),
+			]),
+		);
+		const { result } = renderAutoUpdateHook();
+
+		await act(async () => {
+			result.current.run(false);
+		});
+
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.report).toEqual({
+			containers: [],
+			overall: "unparsable-report",
+			exitCode: 0,
+		});
+	});
+
 	it("surfaces a terminal error event as a connection error, not a report", async () => {
 		mockAutoUpdate(() =>
 			streamResponse([errorEvent("SSH_FAILED", "Machine unreachable")]),

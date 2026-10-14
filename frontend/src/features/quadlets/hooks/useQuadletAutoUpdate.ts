@@ -17,6 +17,8 @@ export interface AutoUpdateItem {
 }
 
 export interface AutoUpdateReport {
+	// Always an array by the time it reaches state: the hook normalizes
+	// the wire's null to [] at the event seam (see AutoUpdateReportWire).
 	containers: AutoUpdateItem[];
 	overall: string;
 	exitCode: number;
@@ -27,13 +29,32 @@ export interface AutoUpdateLine {
 	line: string;
 }
 
+// The wire report mirrors the backend's AutoUpdateReport
+// (backend/internal/domain/quadlets/auto_update.go): Containers carries no
+// omitempty, so an empty or unparsable report serializes its container list
+// as null.
+type AutoUpdateReportWire = Omit<AutoUpdateReport, "containers"> & {
+	containers: AutoUpdateItem[] | null;
+};
+
 interface AutoUpdateEvent {
 	operationId: string;
 	type: "log" | "complete" | "error";
 	stream?: string;
 	line?: string;
-	report?: AutoUpdateReport;
+	report?: AutoUpdateReportWire | null;
 	error?: { code: string; message: string };
+}
+
+// The backend serializes an empty report's container list as null (a Go
+// nil slice without omitempty), so an unparsable or empty report arrives
+// with containers: null. The hook owns the report shape and normalizes it
+// here, so the modal never dereferences null.
+function normalizeAutoUpdateReport(
+	report: AutoUpdateReportWire | null | undefined,
+): AutoUpdateReport | null {
+	if (!report) return null;
+	return { ...report, containers: report.containers ?? [] };
 }
 
 function isAutoUpdateEvent(value: unknown): value is AutoUpdateEvent {
@@ -109,7 +130,7 @@ export function useQuadletAutoUpdate(
 							]);
 						}
 					} else if (value.type === "complete") {
-						setReport(value.report ?? null);
+						setReport(normalizeAutoUpdateReport(value.report));
 						// Restarted containers and pulled images only change on a real
 						// run; a dry run mutates nothing, so its queries stay fresh.
 						if (!runDryRun) {
