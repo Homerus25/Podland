@@ -35,7 +35,9 @@ function KeyValueTable({
 	values: Record<string, string>;
 	testId: string;
 }) {
-	const entries = Object.entries(values);
+	// A missing map renders as None: the app has no error boundary, so a
+	// throw here would unmount the whole page.
+	const entries = Object.entries(values ?? {});
 	return (
 		<>
 			<Text fontWeight="bold" mt={4}>

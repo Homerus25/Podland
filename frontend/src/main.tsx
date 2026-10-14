@@ -1,4 +1,5 @@
 import { ChakraProvider, ColorModeScript } from "@chakra-ui/react";
+import { ErrorBoundary } from "@shared/components/ErrorBoundary";
 import { AuthProvider } from "@shared/context/AuthContext";
 import { shouldRetryQuery } from "@shared/queries/shouldRetryQuery";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -25,11 +26,13 @@ createRoot(document.getElementById("root")!).render(
 	<QueryClientProvider client={queryClient}>
 		<ColorModeScript initialColorMode={theme.config.initialColorMode} />
 		<ChakraProvider theme={theme}>
-			<BrowserRouter>
-				<AuthProvider>
-					<App />
-				</AuthProvider>
-			</BrowserRouter>
+			<ErrorBoundary>
+				<BrowserRouter>
+					<AuthProvider>
+						<App />
+					</AuthProvider>
+				</BrowserRouter>
+			</ErrorBoundary>
 		</ChakraProvider>
 		{import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
 	</QueryClientProvider>,

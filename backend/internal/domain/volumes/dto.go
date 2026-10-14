@@ -17,10 +17,11 @@ type VolumeResponse struct {
 	CreatedAt string `json:"createdAt"`
 	// Whether the volume was created anonymously
 	Anonymous bool `json:"anonymous"`
-	// User-defined key/value metadata
-	Labels map[string]string `json:"labels,omitempty"`
-	// Driver options used when creating the volume
-	Options map[string]string `json:"options,omitempty"`
+	// User-defined key/value metadata; always present, {} when empty
+	// (no omitempty: the frontend renders the map unconditionally)
+	Labels map[string]string `json:"labels"`
+	// Driver options used when creating the volume; always present, {} when empty
+	Options map[string]string `json:"options"`
 	// Mountpoint of the volume on the machine
 	Mountpoint string `json:"mountpoint"`
 	// Size/usage, when podman reports it
@@ -86,10 +87,11 @@ type VolumeInspectResponse struct {
 	CreatedAt string `json:"createdAt"`
 	// Whether the volume was created anonymously
 	Anonymous bool `json:"anonymous"`
-	// User-defined key/value metadata
-	Labels map[string]string `json:"labels,omitempty"`
-	// Driver options used when creating the volume
-	Options map[string]string `json:"options,omitempty"`
+	// User-defined key/value metadata; always present, {} when empty
+	// (no omitempty: the frontend renders the map unconditionally)
+	Labels map[string]string `json:"labels"`
+	// Driver options used when creating the volume; always present, {} when empty
+	Options map[string]string `json:"options"`
 	// Mountpoint of the volume on the machine
 	Mountpoint string `json:"mountpoint"`
 	// Size/usage, when podman reports it

@@ -50,3 +50,25 @@ func TestVolumeHandler_Get_Success(t *testing.T) {
 	assert.Equal(t, map[string]string{"type": "tmpfs"}, got.Options)
 	assert.Equal(t, "2026-08-30T10:00:00Z", got.CreatedAt)
 }
+
+// TestVolumeHandler_Get_EmptyLabelsOptions_AlwaysPresentOnWire pins the
+// documented wire contract: labels and options are always present in the
+// inspect response, {} when the volume has none. The frontend drawer
+// renders both maps unconditionally, so an omitted key crashes the page.
+func TestVolumeHandler_Get_EmptyLabelsOptions_AlwaysPresentOnWire(t *testing.T) {
+	cfg := anonymousVolumeFixture()
+	report := &entities.VolumeInspectReport{VolumeConfigResponse: &cfg}
+	engine := &fakeVolumeEngine{
+		inspectFn: func(name string) (*entities.VolumeInspectReport, error) {
+			return report, nil
+		},
+	}
+
+	w := getRequest(newTestHandler(engine).Get, cfg.Name)
+
+	assert.Equal(t, 200, w.Code, "inspect should return 200")
+	assert.Contains(t, w.Body.String(), `"labels":{}`,
+		"labels must be present as {} when the volume has none")
+	assert.Contains(t, w.Body.String(), `"options":{}`,
+		"options must be present as {} when the volume has none")
+}

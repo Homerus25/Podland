@@ -78,6 +78,29 @@ describe("VolumeInspectDrawer", () => {
 		);
 	});
 
+	it("renders when the inspect response omits labels and options", async () => {
+		// The wire shape for a volume without labels/options: the drawer
+		// must render its None placeholders, not throw during render.
+		mockInspect("app-data", () =>
+			HttpResponse.json({
+				name: "app-data",
+				driver: "local",
+				createdAt: "2026-08-20T10:00:00Z",
+				anonymous: false,
+				mountpoint: "/var/lib/containers/storage/volumes/app-data/_data",
+			}),
+		);
+		renderDrawer();
+
+		await screen.findByTestId("volume-drawer-content");
+		expect(screen.getByTestId("volume-drawer-labels")).toHaveTextContent(
+			/none/i,
+		);
+		expect(screen.getByTestId("volume-drawer-options")).toHaveTextContent(
+			/none/i,
+		);
+	});
+
 	it("shows a distinct loading state while fetching", () => {
 		mockInspect(
 			"app-data",

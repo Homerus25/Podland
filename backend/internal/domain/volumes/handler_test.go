@@ -61,6 +61,28 @@ func TestVolumeHandler_List_Success(t *testing.T) {
 	assert.NotEmpty(t, anonymous.Name)
 }
 
+// TestVolumeHandler_List_EmptyLabelsOptions_AlwaysPresentOnWire pins the
+// documented wire contract: labels and options are always present in the
+// list response, {} when the volume has none.
+func TestVolumeHandler_List_EmptyLabelsOptions_AlwaysPresentOnWire(t *testing.T) {
+	reports := []*entities.VolumeListReport{
+		{VolumeConfigResponse: anonymousVolumeFixture()},
+	}
+	engine := &fakeVolumeEngine{
+		listFn: func(entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
+			return reports, nil
+		},
+	}
+
+	w := listRequest(newTestHandler(engine).List)
+
+	assert.Equal(t, 200, w.Code, "list should return 200")
+	assert.Contains(t, w.Body.String(), `"labels":{}`,
+		"labels must be present as {} when the volume has none")
+	assert.Contains(t, w.Body.String(), `"options":{}`,
+		"options must be present as {} when the volume has none")
+}
+
 func decodeVolumes(t *testing.T, body string) []VolumeResponse {
 	t.Helper()
 	var out []VolumeResponse

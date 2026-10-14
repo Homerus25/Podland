@@ -1,4 +1,5 @@
 import { useAuth } from "@features/auth/hooks/useAuth";
+import { ErrorBoundary } from "@shared/components/ErrorBoundary";
 import { AuthProvider } from "@shared/context/AuthContext";
 import type { User } from "@shared/types/api";
 import { screen } from "@testing-library/react";
@@ -45,12 +46,16 @@ export function renderApp(
 	const { resolveInitialState, usernameProbe = true } = options;
 	// AuthProvider stays inside the router (auth-inside-router order), with
 	// the probes above the App so suites can read them before routes render.
+	// The ErrorBoundary mirrors main.tsx, so app-level suites run under the
+	// same render-crash net as production.
 	return renderWithQuery(
-		<AuthProvider resolveInitialState={resolveInitialState}>
-			<LocationProbe />
-			{usernameProbe && <UsernameProbe />}
-			<App />
-		</AuthProvider>,
+		<ErrorBoundary>
+			<AuthProvider resolveInitialState={resolveInitialState}>
+				<LocationProbe />
+				{usernameProbe && <UsernameProbe />}
+				<App />
+			</AuthProvider>
+		</ErrorBoundary>,
 		{ router: { initialEntries: [at] }, chakra: true },
 	);
 }
