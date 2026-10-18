@@ -22,6 +22,37 @@ export async function listImages(machineId: string): Promise<ImageSummary[]> {
 	return response.data;
 }
 
+// Image as returned by GET /api/machines/{id}/images/{imageId}
+// (backend/internal/domain/images/dto.go ImageDetailResponse): the list
+// fields combined with the inspect report's config fields.
+export interface ImageDetail {
+	id: string;
+	// Podman reports null tags for dangling images.
+	repoTags: string[] | null;
+	repoDigests: string[];
+	createdAt: string;
+	size: number;
+	os?: string;
+	architecture?: string;
+	user?: string;
+	env?: Record<string, string>;
+	entrypoint?: string[];
+	cmd?: string[];
+	labels?: Record<string, string>;
+}
+
+// The image detail endpoint (spec 301): one image's list fields plus the
+// inspect report's config fields.
+export async function getImage(
+	machineId: string,
+	imageId: string,
+): Promise<ImageDetail> {
+	const response = await api.get<ImageDetail>(
+		machineApiPath(machineId, "images", imageId),
+	);
+	return response.data;
+}
+
 // One entry of POST /api/machines/{id}/images/prune -> 200 (backend
 // images dto.go ImagePruneResponse): a removed image's ID and reclaimed
 // size, plus podman's per-image error when removal failed.

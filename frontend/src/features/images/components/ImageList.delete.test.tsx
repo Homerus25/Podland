@@ -37,7 +37,9 @@ function deleteHandler(status = 204, body?: Record<string, unknown>) {
 }
 
 async function renderImageList() {
-	renderWithQuery(<ImageList machine={machineFixture()} />);
+	renderWithQuery(<ImageList machine={machineFixture()} />, {
+		router: { initialEntries: ["/machines/m-1"] },
+	});
 	await screen.findByText("docker.io/library/nginx:1.27");
 }
 

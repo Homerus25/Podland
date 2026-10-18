@@ -39,7 +39,9 @@ function renderForm() {
 // The pull form lives inside the Images tab's toolbar in every list state,
 // next to the list it refreshes.
 function renderTab() {
-	renderWithQuery(<ImageList machine={machineFixture()} />);
+	renderWithQuery(<ImageList machine={machineFixture()} />, {
+		router: { initialEntries: ["/machines/m-1"] },
+	});
 }
 
 async function startPull(imageRef = "nginx:latest") {

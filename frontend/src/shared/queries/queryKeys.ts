@@ -114,6 +114,13 @@ export function machineAccessQueryKey(id: string) {
 	return ["machines", id, "access"] as const;
 }
 
+// The detail view is a container sub-resource keyed by the container, so
+// every page visit resolves to its own entry. Never an invalidation target
+// of its own: containers-prefix invalidation covers it.
+export function containerQueryKey(machineId: string, containerId: string) {
+	return [...containersQueryKey(machineId), containerId] as const;
+}
+
 // The raw inspect report is a container sub-resource keyed by the container,
 // so every dialog open resolves to its own entry. Never an invalidation
 // target of its own: containers-prefix invalidation covers it.
@@ -124,11 +131,25 @@ export function containerInspectQueryKey(
 	return [...containersQueryKey(machineId), containerId, "inspect"] as const;
 }
 
+// The detail view is a network sub-resource keyed by the network, so every
+// page visit resolves to its own entry. Never an invalidation target of its
+// own: networks-prefix invalidation covers it.
+export function networkQueryKey(machineId: string, networkName: string) {
+	return [...networksQueryKey(machineId), networkName] as const;
+}
+
 // The raw inspect report is a network sub-resource keyed by the network,
 // so every dialog open resolves to its own entry. Never an invalidation
 // target of its own: networks-prefix invalidation covers it.
 export function networkInspectQueryKey(machineId: string, networkName: string) {
 	return [...networksQueryKey(machineId), networkName, "inspect"] as const;
+}
+
+// The detail view is an image sub-resource keyed by the image, so every
+// page visit resolves to its own entry. Never an invalidation target of its
+// own: images-prefix invalidation covers it.
+export function imageQueryKey(machineId: string, imageId: string) {
+	return [...imagesQueryKey(machineId), imageId] as const;
 }
 
 // The raw inspect report is an image sub-resource keyed by the image, so

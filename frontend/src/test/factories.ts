@@ -1,7 +1,16 @@
 import type { AuthStatusResponse } from "@features/auth/services/authApi";
-import type { ContainerSummary } from "@features/containers/services/containersApi";
-import type { ImageSummary } from "@features/images/services/imagesApi";
-import type { NetworkSummary } from "@features/networks/services/networksApi";
+import type {
+	ContainerDetail,
+	ContainerSummary,
+} from "@features/containers/services/containersApi";
+import type {
+	ImageDetail,
+	ImageSummary,
+} from "@features/images/services/imagesApi";
+import type {
+	NetworkDetail,
+	NetworkSummary,
+} from "@features/networks/services/networksApi";
 import type {
 	QuadletMoveCompanionState,
 	QuadletMovePreview,
@@ -56,6 +65,37 @@ export function imageFixture(
 	};
 }
 
+// --- spec 301 #308: image detail page fixture -----------------------------
+// Image detail (GET .../images/{imageId}): the list fields combined with
+// the inspect report's config fields. Distinctive values so tests can
+// assert against them without being tautological.
+export function imageDetailFixture(
+	overrides: Partial<ImageDetail> = {},
+): ImageDetail {
+	return {
+		id: "sha256:abc123def4567890abc123def4567890abc123def4567890abc123def4567890",
+		repoTags: [
+			"docker.io/library/nginx:1.27",
+			"docker.io/library/nginx:latest",
+		],
+		repoDigests: ["docker.io/library/nginx@sha256:def4567890abc"],
+		createdAt: "2026-08-18T10:00:00Z",
+		size: 157286400,
+		os: "linux",
+		architecture: "amd64",
+		user: "appuser",
+		env: {
+			PATH: "/usr/local/sbin:/usr/local/bin",
+			NGINX_VERSION: "1.27.1",
+		},
+		entrypoint: ["/docker-entrypoint.sh"],
+		cmd: ["nginx", "-g", "daemon off;"],
+		labels: { maintainer: "NGINX Official Image", tier: "frontend" },
+		...overrides,
+	};
+}
+// --- end spec 301 #308 ----------------------------------------------------
+
 export function containerFixture(
 	overrides: Partial<ContainerSummary> = {},
 ): ContainerSummary {
@@ -71,6 +111,47 @@ export function containerFixture(
 		...overrides,
 	};
 }
+
+// --- spec 301 ticket #306: container detail fixture ---------------------
+// Container detail (GET .../containers/{id}): the extended
+// ContainerGetResponse DTO. Default shape is a running web container with
+// one named volume, one mount, one network, one exposed port, one secret,
+// and a two-variable environment; tests override per scenario.
+export function containerDetailFixture(
+	overrides: Partial<ContainerDetail> = {},
+): ContainerDetail {
+	return {
+		id: "c-1",
+		name: "web",
+		state: "running",
+		status: "Up 2 hours",
+		image: "docker.io/library/nginx:1.27",
+		imageId:
+			"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		createdAt: "2026-08-20T10:00:00Z",
+		command: ["nginx", "-g", "daemon off;"],
+		entrypoint: ["/docker-entrypoint.sh"],
+		secrets: [{ name: "db-password", uid: 0, gid: 0, mode: 420 }],
+		volumes: [
+			{
+				name: "app-data",
+				source: "/var/lib/containers/storage/volumes/app-data/_data",
+				destination: "/data",
+				rw: true,
+			},
+		],
+		exposedPorts: [{ containerPort: 8080, protocol: "tcp" }],
+		environment: { FOO: "bar", MODE: "prod" },
+		mounts: [
+			"type=volume,source=/var/lib/containers/storage/volumes/app-data/_data,destination=/data",
+		],
+		networks: ["app-net"],
+		restarts: 0,
+		exited: false,
+		...overrides,
+	};
+}
+// --- end spec 301 ticket #306 -------------------------------------------
 
 export function quadletFixture(
 	overrides: Partial<QuadletSummary> = {},
@@ -225,6 +306,25 @@ export function networkFixture(
 		...overrides,
 	};
 }
+
+// --- ticket #309 (spec 301): network detail page ---
+// Network detail (GET .../networks/{networkName}, backend DTO
+// NetworkDetailResponse): default shape is the app-net bridge network with
+// one attached container; tests override `containers` per scenario.
+export function networkDetailFixture(
+	overrides: Partial<NetworkDetail> = {},
+): NetworkDetail {
+	return {
+		name: "app-net",
+		id: "9f8e7d6c5b4a",
+		driver: "bridge",
+		createdAt: "2026-08-20T10:00:00Z",
+		subnets: ["10.88.0.0/16"],
+		containers: [{ id: "c-1", name: "my-container" }],
+		...overrides,
+	};
+}
+// --- end ticket #309 ---
 
 export function secretFixture(
 	overrides: Partial<SecretSummary> = {},

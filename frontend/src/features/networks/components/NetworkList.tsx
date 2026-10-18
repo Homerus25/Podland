@@ -2,16 +2,17 @@ import { Button, Td, Tr } from "@chakra-ui/react";
 import { can } from "@features/machines/permissions";
 import { ConnectDialog } from "@features/networks/components/ConnectDialog";
 import { CreateNetworkDialog } from "@features/networks/components/CreateNetworkDialog";
-import { InspectNetworkDialog } from "@features/networks/components/InspectNetworkDialog";
 import {
 	useCreateNetwork,
 	useNetworks,
 } from "@features/networks/hooks/useNetworks";
 import type { NetworkSummary } from "@features/networks/services/networksApi";
 import { ResourceList } from "@shared/components/ResourceList";
+import { detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 // The Networks tab body. Create and connect are write-gated backend routes
 // (issue 255), so the adapter takes the machine and gates on
@@ -21,18 +22,16 @@ import { useState } from "react";
 // this adapter owns only the columns, the row, and the create dialog. The
 // row's connect button opens the one connect dialog (issue 274) with the
 // network fixed — the dialog owns the ritual: its options and the mutation.
-// Clicking the row opens the network's inspect dialog (spec 287); the
+// Clicking the row navigates to the network's detail page (spec 301); the
 // connect button stops propagation so it never also fires the row action.
 export function NetworkList({ machine }: { machine: Machine }) {
 	const machineId = machine.id;
+	const navigate = useNavigate();
 	const { data: networks, isPending, error } = useNetworks(machineId);
 	const createNetwork = useCreateNetwork(machineId);
 	const canManage = can(machine, "manage-networks");
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [pendingConnect, setPendingConnect] = useState<NetworkSummary | null>(
-		null,
-	);
-	const [pendingInspect, setPendingInspect] = useState<NetworkSummary | null>(
 		null,
 	);
 
@@ -55,7 +54,9 @@ export function NetworkList({ machine }: { machine: Machine }) {
 						key={network.name}
 						data-testid="network-row"
 						cursor="pointer"
-						onClick={() => setPendingInspect(network)}
+						onClick={() =>
+							navigate(detailPath(machineId, "networks", network.name))
+						}
 					>
 						<Td fontFamily="mono">{network.name}</Td>
 						<Td>{network.driver}</Td>
@@ -102,13 +103,6 @@ export function NetworkList({ machine }: { machine: Machine }) {
 					machineId={machineId}
 					network={pendingConnect}
 					onClose={() => setPendingConnect(null)}
-				/>
-			) : null}
-			{pendingInspect ? (
-				<InspectNetworkDialog
-					machineId={machineId}
-					network={pendingInspect}
-					onClose={() => setPendingInspect(null)}
 				/>
 			) : null}
 		</>

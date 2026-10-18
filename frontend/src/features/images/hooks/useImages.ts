@@ -1,11 +1,13 @@
 import {
 	deleteImage,
+	getImage,
 	inspectImage,
 	listImages,
 	pruneImages,
 } from "@features/images/services/imagesApi";
 import {
 	imageInspectQueryKey,
+	imageQueryKey,
 	imagesQueryKey,
 } from "@shared/queries/queryKeys";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
@@ -22,13 +24,30 @@ export function useImages(machineId: string) {
 	});
 }
 
+// The image detail view (GET .../images/{imageId}, spec 301): the detail
+// page's overview query. gcTime: 0 drops the cache entry the moment the
+// page unmounts, so every page visit refetches the current detail.
+export function useImage(machineId: string, imageId: string) {
+	return useQuery({
+		queryKey: imageQueryKey(machineId, imageId),
+		queryFn: () => getImage(machineId, imageId),
+		gcTime: 0,
+	});
+}
+
 // The raw inspect report behind the inspect dialog. gcTime: 0 drops the
 // cache entry the moment the dialog unmounts, so every open refetches the
-// current report.
-export function useImageInspect(machineId: string, imageId: string) {
+// current report. The detail page passes enabled: revealed so the report
+// fetches lazily on the first "Show inspect JSON" click, not on page mount.
+export function useImageInspect(
+	machineId: string,
+	imageId: string,
+	options?: { enabled?: boolean },
+) {
 	return useQuery({
 		queryKey: imageInspectQueryKey(machineId, imageId),
 		queryFn: () => inspectImage(machineId, imageId),
+		enabled: options?.enabled ?? true,
 		gcTime: 0,
 	});
 }

@@ -18,7 +18,9 @@ function mockNetworks(networks: NetworkSummary[]) {
 }
 
 function renderNetworkList(machine: Machine = machineFixture()) {
-	return renderWithQuery(<NetworkList machine={machine} />);
+	// The row click navigates (spec 301), so the list renders inside a
+	// router.
+	return renderWithQuery(<NetworkList machine={machine} />, { router: true });
 }
 
 afterEach(() => {

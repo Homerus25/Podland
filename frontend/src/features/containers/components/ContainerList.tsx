@@ -1,7 +1,6 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
 import { CreateContainerDialog } from "@features/containers/components/CreateContainerDialog";
 import { containerDisplayName } from "@features/containers/components/containerDisplayName";
-import { InspectContainerDialog } from "@features/containers/components/InspectContainerDialog";
 import {
 	useContainers,
 	useCreateContainer,
@@ -17,9 +16,11 @@ import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { useOpenLogs } from "@shared/logs/logRoute";
+import { detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 // No delete request leaves the browser until the user explicitly confirms.
 // The shell, reset lifecycle, danger footer, pending wiring, close-on-success,
@@ -55,9 +56,9 @@ function DeleteContainerModal({
 
 // Each row owns its lifecycle mutation instances, so pending state and
 // errors are scoped to the affected container and other rows stay usable.
-// The row itself is clickable: it opens the container's inspect dialog, and
-// every action button stops propagation so a button click never also fires
-// the row action.
+// The row itself is clickable: it navigates to the container's detail page
+// (spec 301), and every action button stops propagation so a button click
+// never also fires the row action.
 function ContainerRow({
 	machineId,
 	container,
@@ -66,7 +67,6 @@ function ContainerRow({
 	onDelete,
 	onShowLogs,
 	onConnect,
-	onInspect,
 }: {
 	machineId: string;
 	container: ContainerSummary;
@@ -75,8 +75,8 @@ function ContainerRow({
 	onDelete: (container: ContainerSummary) => void;
 	onShowLogs: (container: ContainerSummary) => void;
 	onConnect: (container: ContainerSummary) => void;
-	onInspect: (container: ContainerSummary) => void;
 }) {
+	const navigate = useNavigate();
 	const startContainer = useStartContainer(machineId);
 	const stopContainer = useStopContainer(machineId);
 	const name = containerDisplayName(container);
@@ -100,7 +100,9 @@ function ContainerRow({
 			<Tr
 				data-testid="container-row"
 				cursor="pointer"
-				onClick={() => onInspect(container)}
+				onClick={() =>
+					navigate(detailPath(machineId, "containers", container.id))
+				}
 			>
 				<Td fontFamily="mono">{containerDisplayName(container)}</Td>
 				<Td fontFamily="mono">{container.image}</Td>
@@ -202,9 +204,6 @@ export function ContainerList({ machine }: { machine: Machine }) {
 	const [pendingConnect, setPendingConnect] = useState<ContainerSummary | null>(
 		null,
 	);
-	const [pendingInspect, setPendingInspect] = useState<ContainerSummary | null>(
-		null,
-	);
 	const openLogs = useOpenLogs(machineId, "container");
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 
@@ -237,7 +236,6 @@ export function ContainerList({ machine }: { machine: Machine }) {
 							})
 						}
 						onConnect={setPendingConnect}
-						onInspect={setPendingInspect}
 					/>
 				)}
 				toolbar={
@@ -270,13 +268,6 @@ export function ContainerList({ machine }: { machine: Machine }) {
 					machineId={machineId}
 					container={pendingConnect}
 					onClose={() => setPendingConnect(null)}
-				/>
-			) : null}
-			{pendingInspect ? (
-				<InspectContainerDialog
-					machineId={machineId}
-					container={pendingInspect}
-					onClose={() => setPendingInspect(null)}
 				/>
 			) : null}
 		</>

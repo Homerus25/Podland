@@ -83,6 +83,23 @@ func (s *ImageService) Inspect(ctx context.Context, userID, machineID, imageID s
 	return report, err
 }
 
+// Get returns one image's detail DTO on the specified machine: the list
+// fields combined with the inspect report's config fields. Unlike
+// Inspect, the report is mapped to ImageDetailResponse here.
+func (s *ImageService) Get(ctx context.Context, userID, machineID, imageID string) (ImageDetailResponse, error) {
+	var detail ImageDetailResponse
+	err := s.engines.WithEngine(ctx, userID, machineID, "images.Get", func(e ImageEngine) error {
+		report, err := inspectImage(e, imageID)
+		if err != nil {
+			return err
+		}
+
+		detail = FromImageInspectReport(report)
+		return nil
+	})
+	return detail, err
+}
+
 // inspectImage resolves one image's inspect report through the shared
 // single-report ritual, classifying podman's not-found shapes into
 // ErrImageNotFound.

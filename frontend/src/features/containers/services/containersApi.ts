@@ -20,6 +20,76 @@ export interface ContainerSummary {
 	mounts?: string[];
 }
 
+// A secret mounted in the container
+// (backend/internal/domain/containers/dto.go ContainerSecretResponse).
+export interface ContainerSecret {
+	name: string;
+	uid: number;
+	gid: number;
+	mode: number;
+}
+
+// A named volume mount of the container
+// (backend/internal/domain/containers/dto.go ContainerVolumeResponse).
+export interface ContainerVolume {
+	name: string;
+	source: string;
+	destination: string;
+	rw: boolean;
+}
+
+// A port the container exposes
+// (backend/internal/domain/containers/dto.go ExposedPortResponse).
+export interface ExposedPort {
+	containerPort: number;
+	protocol: string;
+}
+
+// A published port mapping
+// (backend/internal/domain/containers/dto.go PortMappingResponse).
+export interface PortMapping {
+	containerPort: number;
+	hostPort: number;
+	protocol: string;
+	hostIp?: string;
+}
+
+// Container size information
+// (backend/internal/domain/containers/dto.go ContainerSizeResponse).
+export interface ContainerSize {
+	rootFsSize: number;
+	rwSize: number;
+}
+
+// Container as returned by GET /api/machines/{id}/containers/{containerId}
+// (backend/internal/domain/containers/dto.go ContainerGetResponse, extended
+// with entrypoint/secrets/volumes/exposedPorts by spec 301 ticket #302).
+export interface ContainerDetail {
+	id: string;
+	name: string;
+	state: string;
+	status: string;
+	image: string;
+	imageId?: string;
+	createdAt: string;
+	command?: string[];
+	args?: string[];
+	entrypoint?: string[];
+	secrets?: ContainerSecret[];
+	volumes?: ContainerVolume[];
+	exposedPorts?: ExposedPort[];
+	workingDir?: string;
+	environment?: Record<string, string>;
+	labels?: Record<string, string>;
+	ports?: PortMapping[];
+	mounts?: string[];
+	networks?: string[];
+	restarts: number;
+	exited: boolean;
+	exitCode?: number;
+	size?: ContainerSize;
+}
+
 // Envelope of GET /api/machines/{id}/containers
 // (backend/internal/domain/containers/dto.go ContainerListResult).
 interface ContainerListResult {
@@ -39,6 +109,19 @@ export async function listContainers(
 		},
 	);
 	return response.data.containers;
+}
+
+// GET /api/machines/{id}/containers/{containerId} -> 200
+// (backend/internal/domain/containers/dto.go ContainerGetResponse; the
+// extended DTO behind the container detail page, spec 301 ticket #306).
+export async function getContainer(
+	machineId: string,
+	containerId: string,
+): Promise<ContainerDetail> {
+	const response = await api.get<ContainerDetail>(
+		machineApiPath(machineId, "containers", containerId),
+	);
+	return response.data;
 }
 
 // Body of POST /api/machines/{id}/containers

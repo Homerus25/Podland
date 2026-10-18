@@ -50,6 +50,7 @@ function installHandlers(
 function renderImageList(permission: "read" | "write" | "admin" = "admin") {
 	renderWithQuery(<ImageList machine={machineFixture({ permission })} />, {
 		chakra: true,
+		router: { initialEntries: ["/machines/m-1"] },
 	});
 }
 

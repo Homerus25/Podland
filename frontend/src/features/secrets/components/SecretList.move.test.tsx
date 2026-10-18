@@ -89,7 +89,11 @@ async function openMoveDialog(
 		previewHandler(previewOverrides),
 		moveHandler(() => secretMoveResultFixture()),
 	);
-	renderWithQuery(<SecretList machine={source} />, { chakra: true });
+	renderWithQuery(<SecretList machine={source} />, {
+		chakra: true,
+		// The row navigates on click, so the list renders inside a router.
+		router: true,
+	});
 	const user = userEvent.setup();
 	await user.click(
 		await screen.findByRole("button", { name: "Move or copy db-password" }),
@@ -128,7 +132,8 @@ describe("SecretList move/copy", () => {
 			<SecretList
 				machine={machineFixture({ permission: "write", isOwner: false })}
 			/>,
-			{ chakra: true },
+			// The row navigates on click, so the list renders inside a router.
+			{ chakra: true, router: true },
 		);
 
 		expect(await screen.findByTestId("secret-row")).toBeInTheDocument();
@@ -212,7 +217,11 @@ describe("SecretList move/copy", () => {
 				() => new Promise<Response>(() => {}),
 			),
 		);
-		renderWithQuery(<SecretList machine={source} />, { chakra: true });
+		renderWithQuery(<SecretList machine={source} />, {
+			chakra: true,
+			// The row navigates on click, so the list renders inside a router.
+			router: true,
+		});
 		const user = userEvent.setup();
 		await user.click(
 			await screen.findByRole("button", { name: "Move or copy db-password" }),
@@ -235,7 +244,11 @@ describe("SecretList move/copy", () => {
 				),
 			),
 		);
-		renderWithQuery(<SecretList machine={source} />, { chakra: true });
+		renderWithQuery(<SecretList machine={source} />, {
+			chakra: true,
+			// The row navigates on click, so the list renders inside a router.
+			router: true,
+		});
 		const user = userEvent.setup();
 		await user.click(
 			await screen.findByRole("button", { name: "Move or copy db-password" }),
@@ -274,7 +287,11 @@ describe("SecretList move/copy", () => {
 			previewHandler(),
 			moveHandler(() => secretMoveResultFixture()),
 		);
-		renderWithQuery(<SecretList machine={source} />, { chakra: true });
+		renderWithQuery(<SecretList machine={source} />, {
+			chakra: true,
+			// The row navigates on click, so the list renders inside a router.
+			router: true,
+		});
 		const user = userEvent.setup();
 		await user.click(
 			await screen.findByRole("button", { name: "Move or copy db-password" }),

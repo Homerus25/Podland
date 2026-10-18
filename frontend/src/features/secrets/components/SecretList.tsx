@@ -1,9 +1,7 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
 import { can } from "@features/machines/permissions";
 import { CreateSecretDialog } from "@features/secrets/components/CreateSecretDialog";
-import { InspectSecretDialog } from "@features/secrets/components/InspectSecretDialog";
 import { MoveSecretDialog } from "@features/secrets/components/MoveSecretDialog";
-import { SecretDetailModal } from "@features/secrets/components/SecretDetailModal";
 import {
 	useCreateSecret,
 	useDeleteSecret,
@@ -12,9 +10,11 @@ import {
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
+import { detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 // Each row owns its delete mutation instance, so pending state and errors
 // stay scoped to this secret's modal and other rows stay usable. The shell,
@@ -22,28 +22,24 @@ import { useState } from "react";
 // ConfirmDialog's; the failure envelopes (409 SECRET_IN_USE, 404) surface
 // through the default error region as plain envelopes, with no code-specific
 // hint. There are no delete options in v1: the backend exposes no force
-// parameter. The row itself is clickable: it opens the secret's inspect
-// dialog, and every action inside it — the name link, the move/copy and
+// parameter. The row itself is clickable: it navigates to the secret's
+// detail page (spec 301), and every action inside it — the move/copy and
 // delete buttons — stops propagation so it never also fires the row action.
-// The name link keeps opening the detail modal (the reveal flow), so both
-// surfaces stay reachable.
 function SecretRow({
 	machine,
 	secret,
 	canDelete,
 	canMove,
-	onInspect,
 }: {
 	machine: Machine;
 	secret: SecretSummary;
 	canDelete: boolean;
 	canMove: boolean;
-	onInspect: (secret: SecretSummary) => void;
 }) {
 	const machineId = machine.id;
+	const navigate = useNavigate();
 	const deleteSecret = useDeleteSecret(machineId);
 	const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-	const [isDetailOpen, setIsDetailOpen] = useState(false);
 	const [isMoveOpen, setIsMoveOpen] = useState(false);
 
 	return (
@@ -51,21 +47,9 @@ function SecretRow({
 			<Tr
 				data-testid="secret-row"
 				cursor="pointer"
-				onClick={() => onInspect(secret)}
+				onClick={() => navigate(detailPath(machineId, "secrets", secret.name))}
 			>
-				<Td fontFamily="mono">
-					<Button
-						size="xs"
-						variant="link"
-						onClick={(event) => {
-							event.stopPropagation();
-							setIsDetailOpen(true);
-						}}
-						data-testid="secret-detail-button"
-					>
-						{secret.name}
-					</Button>
-				</Td>
+				<Td fontFamily="mono">{secret.name}</Td>
 				<Td>{secret.driver}</Td>
 				<Td>{formatRelativeDate(secret.createdAt)}</Td>
 				{canDelete ? (
@@ -102,13 +86,6 @@ function SecretRow({
 					</Td>
 				) : null}
 			</Tr>
-			{isDetailOpen ? (
-				<SecretDetailModal
-					machine={machine}
-					secret={secret}
-					onClose={() => setIsDetailOpen(false)}
-				/>
-			) : null}
 			{isMoveOpen ? (
 				<MoveSecretDialog
 					machine={machine}
@@ -141,9 +118,6 @@ export function SecretList({ machine }: { machine: Machine }) {
 	const { data: secrets, isPending, error } = useSecrets(machineId);
 	const createSecret = useCreateSecret(machineId);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
-	const [pendingInspect, setPendingInspect] = useState<SecretSummary | null>(
-		null,
-	);
 	const canManage = can(machine, "manage-secrets");
 	// The transfer's source gate is admin — the value leaving the machine is
 	// a reveal — so the row's Move/Copy affordance sits behind
@@ -170,7 +144,6 @@ export function SecretList({ machine }: { machine: Machine }) {
 						secret={secret}
 						canDelete={canManage}
 						canMove={canMove}
-						onInspect={setPendingInspect}
 					/>
 				)}
 				toolbar={
@@ -189,13 +162,6 @@ export function SecretList({ machine }: { machine: Machine }) {
 				<CreateSecretDialog
 					mutation={createSecret}
 					onClose={() => setIsCreateOpen(false)}
-				/>
-			) : null}
-			{pendingInspect ? (
-				<InspectSecretDialog
-					machineId={machineId}
-					secret={pendingInspect}
-					onClose={() => setPendingInspect(null)}
 				/>
 			) : null}
 		</>

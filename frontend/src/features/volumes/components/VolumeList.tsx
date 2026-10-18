@@ -32,12 +32,13 @@ import {
 } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
+import { detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { downloadFile } from "@shared/utils/download";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
-import { VolumeInspectDrawer } from "./VolumeInspectDrawer";
+import { useNavigate } from "react-router-dom";
 
 function VolumeRow({
 	volume,
@@ -363,11 +364,11 @@ function PopulateVolumeModal({
 
 // The Volumes tab body. The toolbar/triad/table machinery, the plural
 // testids, and the hint swap are ResourceList's; this adapter owns only the
-// columns, the clickable row with its inspect drawer, and the create,
-// export, populate, move/copy, delete, and prune feature code.
+// columns, the clickable row navigating to the volume's detail page, and
+// the create, export, populate, move/copy, delete, and prune feature code.
 export function VolumeList({ machine }: { machine: Machine }) {
 	const machineId = machine.id;
-	const [selectedVolume, setSelectedVolume] = useState<string | null>(null);
+	const navigate = useNavigate();
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const { data: volumes, isPending, error } = useVolumes(machineId);
 	const createVolume = useCreateVolume(machineId);
@@ -433,7 +434,9 @@ export function VolumeList({ machine }: { machine: Machine }) {
 					<VolumeRow
 						key={volume.name}
 						volume={volume}
-						onSelect={setSelectedVolume}
+						onSelect={(name) =>
+							navigate(detailPath(machineId, "volumes", name))
+						}
 						canManage={canManage}
 						onDelete={setPendingDelete}
 						isExporting={exportingName === volume.name}
@@ -464,12 +467,6 @@ export function VolumeList({ machine }: { machine: Machine }) {
 					</>
 				}
 				canManage={canManage}
-			/>
-			<VolumeInspectDrawer
-				machineId={machineId}
-				volumeName={selectedVolume}
-				isOpen={selectedVolume !== null}
-				onClose={() => setSelectedVolume(null)}
 			/>
 			{populateTarget ? (
 				<PopulateVolumeModal

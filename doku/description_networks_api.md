@@ -2,7 +2,7 @@
 
 Part of the [API contract](description_api.md). See the main document for base URL, common headers, and the error response format.
 
-Networks live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. Listing is available at `read` level; creating a network and connecting a container to one mutate remote state and gate at `write` level. Disconnect, delete, and prune remain follow-up issues.
+Networks live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. Listing and the per-network detail endpoint are available at `read` level; creating a network and connecting a container to one mutate remote state and gate at `write` level. Disconnect, delete, and prune remain follow-up issues.
 
 ---
 
@@ -97,6 +97,44 @@ Attach a container to a network on the machine. The body carries the container's
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
 - 404: `MACHINE_NOT_FOUND`, `NETWORK_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+### GET /api/machines/{id}/networks/{networkName}
+
+Return one network's detail DTO — the fields the network detail page renders, mapped from podman's inspect report: name, id, driver, creation time, subnets in CIDR form, and the attached containers (id + name, resolved from the inspect report's `containers` map, ordered by container ID).
+
+**Authentication:** Required
+
+**Access:** Any user with a machine-access row for `{id}` (read level).
+
+**Response (Success - 200):**
+```json
+{
+  "name": "string",
+  "id": "string (network ID from the inspect report)",
+  "driver": "string (e.g. \"bridge\", \"macvlan\", \"host\")",
+  "createdAt": "RFC3339 timestamp",
+  "subnets": ["string (CIDR, e.g. \"10.89.0.0/16\")"],
+  "containers": [
+    {
+      "id": "string (container ID)",
+      "name": "string (container name)"
+    }
+  ]
+}
+```
+
+Notes:
+- `subnets` and `containers` are always present; each is `[]` when the network has no subnets / no attached containers.
+- `createdAt` is an RFC3339 timestamp.
+- This endpoint is distinct from `GET .../networks/{networkName}/inspect`, which returns the raw, unmapped inspect report.
+
+**Response (Error):**
+- 400: `MISSING_NETWORK_NAME`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `NETWORK_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 

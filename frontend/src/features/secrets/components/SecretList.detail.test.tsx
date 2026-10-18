@@ -1,15 +1,15 @@
 import { SecretList } from "@features/secrets/components/SecretList";
-import type {
-	SecretInspect,
-	SecretSummary,
-} from "@features/secrets/services/secretsApi";
-import { secretQueryKey } from "@shared/queries/queryKeys";
-import { screen, waitFor } from "@testing-library/react";
+import type { SecretSummary } from "@features/secrets/services/secretsApi";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
+import { Route, Routes, useParams } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { errorResponse } from "@/test/errors";
-import { machineFixture, secretFixture } from "@/test/factories";
+import {
+	machineFixture,
+	secretFixture,
+	secretMovePreviewFixture,
+} from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -19,191 +19,102 @@ function mockSecrets(secrets: SecretSummary[]) {
 	);
 }
 
-function mockInspect(secret: SecretInspect) {
-	return server.use(
-		http.get("*/api/machines/m-1/secrets/db-password", ({ request }) =>
-			HttpResponse.json(
-				request.url.includes("reveal=true")
-					? { ...secret, secretData: "s3cr3t-value" }
-					: secret,
-			),
-		),
-	);
-}
-
-async function openDetail() {
-	await screen.findByTestId("secret-row");
-	await userEvent.click(screen.getByTestId("secret-detail-button"));
-	await screen.findByTestId("secret-detail-id");
+// The detail route's stub: the row click must land here, with the secret's
+// name as the route param (the backend addresses secrets by name).
+function SecretDetailStub() {
+	const { secretId } = useParams<{ secretId: string }>();
+	return <div data-testid="secret-detail-page">{secretId}</div>;
 }
 
 function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
 	return renderWithQuery(
-		<SecretList machine={machineFixture({ permission })} />,
+		<Routes>
+			<Route
+				path="/machines/:machineId"
+				element={
+					<SecretList
+						machine={machineFixture({
+							permission,
+							isOwner: permission === "admin",
+						})}
+					/>
+				}
+			/>
+			<Route
+				path="/machines/:machineId/secrets/:secretId"
+				element={<SecretDetailStub />}
+			/>
+		</Routes>,
+		{ router: { initialEntries: ["/machines/m-1"] } },
 	);
 }
 
-describe("SecretDetailModal", () => {
-	it("renders detail fields from the inspect endpoint", async () => {
-		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
-		mockInspect(
-			secretFixture({
-				updatedAt: "2026-08-21T10:00:00Z",
-				labels: { env: "prod" },
-			}),
-		);
+describe("SecretList row navigation", () => {
+	it("navigates to the secret's detail page when the row is clicked", async () => {
+		mockSecrets([secretFixture()]);
 		renderSecretList();
+		const user = userEvent.setup();
 
-		await openDetail();
+		await user.click(await screen.findByTestId("secret-row"));
 
-		expect(screen.getByTestId("secret-detail-id")).toHaveTextContent(
-			"3f2e1d0c",
-		);
-		expect(screen.getByTestId("secret-detail-name")).toHaveTextContent(
+		expect(await screen.findByTestId("secret-detail-page")).toHaveTextContent(
 			"db-password",
 		);
-		expect(screen.getByTestId("secret-detail-driver")).toHaveTextContent(
-			"file",
-		);
-		expect(screen.getByTestId("secret-detail-labels")).toHaveTextContent(
-			"env=prod",
-		);
+		expect(screen.queryByTestId("secret-row")).not.toBeInTheDocument();
+		// The former detail modal is gone: no dialog opens on row click.
+		expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
 		expect(
-			screen.getByTestId("secret-detail-created"),
-		).not.toBeEmptyDOMElement();
+			screen.queryByTestId("secret-detail-button"),
+		).not.toBeInTheDocument();
+	});
+
+	it("navigates for read-only users too", async () => {
+		mockSecrets([secretFixture()]);
+		renderSecretList("read");
+		const user = userEvent.setup();
+
+		await user.click(await screen.findByTestId("secret-row"));
+
+		expect(await screen.findByTestId("secret-detail-page")).toHaveTextContent(
+			"db-password",
+		);
+	});
+
+	it("does not navigate when the delete button is clicked", async () => {
+		mockSecrets([secretFixture()]);
+		renderSecretList();
+		const user = userEvent.setup();
+
+		await user.click(
+			await screen.findByRole("button", { name: "Delete db-password" }),
+		);
+
 		expect(
-			screen.getByTestId("secret-detail-updated"),
-		).not.toBeEmptyDOMElement();
+			await screen.findByTestId("confirm-delete-button"),
+		).toBeInTheDocument();
+		expect(screen.queryByTestId("secret-detail-page")).not.toBeInTheDocument();
+		expect(screen.getByTestId("secret-row")).toBeInTheDocument();
 	});
 
-	it("sends reveal=true to the inspect endpoint when an admin reveals", async () => {
-		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
-		let requestedUrl = "";
+	it("does not navigate when the move/copy button is clicked", async () => {
+		mockSecrets([secretFixture()]);
 		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password", ({ request }) => {
-				requestedUrl = request.url;
-				return HttpResponse.json({
-					...secretFixture({ updatedAt: "2026-08-21T10:00:00Z" }),
-					secretData: "s3cr3t-value",
-				});
-			}),
-		);
-		renderSecretList();
-
-		await openDetail();
-		await userEvent.click(screen.getByTestId("reveal-secret-button"));
-
-		await screen.findByTestId("secret-value");
-		expect(requestedUrl).toContain("reveal=true");
-	});
-
-	it.each(["read", "write"] as const)(
-		"shows a hint instead of a reveal button for %s users",
-		async (permission) => {
-			mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
-			mockInspect(secretFixture({ updatedAt: "2026-08-21T10:00:00Z" }));
-			renderSecretList(permission);
-
-			await openDetail();
-
-			expect(
-				screen.queryByTestId("reveal-secret-button"),
-			).not.toBeInTheDocument();
-			expect(screen.getByTestId("reveal-permission-hint")).toBeInTheDocument();
-		},
-	);
-
-	it("renders the revealed value masked until the eye toggle is used", async () => {
-		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
-		mockInspect(secretFixture({ updatedAt: "2026-08-21T10:00:00Z" }));
-		renderSecretList();
-
-		await openDetail();
-		await userEvent.click(screen.getByTestId("reveal-secret-button"));
-		const value = await screen.findByTestId("secret-value");
-
-		expect(value).toHaveAttribute("data-visible", "false");
-		expect(value).not.toHaveTextContent("s3cr3t-value");
-
-		await userEvent.click(screen.getByTestId("toggle-secret-visibility"));
-		expect(value).toHaveAttribute("data-visible", "true");
-		expect(value).toHaveTextContent("s3cr3t-value");
-	});
-
-	it("renders a 403 reveal error through the shared error display", async () => {
-		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
-		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password", ({ request }) => {
-				if (request.url.includes("reveal=true")) {
-					return errorResponse(
-						403,
-						"ACCESS_DENIED",
-						"Admin access required",
-						"req-7",
-					);
-				}
-				return HttpResponse.json(
-					secretFixture({ updatedAt: "2026-08-21T10:00:00Z" }),
-				);
-			}),
-		);
-		renderSecretList();
-
-		await openDetail();
-		await userEvent.click(screen.getByTestId("reveal-secret-button"));
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("ACCESS_DENIED")).toBeInTheDocument();
-		expect(screen.getByText("Admin access required")).toBeInTheDocument();
-	});
-
-	it("renders an inspect 404 through the shared error display", async () => {
-		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
-		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password", () =>
-				errorResponse(404, "SECRET_NOT_FOUND", "Secret not found", "req-9"),
+			http.get("*/api/machines", () =>
+				HttpResponse.json([machineFixture({ id: "m-2", name: "staging-01" })]),
+			),
+			http.get("*/api/machines/m-1/secrets/db-password/move-preview", () =>
+				HttpResponse.json(secretMovePreviewFixture()),
 			),
 		);
 		renderSecretList();
+		const user = userEvent.setup();
 
-		await screen.findByTestId("secret-row");
-		await userEvent.click(screen.getByTestId("secret-detail-button"));
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("SECRET_NOT_FOUND")).toBeInTheDocument();
-		expect(screen.getByText("Secret not found")).toBeInTheDocument();
-	});
-
-	it("renders a connection failure through the shared error display", async () => {
-		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
-		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password", () =>
-				HttpResponse.error(),
-			),
+		await user.click(
+			await screen.findByRole("button", { name: "Move or copy db-password" }),
 		);
-		renderSecretList();
 
-		await screen.findByTestId("secret-row");
-		await userEvent.click(screen.getByTestId("secret-detail-button"));
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-	});
-
-	it("keeps no inspect data in the React Query cache after the view closes", async () => {
-		mockSecrets([secretFixture({ updatedAt: "2026-08-21T10:00:00Z" })]);
-		mockInspect(secretFixture({ updatedAt: "2026-08-21T10:00:00Z" }));
-		const { queryClient } = renderSecretList();
-
-		await openDetail();
-		expect(
-			queryClient.getQueryData(secretQueryKey("m-1", "db-password")),
-		).toBeTruthy();
-
-		await userEvent.click(screen.getByRole("button", { name: /close/i }));
-		await waitFor(() => {
-			expect(
-				queryClient.getQueryData(secretQueryKey("m-1", "db-password")),
-			).toBeUndefined();
-		});
+		expect(await screen.findByTestId("modal")).toBeInTheDocument();
+		expect(screen.queryByTestId("secret-detail-page")).not.toBeInTheDocument();
+		expect(screen.getByTestId("secret-row")).toBeInTheDocument();
 	});
 });

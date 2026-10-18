@@ -102,6 +102,23 @@ func (s *NetworkService) Connect(ctx context.Context, userID, machineID, network
 	})
 }
 
+// Get returns one network's detail DTO on the specified machine,
+// mapped from podman's inspect report. A missing network surfaces as
+// 404 NETWORK_NOT_FOUND.
+func (s *NetworkService) Get(ctx context.Context, userID, machineID, networkName string) (NetworkDetailResponse, error) {
+	var detail NetworkDetailResponse
+	err := s.engines.WithEngine(ctx, userID, machineID, "networks.Get", func(e NetworkEngine) error {
+		report, err := inspectNetwork(e, networkName)
+		if err != nil {
+			return err
+		}
+
+		detail = FromNetworkInspectReport(&report)
+		return nil
+	})
+	return detail, err
+}
+
 // Inspect returns the raw podman inspect report for one network on the
 // specified machine, unmapped — the endpoint answers podman's raw
 // inspect JSON. A missing network surfaces as 404 NETWORK_NOT_FOUND.

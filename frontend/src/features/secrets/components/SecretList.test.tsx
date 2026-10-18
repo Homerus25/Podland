@@ -18,6 +18,8 @@ function mockSecrets(secrets: SecretSummary[]) {
 function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
 	return renderWithQuery(
 		<SecretList machine={machineFixture({ permission })} />,
+		// The row navigates on click, so the list renders inside a router.
+		{ router: true },
 	);
 }
 

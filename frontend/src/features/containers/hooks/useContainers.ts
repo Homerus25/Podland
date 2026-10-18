@@ -2,6 +2,7 @@ import type { CreateContainerInput } from "@features/containers/services/contain
 import {
 	createContainer,
 	deleteContainer,
+	getContainer,
 	inspectContainer,
 	listContainers,
 	startContainer,
@@ -9,6 +10,7 @@ import {
 } from "@features/containers/services/containersApi";
 import {
 	containerInspectQueryKey,
+	containerQueryKey,
 	containersQueryKey,
 } from "@shared/queries/queryKeys";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
@@ -25,13 +27,31 @@ export function useContainers(machineId: string) {
 	});
 }
 
-// The raw inspect report behind the inspect dialog. gcTime: 0 drops the
-// cache entry the moment the dialog unmounts, so every open refetches the
-// current report.
-export function useContainerInspect(machineId: string, containerId: string) {
+// The container detail view behind the detail page (spec 301): a singular
+// sub-resource keyed by the container, gcTime: 0 so every page visit
+// refetches the container's current state.
+export function useContainer(machineId: string, containerId: string) {
+	return useQuery({
+		queryKey: containerQueryKey(machineId, containerId),
+		queryFn: () => getContainer(machineId, containerId),
+		gcTime: 0,
+	});
+}
+
+// The raw inspect report behind the detail page's "Show inspect JSON"
+// reveal. gcTime: 0 drops the cache entry the moment the page unmounts, so
+// every reveal refetches the current report. The detail page passes
+// enabled: revealed so the report fetches lazily on the first "Show
+// inspect JSON" click, not on page mount.
+export function useContainerInspect(
+	machineId: string,
+	containerId: string,
+	options?: { enabled?: boolean },
+) {
 	return useQuery({
 		queryKey: containerInspectQueryKey(machineId, containerId),
 		queryFn: () => inspectContainer(machineId, containerId),
+		enabled: options?.enabled ?? true,
 		gcTime: 0,
 	});
 }

@@ -1,13 +1,22 @@
 import { VolumeList } from "@features/volumes/components/VolumeList";
 import type { VolumeSummary } from "@features/volumes/services/volumesApi";
-import { screen, waitFor, within } from "@testing-library/react";
+import { downloadFile } from "@shared/utils/download";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { describe, expect, it } from "vitest";
-import { errorResponse } from "@/test/errors";
+import { useLocation } from "react-router-dom";
+import { describe, expect, it, vi } from "vitest";
 import { machineFixture, volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
+
+// The export button's download is mocked: the stopPropagation test only
+// needs to verify the row click does not fire, not the download itself
+// (the export flow has its own suite in VolumeList.export.test.tsx).
+vi.mock("@shared/utils/download", () => ({
+	downloadFile: vi.fn().mockResolvedValue(undefined),
+}));
+const mockedDownload = vi.mocked(downloadFile);
 
 function mockVolumes(volumes: VolumeSummary[]) {
 	server.use(
@@ -15,11 +24,20 @@ function mockVolumes(volumes: VolumeSummary[]) {
 	);
 }
 
+function LocationProbe() {
+	const location = useLocation();
+	return <div data-testid="location">{location.pathname}</div>;
+}
+
 function renderVolumeList(
 	permission: "read" | "write" | "admin" = "admin" as const,
 ) {
 	return renderWithQuery(
-		<VolumeList machine={machineFixture({ permission })} />,
+		<>
+			<LocationProbe />
+			<VolumeList machine={machineFixture({ permission })} />
+		</>,
+		{ chakra: true, router: { initialEntries: ["/machines/m-1"] } },
 	);
 }
 
@@ -74,49 +92,60 @@ describe("VolumeList", () => {
 		expect(screen.getByTestId("prune-volumes-button")).toBeInTheDocument();
 	});
 
-	it("opens the inspect drawer when a row is clicked", async () => {
+	it("navigates to the volume's detail page when a row is clicked", async () => {
 		mockVolumes([volumeFixture()]);
-		server.use(
-			http.get("*/api/machines/m-1/volumes/app-data", () =>
-				HttpResponse.json(volumeFixture({ labels: { team: "platform" } })),
-			),
-		);
 		renderVolumeList();
 
 		const user = userEvent.setup();
 		await user.click(await screen.findByTestId("volume-row"));
 
-		const content = await screen.findByTestId("volume-drawer-content");
-		expect(content).toHaveTextContent("app-data");
-		expect(screen.getByTestId("volume-drawer-labels")).toHaveTextContent(
-			"platform",
+		expect(screen.getByTestId("location").textContent).toBe(
+			"/machines/m-1/volumes/app-data",
 		);
 	});
 
-	it("removes a deleted row from the list after a stale 404 inspect", async () => {
+	it("keeps the row's action buttons from triggering the navigation", async () => {
 		mockVolumes([volumeFixture()]);
-		let listCount = 0;
+		// The machines endpoint for the move/copy dialog's target list.
 		server.use(
-			http.get("*/api/machines/m-1/volumes", () => {
-				listCount += 1;
-				return HttpResponse.json(listCount > 1 ? [] : [volumeFixture()]);
-			}),
-			http.get("*/api/machines/m-1/volumes/app-data", () =>
-				errorResponse(404, "VOLUME_NOT_FOUND", "Volume not found", "r-1"),
-			),
+			http.get("*/api/machines", () => HttpResponse.json([machineFixture()])),
 		);
 		renderVolumeList();
 
 		const user = userEvent.setup();
-		await user.click(await screen.findByTestId("volume-row"));
+		const row = await screen.findByTestId("volume-row");
 
-		expect(
-			await screen.findByTestId("volume-drawer-not-found"),
-		).toHaveTextContent(/no longer exists/i);
-		await waitFor(() =>
-			expect(screen.queryByTestId("volume-row")).not.toBeInTheDocument(),
+		// Export — fires the download, not the row navigation.
+		await user.click(
+			within(row).getByRole("button", { name: "Export app-data" }),
 		);
-		expect(screen.getByTestId("volumes-empty")).toBeInTheDocument();
+		expect(mockedDownload).toHaveBeenCalledTimes(1);
+		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+
+		// Populate — opens the populate dialog, not the detail page.
+		await user.click(
+			within(row).getByRole("button", { name: "Populate app-data" }),
+		);
+		expect(
+			await screen.findByTestId("confirm-populate-button"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+		// Move/Copy — opens the transfer dialog, not the detail page.
+		await user.click(within(row).getByTestId("move-volume-button"));
+		expect(await screen.findByText(/move or copy/i)).toBeInTheDocument();
+		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+		await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+		// Delete — opens the confirm dialog, not the detail page.
+		await user.click(
+			within(row).getByRole("button", { name: "Delete app-data" }),
+		);
+		expect(
+			await screen.findByTestId("confirm-delete-button"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
 	});
 
 	it("sorts rows when a column header is clicked", async () => {

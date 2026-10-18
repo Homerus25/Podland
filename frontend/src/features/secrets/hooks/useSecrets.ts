@@ -55,11 +55,17 @@ export function useSecret(machineId: string, secretId: string) {
 
 // The raw inspect report behind the inspect dialog. gcTime: 0 drops the
 // cache entry the moment the dialog unmounts, so every open refetches the
-// current report.
-export function useSecretInspect(machineId: string, secretId: string) {
+// current report. The detail page passes enabled: revealed so the report
+// fetches lazily on the first "Show inspect JSON" click, not on page mount.
+export function useSecretInspect(
+	machineId: string,
+	secretId: string,
+	options?: { enabled?: boolean },
+) {
 	return useQuery({
 		queryKey: secretInspectQueryKey(machineId, secretId),
 		queryFn: () => inspectSecret(machineId, secretId),
+		enabled: options?.enabled ?? true,
 		gcTime: 0,
 	});
 }

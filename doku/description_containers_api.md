@@ -24,7 +24,7 @@ List all containers on a machine.
     "name": "string",
     "state": "created|running|paused|stopped|removing|exited|dead",
     "image": "string",
-    "imageID": "string",
+    "imageId": "string",
     "command": "string[]",
     "createdAt": "ISO8601 timestamp",
     "portBindings": [
@@ -100,7 +100,7 @@ Create a new container on a machine.
   "name": "string",
   "state": "created|running",
   "image": "string",
-  "imageID": "string",
+  "imageId": "string",
   "createdAt": "ISO8601 timestamp"
 }
 ```
@@ -128,8 +128,9 @@ Get details of a specific container.
   "name": "string",
   "state": "created|running|paused|stopped|removing|exited|dead",
   "image": "string",
-  "imageID": "string",
+  "imageId": "string",
   "command": "string[]",
+  "entrypoint": ["string"],
   "createdAt": "ISO8601 timestamp",
   "startedAt": "ISO8601 timestamp (optional)",
   "finishedAt": "ISO8601 timestamp (optional)",
@@ -141,26 +142,51 @@ Get details of a specific container.
       "protocol": "tcp|udp"
     }
   ],
-  "mounts": [
+  "mounts": ["string"],
+  "secrets": [
     {
+      "name": "string",
+      "uid": integer,
+      "gid": integer,
+      "mode": integer
+    }
+  ],
+  "volumes": [
+    {
+      "name": "string",
       "source": "string",
       "destination": "string",
-      "mode": "ro|rw"
+      "rw": boolean
+    }
+  ],
+  "exposedPorts": [
+    {
+      "containerPort": integer,
+      "protocol": "tcp|udp"
     }
   ],
   "environment": { "key": "value" },
   "labels": { "key": "value" },
-  "networks": [
-    {
-      "name": "string",
-      "ipAddress": "string",
-      "macAddress": "string"
-    }
-  ],
+  "networks": ["string"],
   "logPath": "string",
   "config": { ... }
 }
 ```
+
+The `entrypoint`, `secrets`, `volumes`, `exposedPorts`, `mounts`, and
+`networks` fields are optional (omitted when empty). `entrypoint` comes
+from the inspect report's `Config.Entrypoint`; `secrets` from
+`Config.Secrets` (the secrets mounted in the container); `volumes`
+lists the named volume mounts filtered from the inspect report's
+`Mounts` (only entries of type `volume`); `exposedPorts` comes from
+`Config.ExposedPorts`, sorted by container port; `mounts` lists every
+mount from the inspect report's `Mounts` as `--mount`-style strings
+(`type=<type>,source=<source>,destination=<destination>` — named volumes
+and binds alike, in report order; the mount's `rw` flag is not included in
+these display strings — use the structured `volumes` entries for read-write
+state); `networks` lists the names of the networks the container is
+attached to (the keys of the inspect report's `NetworkSettings.Networks`),
+sorted by name.
 
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`

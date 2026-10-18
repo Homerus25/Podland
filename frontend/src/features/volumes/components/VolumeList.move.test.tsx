@@ -110,7 +110,10 @@ async function openMoveDialog(
 		previewHandler(previewOverrides),
 		moveStreamHandler([completeEvent(volumeMoveResultFixture())]),
 	);
-	renderWithQuery(<VolumeList machine={source} />, { chakra: true });
+	renderWithQuery(<VolumeList machine={source} />, {
+		chakra: true,
+		router: true,
+	});
 	const user = userEvent.setup();
 	await user.click(
 		await screen.findByRole("button", { name: "Move or copy app-data" }),
@@ -140,7 +143,7 @@ describe("VolumeList move/copy", () => {
 			<VolumeList
 				machine={machineFixture({ permission: "read", isOwner: false })}
 			/>,
-			{ chakra: true },
+			{ chakra: true, router: true },
 		);
 
 		expect(await screen.findByTestId("volume-row")).toBeInTheDocument();
@@ -222,7 +225,10 @@ describe("VolumeList move/copy", () => {
 				() => new Promise<Response>(() => {}),
 			),
 		);
-		renderWithQuery(<VolumeList machine={source} />, { chakra: true });
+		renderWithQuery(<VolumeList machine={source} />, {
+			chakra: true,
+			router: true,
+		});
 		const user = userEvent.setup();
 		await user.click(
 			await screen.findByRole("button", { name: "Move or copy app-data" }),
@@ -245,7 +251,10 @@ describe("VolumeList move/copy", () => {
 				),
 			),
 		);
-		renderWithQuery(<VolumeList machine={source} />, { chakra: true });
+		renderWithQuery(<VolumeList machine={source} />, {
+			chakra: true,
+			router: true,
+		});
 		const user = userEvent.setup();
 		await user.click(
 			await screen.findByRole("button", { name: "Move or copy app-data" }),
@@ -334,7 +343,10 @@ describe("VolumeList move/copy", () => {
 				true,
 			),
 		);
-		renderWithQuery(<VolumeList machine={source} />, { chakra: true });
+		renderWithQuery(<VolumeList machine={source} />, {
+			chakra: true,
+			router: true,
+		});
 		const user = userEvent.setup();
 		await user.click(
 			await screen.findByRole("button", { name: "Move or copy app-data" }),

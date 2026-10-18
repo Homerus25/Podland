@@ -315,6 +315,9 @@ func New(cfg *config.Config) (*App, error) {
 						// routes are a DELETE and a GET on distinct
 						// paths, and the router routes by method+path.
 						r.With(requireWrite).Post("/prune", imageHandler.Prune)
+						// Detail DTO (list fields + inspect config), read-level
+						// like the raw inspect route below.
+						r.Get("/{imageId}", imageHandler.Get)
 						r.With(requireWrite).Delete("/{imageId}", imageHandler.Delete)
 						r.Get("/{imageId}/inspect", imageHandler.Inspect)
 					})
@@ -414,11 +417,13 @@ func New(cfg *config.Config) (*App, error) {
 						})
 					})
 
-					// Networks — the list stays at the subtree's read
-					// level; create and connect mutate remote state,
-					// so they gate at write (issue 252).
+					// Networks — the list and the detail endpoint
+					// stay at the subtree's read level; create and
+					// connect mutate remote state, so they gate at
+					// write (issue 252).
 					r.Route("/networks", func(r chi.Router) {
 						r.Get("/", networkHandler.List)
+						r.Get("/{networkName}", networkHandler.Get)
 						r.Get("/{networkName}/inspect", networkHandler.Inspect)
 						r.With(requireWrite).Post("/", networkHandler.Create)
 						r.With(requireWrite).Post("/{networkName}/connect", networkHandler.Connect)

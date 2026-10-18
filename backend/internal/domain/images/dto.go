@@ -204,6 +204,82 @@ func formatImageCreatedTime(created int64) string {
 	return time.Unix(created, 0).UTC().Format(time.RFC3339)
 }
 
+// ImageDetailResponse is the image detail API response: the list fields
+// combined with the inspect report's config fields the detail page
+// needs.
+type ImageDetailResponse struct {
+	// Unique identifier for the image
+	ID string `json:"id"`
+	// Repository tags associated with the image (nullable)
+	RepoTags []string `json:"repoTags"`
+	// Repository digests associated with the image
+	RepoDigests []string `json:"repoDigests"`
+	// Time when the image was created (RFC3339)
+	CreatedAt string `json:"createdAt"`
+	// Size of the image in bytes
+	Size int64 `json:"size"`
+	// Operating system (optional)
+	OS string `json:"os,omitempty"`
+	// Architecture (optional)
+	Architecture string `json:"architecture,omitempty"`
+	// User the image's containers run as (optional, from Config.User)
+	User string `json:"user,omitempty"`
+	// Environment variables (optional, parsed from Config.Env KEY=VALUE strings)
+	Env map[string]string `json:"env,omitempty"`
+	// Entrypoint (optional, from Config.Entrypoint)
+	Entrypoint []string `json:"entrypoint,omitempty"`
+	// Command (optional, from Config.Cmd)
+	Cmd []string `json:"cmd,omitempty"`
+	// Labels (optional, from Config.Labels)
+	Labels map[string]string `json:"labels,omitempty"`
+}
+
+// FromImageInspectReport converts a podman entities.ImageInspectReport to
+// ImageDetailResponse. A nil report (or one without its embedded
+// ImageData or Config) maps to the zero value of the missing parts.
+func FromImageInspectReport(report *entities.ImageInspectReport) ImageDetailResponse {
+	if report == nil || report.ImageData == nil {
+		return ImageDetailResponse{}
+	}
+	data := report.ImageData
+	detail := ImageDetailResponse{
+		ID:           data.ID,
+		RepoTags:     data.RepoTags,
+		RepoDigests:  data.RepoDigests,
+		Size:         data.Size,
+		OS:           data.Os,
+		Architecture: data.Architecture,
+	}
+	if data.Created != nil {
+		detail.CreatedAt = data.Created.UTC().Format(time.RFC3339)
+	}
+	if config := data.Config; config != nil {
+		detail.User = config.User
+		detail.Env = parseImageEnv(config.Env)
+		detail.Entrypoint = config.Entrypoint
+		detail.Cmd = config.Cmd
+		detail.Labels = config.Labels
+	}
+	return detail
+}
+
+// parseImageEnv converts podman's KEY=VALUE env strings to a map. The
+// first "=" splits key from value; an entry without "=" is skipped.
+func parseImageEnv(env []string) map[string]string {
+	if len(env) == 0 {
+		return nil
+	}
+	parsed := make(map[string]string, len(env))
+	for _, entry := range env {
+		key, value, found := strings.Cut(entry, "=")
+		if !found {
+			continue
+		}
+		parsed[key] = value
+	}
+	return parsed
+}
+
 // ParsePlatform parses a platform string (e.g., "linux/amd64") into OS, Arch, and Variant
 func ParsePlatform(platform string) (os, arch, variant string) {
 	if platform == "" {

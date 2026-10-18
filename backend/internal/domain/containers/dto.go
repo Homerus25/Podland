@@ -1,10 +1,14 @@
 package containers
 
 import (
+	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	netTypes "go.podman.io/common/libnetwork/types"
+	libpoddefine "go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	define "go.podman.io/podman/v6/pkg/ps/define"
 )
@@ -30,6 +34,14 @@ type ContainerGetResponse struct {
 	Command []string `json:"command,omitempty"`
 	// Container arguments
 	Args []string `json:"args,omitempty"`
+	// Container entrypoint
+	Entrypoint []string `json:"entrypoint,omitempty"`
+	// Secrets mounted in the container
+	Secrets []ContainerSecretResponse `json:"secrets,omitempty"`
+	// Named volume mounts
+	Volumes []ContainerVolumeResponse `json:"volumes,omitempty"`
+	// Ports the container exposes
+	ExposedPorts []ExposedPortResponse `json:"exposedPorts,omitempty"`
 	// Container working directory
 	WorkingDir string `json:"workingDir,omitempty"`
 	// Container environment variables
@@ -64,6 +76,28 @@ type PortMappingResponse struct {
 type ContainerSizeResponse struct {
 	RootFsSize int64 `json:"rootFsSize"`
 	RwSize     int64 `json:"rwSize"`
+}
+
+// ContainerSecretResponse represents a secret mounted in the container
+type ContainerSecretResponse struct {
+	Name string `json:"name"`
+	UID  uint32 `json:"uid"`
+	GID  uint32 `json:"gid"`
+	Mode uint32 `json:"mode"`
+}
+
+// ContainerVolumeResponse represents a named volume mount of the container
+type ContainerVolumeResponse struct {
+	Name        string `json:"name"`
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	RW          bool   `json:"rw"`
+}
+
+// ExposedPortResponse represents a port the container exposes
+type ExposedPortResponse struct {
+	ContainerPort int    `json:"containerPort"`
+	Protocol      string `json:"protocol"`
 }
 
 // ContainerListResponse represents a container in the API response
@@ -205,6 +239,7 @@ func FromPodmanInspectContainer(containerReport *entities.ContainerInspectReport
 		State:     getContainerState(containerReport),
 		Status:    getContainerStatus(containerReport),
 		Image:     getContainerImage(containerReport),
+		ImageID:   getContainerImageID(containerReport),
 		CreatedAt: formatCreatedTime(containerReport),
 		Restarts:  uint(getContainerRestartCount(containerReport)),
 		Exited:    isContainerExited(containerReport),
@@ -214,6 +249,9 @@ func FromPodmanInspectContainer(containerReport *entities.ContainerInspectReport
 	if containerReport.Config != nil {
 		response.Command = containerReport.Config.Cmd
 		// Args might not be available in the Config, so we'll skip it
+		response.Entrypoint = containerReport.Config.Entrypoint
+		response.Secrets = mapContainerSecrets(containerReport.Config.Secrets)
+		response.ExposedPorts = mapExposedPorts(containerReport.Config.ExposedPorts)
 		response.WorkingDir = containerReport.Config.WorkingDir
 		response.Labels = containerReport.Config.Labels
 
@@ -228,6 +266,17 @@ func FromPodmanInspectContainer(containerReport *entities.ContainerInspectReport
 			}
 		}
 	}
+
+	// Named volume mounts, filtered from the report's mounts
+	response.Volumes = mapContainerVolumes(containerReport.Mounts)
+
+	// The detail page's mounts row lists every mount the inspect report
+	// carries — named volumes and binds alike — as --mount-style strings
+	// matching the frontend fixture format.
+	response.Mounts = mapContainerMounts(containerReport.Mounts)
+
+	// The attached networks, sorted by name for a stable response
+	response.Networks = mapContainerNetworks(containerReport.NetworkSettings)
 
 	// Skip size information for now since the field types are unclear
 
@@ -314,6 +363,136 @@ func mapContainerSize(size *define.ContainerSize) *ContainerSizeResponse {
 	}
 }
 
+// Helper function to map the secrets mounted in the container
+func mapContainerSecrets(secrets []*libpoddefine.InspectSecret) []ContainerSecretResponse {
+	if len(secrets) == 0 {
+		return nil
+	}
+	result := make([]ContainerSecretResponse, 0, len(secrets))
+	for _, secret := range secrets {
+		if secret == nil {
+			continue
+		}
+		result = append(result, ContainerSecretResponse{
+			Name: secret.Name,
+			UID:  secret.UID,
+			GID:  secret.GID,
+			Mode: secret.Mode,
+		})
+	}
+	return result
+}
+
+// Helper function to map the report's mounts down to named volume mounts
+func mapContainerVolumes(mounts []libpoddefine.InspectMount) []ContainerVolumeResponse {
+	var result []ContainerVolumeResponse
+	for _, mount := range mounts {
+		if mount.Type != "volume" {
+			continue
+		}
+		result = append(result, ContainerVolumeResponse{
+			Name:        mount.Name,
+			Source:      mount.Source,
+			Destination: mount.Destination,
+			RW:          mount.RW,
+		})
+	}
+	return result
+}
+
+// Helper function to map the report's mounts to --mount-style strings
+// ("type=…,source=…,destination=…"), the format the frontend's detail page
+// renders. Every mount is included — named volumes and binds alike — in the
+// report's order.
+func mapContainerMounts(mounts []libpoddefine.InspectMount) []string {
+	if len(mounts) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(mounts))
+	for _, mount := range mounts {
+		result = append(result, fmt.Sprintf("type=%s,source=%s,destination=%s", mount.Type, mount.Source, mount.Destination))
+	}
+	return result
+}
+
+// Helper function to map the report's attached networks to their names,
+// sorted for a stable response. Nil-safe: a report without network
+// settings maps to nil.
+func mapContainerNetworks(networkSettings *libpoddefine.InspectNetworkSettings) []string {
+	if networkSettings == nil || len(networkSettings.Networks) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(networkSettings.Networks))
+	for name := range networkSettings.Networks {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// Helper function to map the config's exposed-port set ("8080/tcp" keys)
+// to a slice sorted by container port, so the response is stable
+func mapExposedPorts(exposedPorts map[string]struct{}) []ExposedPortResponse {
+	if len(exposedPorts) == 0 {
+		return nil
+	}
+	result := make([]ExposedPortResponse, 0, len(exposedPorts))
+	for key := range exposedPorts {
+		ports, protocol, ok := parseExposedPortKey(key)
+		if !ok {
+			continue
+		}
+		for _, port := range ports {
+			result = append(result, ExposedPortResponse{
+				ContainerPort: port,
+				Protocol:      protocol,
+			})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].ContainerPort != result[j].ContainerPort {
+			return result[i].ContainerPort < result[j].ContainerPort
+		}
+		return result[i].Protocol < result[j].Protocol
+	})
+	return result
+}
+
+// parseExposedPortKey splits an exposed-port key ("8080/tcp" or
+// "2000-2002/udp") into its ports and protocol; a key without a
+// protocol defaults to tcp. A range key expands to each port in the
+// range, so no exposed port is silently dropped.
+func parseExposedPortKey(key string) ([]int, string, bool) {
+	portPart, protocol, _ := strings.Cut(key, "/")
+	if protocol == "" {
+		protocol = "tcp"
+	}
+	// A range key ("2000-2002") expands to each port in the range.
+	if start, end, ok := strings.Cut(portPart, "-"); ok {
+		startPort, err := strconv.Atoi(start)
+		if err != nil {
+			return nil, "", false
+		}
+		endPort, err := strconv.Atoi(end)
+		if err != nil {
+			return nil, "", false
+		}
+		if startPort > endPort || endPort-startPort > 1000 {
+			return nil, "", false
+		}
+		ports := make([]int, 0, endPort-startPort+1)
+		for p := startPort; p <= endPort; p++ {
+			ports = append(ports, p)
+		}
+		return ports, protocol, true
+	}
+	port, err := strconv.Atoi(portPart)
+	if err != nil {
+		return nil, "", false
+	}
+	return []int{port}, protocol, true
+}
+
 // Helper function to get container ID from report
 func getContainerID(containerReport *entities.ContainerInspectReport) string {
 	if containerReport != nil {
@@ -347,6 +526,17 @@ func getContainerRestartCount(containerReport *entities.ContainerInspectReport) 
 func getContainerImage(containerReport *entities.ContainerInspectReport) string {
 	if containerReport != nil && containerReport.Config != nil {
 		return containerReport.Config.Image
+	}
+	return ""
+}
+
+// Helper function to get the container's image ID from the report: the
+// inspect report's top-level Image field carries the image ID (sha256:…),
+// distinct from Config.Image, which carries the image name the container
+// was created from. The detail page's image cross-link targets the ID.
+func getContainerImageID(containerReport *entities.ContainerInspectReport) string {
+	if containerReport != nil {
+		return containerReport.Image
 	}
 	return ""
 }

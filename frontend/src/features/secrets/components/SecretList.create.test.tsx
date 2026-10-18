@@ -38,7 +38,10 @@ function createHandler(
 }
 
 function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
-	renderWithQuery(<SecretList machine={machineFixture({ permission })} />);
+	// The row navigates on click, so the list renders inside a router.
+	renderWithQuery(<SecretList machine={machineFixture({ permission })} />, {
+		router: true,
+	});
 }
 
 async function openCreateModal() {

@@ -2,6 +2,7 @@ import { ImageList } from "@features/images/components/ImageList";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
+import { useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { imageFixture, machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
@@ -14,7 +15,26 @@ const imagesFixture = [
 ];
 
 function renderImageList() {
-	return renderWithQuery(<ImageList machine={machineFixture()} />);
+	return renderWithQuery(<ImageList machine={machineFixture()} />, {
+		router: { initialEntries: ["/machines/m-1"] },
+	});
+}
+
+// The row click navigates, so the navigation tests observe the location
+// through the public interface: a probe reading the router's pathname.
+function LocationProbe() {
+	const location = useLocation();
+	return <div data-testid="location">{location.pathname}</div>;
+}
+
+function renderImageListWithLocationProbe() {
+	renderWithQuery(
+		<>
+			<LocationProbe />
+			<ImageList machine={machineFixture()} />
+		</>,
+		{ router: { initialEntries: ["/machines/m-1"] } },
+	);
 }
 
 describe("ImageList", () => {
@@ -129,6 +149,46 @@ describe("ImageList", () => {
 		const rows = screen.getAllByTestId("image-row");
 		expect(within(rows[0]).getByText("apple:latest")).toBeInTheDocument();
 		expect(within(rows[1]).getByText("zebra:latest")).toBeInTheDocument();
+	});
+
+	it("navigates to the image's detail page when a row is clicked", async () => {
+		server.use(
+			http.get("*/api/machines/m-1/images", () =>
+				HttpResponse.json(imagesFixture),
+			),
+		);
+		renderImageListWithLocationProbe();
+		const user = userEvent.setup();
+
+		await user.click(await screen.findByTestId("image-row"));
+
+		expect(screen.getByTestId("location").textContent).toBe(
+			`/machines/m-1/images/${encodeURIComponent(imagesFixture[0].id)}`,
+		);
+		expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
+	});
+
+	it("does not navigate when the row's delete button is clicked", async () => {
+		server.use(
+			http.get("*/api/machines/m-1/images", () =>
+				HttpResponse.json(imagesFixture),
+			),
+		);
+		renderImageListWithLocationProbe();
+		const user = userEvent.setup();
+
+		const row = await screen.findByTestId("image-row");
+		await user.click(
+			within(row).getByRole("button", {
+				name: "Delete docker.io/library/nginx:1.27",
+			}),
+		);
+
+		// The delete confirm opens, not a navigation.
+		expect(
+			await screen.findByTestId("confirm-delete-button"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
 	});
 });
 

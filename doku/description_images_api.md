@@ -173,6 +173,44 @@ Remove an image from a machine.
 
 ---
 
+### GET /api/machines/{id}/images/{imageId}
+
+Get one image's detail on a machine: the list fields combined with the inspect report's config fields.
+
+**Authentication:** Required
+
+**Permission:** `read` (any grantee of the machine)
+
+**Response (Success - 200):**
+```json
+{
+  "id": "sha256:abc123...",
+  "repoTags": ["nginx:latest"],
+  "repoDigests": ["nginx@sha256:..."],
+  "createdAt": "RFC3339 timestamp",
+  "size": 102400000,
+  "os": "string (optional)",
+  "architecture": "string (optional)",
+  "user": "string (optional)",
+  "env": { "KEY": "value" } (optional),
+  "entrypoint": ["string"] (optional),
+  "cmd": ["string"] (optional),
+  "labels": { "key": "value" } (optional)
+}
+```
+
+`repoTags` is nullable (an untagged image answers `null`). `env` is parsed from the inspect report's `KEY=VALUE` strings; `user`, `entrypoint`, `cmd`, and `labels` come from the report's `Config`.
+
+**Response (Error):**
+- 400: `MISSING_IMAGE_ID`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
 ### GET /api/machines/{id}/images/{imageId}/inspect
 
 Inspect one image on a machine. The response is the raw podman inspect report as the top-level JSON body — no curated DTO; the field names are podman's own.

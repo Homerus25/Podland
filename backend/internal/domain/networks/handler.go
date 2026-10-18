@@ -74,6 +74,22 @@ func (h *NetworkHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Get handles returning one network's detail DTO on a machine. Route-level
+// RequireMachineAccess (app.go) gates the subtree at read; the endpoint
+// envelope owns extraction, error mapping, and encoding. The DTO is
+// mapped from podman's inspect report: name, id, driver, createdAt,
+// subnets, and the attached containers.
+func (h *NetworkHandler) Get(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (NetworkDetailResponse, error) {
+		networkName, guard := web.URLParam(r, "networkName", "MISSING_NETWORK_NAME")
+		if guard != nil {
+			return NetworkDetailResponse{}, guard
+		}
+
+		return h.service.Get(ctx, userID, machineID, networkName)
+	})
+}
+
 // Inspect handles returning one network's raw podman inspect report on
 // a machine. Route-level RequireMachineAccess (app.go) gates the
 // subtree at read; the endpoint envelope owns extraction, error

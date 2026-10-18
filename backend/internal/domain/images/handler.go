@@ -128,6 +128,20 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Get handles returning one image's detail DTO: the list fields
+// combined with the inspect report's config fields. Read level (app.go
+// mounts it without requireWrite).
+func (h *ImageHandler) Get(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ImageDetailResponse, error) {
+		imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
+		if guard != nil {
+			return ImageDetailResponse{}, guard
+		}
+
+		return h.service.Get(ctx, userID, machineID, imageID)
+	})
+}
+
 // Inspect handles returning the raw podman inspect report for one image.
 // Read level (app.go mounts it without requireWrite); the report crosses
 // the envelope as-is — no DTO mapping.

@@ -64,7 +64,9 @@ function createHandler(status = 201, body?: JsonBodyType) {
 }
 
 async function openCreateDialog() {
-	renderWithQuery(<NetworkList machine={machineFixture()} />);
+	renderWithQuery(<NetworkList machine={machineFixture()} />, {
+		router: true,
+	});
 	await screen.findByTestId("network-row");
 	const user = userEvent.setup();
 	await user.click(screen.getByTestId("create-network-button"));
@@ -166,6 +168,7 @@ describe("NetworkList create", () => {
 		});
 		renderWithQuery(<NetworkList machine={machineFixture()} />, {
 			queryClient,
+			router: true,
 		});
 		await screen.findByTestId("network-row");
 		const user = userEvent.setup();

@@ -1,3 +1,8 @@
+import { ContainerDetailPage } from "@features/containers/components/ContainerDetailPage";
+import { ImageDetailPage } from "@features/images/components/ImageDetailPage";
+import { NetworkDetailPage } from "@features/networks/components/NetworkDetailPage";
+import { SecretDetailPage } from "@features/secrets/components/SecretDetailPage";
+import { VolumeDetailPage } from "@features/volumes/components/VolumeDetailPage";
 import { AdminRoute } from "@shared/components/AdminRoute";
 import { Layout } from "@shared/components/Layout";
 import { ProtectedRoute } from "@shared/components/ProtectedRoute";
@@ -27,6 +32,26 @@ export function App() {
 				<Route index element={<DashboardPage />} />
 				<Route path="machines" element={<MachinesPage />} />
 				<Route path="machines/:machineId" element={<MachineDetailPage />} />
+				<Route
+					path="machines/:machineId/containers/:containerId"
+					element={<ContainerDetailPage />}
+				/>
+				<Route
+					path="machines/:machineId/volumes/:volumeName"
+					element={<VolumeDetailPage />}
+				/>
+				<Route
+					path="machines/:machineId/images/:imageId"
+					element={<ImageDetailPage />}
+				/>
+				<Route
+					path="machines/:machineId/networks/:networkName"
+					element={<NetworkDetailPage />}
+				/>
+				<Route
+					path="machines/:machineId/secrets/:secretId"
+					element={<SecretDetailPage />}
+				/>
 				<Route path={LOG_ROUTE_PATTERN} element={<LogsPage />} />
 				<Route
 					path="users"

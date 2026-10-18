@@ -22,6 +22,43 @@ export async function listNetworks(
 	return response.data;
 }
 
+// One attached container on the network detail DTO
+// (backend/internal/domain/networks/dto.go NetworkContainerRef): the
+// container's ID (the inspect report's Containers map key) and name.
+export interface NetworkContainerRef {
+	id: string;
+	name: string;
+}
+
+// Network as returned by GET /api/machines/{id}/networks/{networkName}
+// (backend/internal/domain/networks/dto.go NetworkDetailResponse): the
+// fields the network detail page renders, mapped from the inspect report.
+export interface NetworkDetail {
+	name: string;
+	// Network ID from the inspect report
+	id: string;
+	// Network driver (bridge, macvlan, host, …)
+	driver: string;
+	// RFC3339 creation timestamp
+	createdAt: string;
+	// Subnets in CIDR form; always present, [] when the network has none
+	subnets: string[];
+	// Attached containers (id + name); always present, [] when none
+	containers: NetworkContainerRef[];
+}
+
+// GET /api/machines/{id}/networks/{networkName} -> 200 with the detail DTO
+// (backend/internal/domain/networks handler Get).
+export async function getNetwork(
+	machineId: string,
+	networkName: string,
+): Promise<NetworkDetail> {
+	const response = await api.get<NetworkDetail>(
+		machineApiPath(machineId, "networks", networkName),
+	);
+	return response.data;
+}
+
 // GET /api/machines/{id}/networks/{networkName}/inspect -> 200 with the
 // raw podman inspect report as the top-level body. The report is deliberately
 // untyped on the client: no DTO is invented for it.

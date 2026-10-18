@@ -42,8 +42,10 @@ describe("useVolume", () => {
 		);
 	});
 
-	it("does not fetch when no volume is selected", () => {
-		const { result } = renderHookWithQuery(() => useVolume("m-1", null));
+	it("does not fetch when disabled", () => {
+		const { result } = renderHookWithQuery(() =>
+			useVolume("m-1", "app-data", { enabled: false }),
+		);
 		expect(result.current.isPending).toBe(true);
 		expect(result.current.fetchStatus).toBe("idle");
 	});

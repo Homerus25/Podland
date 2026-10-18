@@ -32,7 +32,9 @@ function mockLists() {
 describe("NetworkList connect", () => {
 	it("opens the connect dialog from the row button with the network fixed", async () => {
 		server.use(...mockLists());
-		renderWithQuery(<NetworkList machine={machineFixture()} />);
+		renderWithQuery(<NetworkList machine={machineFixture()} />, {
+			router: true,
+		});
 		const row = await screen.findByTestId("network-row");
 		const user = userEvent.setup();
 		await user.click(
@@ -51,6 +53,7 @@ describe("NetworkList connect", () => {
 			<NetworkList
 				machine={machineFixture({ permission: "read", isOwner: false })}
 			/>,
+			{ router: true },
 		);
 
 		const row = await screen.findByTestId("network-row");

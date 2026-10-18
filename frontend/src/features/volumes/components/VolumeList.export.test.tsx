@@ -52,6 +52,7 @@ function installHandlers(
 function renderVolumeList(permission: "read" | "write" | "admin" = "read") {
 	renderWithQuery(<VolumeList machine={machineFixture({ permission })} />, {
 		chakra: true,
+		router: true,
 	});
 }
 

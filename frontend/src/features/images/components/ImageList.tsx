@@ -1,5 +1,4 @@
 import { Box, Button, Td, Text, Tr } from "@chakra-ui/react";
-import { InspectImageDialog } from "@features/images/components/InspectImageDialog";
 import { displayTags } from "@features/images/components/imageDisplayTags";
 import { PullImageForm } from "@features/images/components/PullImageForm";
 import {
@@ -13,6 +12,7 @@ import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
+import { detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import {
@@ -21,6 +21,7 @@ import {
 	shortImageId,
 } from "@shared/utils/format";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 const USED_BY_CONTAINERS_CODE = "IMAGE_USED_BY_CONTAINERS";
 
@@ -130,11 +131,9 @@ export function ImageList({ machine }: { machine: Machine }) {
 	const deleteImage = useDeleteImage(machineId);
 	const pruneImages = usePruneImages(machineId);
 	const [pendingDelete, setPendingDelete] = useState<ImageSummary | null>(null);
-	const [pendingInspect, setPendingInspect] = useState<ImageSummary | null>(
-		null,
-	);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const canManage = can(machine, "manage-images");
+	const navigate = useNavigate();
 
 	return (
 		<>
@@ -151,14 +150,14 @@ export function ImageList({ machine }: { machine: Machine }) {
 					{},
 				]}
 				renderRow={(image) => (
-					// The row is clickable: it opens the image's inspect dialog,
-					// and the delete button stops propagation so a button click
-					// never also fires the row action.
+					// The row is clickable: it navigates to the image's detail
+					// page, and the delete button stops propagation so a button
+					// click never also fires the row action.
 					<Tr
 						key={image.id}
 						data-testid="image-row"
 						cursor="pointer"
-						onClick={() => setPendingInspect(image)}
+						onClick={() => navigate(detailPath(machineId, "images", image.id))}
 					>
 						<Td fontFamily="mono">{displayTags(image)}</Td>
 						<Td fontFamily="mono" color="gray.500">
@@ -212,13 +211,6 @@ export function ImageList({ machine }: { machine: Machine }) {
 					image={pendingDelete}
 					onClose={() => setPendingDelete(null)}
 					deleteImage={deleteImage}
-				/>
-			) : null}
-			{pendingInspect ? (
-				<InspectImageDialog
-					machineId={machineId}
-					image={pendingInspect}
-					onClose={() => setPendingInspect(null)}
 				/>
 			) : null}
 		</>
