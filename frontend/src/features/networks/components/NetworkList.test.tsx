@@ -3,6 +3,7 @@ import type { NetworkSummary } from "@features/networks/services/networksApi";
 import { networksQueryKey } from "@shared/queries/queryKeys";
 import type { Machine } from "@shared/types/api";
 import { screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorResponse } from "@/test/errors";
@@ -159,5 +160,19 @@ describe("NetworkList", () => {
 		expect(
 			screen.queryByRole("button", { name: /connect container/i }),
 		).not.toBeInTheDocument();
+	});
+
+	it("sorts rows when a column header is clicked", async () => {
+		mockNetworks([
+			networkFixture({ name: "zebra-net" }),
+			networkFixture({ name: "apple-net" }),
+		]);
+		renderNetworkList();
+		await screen.findAllByTestId("network-row");
+		const user = userEvent.setup();
+		await user.click(screen.getByTestId("sort-network-0"));
+		const rows = screen.getAllByTestId("network-row");
+		expect(within(rows[0]).getByText("apple-net")).toBeInTheDocument();
+		expect(within(rows[1]).getByText("zebra-net")).toBeInTheDocument();
 	});
 });

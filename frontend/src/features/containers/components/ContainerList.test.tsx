@@ -3,6 +3,7 @@ import type { ContainerSummary } from "@features/containers/services/containersA
 import { containersQueryKey } from "@shared/queries/queryKeys";
 import type { Machine, MachinePermission } from "@shared/types/api";
 import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { containerFixture, machineFixture } from "@/test/factories";
@@ -172,5 +173,19 @@ describe("ContainerList", () => {
 
 		expect(screen.getByTestId("containers-loading")).toBeInTheDocument();
 		expect(screen.getByTestId("create-container-button")).toBeInTheDocument();
+	});
+
+	it("sorts rows when a column header is clicked", async () => {
+		mockContainers([
+			containerFixture({ id: "z-1", names: ["/zebra"] }),
+			containerFixture({ id: "a-1", names: ["/apple"] }),
+		]);
+		renderContainerList();
+		await screen.findAllByTestId("container-row");
+		const user = userEvent.setup();
+		await user.click(screen.getByTestId("sort-container-0"));
+		const rows = screen.getAllByTestId("container-row");
+		expect(within(rows[0]).getByText("apple")).toBeInTheDocument();
+		expect(within(rows[1]).getByText("zebra")).toBeInTheDocument();
 	});
 });

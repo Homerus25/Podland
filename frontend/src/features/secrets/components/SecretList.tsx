@@ -135,9 +135,9 @@ export function SecretList({ machine }: { machine: Machine }) {
 				error={error}
 				items={secrets}
 				columns={[
-					{ label: "Name" },
-					{ label: "Driver" },
-					{ label: "Created" },
+					{ label: "Name", sortBy: (s) => s.name },
+					{ label: "Driver", sortBy: (s) => s.driver },
+					{ label: "Created", sortBy: (s) => s.createdAt },
 					...(canManage ? [{}] : []),
 				]}
 				renderRow={(secret) => (

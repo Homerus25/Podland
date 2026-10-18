@@ -261,9 +261,9 @@ export function UserList() {
 				error={error}
 				items={users}
 				columns={[
-					{ label: "Username" },
-					{ label: "Role" },
-					{ label: "Created" },
+					{ label: "Username", sortBy: (u) => u.username },
+					{ label: "Role", sortBy: (u) => u.role ?? "—" },
+					{ label: "Created", sortBy: (u) => u.createdAt ?? "—" },
 					{},
 				]}
 				emptyMessage="No users yet."

@@ -1,5 +1,6 @@
 import { ImageList } from "@features/images/components/ImageList";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { imageFixture, machineFixture } from "@/test/factories";
@@ -107,6 +108,27 @@ describe("ImageList", () => {
 		expect(empty.textContent).toMatch(/pull one to get started/i);
 		expect(screen.getByTestId("pull-image-form")).toBeInTheDocument();
 		expect(screen.queryByTestId("image-row")).not.toBeInTheDocument();
+	});
+
+	it("sorts rows when a column header is clicked", async () => {
+		server.use(
+			http.get("*/api/machines/m-1/images", () =>
+				HttpResponse.json([
+					imageFixture({ repoTags: ["zebra:latest"] }),
+					imageFixture({
+						id: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+						repoTags: ["apple:latest"],
+					}),
+				]),
+			),
+		);
+		renderImageList();
+		await screen.findAllByTestId("image-row");
+		const user = userEvent.setup();
+		await user.click(screen.getByTestId("sort-image-0"));
+		const rows = screen.getAllByTestId("image-row");
+		expect(within(rows[0]).getByText("apple:latest")).toBeInTheDocument();
+		expect(within(rows[1]).getByText("zebra:latest")).toBeInTheDocument();
 	});
 });
 

@@ -112,9 +112,9 @@ export function QuadletList({ machine }: { machine: Machine }) {
 				error={error}
 				items={quadlets}
 				columns={[
-					{ label: "Name" },
-					{ label: "Resource" },
-					{ label: "State" },
+					{ label: "Name", sortBy: (q) => q.name },
+					{ label: "Resource", sortBy: (q) => q.resource },
+					{ label: "State", sortBy: (q) => q.state },
 					{},
 					{},
 					// The move/copy column exists only when the rows can offer the

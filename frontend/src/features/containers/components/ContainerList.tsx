@@ -191,9 +191,9 @@ export function ContainerList({ machine }: { machine: Machine }) {
 				error={error}
 				items={containers}
 				columns={[
-					{ label: "Name" },
-					{ label: "Image" },
-					{ label: "State" },
+					{ label: "Name", sortBy: (c) => containerDisplayName(c) },
+					{ label: "Image", sortBy: (c) => c.image },
+					{ label: "State", sortBy: (c) => c.state },
 					{},
 					...(canManage ? [{}] : []),
 				]}

@@ -198,6 +198,39 @@ describe("users list", () => {
 		expect(within(bobRow).getByTestId("user-role")).toHaveTextContent("user");
 		expect(within(bobRow).getAllByRole("cell")).toHaveLength(4);
 	});
+
+	it("sorts rows when a column header is clicked", async () => {
+		server.use(
+			http.get("*/api/users", () =>
+				HttpResponse.json([
+					userFixture({
+						id: "u-1",
+						username: "zoe",
+						role: "user",
+						createdAt: "2026-08-20T10:00:00Z",
+					}),
+					userFixture({
+						id: "u-2",
+						username: "alice",
+						role: "admin",
+						createdAt: "2026-09-20T10:00:00Z",
+					}),
+				]),
+			),
+		);
+		renderUsersApp("/users");
+		await screen.findByTestId("users-table");
+
+		// Server order: zoe first. The first click on a column sorts asc.
+		let rows = screen.getAllByTestId(/^user-row-/);
+		expect(within(rows[0]).getByText("zoe")).toBeInTheDocument();
+		expect(within(rows[1]).getByText("alice")).toBeInTheDocument();
+
+		await userEvent.click(screen.getByTestId("sort-user-0"));
+		rows = screen.getAllByTestId(/^user-row-/);
+		expect(within(rows[0]).getByText("alice")).toBeInTheDocument();
+		expect(within(rows[1]).getByText("zoe")).toBeInTheDocument();
+	});
 });
 
 describe("add-user dialog", () => {

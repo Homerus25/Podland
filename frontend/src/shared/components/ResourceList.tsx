@@ -9,11 +9,12 @@ import {
 } from "@chakra-ui/react";
 import { PermissionHint } from "@shared/components/PermissionHint";
 import { ResourceStates } from "@shared/components/ResourceStates";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 
-export type ResourceListColumn = {
+export type ResourceListColumn<T> = {
 	label?: string;
 	isNumeric?: boolean;
+	sortBy?: (item: T) => string | number;
 };
 
 // One owner for the machinery every feature list hand-rolled: the
@@ -27,7 +28,11 @@ export type ResourceListColumn = {
 // that is itself clickable keeps its onClick in the feature's row, and the
 // action buttons inside such a row are responsible for stopPropagation so a
 // button click does not also fire the row action. With `canManage` undefined
-// the list is ungated: toolbar always, no hint ever.
+// the list is ungated: toolbar always, no hint ever. Column sorting rides the
+// same ownership: a column declares an optional `sortBy` accessor, and the
+// three-state header cycle (asc, desc, back to server order) is
+// component-local state here — no default sort, and the state dies with the
+// list.
 export function ResourceList<T>({
 	resource,
 	isPending,
@@ -43,13 +48,46 @@ export function ResourceList<T>({
 	isPending: boolean;
 	error: unknown;
 	items: T[] | undefined;
-	columns: ResourceListColumn[];
+	columns: ResourceListColumn<T>[];
 	renderRow: (item: T) => ReactNode;
 	toolbar?: ReactNode;
 	canManage?: boolean;
 	emptyMessage?: string;
 }) {
 	const plural = `${resource}s`;
+	const [sort, setSort] = useState<{
+		columnIndex: number;
+		direction: "asc" | "desc";
+	} | null>(null);
+
+	let sortedItems = items;
+	if (sort && items) {
+		const accessor = columns[sort.columnIndex]?.sortBy;
+		if (accessor) {
+			const direction = sort.direction === "asc" ? 1 : -1;
+			sortedItems = [...items].sort((a, b) => {
+				const keyA = accessor(a);
+				const keyB = accessor(b);
+				const comparison =
+					typeof keyA === "number" && typeof keyB === "number"
+						? keyA - keyB
+						: String(keyA).localeCompare(String(keyB));
+				return comparison * direction;
+			});
+		}
+	}
+
+	const handleSortClick = (columnIndex: number) => {
+		setSort((current) => {
+			if (!current || current.columnIndex !== columnIndex) {
+				return { columnIndex, direction: "asc" };
+			}
+			if (current.direction === "asc") {
+				return { columnIndex, direction: "desc" };
+			}
+			return null;
+		});
+	};
 
 	return (
 		<>
@@ -78,15 +116,41 @@ export function ResourceList<T>({
 					<Table data-testid={`${plural}-table`} variant="simple">
 						<Thead>
 							<Tr>
-								{columns.map((column, index) => (
-									// biome-ignore lint/suspicious/noArrayIndexKey: static columns are never reordered; position is their identity
-									<Th key={index} isNumeric={column.isNumeric}>
-										{column.label}
-									</Th>
-								))}
+								{columns.map((column, index) => {
+									const isSortable = column.sortBy !== undefined;
+									const isActiveSort = sort?.columnIndex === index;
+									return (
+										<Th
+											// biome-ignore lint/suspicious/noArrayIndexKey: static columns are never reordered; position is their identity
+											key={index}
+											isNumeric={column.isNumeric}
+											cursor={isSortable ? "pointer" : undefined}
+											data-testid={
+												isSortable ? `sort-${resource}-${index}` : undefined
+											}
+											aria-sort={
+												isActiveSort
+													? sort?.direction === "asc"
+														? "ascending"
+														: "descending"
+													: undefined
+											}
+											onClick={
+												isSortable ? () => handleSortClick(index) : undefined
+											}
+										>
+											{column.label}
+											{isActiveSort
+												? sort?.direction === "asc"
+													? " ▲"
+													: " ▼"
+												: null}
+										</Th>
+									);
+								})}
 							</Tr>
 						</Thead>
-						<Tbody>{items?.map((item) => renderRow(item))}</Tbody>
+						<Tbody>{sortedItems?.map((item) => renderRow(item))}</Tbody>
 					</Table>
 				</TableContainer>
 			</ResourceStates>

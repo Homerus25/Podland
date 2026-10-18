@@ -118,4 +118,18 @@ describe("VolumeList", () => {
 		);
 		expect(screen.getByTestId("volumes-empty")).toBeInTheDocument();
 	});
+
+	it("sorts rows when a column header is clicked", async () => {
+		mockVolumes([
+			volumeFixture({ name: "zebra-data" }),
+			volumeFixture({ name: "apple-data" }),
+		]);
+		renderVolumeList();
+		await screen.findAllByTestId("volume-row");
+		const user = userEvent.setup();
+		await user.click(screen.getByTestId("sort-volume-0"));
+		const rows = screen.getAllByTestId("volume-row");
+		expect(within(rows[0]).getByText("apple-data")).toBeInTheDocument();
+		expect(within(rows[1]).getByText("zebra-data")).toBeInTheDocument();
+	});
 });

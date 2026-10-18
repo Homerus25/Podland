@@ -414,11 +414,19 @@ export function VolumeList({ machine }: { machine: Machine }) {
 				error={error}
 				items={volumes}
 				columns={[
-					{ label: "Name" },
-					{ label: "Type" },
-					{ label: "Driver" },
-					{ label: "Created" },
-					{ label: "Size", isNumeric: true },
+					{ label: "Name", sortBy: (v) => v.name },
+					{
+						label: "Type",
+						sortBy: (v) => (v.anonymous ? "Anonymous" : "Named"),
+					},
+					{ label: "Driver", sortBy: (v) => v.driver },
+					{ label: "Created", sortBy: (v) => v.createdAt },
+					{
+						label: "Size",
+						isNumeric: true,
+						// Unknown sizes ride the key order: last in asc, first in desc.
+						sortBy: (v) => v.size ?? Number.POSITIVE_INFINITY,
+					},
 					{},
 				]}
 				renderRow={(volume) => (

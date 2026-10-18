@@ -1,7 +1,8 @@
 import { QuadletList } from "@features/quadlets/components/QuadletList";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { quadletsQueryKey } from "@shared/queries/queryKeys";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { machineFixture, quadletFixture } from "@/test/factories";
@@ -118,5 +119,19 @@ describe("QuadletList", () => {
 
 		expect(screen.getByTestId("quadlets-loading")).toBeInTheDocument();
 		expect(screen.getByTestId("create-quadlet-button")).toBeInTheDocument();
+	});
+
+	it("sorts rows when a column header is clicked", async () => {
+		mockQuadlets([
+			quadletFixture({ id: "z-1", name: "zebra" }),
+			quadletFixture({ id: "a-1", name: "apple" }),
+		]);
+		renderQuadletList();
+		await screen.findAllByTestId("quadlet-row");
+		const user = userEvent.setup();
+		await user.click(screen.getByTestId("sort-quadlet-0"));
+		const rows = screen.getAllByTestId("quadlet-row");
+		expect(within(rows[0]).getByText("apple")).toBeInTheDocument();
+		expect(within(rows[1]).getByText("zebra")).toBeInTheDocument();
 	});
 });
