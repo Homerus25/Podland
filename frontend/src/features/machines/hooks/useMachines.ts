@@ -73,6 +73,10 @@ export function useMachineAccess(machineId: string) {
 	return useQuery({
 		queryKey: machineAccessQueryKey(machineId),
 		queryFn: () => listMachineAccess(machineId),
+		// The settings tab remounts on every activation (lazy tabs); refetch
+		// on mount so re-entering it re-reads the grants even inside the
+		// app-wide five-minute stale window.
+		refetchOnMount: "always",
 	});
 }
 

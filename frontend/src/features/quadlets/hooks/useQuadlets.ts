@@ -33,6 +33,10 @@ export function useQuadlets(machineId: string) {
 	return useQuery({
 		queryKey: quadletsQueryKey(machineId),
 		queryFn: () => listQuadlets(machineId),
+		// Lazy tabs remount the panel on every activation; refetching on
+		// mount makes each activation issue a fresh request, even inside the
+		// app-wide five-minute stale window.
+		refetchOnMount: "always",
 	});
 }
 
