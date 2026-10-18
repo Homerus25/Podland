@@ -44,6 +44,37 @@ npm install
 npm run dev
 ```
 
+## Configuration
+
+The backend reads its configuration from environment variables at startup
+(`backend/internal/config/config.go`). The `VITE_*` variables are build-time:
+Vite bakes them into the frontend bundle (see `frontend/.env.example`).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | HTTP port the server listens on |
+| `DATABASE_PATH` | `./podland.db` | SQLite database file (`/app/data/podland.db` in the container image) |
+| `JWT_PRIVATE_KEY_PATH` | `./jwt-private.pem` | Path to the RS256 private key used to sign access tokens |
+| `JWT_PUBLIC_KEY_PATH` | `./jwt-public.pem` | Path to the public key used to verify access tokens |
+| `JWT_EXPIRATION_MINUTES` | `60` | Access-token lifetime in minutes |
+| `JWT_ISSUER` | `podland` | `iss` claim written into issued tokens |
+| `SESSION_TTL_DAYS` | `30` | Days a login's refresh session stays redeemable |
+| `SSH_IDLE_TIMEOUT_SECONDS` | `900` | Idle timeout for SSH tunnels to managed machines |
+| `MAX_CONCURRENT_MACHINES` | `100` | Maximum number of concurrent machine connections |
+| `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | Timeout for the connection test when registering a machine |
+| `RATE_LIMIT_REQUESTS_PER_USER_PER_MINUTE` | `60` | Authenticated API requests allowed per minute per user |
+| `RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE` | `10` | Login/refresh requests allowed per minute per client IP |
+| `RATE_LIMIT_AUTH_FAILURE_BUDGET` | `5` | Failed password attempts allowed per window before throttling (HTTP 429) |
+| `RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES` | `15` | Credential-failure window in minutes |
+| `ALLOWED_ORIGINS` | (empty) | Comma-separated list of CORS allowed origins |
+| `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, or `error` |
+| `LOG_FORMAT` | `json` | Log output format: `json` or `text` |
+| `ENCRYPTION_KEY` | — (required) | Base64-encoded 32-byte key (AES-256-GCM) encrypting stored SSH private keys |
+| `VOLUME_UPLOAD_MAX_BYTES` | `2147483648` (2 GiB) | Maximum size of a volume populate upload |
+| `VITE_API_BASE_URL` | `/api` | Base URL the frontend uses for API calls (build-time) |
+| `VITE_APP_NAME` | `Podland` | Application name shown in the UI (build-time) |
+| `VITE_DEFAULT_THEME` | `system` | Initial color mode: `light`, `dark`, or `system` (build-time) |
+
 ## Podman Integration
 
 Podland tightly integrates with Podman: it talks to the Podman Service API
@@ -51,15 +82,6 @@ Podland tightly integrates with Podman: it talks to the Podman Service API
 using a patched fork of Podman's Go bindings —
 [github.com/Homerus25/podman](https://github.com/Homerus25/podman).
 Podman must be pre-installed on every managed machine.
-
-## License
-
-This software is licensed under a modified PolyForm Small Business License —
-see [LICENSE](LICENSE). In short:
-
-- Free to use, including commercially, as long as you manage **no more than
-  two machines** with it.
-- Managing more than two machines requires a commercial license.
 
 ## Disclaimer
 
