@@ -337,3 +337,23 @@ export function machineFixture(overrides: Partial<Machine> = {}): Machine {
 		...overrides,
 	};
 }
+
+// Raw inspect report (GET .../{resource}/{id}/inspect, spec 287): the
+// backend returns the podman report as-is, so the client type is an untyped
+// JSON object and no DTO fixture shape exists. One shared factory for the
+// raw payload, since all four inspect suites consume it; tests override the
+// fields they assert against.
+export function rawInspectFixture(
+	overrides: Partial<Record<string, unknown>> = {},
+): Record<string, unknown> {
+	return {
+		Id: "c-1",
+		Name: "/my-container",
+		State: { Status: "running", Running: true, Pid: 4242 },
+		Config: {
+			Image: "docker.io/library/nginx:1.27",
+			Labels: { app: "web" },
+		},
+		...overrides,
+	};
+}

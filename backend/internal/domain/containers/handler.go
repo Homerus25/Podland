@@ -98,6 +98,19 @@ func (h *ContainerHandler) Get(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Inspect handles returning a container's raw podman inspect report.
+// The report is the top-level JSON body — no DTO mapping, unlike Get.
+func (h *ContainerHandler) Inspect(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*entities.ContainerInspectReport, error) {
+		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		return h.service.Inspect(ctx, userID, machineID, containerID)
+	})
+}
+
 // Start handles starting a container. The service returns the
 // container's identity; the response DTO's state and timestamp are
 // stamped here, at mapping time.

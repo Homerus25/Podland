@@ -1,4 +1,6 @@
 import { Box, Button, Td, Text, Tr } from "@chakra-ui/react";
+import { InspectImageDialog } from "@features/images/components/InspectImageDialog";
+import { displayTags } from "@features/images/components/imageDisplayTags";
 import { PullImageForm } from "@features/images/components/PullImageForm";
 import {
 	useDeleteImage,
@@ -19,15 +21,6 @@ import {
 	shortImageId,
 } from "@shared/utils/format";
 import { useState } from "react";
-
-function imageTags(image: ImageSummary): string[] {
-	const tags = (image.repoTags ?? []).filter((tag) => tag !== "<none>:<none>");
-	return tags.length > 0 ? tags : ["<none>"];
-}
-
-function displayTags(image: ImageSummary): string {
-	return imageTags(image).join(", ");
-}
 
 const USED_BY_CONTAINERS_CODE = "IMAGE_USED_BY_CONTAINERS";
 
@@ -137,6 +130,9 @@ export function ImageList({ machine }: { machine: Machine }) {
 	const deleteImage = useDeleteImage(machineId);
 	const pruneImages = usePruneImages(machineId);
 	const [pendingDelete, setPendingDelete] = useState<ImageSummary | null>(null);
+	const [pendingInspect, setPendingInspect] = useState<ImageSummary | null>(
+		null,
+	);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const canManage = can(machine, "manage-images");
 
@@ -155,7 +151,15 @@ export function ImageList({ machine }: { machine: Machine }) {
 					{},
 				]}
 				renderRow={(image) => (
-					<Tr key={image.id} data-testid="image-row">
+					// The row is clickable: it opens the image's inspect dialog,
+					// and the delete button stops propagation so a button click
+					// never also fires the row action.
+					<Tr
+						key={image.id}
+						data-testid="image-row"
+						cursor="pointer"
+						onClick={() => setPendingInspect(image)}
+					>
 						<Td fontFamily="mono">{displayTags(image)}</Td>
 						<Td fontFamily="mono" color="gray.500">
 							{shortImageId(image.id)}
@@ -168,7 +172,10 @@ export function ImageList({ machine }: { machine: Machine }) {
 								colorScheme="red"
 								variant="outline"
 								aria-label={`Delete ${displayTags(image)}`}
-								onClick={() => setPendingDelete(image)}
+								onClick={(event) => {
+									event.stopPropagation();
+									setPendingDelete(image);
+								}}
 							>
 								Delete
 							</Button>
@@ -205,6 +212,13 @@ export function ImageList({ machine }: { machine: Machine }) {
 					image={pendingDelete}
 					onClose={() => setPendingDelete(null)}
 					deleteImage={deleteImage}
+				/>
+			) : null}
+			{pendingInspect ? (
+				<InspectImageDialog
+					machineId={machineId}
+					image={pendingInspect}
+					onClose={() => setPendingInspect(null)}
 				/>
 			) : null}
 		</>

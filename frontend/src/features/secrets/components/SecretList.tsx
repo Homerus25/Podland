@@ -1,6 +1,7 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
 import { can } from "@features/machines/permissions";
 import { CreateSecretDialog } from "@features/secrets/components/CreateSecretDialog";
+import { InspectSecretDialog } from "@features/secrets/components/InspectSecretDialog";
 import { MoveSecretDialog } from "@features/secrets/components/MoveSecretDialog";
 import { SecretDetailModal } from "@features/secrets/components/SecretDetailModal";
 import {
@@ -21,17 +22,23 @@ import { useState } from "react";
 // ConfirmDialog's; the failure envelopes (409 SECRET_IN_USE, 404) surface
 // through the default error region as plain envelopes, with no code-specific
 // hint. There are no delete options in v1: the backend exposes no force
-// parameter.
+// parameter. The row itself is clickable: it opens the secret's inspect
+// dialog, and every action inside it — the name link, the move/copy and
+// delete buttons — stops propagation so it never also fires the row action.
+// The name link keeps opening the detail modal (the reveal flow), so both
+// surfaces stay reachable.
 function SecretRow({
 	machine,
 	secret,
 	canDelete,
 	canMove,
+	onInspect,
 }: {
 	machine: Machine;
 	secret: SecretSummary;
 	canDelete: boolean;
 	canMove: boolean;
+	onInspect: (secret: SecretSummary) => void;
 }) {
 	const machineId = machine.id;
 	const deleteSecret = useDeleteSecret(machineId);
@@ -41,12 +48,19 @@ function SecretRow({
 
 	return (
 		<>
-			<Tr data-testid="secret-row">
+			<Tr
+				data-testid="secret-row"
+				cursor="pointer"
+				onClick={() => onInspect(secret)}
+			>
 				<Td fontFamily="mono">
 					<Button
 						size="xs"
 						variant="link"
-						onClick={() => setIsDetailOpen(true)}
+						onClick={(event) => {
+							event.stopPropagation();
+							setIsDetailOpen(true);
+						}}
 						data-testid="secret-detail-button"
 					>
 						{secret.name}
@@ -62,7 +76,10 @@ function SecretRow({
 									size="xs"
 									variant="outline"
 									aria-label={`Move or copy ${secret.name}`}
-									onClick={() => setIsMoveOpen(true)}
+									onClick={(event) => {
+										event.stopPropagation();
+										setIsMoveOpen(true);
+									}}
 									data-testid="move-secret-button"
 								>
 									Move/Copy
@@ -73,7 +90,10 @@ function SecretRow({
 								colorScheme="red"
 								variant="outline"
 								aria-label={`Delete ${secret.name}`}
-								onClick={() => setIsDeleteOpen(true)}
+								onClick={(event) => {
+									event.stopPropagation();
+									setIsDeleteOpen(true);
+								}}
 								data-testid="delete-secret-button"
 							>
 								Delete
@@ -121,6 +141,9 @@ export function SecretList({ machine }: { machine: Machine }) {
 	const { data: secrets, isPending, error } = useSecrets(machineId);
 	const createSecret = useCreateSecret(machineId);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
+	const [pendingInspect, setPendingInspect] = useState<SecretSummary | null>(
+		null,
+	);
 	const canManage = can(machine, "manage-secrets");
 	// The transfer's source gate is admin — the value leaving the machine is
 	// a reveal — so the row's Move/Copy affordance sits behind
@@ -147,6 +170,7 @@ export function SecretList({ machine }: { machine: Machine }) {
 						secret={secret}
 						canDelete={canManage}
 						canMove={canMove}
+						onInspect={setPendingInspect}
 					/>
 				)}
 				toolbar={
@@ -165,6 +189,13 @@ export function SecretList({ machine }: { machine: Machine }) {
 				<CreateSecretDialog
 					mutation={createSecret}
 					onClose={() => setIsCreateOpen(false)}
+				/>
+			) : null}
+			{pendingInspect ? (
+				<InspectSecretDialog
+					machineId={machineId}
+					secret={pendingInspect}
+					onClose={() => setPendingInspect(null)}
 				/>
 			) : null}
 		</>

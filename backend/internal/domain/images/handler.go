@@ -127,3 +127,17 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return struct{}{}, h.service.Delete(ctx, userID, machineID, imageID, force)
 	})
 }
+
+// Inspect handles returning the raw podman inspect report for one image.
+// Read level (app.go mounts it without requireWrite); the report crosses
+// the envelope as-is — no DTO mapping.
+func (h *ImageHandler) Inspect(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*entities.ImageInspectReport, error) {
+		imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		return h.service.Inspect(ctx, userID, machineID, imageID)
+	})
+}

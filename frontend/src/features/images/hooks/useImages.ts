@@ -1,9 +1,13 @@
 import {
 	deleteImage,
+	inspectImage,
 	listImages,
 	pruneImages,
 } from "@features/images/services/imagesApi";
-import { imagesQueryKey } from "@shared/queries/queryKeys";
+import {
+	imageInspectQueryKey,
+	imagesQueryKey,
+} from "@shared/queries/queryKeys";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import { useQuery } from "@tanstack/react-query";
 
@@ -11,6 +15,17 @@ export function useImages(machineId: string) {
 	return useQuery({
 		queryKey: imagesQueryKey(machineId),
 		queryFn: () => listImages(machineId),
+	});
+}
+
+// The raw inspect report behind the inspect dialog. gcTime: 0 drops the
+// cache entry the moment the dialog unmounts, so every open refetches the
+// current report.
+export function useImageInspect(machineId: string, imageId: string) {
+	return useQuery({
+		queryKey: imageInspectQueryKey(machineId, imageId),
+		queryFn: () => inspectImage(machineId, imageId),
+		gcTime: 0,
 	});
 }
 

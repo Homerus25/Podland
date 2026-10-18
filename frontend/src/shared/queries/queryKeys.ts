@@ -113,3 +113,34 @@ export function machineStatusQueryKey(id: string) {
 export function machineAccessQueryKey(id: string) {
 	return ["machines", id, "access"] as const;
 }
+
+// The raw inspect report is a container sub-resource keyed by the container,
+// so every dialog open resolves to its own entry. Never an invalidation
+// target of its own: containers-prefix invalidation covers it.
+export function containerInspectQueryKey(
+	machineId: string,
+	containerId: string,
+) {
+	return [...containersQueryKey(machineId), containerId, "inspect"] as const;
+}
+
+// The raw inspect report is a network sub-resource keyed by the network,
+// so every dialog open resolves to its own entry. Never an invalidation
+// target of its own: networks-prefix invalidation covers it.
+export function networkInspectQueryKey(machineId: string, networkName: string) {
+	return [...networksQueryKey(machineId), networkName, "inspect"] as const;
+}
+
+// The raw inspect report is an image sub-resource keyed by the image, so
+// every dialog open resolves to its own entry. Never an invalidation
+// target of its own: images-prefix invalidation covers it.
+export function imageInspectQueryKey(machineId: string, imageId: string) {
+	return [...imagesQueryKey(machineId), imageId, "inspect"] as const;
+}
+
+// The raw inspect report is a secret sub-resource keyed by the secret, so
+// every dialog open resolves to its own entry. Never an invalidation target
+// of its own: secrets-prefix invalidation covers it.
+export function secretInspectQueryKey(machineId: string, secretId: string) {
+	return [...secretsQueryKey(machineId), secretId, "inspect"] as const;
+}

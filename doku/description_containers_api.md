@@ -171,6 +171,41 @@ Get details of a specific container.
 
 ---
 
+### GET /api/machines/{id}/containers/{containerId}/inspect
+
+Get the raw podman inspect report for a specific container. The response
+body is podman's inspect report verbatim as the top-level JSON object —
+no curated DTO mapping (unlike `GET .../containers/{containerId}`).
+
+**Authentication:** Required
+
+**Permission:** `read` (any grantee of the machine)
+
+**Response (Success - 200):**
+The raw podman container inspect report as the top-level JSON body:
+```json
+{
+  "Id": "string",
+  "Name": "string",
+  "Created": "ISO8601 timestamp",
+  "Image": "string",
+  "State": { "...": "podman's InspectContainerState, verbatim" },
+  "Config": { "...": "podman's inspect config, verbatim" }
+}
+```
+The body is podman's full `ContainerInspectReport` — every field podman
+returns, unmapped.
+
+**Response (Error):**
+- 400: `MISSING_CONTAINER_ID`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
 ### POST /api/machines/{id}/containers/{containerId}/start
 
 Start a stopped container.

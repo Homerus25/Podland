@@ -5,8 +5,10 @@ import (
 	"fmt"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/inspect"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"go.podman.io/common/libnetwork/types"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // NetworkService provides business logic for networks. Networks live
@@ -98,6 +100,31 @@ func (s *NetworkService) Connect(ctx context.Context, userID, machineID, network
 		}
 		return nil
 	})
+}
+
+// Inspect returns the raw podman inspect report for one network on the
+// specified machine, unmapped — the endpoint answers podman's raw
+// inspect JSON. A missing network surfaces as 404 NETWORK_NOT_FOUND.
+func (s *NetworkService) Inspect(ctx context.Context, userID, machineID, networkName string) (entities.NetworkInspectReport, error) {
+	var report entities.NetworkInspectReport
+	err := s.engines.WithEngine(ctx, userID, machineID, "networks.Inspect", func(e NetworkEngine) error {
+		inspectReport, err := inspectNetwork(e, networkName)
+		if err != nil {
+			return err
+		}
+
+		report = inspectReport
+		return nil
+	})
+	return report, err
+}
+
+// inspectNetwork resolves one network's inspect report through the
+// shared single-report ritual, classifying podman's not-found shapes
+// into ErrNetworkNotFound.
+func inspectNetwork(e NetworkEngine, name string) (entities.NetworkInspectReport, error) {
+	reports, inspectErrs, err := e.Inspect(name)
+	return inspect.Resolve(reports, inspectErrs, err, appErrors.ErrNetworkNotFound, "network", name)
 }
 
 // mapCreateError converts podman's create rejections into app errors.

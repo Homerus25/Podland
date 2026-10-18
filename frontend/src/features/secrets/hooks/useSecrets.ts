@@ -4,11 +4,13 @@ import {
 	deleteSecret,
 	getSecret,
 	getSecretMovePreview,
+	inspectSecret,
 	listSecrets,
 	moveSecret,
 	type SecretMoveInput,
 } from "@features/secrets/services/secretsApi";
 import {
+	secretInspectQueryKey,
 	secretMovePreviewQueryKey,
 	secretQueryKey,
 	secretsQueryKey,
@@ -43,6 +45,17 @@ export function useSecret(machineId: string, secretId: string) {
 	return useQuery({
 		queryKey: secretQueryKey(machineId, secretId),
 		queryFn: () => getSecret(machineId, secretId),
+		gcTime: 0,
+	});
+}
+
+// The raw inspect report behind the inspect dialog. gcTime: 0 drops the
+// cache entry the moment the dialog unmounts, so every open refetches the
+// current report.
+export function useSecretInspect(machineId: string, secretId: string) {
+	return useQuery({
+		queryKey: secretInspectQueryKey(machineId, secretId),
+		queryFn: () => inspectSecret(machineId, secretId),
 		gcTime: 0,
 	});
 }

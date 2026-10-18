@@ -11,10 +11,11 @@ import (
 // Each test arms only the operations its scenario needs; an unarmed
 // operation panics, so an unexpected engine call fails the test loudly.
 type fakeImageEngine struct {
-	listFn   func(opts entities.ImageListOptions) ([]*entities.ImageSummary, error)
-	removeFn func(id string, force bool) (*entities.ImageRemoveReport, []error)
-	pullFn   func(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error)
-	pruneFn  func() ([]*reports.PruneReport, error)
+	listFn    func(opts entities.ImageListOptions) ([]*entities.ImageSummary, error)
+	removeFn  func(id string, force bool) (*entities.ImageRemoveReport, []error)
+	pullFn    func(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error)
+	pruneFn   func() ([]*reports.PruneReport, error)
+	inspectFn func(id string) ([]*entities.ImageInspectReport, []error, error)
 }
 
 func (f *fakeImageEngine) List(opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
@@ -43,6 +44,13 @@ func (f *fakeImageEngine) Prune() ([]*reports.PruneReport, error) {
 		panic("unexpected ImageEngine.Prune call")
 	}
 	return f.pruneFn()
+}
+
+func (f *fakeImageEngine) Inspect(id string) ([]*entities.ImageInspectReport, []error, error) {
+	if f.inspectFn == nil {
+		panic("unexpected ImageEngine.Inspect call")
+	}
+	return f.inspectFn(id)
 }
 
 // fakeEngineProvider arms the provider seam: engine is handed to the

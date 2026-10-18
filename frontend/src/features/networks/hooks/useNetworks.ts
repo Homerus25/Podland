@@ -5,10 +5,14 @@ import type {
 import {
 	connectContainer,
 	createNetwork,
+	inspectNetwork,
 	listNetworks,
 } from "@features/networks/services/networksApi";
 import type { MachineResource } from "@shared/queries/queryKeys";
-import { networksQueryKey } from "@shared/queries/queryKeys";
+import {
+	networkInspectQueryKey,
+	networksQueryKey,
+} from "@shared/queries/queryKeys";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import { useQuery } from "@tanstack/react-query";
 
@@ -16,6 +20,16 @@ export function useNetworks(machineId: string) {
 	return useQuery({
 		queryKey: networksQueryKey(machineId),
 		queryFn: () => listNetworks(machineId),
+	});
+}
+
+// The inspect dialog mounts conditionally, so the query fires on open and
+// dies on close; gcTime 0 makes every open refetch.
+export function useNetworkInspect(machineId: string, networkName: string) {
+	return useQuery({
+		queryKey: networkInspectQueryKey(machineId, networkName),
+		queryFn: () => inspectNetwork(machineId, networkName),
+		gcTime: 0,
 	});
 }
 

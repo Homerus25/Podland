@@ -99,3 +99,21 @@ Attach a container to a network on the machine. The body carries the container's
 - 404: `MACHINE_NOT_FOUND`, `NETWORK_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
+
+### GET /api/machines/{id}/networks/{networkName}/inspect
+
+Return one network's raw podman inspect report — the full network configuration podman holds (subnets, routes, IPAM options, labels, attached containers), marshaled as-is with no DTO mapping. The report is the top-level JSON body.
+
+**Authentication:** Required
+
+**Access:** Any user with a machine-access row for `{id}` (read level).
+
+**Response (Success - 200):** the raw network inspect report as the top-level JSON body — podman's `NetworkInspectReport` shape (`name`, `id`, `driver`, `created`, `subnets`, `ipv6_enabled`, `internal`, `dns_enabled`, `labels`, `options`, `ipam_options`, `containers`), not the four-field list DTO.
+
+**Response (Error):**
+- 400: `MISSING_NETWORK_NAME`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `NETWORK_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`

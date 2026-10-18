@@ -52,6 +52,19 @@ export async function deleteImage(
 	});
 }
 
+// GET /api/machines/{id}/images/{imageId}/inspect -> 200 with the raw
+// podman inspect report as the top-level body. The report is deliberately
+// untyped on the client: no DTO is invented for it.
+export async function inspectImage(
+	machineId: string,
+	imageId: string,
+): Promise<Record<string, unknown>> {
+	const response = await api.get<Record<string, unknown>>(
+		machineApiPath(machineId, "images", imageId, "inspect"),
+	);
+	return response.data;
+}
+
 export function pullStreamUrl(machineId: string): string {
 	return machineApiUrl(machineId, "images", "pull");
 }

@@ -22,6 +22,9 @@ type ImageEngine interface {
 	// Prune removes every unused image, tagged or not (the equivalent of
 	// `podman image prune -a`).
 	Prune() ([]*reports.PruneReport, error)
+	// Inspect reports podman's per-item failures through the error slice,
+	// not an error return — the service classifies them.
+	Inspect(id string) ([]*entities.ImageInspectReport, []error, error)
 }
 
 // ImageEngineProvider is the images domain's slice of the connection seam:
@@ -74,4 +77,8 @@ func (e *podmanImageEngine) Pull(rawImage string, opts entities.ImagePullOptions
 
 func (e *podmanImageEngine) Prune() ([]*reports.PruneReport, error) {
 	return e.tunnelEngine().Prune(e.ctx, entities.ImagePruneOptions{All: true})
+}
+
+func (e *podmanImageEngine) Inspect(id string) ([]*entities.ImageInspectReport, []error, error) {
+	return e.tunnelEngine().Inspect(e.ctx, []string{id}, entities.InspectOptions{})
 }

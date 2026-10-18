@@ -44,6 +44,21 @@ export async function getSecret(
 	return response.data;
 }
 
+// GET /api/machines/{id}/secrets/{secretId}/inspect -> 200 with the raw
+// podman inspect report as the top-level body. The report is deliberately
+// untyped on the client: no DTO is invented for it. Distinct from getSecret
+// above: this endpoint never carries the reveal param, so the value never
+// reaches the client through it.
+export async function inspectSecret(
+	machineId: string,
+	secretId: string,
+): Promise<Record<string, unknown>> {
+	const response = await api.get<Record<string, unknown>>(
+		machineApiPath(machineId, "secrets", secretId, "inspect"),
+	);
+	return response.data;
+}
+
 // Body of POST /api/machines/{id}/secrets
 // (backend/internal/domain/secrets/dto.go SecretCreateRequest). The backend
 // trims the name; the value must arrive byte-identical — meaningful

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/Homerus25/podland/backend/internal/web"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // NetworkHandler handles network requests
@@ -70,5 +71,21 @@ func (h *NetworkHandler) Connect(w http.ResponseWriter, r *http.Request) {
 		}
 
 		return struct{}{}, h.service.Connect(ctx, userID, machineID, networkName, request.Container)
+	})
+}
+
+// Inspect handles returning one network's raw podman inspect report on
+// a machine. Route-level RequireMachineAccess (app.go) gates the
+// subtree at read; the endpoint envelope owns extraction, error
+// mapping, and encoding. The report is returned unmapped: the body is
+// podman's raw inspect JSON.
+func (h *NetworkHandler) Inspect(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (entities.NetworkInspectReport, error) {
+		networkName, guard := web.URLParam(r, "networkName", "MISSING_NETWORK_NAME")
+		if guard != nil {
+			return entities.NetworkInspectReport{}, guard
+		}
+
+		return h.service.Inspect(ctx, userID, machineID, networkName)
 	})
 }

@@ -100,6 +100,19 @@ export async function deleteContainer(
 	await api.delete(machineApiPath(machineId, "containers", containerId));
 }
 
+// GET /api/machines/{id}/containers/{containerId}/inspect -> 200 with the
+// raw podman inspect report as the top-level body. The report is deliberately
+// untyped on the client: no DTO is invented for it.
+export async function inspectContainer(
+	machineId: string,
+	containerId: string,
+): Promise<Record<string, unknown>> {
+	const response = await api.get<Record<string, unknown>>(
+		machineApiPath(machineId, "containers", containerId, "inspect"),
+	);
+	return response.data;
+}
+
 // Log source for GET /api/machines/{machineId}/containers/{containerId}/logs:
 // the kit owns the buffered tail fetch and the follow stream
 // (backend/internal/domain/containers handler pair).

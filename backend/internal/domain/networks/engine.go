@@ -23,6 +23,9 @@ type NetworkEngine interface {
 	Create(name string) (*types.Network, error)
 	// Connect attaches a container (by ID) to a network by name.
 	Connect(networkName, containerID string) error
+	// Inspect returns podman's raw inspect reports for the named
+	// network, plus the tunnel's per-item errors.
+	Inspect(name string) ([]entities.NetworkInspectReport, []error, error)
 }
 
 // NetworkEngineProvider is the networks domain's slice of the connection
@@ -72,4 +75,8 @@ func (e *podmanNetworkEngine) Create(name string) (*types.Network, error) {
 
 func (e *podmanNetworkEngine) Connect(networkName, containerID string) error {
 	return e.tunnelEngine().NetworkConnect(e.ctx, networkName, entities.NetworkConnectOptions{Container: containerID})
+}
+
+func (e *podmanNetworkEngine) Inspect(name string) ([]entities.NetworkInspectReport, []error, error) {
+	return e.tunnelEngine().NetworkInspect(e.ctx, []string{name}, entities.InspectOptions{})
 }

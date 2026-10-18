@@ -22,6 +22,19 @@ export async function listNetworks(
 	return response.data;
 }
 
+// GET /api/machines/{id}/networks/{networkName}/inspect -> 200 with the
+// raw podman inspect report as the top-level body. The report is deliberately
+// untyped on the client: no DTO is invented for it.
+export async function inspectNetwork(
+	machineId: string,
+	networkName: string,
+): Promise<Record<string, unknown>> {
+	const response = await api.get<Record<string, unknown>>(
+		machineApiPath(machineId, "networks", networkName, "inspect"),
+	);
+	return response.data;
+}
+
 // Body of POST /api/machines/{id}/networks
 // (backend/internal/domain/networks/dto.go NetworkCreateRequest).
 export interface CreateNetworkInput {

@@ -78,6 +78,42 @@ Inspect a single secret. `{secretId}` may be the secret's name or its ID; podman
 
 ---
 
+### GET /api/machines/{id}/secrets/{secretId}/inspect
+
+Inspect a single secret and answer with podman's **raw inspect report** as the top-level JSON body (issue 287) — the entity's own field names (`ID`, `CreatedAt`, `UpdatedAt`, `Spec`), not the mapped DTO the `GET .../secrets/{secretId}` endpoint returns. `{secretId}` may be the secret's name or its ID; podman resolves both.
+
+**Redaction guarantee:** the response **never contains the secret's value**. The endpoint never passes reveal to podman (no `showsecret`), so the report's `SecretData` field is omitted entirely. There is no `?reveal=` parameter and no admin gate on this endpoint — metadata is visible to any grantee at read level. The value still reaches the client exactly twice: the create request and an admin reveal response (`GET .../secrets/{secretId}?reveal=true`).
+
+**Authentication:** Required
+
+**Permission:** `read` (any grantee of the machine)
+
+**Response (Success - 200):**
+```json
+{
+  "ID": "string (podman secret ID)",
+  "CreatedAt": "ISO8601 timestamp",
+  "UpdatedAt": "ISO8601 timestamp",
+  "Spec": {
+    "Name": "string",
+    "Driver": { "Name": "string (e.g. \"file\")", "Options": "object (or null)" },
+    "Labels": "object (or null when the secret has none)"
+  }
+}
+```
+
+`SecretData` is always omitted — the endpoint never asks podman for the value.
+
+**Response (Error):**
+- 400: `MISSING_SECRET_ID`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `SECRET_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
 ### POST /api/machines/{id}/secrets
 
 Create a secret on a machine. The value is forwarded to podman byte-identical — it is never trimmed or otherwise mutated, and leading/trailing whitespace and embedded newlines are significant.

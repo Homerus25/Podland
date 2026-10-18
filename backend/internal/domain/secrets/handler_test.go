@@ -402,6 +402,7 @@ func secretsAccessRouter(machineRepo *testutils.MockMachineRepository, accessRep
 				r.With(requireWrite).Post("/", NewSecretHandler(service).Create)
 				r.Route("/{secretId}", func(r chi.Router) {
 					r.Get("/", NewSecretHandler(service).Get)
+					r.Get("/inspect", NewSecretHandler(service).Inspect)
 					r.With(requireWrite).Delete("/", NewSecretHandler(service).Delete)
 				})
 			})

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/inspect"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -102,6 +103,23 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 func (s *ContainerService) Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
 	var report *entities.ContainerInspectReport
 	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Get", func(e ContainerEngine) error {
+		inspectReport, err := inspectContainer(e, containerID)
+		if err != nil {
+			return err
+		}
+
+		report = inspectReport
+		return nil
+	})
+	return report, err
+}
+
+// Inspect returns the container's raw podman inspect report. Unlike
+// Get, the report crosses the wire unmapped: this endpoint is the raw
+// inspect JSON window, so no DTO mapping happens here or in the handler.
+func (s *ContainerService) Inspect(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
+	var report *entities.ContainerInspectReport
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Inspect", func(e ContainerEngine) error {
 		inspectReport, err := inspectContainer(e, containerID)
 		if err != nil {
 			return err
@@ -211,39 +229,13 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 	return result, err
 }
 
-// inspectContainer resolves one container's inspect report, classifying
-// podman's not-found shapes — a top-level 404 ErrorModel or the
-// tunnel's per-item "no such container" error — into
-// ErrContainerNotFound. It is the pre-action read for Start and Stop:
-// one inspect serves existence, state, and name.
+// inspectContainer resolves one container's inspect report through the
+// shared single-report ritual, classifying podman's not-found shapes
+// into ErrContainerNotFound. It is the pre-action read for Start and
+// Stop: one inspect serves existence, state, and name.
 func inspectContainer(e ContainerEngine, containerID string) (*entities.ContainerInspectReport, error) {
 	reports, inspectErrs, err := e.Inspect(containerID)
-	if err != nil {
-		if podmanerr.IsNotFound(err) {
-			return nil, appErrors.ErrContainerNotFound
-		}
-		return nil, fmt.Errorf("failed to inspect container: %w", err)
-	}
-
-	// The tunnel's not-found answer for inspect arrives as a
-	// per-item error with zero reports.
-	for _, inspectErr := range inspectErrs {
-		if podmanerr.IsNotFound(inspectErr) {
-			return nil, appErrors.ErrContainerNotFound
-		}
-	}
-
-	if len(reports) == 0 {
-		// Zero reports with per-item errors means the inspect failed
-		// for a real cause the not-found loop above did not classify;
-		// surface it instead of dropping it behind the anomaly message.
-		if len(inspectErrs) > 0 {
-			return nil, fmt.Errorf("failed to inspect container: %w", inspectErrs[0])
-		}
-		return nil, fmt.Errorf("no inspect report returned for container: %s", containerID)
-	}
-
-	return reports[0], nil
+	return inspect.Resolve(reports, inspectErrs, err, appErrors.ErrContainerNotFound, "container", containerID)
 }
 
 // containerRunning reports the container's running state, nil-safe

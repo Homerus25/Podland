@@ -333,7 +333,7 @@ already diverged, extraction triggers even below the third copy — the
 log-stream kit (`.scratch/380-log-stream-kit`) is the precedent, where
 two timestamp parsers that disagreed on a spaceless podman line made
 the streaming path un-changeable in one place. The threshold has been
-crossed eight times and all eight extractions are now the reference: the
+crossed nine times and all nine extractions are now the reference: the
 endpoint ritual became `internal/web.Handle`, the handler-test
 scaffolding became `testutils.Perform`, the decode+validate ritual
 became `web.Decode`, podman error classification became
@@ -363,7 +363,15 @@ ErrRateLimitExceeded stays theirs). Two vocabularies deliberately stay quadlet-l
 quadlet running-refusal phrases (podman phrases that refusal outside
 its shared conflict vocabulary) and lifecycle.go's systemctl/stderr
 classification (a different transport). A second consumer for either
-earns it a place in the adapter.
+earns it a place in the adapter. The single-report inspect resolution
+ritual became `internal/inspect` (issue 287: one `Resolve` per inspect
+call site, the caller's sentinel and domain label passed in, the
+(report slice, per-item errors, transport error) triple resolved into
+one report — the classification matrix pinned once in the kit's suite,
+the domains keep their composition pins; the slice-report domains
+containers, networks, and images are its three compositions, secrets
+hand-rolls its single-report classification because its engine returns
+a single report plus one error, not the triple).
 
 ## API documentation sync
 

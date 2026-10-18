@@ -170,3 +170,34 @@ Remove an image from a machine.
 - 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
+
+---
+
+### GET /api/machines/{id}/images/{imageId}/inspect
+
+Inspect one image on a machine. The response is the raw podman inspect report as the top-level JSON body — no curated DTO; the field names are podman's own.
+
+**Authentication:** Required
+
+**Permission:** `read` (any grantee of the machine)
+
+**Response (Success - 200):**
+The raw podman image inspect report, e.g.:
+```json
+{
+  "Id": "sha256:abc123...",
+  "RepoTags": ["nginx:latest"],
+  "RepoDigests": ["nginx@sha256:..."],
+  "Os": "linux",
+  "Architecture": "amd64",
+  "Size": 102400000
+}
+```
+
+**Response (Error):**
+- 400: `MISSING_IMAGE_ID`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`

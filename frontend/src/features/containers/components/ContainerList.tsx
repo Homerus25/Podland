@@ -1,6 +1,7 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
 import { CreateContainerDialog } from "@features/containers/components/CreateContainerDialog";
 import { containerDisplayName } from "@features/containers/components/containerDisplayName";
+import { InspectContainerDialog } from "@features/containers/components/InspectContainerDialog";
 import {
 	useContainers,
 	useCreateContainer,
@@ -54,6 +55,9 @@ function DeleteContainerModal({
 
 // Each row owns its lifecycle mutation instances, so pending state and
 // errors are scoped to the affected container and other rows stay usable.
+// The row itself is clickable: it opens the container's inspect dialog, and
+// every action button stops propagation so a button click never also fires
+// the row action.
 function ContainerRow({
 	machineId,
 	container,
@@ -62,6 +66,7 @@ function ContainerRow({
 	onDelete,
 	onShowLogs,
 	onConnect,
+	onInspect,
 }: {
 	machineId: string;
 	container: ContainerSummary;
@@ -70,6 +75,7 @@ function ContainerRow({
 	onDelete: (container: ContainerSummary) => void;
 	onShowLogs: (container: ContainerSummary) => void;
 	onConnect: (container: ContainerSummary) => void;
+	onInspect: (container: ContainerSummary) => void;
 }) {
 	const startContainer = useStartContainer(machineId);
 	const stopContainer = useStopContainer(machineId);
@@ -91,7 +97,11 @@ function ContainerRow({
 
 	return (
 		<>
-			<Tr data-testid="container-row">
+			<Tr
+				data-testid="container-row"
+				cursor="pointer"
+				onClick={() => onInspect(container)}
+			>
 				<Td fontFamily="mono">{containerDisplayName(container)}</Td>
 				<Td fontFamily="mono">{container.image}</Td>
 				<Td>
@@ -104,7 +114,10 @@ function ContainerRow({
 								size="xs"
 								variant="outline"
 								colorScheme={action.colorScheme}
-								onClick={() => action.lifecycle.mutate(container.id)}
+								onClick={(event) => {
+									event.stopPropagation();
+									action.lifecycle.mutate(container.id);
+								}}
 								isLoading={action.lifecycle.isPending}
 								data-testid={action.testId}
 							>
@@ -116,7 +129,10 @@ function ContainerRow({
 								size="xs"
 								variant="outline"
 								aria-label={`Connect to network ${name}`}
-								onClick={() => onConnect(container)}
+								onClick={(event) => {
+									event.stopPropagation();
+									onConnect(container);
+								}}
 							>
 								Connect to network
 							</Button>
@@ -125,7 +141,10 @@ function ContainerRow({
 							size="xs"
 							variant="outline"
 							aria-label={`Logs ${name}`}
-							onClick={() => onShowLogs(container)}
+							onClick={(event) => {
+								event.stopPropagation();
+								onShowLogs(container);
+							}}
 						>
 							Logs
 						</Button>
@@ -138,7 +157,10 @@ function ContainerRow({
 							colorScheme="red"
 							variant="outline"
 							aria-label={`Delete ${name}`}
-							onClick={() => onDelete(container)}
+							onClick={(event) => {
+								event.stopPropagation();
+								onDelete(container);
+							}}
 						>
 							Delete
 						</Button>
@@ -180,6 +202,9 @@ export function ContainerList({ machine }: { machine: Machine }) {
 	const [pendingConnect, setPendingConnect] = useState<ContainerSummary | null>(
 		null,
 	);
+	const [pendingInspect, setPendingInspect] = useState<ContainerSummary | null>(
+		null,
+	);
 	const openLogs = useOpenLogs(machineId, "container");
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 
@@ -212,6 +237,7 @@ export function ContainerList({ machine }: { machine: Machine }) {
 							})
 						}
 						onConnect={setPendingConnect}
+						onInspect={setPendingInspect}
 					/>
 				)}
 				toolbar={
@@ -244,6 +270,13 @@ export function ContainerList({ machine }: { machine: Machine }) {
 					machineId={machineId}
 					container={pendingConnect}
 					onClose={() => setPendingConnect(null)}
+				/>
+			) : null}
+			{pendingInspect ? (
+				<InspectContainerDialog
+					machineId={machineId}
+					container={pendingInspect}
+					onClose={() => setPendingInspect(null)}
 				/>
 			) : null}
 		</>

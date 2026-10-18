@@ -9,6 +9,7 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/web"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // SecretHandler handles secret requests. All endpoints are JSON and
@@ -106,6 +107,21 @@ func (h *SecretHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 		reveal := r.URL.Query().Get("reveal") == "true"
 		return h.service.Get(ctx, userID, machineID, secretID, reveal)
+	})
+}
+
+// Inspect handles the raw inspect window (issue 287): 200 with the
+// secret's raw podman inspect report as the top-level JSON body — metadata
+// only. The service never passes reveal, so the response cannot carry the
+// value; the route is read-level (no reveal/admin gate, unlike Get).
+func (h *SecretHandler) Inspect(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*entities.SecretInfoReport, error) {
+		secretID, guard := web.URLParam(r, "secretId", "MISSING_SECRET_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		return h.service.Inspect(ctx, userID, machineID, secretID)
 	})
 }
 

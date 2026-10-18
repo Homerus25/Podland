@@ -302,6 +302,7 @@ func New(cfg *config.Config) (*App, error) {
 							r.With(requireWrite).Post("/stop", containerHandler.Stop)
 							r.With(requireWrite).Delete("/", containerHandler.Delete)
 							r.Get("/logs", containerHandler.Logs)
+							r.Get("/inspect", containerHandler.Inspect)
 						})
 					})
 
@@ -310,10 +311,12 @@ func New(cfg *config.Config) (*App, error) {
 						r.Get("/", imageHandler.List)
 						r.With(requireWrite).Post("/pull", imageHandler.Pull)
 						// Bulk deletion, so write-level like the volume
-						// prune. No shadowing hazard: the only parametric
-						// images route is a DELETE.
+						// prune. No shadowing hazard: the parametric
+						// routes are a DELETE and a GET on distinct
+						// paths, and the router routes by method+path.
 						r.With(requireWrite).Post("/prune", imageHandler.Prune)
 						r.With(requireWrite).Delete("/{imageId}", imageHandler.Delete)
+						r.Get("/{imageId}/inspect", imageHandler.Inspect)
 					})
 
 					// Quadlets
@@ -359,6 +362,7 @@ func New(cfg *config.Config) (*App, error) {
 						r.With(requireWrite).Post("/", secretHandler.Create)
 						r.Route("/{secretId}", func(r chi.Router) {
 							r.Get("/", secretHandler.Get)
+							r.Get("/inspect", secretHandler.Inspect)
 							// Move/copy preview stays read-level: it mutates
 							// nothing and reveals nothing on the source, and
 							// the target machine's read access is enforced
@@ -415,6 +419,7 @@ func New(cfg *config.Config) (*App, error) {
 					// so they gate at write (issue 252).
 					r.Route("/networks", func(r chi.Router) {
 						r.Get("/", networkHandler.List)
+						r.Get("/{networkName}/inspect", networkHandler.Inspect)
 						r.With(requireWrite).Post("/", networkHandler.Create)
 						r.With(requireWrite).Post("/{networkName}/connect", networkHandler.Connect)
 					})

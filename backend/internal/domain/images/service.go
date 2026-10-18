@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/inspect"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -64,6 +65,30 @@ func (s *ImageService) Delete(ctx context.Context, userID, machineID, imageID st
 
 		return nil
 	})
+}
+
+// Inspect returns the raw podman inspect report for one image on the
+// specified machine.
+func (s *ImageService) Inspect(ctx context.Context, userID, machineID, imageID string) (*entities.ImageInspectReport, error) {
+	var report *entities.ImageInspectReport
+	err := s.engines.WithEngine(ctx, userID, machineID, "images.Inspect", func(e ImageEngine) error {
+		inspectReport, err := inspectImage(e, imageID)
+		if err != nil {
+			return err
+		}
+
+		report = inspectReport
+		return nil
+	})
+	return report, err
+}
+
+// inspectImage resolves one image's inspect report through the shared
+// single-report ritual, classifying podman's not-found shapes into
+// ErrImageNotFound.
+func inspectImage(e ImageEngine, id string) (*entities.ImageInspectReport, error) {
+	reports, inspectErrs, err := e.Inspect(id)
+	return inspect.Resolve(reports, inspectErrs, err, appErrors.ErrImageNotFound, "image", id)
 }
 
 // PullWithProgress pulls an image on the specified machine and reports progress via the provided callback.

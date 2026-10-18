@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"go.podman.io/common/libnetwork/types"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // fakeNetworkEngine is the function-field fake for the NetworkEngine
@@ -14,6 +15,7 @@ type fakeNetworkEngine struct {
 	listFn    func() ([]types.Network, error)
 	createFn  func(name string) (*types.Network, error)
 	connectFn func(networkName, containerID string) error
+	inspectFn func(name string) ([]entities.NetworkInspectReport, []error, error)
 }
 
 func (f *fakeNetworkEngine) List() ([]types.Network, error) {
@@ -35,6 +37,13 @@ func (f *fakeNetworkEngine) Connect(networkName, containerID string) error {
 		panic("unexpected NetworkEngine.Connect call")
 	}
 	return f.connectFn(networkName, containerID)
+}
+
+func (f *fakeNetworkEngine) Inspect(name string) ([]entities.NetworkInspectReport, []error, error) {
+	if f.inspectFn == nil {
+		panic("unexpected NetworkEngine.Inspect call")
+	}
+	return f.inspectFn(name)
 }
 
 // fakeEngineProvider arms the provider seam: engine is handed to the

@@ -2,11 +2,15 @@ import type { CreateContainerInput } from "@features/containers/services/contain
 import {
 	createContainer,
 	deleteContainer,
+	inspectContainer,
 	listContainers,
 	startContainer,
 	stopContainer,
 } from "@features/containers/services/containersApi";
-import { containersQueryKey } from "@shared/queries/queryKeys";
+import {
+	containerInspectQueryKey,
+	containersQueryKey,
+} from "@shared/queries/queryKeys";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import { useQuery } from "@tanstack/react-query";
 
@@ -14,6 +18,17 @@ export function useContainers(machineId: string) {
 	return useQuery({
 		queryKey: containersQueryKey(machineId),
 		queryFn: () => listContainers(machineId),
+	});
+}
+
+// The raw inspect report behind the inspect dialog. gcTime: 0 drops the
+// cache entry the moment the dialog unmounts, so every open refetches the
+// current report.
+export function useContainerInspect(machineId: string, containerId: string) {
+	return useQuery({
+		queryKey: containerInspectQueryKey(machineId, containerId),
+		queryFn: () => inspectContainer(machineId, containerId),
+		gcTime: 0,
 	});
 }
 

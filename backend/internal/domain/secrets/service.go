@@ -10,6 +10,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/removal"
+	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
 // SecretService provides business logic for secrets. Secrets live only in
@@ -115,6 +116,30 @@ func (s *SecretService) Get(ctx context.Context, userID, machineID, secretID str
 		return nil
 	})
 	return response, err
+}
+
+// Inspect returns the raw podman inspect report for one secret on the
+// specified machine — metadata only. Unlike Get it has no reveal path: the
+// engine call is e.Inspect(secretID, false), so podman runs without
+// WithShowSecret and the re-marshaled report cannot carry SecretData. There
+// is no reveal/admin gate either — metadata is visible to any grantee, so
+// the endpoint is read-level. The report is returned raw; the
+// ToSecretInspectResponse mapping stays Get's.
+func (s *SecretService) Inspect(ctx context.Context, userID, machineID, secretID string) (*entities.SecretInfoReport, error) {
+	var report *entities.SecretInfoReport
+	err := s.engines.WithEngine(ctx, userID, machineID, "secrets.Inspect", func(e SecretEngine) error {
+		r, err := e.Inspect(secretID, false)
+		if err != nil {
+			if podmanerr.IsNotFound(err) {
+				return appErrors.ErrSecretNotFound
+			}
+			return fmt.Errorf("failed to inspect secret: %w", err)
+		}
+
+		report = r
+		return nil
+	})
+	return report, err
 }
 
 // Create installs a new secret on the specified machine. Podman takes the
