@@ -124,6 +124,25 @@ export async function getContainer(
 	return response.data;
 }
 
+// Restart policy of POST /api/machines/{id}/containers
+// (backend/internal/domain/containers/dto.go ContainerCreateRequest
+// restartPolicy oneof): the policy podman applies to the container.
+export type ContainerRestartPolicy =
+	| "no"
+	| "always"
+	| "unless-stopped"
+	| "on-failure";
+
+// Access mode of a bind mount or named volume
+// (backend/internal/domain/containers/dto.go MountRequest/VolumeRequest
+// mode oneof): "ro" mounts read-only, "rw" read-write (the default).
+export type MountMode = "ro" | "rw";
+
+// Protocol of a port binding
+// (backend/internal/domain/containers/dto.go PortBindingRequest
+// protocol): the transport the published port speaks.
+export type PortProtocol = "tcp" | "udp";
+
 // Body of POST /api/machines/{id}/containers
 // (backend/internal/domain/containers/dto.go ContainerCreateRequest; only the
 // fields the create form exposes — everything else is optional server-side).
@@ -131,6 +150,35 @@ export interface CreateContainerInput {
 	image: string;
 	name?: string;
 	command?: string[];
+	user?: string;
+	timezone?: string;
+	restartPolicy?: ContainerRestartPolicy;
+	remove?: boolean;
+	environment?: Record<string, string>;
+	portBindings?: {
+		hostPort: number;
+		containerPort: number;
+		protocol?: PortProtocol;
+	}[];
+	mounts?: {
+		source: string;
+		destination: string;
+		mode?: MountMode;
+	}[];
+	volumes?: {
+		name: string;
+		destination: string;
+		mode?: MountMode;
+	}[];
+	networks?: string[];
+	secrets?: {
+		source: string;
+		target?: string;
+	}[];
+	devices?: {
+		hostPath: string;
+		containerPath: string;
+	}[];
 }
 
 // Response of POST /api/machines/{id}/containers -> 201

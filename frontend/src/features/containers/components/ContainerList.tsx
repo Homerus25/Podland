@@ -260,6 +260,7 @@ export function ContainerList({ machine }: { machine: Machine }) {
 			{isCreateOpen ? (
 				<CreateContainerDialog
 					mutation={createContainer}
+					machineId={machineId}
 					onClose={() => setIsCreateOpen(false)}
 				/>
 			) : null}

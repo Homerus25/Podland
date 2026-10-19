@@ -11,6 +11,8 @@ import (
 	"github.com/Homerus25/podland/backend/internal/inspect"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/streaming"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
+	netTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/specgen"
 )
@@ -83,13 +85,97 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 			maps.Copy(spec.Labels, request.Labels)
 		}
 
-		// Note: For now, we're skipping port bindings, mounts, privileged mode,
-		// restart policy, and resource limits due to API complexity.
-		// These can be added in a future enhancement.
+		// Port bindings map to the spec's port mappings; the protocol
+		// defaults to tcp when the request omits it.
+		if len(request.PortBindings) > 0 {
+			spec.PortMappings = make([]netTypes.PortMapping, 0, len(request.PortBindings))
+			for _, binding := range request.PortBindings {
+				protocol := binding.Protocol
+				if protocol == "" {
+					protocol = "tcp"
+				}
+				spec.PortMappings = append(spec.PortMappings, netTypes.PortMapping{
+					HostPort:      uint16(binding.HostPort),
+					ContainerPort: uint16(binding.ContainerPort),
+					Protocol:      protocol,
+				})
+			}
+		}
 
-		// Create the container using Podman API
+		// Bind mounts map to the spec's mounts: rbind propagation plus
+		// the requested access mode (rw when omitted).
+		for _, mount := range request.Mounts {
+			spec.Mounts = append(spec.Mounts, bindMount(mount.Source, mount.Destination, "rbind", defaultMode(mount.Mode)))
+		}
+
+		// Restart policy, remove-on-exit, user, and timezone map
+		// straight through.
+		if request.RestartPolicy != "" {
+			spec.RestartPolicy = request.RestartPolicy
+		}
+		if request.Remove != nil {
+			spec.Remove = request.Remove
+		}
+		if request.User != "" {
+			spec.User = request.User
+		}
+		if request.Timezone != "" {
+			spec.Timezone = request.Timezone
+		}
+
+		// Networks map to the spec's network map, one empty-options
+		// entry per requested network.
+		if len(request.Networks) > 0 {
+			spec.Networks = make(map[string]netTypes.PerNetworkOptions, len(request.Networks))
+			for _, network := range request.Networks {
+				spec.Networks[network] = netTypes.PerNetworkOptions{}
+			}
+		}
+
+		// Named volumes map to the spec's volumes; the access mode
+		// rides along as the mount option (rw when omitted).
+		for _, volume := range request.Volumes {
+			spec.Volumes = append(spec.Volumes, &specgen.NamedVolume{
+				Name:    volume.Name,
+				Dest:    volume.Destination,
+				Options: []string{defaultMode(volume.Mode)},
+			})
+		}
+
+		// Secrets map to the spec's secrets; the mount target defaults
+		// to /run/secrets/<source> when the request omits it.
+		for _, secret := range request.Secrets {
+			target := secret.Target
+			if target == "" {
+				target = "/run/secrets/" + secret.Source
+			}
+			spec.Secrets = append(spec.Secrets, specgen.Secret{
+				Source: secret.Source,
+				Target: target,
+			})
+		}
+
+		// Devices map to the spec's device list by host path; a device
+		// whose container path differs also gets a bind mount at the
+		// container path.
+		for _, device := range request.Devices {
+			spec.Devices = append(spec.Devices, runtimespec.LinuxDevice{Path: device.HostPath})
+			if device.ContainerPath != device.HostPath {
+				spec.Mounts = append(spec.Mounts, bindMount(device.HostPath, device.ContainerPath, "rbind"))
+			}
+		}
+
+		// Privileged, memory, and cpus stay unmapped (out of scope).
+
+		// Create the container using Podman API. A not-found answer is
+		// the missing-image terminal: the doku documents 404
+		// IMAGE_NOT_FOUND for this endpoint, so the classification
+		// happens here, not in the envelope's 500 fallback.
 		createReport, err := e.Create(spec)
 		if err != nil {
+			if podmanerr.IsNotFound(err) {
+				return appErrors.ErrImageNotFound
+			}
 			return fmt.Errorf("failed to create container: %w", err)
 		}
 
@@ -97,6 +183,27 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 		return nil
 	})
 	return report, err
+}
+
+// bindMount builds one bind mount for the spec's Mounts: the rbind
+// propagation option rides along with any further options (the access
+// mode for request mounts, nothing extra for device container paths).
+func bindMount(source, destination string, options ...string) runtimespec.Mount {
+	return runtimespec.Mount{
+		Type:        "bind",
+		Source:      source,
+		Destination: destination,
+		Options:     options,
+	}
+}
+
+// defaultMode returns the requested mount access mode, defaulting to rw
+// when the request omits it.
+func defaultMode(mode string) string {
+	if mode == "" {
+		return "rw"
+	}
+	return mode
 }
 
 // Get returns detailed information about a specific container

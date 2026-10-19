@@ -74,8 +74,8 @@ Create a new container on a machine.
   "labels": { "key": "value" } (optional),
   "portBindings": [
     {
-      "hostPort": integer (required),
-      "containerPort": integer (required),
+      "hostPort": integer (required, 1-65535),
+      "containerPort": integer (required, 1-65535),
       "protocol": "tcp|udp" (optional, default: tcp)
     }
   ] (optional),
@@ -86,12 +86,45 @@ Create a new container on a machine.
       "mode": "ro|rw" (optional, default: rw)
     }
   ] (optional),
+  "volumes": [
+    {
+      "name": "string (required)",
+      "destination": "string (required)",
+      "mode": "ro|rw" (optional, default: rw)
+    }
+  ] (optional),
+  "networks": ["string"] (optional),
+  "secrets": [
+    {
+      "source": "string (required)",
+      "target": "string (optional, default: /run/secrets/<source>)"
+    }
+  ] (optional),
+  "devices": [
+    {
+      "hostPath": "string (required)",
+      "containerPath": "string (required)"
+    }
+  ] (optional),
   "privileged": boolean (optional, default: false),
   "restartPolicy": "no|always|unless-stopped|on-failure" (optional, default: no),
+  "remove": boolean (optional, default: false, remove the container when it exits),
+  "user": "string (optional, UID or username)",
+  "timezone": "string (optional, IANA name e.g. 'Europe/Berlin')",
   "memory": "string (optional, e.g., '512m')",
   "cpus": number (optional)
 }
 ```
+
+The `portBindings`, `mounts`, `volumes`, `secrets`, and `devices` arrays
+validate each entry's required sub-fields (a missing `hostPort`,
+`source`, `name`, `destination`, or device path is a 400
+`VALIDATION_FAILED`). `mounts` are applied as bind mounts with `rbind`
+propagation; `volumes` are applied as named volumes; `networks` attaches
+the container to each named network; a `device` whose `containerPath`
+differs from its `hostPath` is additionally bind-mounted at the
+container path. `privileged`, `memory`, and `cpus` are accepted but not
+yet applied.
 
 **Response (Success - 201):**
 ```json

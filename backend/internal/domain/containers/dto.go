@@ -155,13 +155,27 @@ type ContainerCreateRequest struct {
 	// Labels for the container (optional)
 	Labels map[string]string `json:"labels,omitempty"`
 	// Port bindings (optional)
-	PortBindings []PortBindingRequest `json:"portBindings,omitempty"`
-	// Mounts/volumes (optional)
-	Mounts []MountRequest `json:"mounts,omitempty"`
+	PortBindings []PortBindingRequest `json:"portBindings,omitempty" validate:"omitempty,dive"`
+	// Bind mounts (optional)
+	Mounts []MountRequest `json:"mounts,omitempty" validate:"omitempty,dive"`
+	// Named volumes to mount (optional)
+	Volumes []VolumeRequest `json:"volumes,omitempty" validate:"omitempty,dive"`
+	// Networks to attach the container to (optional)
+	Networks []string `json:"networks,omitempty"`
+	// Secrets to mount into the container (optional)
+	Secrets []SecretRequest `json:"secrets,omitempty" validate:"omitempty,dive"`
+	// Host devices to pass through to the container (optional)
+	Devices []DeviceRequest `json:"devices,omitempty" validate:"omitempty,dive"`
 	// Run container in privileged mode (optional)
 	Privileged bool `json:"privileged,omitempty"`
 	// Restart policy (optional)
 	RestartPolicy string `json:"restartPolicy,omitempty" validate:"omitempty,oneof=no always unless-stopped on-failure"`
+	// Remove the container when it exits (optional)
+	Remove *bool `json:"remove,omitempty"`
+	// User to run the container as, UID or username (optional)
+	User string `json:"user,omitempty"`
+	// Timezone inside the container, IANA name (optional)
+	Timezone string `json:"timezone,omitempty"`
 	// Memory limit (optional)
 	Memory string `json:"memory,omitempty"`
 	// CPU limit (optional)
@@ -180,6 +194,33 @@ type MountRequest struct {
 	Source      string `json:"source" validate:"required,min=1"`
 	Destination string `json:"destination" validate:"required,min=1"`
 	Mode        string `json:"mode,omitempty" validate:"omitempty,oneof=ro rw"`
+}
+
+// VolumeRequest represents a named volume to mount into the container
+type VolumeRequest struct {
+	// Name of the named volume (required)
+	Name string `json:"name" validate:"required,min=1"`
+	// Destination path inside the container (required)
+	Destination string `json:"destination" validate:"required,min=1"`
+	// Mount mode (optional, defaults to rw)
+	Mode string `json:"mode,omitempty" validate:"omitempty,oneof=ro rw"`
+}
+
+// SecretRequest represents a secret to mount into the container
+type SecretRequest struct {
+	// Name of the secret on the machine (required)
+	Source string `json:"source" validate:"required,min=1"`
+	// Path inside the container to mount the secret at (optional,
+	// defaults to /run/secrets/<source>)
+	Target string `json:"target,omitempty"`
+}
+
+// DeviceRequest represents a host device to pass through to the container
+type DeviceRequest struct {
+	// Path of the device on the host (required)
+	HostPath string `json:"hostPath" validate:"required,min=1"`
+	// Path of the device inside the container (required)
+	ContainerPath string `json:"containerPath" validate:"required,min=1"`
 }
 
 // ContainerCreateResponse represents the response after creating a container
