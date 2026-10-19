@@ -1,12 +1,18 @@
+import { containersQueryKey } from "@shared/queries/queryKeys";
 import type { User } from "@shared/types/api";
 import { setBearerToken } from "@shared/utils/api";
+import { QueryClient } from "@tanstack/react-query";
 import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 import { loginViaForm, renderApp } from "@/test/auth";
 import { errorResponse } from "@/test/errors";
-import { authStatusFixture, machineFixture } from "@/test/factories";
+import {
+	authStatusFixture,
+	containerFixture,
+	machineFixture,
+} from "@/test/factories";
 import { server } from "@/test/server";
 
 function deferred<T>() {
@@ -179,7 +185,7 @@ describe("app routing guard", () => {
 	});
 
 	describe("session death mid-app", () => {
-		it("lands on /login with the deep link preserved and an empty cache when a query 401s and refresh is rejected", async () => {
+		it("lands on /login with the deep link preserved and no cached data when a query 401s and refresh is rejected", async () => {
 			// The live session holds a bearer; installing one also re-arms
 			// the policy's once-latch for this module instance.
 			setBearerToken("mid-session-token");
@@ -196,8 +202,16 @@ describe("app routing guard", () => {
 					),
 				),
 			);
-			const { queryClient } = renderApp("/machines", {
+			// The predecessor's cached list, seeded before mount: session
+			// death must clear it, so the next identity never starts from
+			// the predecessor's data.
+			const queryClient = new QueryClient({
+				defaultOptions: { queries: { retry: false } },
+			});
+			queryClient.setQueryData(containersQueryKey("m-1"), [containerFixture()]);
+			renderApp("/machines", {
 				resolveInitialState: async () => ({ username: "alice", role: "user" }),
+				queryClient,
 			});
 
 			expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
@@ -206,7 +220,16 @@ describe("app routing guard", () => {
 				screen.queryByRole("heading", { name: "Machines" }),
 			).not.toBeInTheDocument();
 			expect(screen.getByTestId("auth-user")).toHaveTextContent("anonymous");
-			expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+			// The cache clear can race the dying page's final render, which
+			// re-creates its query in the cleared cache before unmounting;
+			// what must never survive is predecessor data — a re-created
+			// query is data-less and inert.
+			expect(
+				queryClient
+					.getQueryCache()
+					.getAll()
+					.every((query) => query.state.data === undefined),
+			).toBe(true);
 
 			// Logging back in returns to the originally requested page: the
 			// session-death redirect attached that location to /login's state.

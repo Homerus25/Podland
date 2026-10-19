@@ -245,6 +245,10 @@ describe("refreshSession", () => {
 	beforeEach(() => {
 		refreshCalls = 0;
 		seamCalls = 0;
+		// The session-death latch is module state that outlives a test, so
+		// every test starts from a live session: installing a token re-arms
+		// the latch, whatever a previous test in this file fired.
+		setBearerToken("expired-access-token");
 	});
 
 	afterEach(() => {
