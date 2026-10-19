@@ -3,9 +3,10 @@
 // already persisted at machine-registration time).
 //
 // The package defines SSHExecInterface and a production *Service
-// implementation. The underlying *ssh.Client is cached per machine
-// (mirroring the connection-cache discipline and LRU eviction in
-// internal/connections), and SSH failures fail fast (no retry, per
+// implementation. The underlying *ssh.Client is cached per machine by
+// internal/rescache (the one per-machine cache lifecycle, architecture review
+// 2026-10-19 candidate C1; the podman Connection Cache in internal/connections
+// is its other adapter), and SSH failures fail fast (no retry, per
 // docs/architecture-decisions.md §4).
 package sshexec
 

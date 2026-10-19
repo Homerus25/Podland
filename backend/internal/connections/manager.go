@@ -1,6 +1,13 @@
 // Package connections is the home of the podman connection seam: machine
 // lookup, key decryption, dialing with per-machine dedup, and the
 // per-machine LRU cache with real SSH teardown.
+//
+// The per-machine cache lifecycle (acquire with dial dedup, refcounted
+// release, LRU-idle eviction, idle cleanup, graceful removal) lives in
+// internal/rescache (architecture review 2026-10-19, candidate C1); this
+// package is the adapter — it hands over its dial and close and keeps its own
+// error vocabulary, probe regime, and payload (the connection-context
+// detachment, §4, stays in the adapter's dial func).
 package connections
 
 import (
@@ -9,12 +16,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/encryption"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/rescache"
 	"go.podman.io/podman/v6/pkg/bindings"
 )
 
@@ -53,26 +60,28 @@ const (
 	defaultCleanupInterval = 30 * time.Second
 )
 
-// errMachineRemoved marks an acquisition that lost a race against
-// RemoveMachine: the dial (or the freshly dialed connection) must not be
-// cached or served. WithConnection maps it to the 502 contract like any
-// other acquisition failure.
-var errMachineRemoved = errors.New("machine removed during connection acquisition")
-
 // dialFunc is the seam that produces a live podman connection context for
 // a persisted machine. Production wires dialForMachine (repo lookup → key
 // decrypt → bindings.NewConnectionWithHandle); tests inject a fake (the
 // sshexec dialer test pattern) so no live SSH is needed.
 type dialFunc func(ctx context.Context, machineID string) (context.Context, bindings.CloseFunc, error)
 
+// connResource is the cached payload: the detached connection context plus
+// its teardown handle.
+type connResource struct {
+	connCtx context.Context
+	closeFn bindings.CloseFunc
+}
+
 // ConnectionManager is the production Manager: one module owning
-// lookup → decrypt → dial → per-machine LRU cache, with real SSH teardown
-// on eviction, idle cleanup, and RemoveMachine.
+// lookup → decrypt → dial → per-machine cache, with real SSH teardown on
+// eviction, idle cleanup, and RemoveMachine. The cache lifecycle itself is
+// delegated to internal/rescache; this adapter owns the dial seam, the
+// connection-context detachment, the error mapping, and the probe regime.
 type ConnectionManager struct {
 	machineRepo *models.MachineRepository
 	encryption  *encryption.EncryptionService
 
-	maxSize int
 	// testTimeout bounds the synchronous connection probes — ProbeMachine
 	// for a persisted machine and TestConnection at registration —
 	// corresponding to MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS. It is a
@@ -81,49 +90,13 @@ type ConnectionManager struct {
 	// deadline.
 	testTimeout time.Duration
 
-	idleTimeout     time.Duration
-	cleanupInterval time.Duration
+	// cache owns the per-machine connection lifecycle (acquire with dial
+	// dedup, refcounted release, LRU-idle eviction, idle cleanup, graceful
+	// removal) — internal/rescache (architecture review 2026-10-19, C1).
+	cache *rescache.Cache[connResource]
 
 	// dial is swapped for a fake in tests (see dialFunc).
 	dial dialFunc
-
-	mu      sync.Mutex
-	entries map[string]*connectionEntry
-
-	stopCh chan struct{}
-	// stoppedCh is closed by cleanupLoop on its way out so Stop can block
-	// until the goroutine has truly exited. nil when no cleanup goroutine
-	// was started (cleanupInterval == 0, the test wiring); Stop then
-	// doesn't wait.
-	stoppedCh chan struct{}
-	// stopOnce makes Stop idempotent — internal/app.App.Close() promises
-	// "safe to call any number of times"; this keeps Stop safe to call
-	// repeatedly without panicking on a double-close of stopCh.
-	stopOnce sync.Once
-}
-
-// connectionEntry is one cached per-machine connection. An entry is
-// pending (ready == false) while its dial is in flight: concurrent cold
-// acquisitions wait on done instead of stacking duplicate dials.
-type connectionEntry struct {
-	machineID string
-	connCtx   context.Context
-	close     bindings.CloseFunc
-	refCount  int
-	lastUsed  time.Time
-	// dead marks an entry that serves no new users and closes its handle
-	// as soon as the last in-flight user releases (RemoveMachine).
-	dead bool
-	// ready flips when the dial outcome is final: success fills connCtx/
-	// close, failure sets dialErr. done is closed alongside so waiters
-	// wake and read the outcome.
-	ready   bool
-	dialErr error
-	done    chan struct{}
-	// closed pins teardown idempotence at the module level: every close
-	// site goes through closeEntry, so the handle fires at most once even
-	// if several paths race to tear the entry down.
-	closed bool
 }
 
 // managerOptions configures a ConnectionManager; NewConnectionManager
@@ -163,13 +136,7 @@ func NewConnectionManager(
 // inject the fake dial seam and tight timeouts (cleanupInterval == 0
 // disables the cleanup goroutine).
 func newManager(opts managerOptions) *ConnectionManager {
-	m := &ConnectionManager{
-		maxSize:         opts.maxSize,
-		idleTimeout:     opts.idleTimeout,
-		cleanupInterval: opts.cleanupInterval,
-		entries:         make(map[string]*connectionEntry),
-		stopCh:          make(chan struct{}),
-	}
+	m := &ConnectionManager{}
 	m.testTimeout = opts.testTimeout
 	if m.testTimeout <= 0 {
 		m.testTimeout = DefaultConnectionTestTimeout
@@ -180,11 +147,39 @@ func newManager(opts managerOptions) *ConnectionManager {
 			return nil, nil, errors.New("connections: no dial seam configured")
 		}
 	}
-	if opts.cleanupInterval > 0 {
-		m.stoppedCh = make(chan struct{})
-		go m.cleanupLoop()
-	}
+	m.cache = rescache.New(rescache.Options[connResource]{
+		Dial:            m.dialResource,
+		Close:           closeResource,
+		MaxSize:         opts.maxSize,
+		IdleTimeout:     opts.idleTimeout,
+		CleanupInterval: opts.cleanupInterval,
+	})
 	return m
+}
+
+// dialResource is the rescache Dial seam: it runs the adapter's dial (machine
+// lookup → key decrypt → podman-over-SSH dial) and detaches the connection
+// context from the dialing request. A request-scoped ctx dies with its HTTP
+// handler, which would kill the connection for every later cache hit — the
+// stored context must live as long as the connection itself, governed by
+// release/refcount, eviction, idle cleanup, and RemoveMachine.
+// context.WithoutCancel drops cancellation and deadline but keeps values, so
+// the bindings' client/version keys the podman calls rely on survive (§4:
+// "connection lifetime is the connection's, not the request's").
+// The dial seam (m.dial) is read at call time, not captured at construction,
+// so tests can swap it after the manager is built — newProbeManager's
+// seed-then-swap relies on this.
+func (m *ConnectionManager) dialResource(ctx context.Context, machineID string) (connResource, error) {
+	connCtx, closeFn, err := m.dial(ctx, machineID)
+	if err != nil {
+		return connResource{}, err
+	}
+	return connResource{connCtx: context.WithoutCancel(connCtx), closeFn: closeFn}, nil
+}
+
+// closeResource tears a cached connection down (the SSH handle).
+func closeResource(r connResource) {
+	r.closeFn()
 }
 
 // WithConnection hands fn a live podman connection context and releases it
@@ -192,7 +187,7 @@ func newManager(opts managerOptions) *ConnectionManager {
 // machineID, userID, cause) and returned as appErrors.ErrConnectionFailed
 // — callers never map them; fn's own error propagates untouched.
 func (m *ConnectionManager) WithConnection(ctx context.Context, userID, machineID, op string, fn func(connCtx context.Context) error) error {
-	connCtx, release, err := m.acquire(ctx, machineID, userID)
+	res, release, err := m.cache.Acquire(ctx, machineID)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			// The caller's own context ended the wait; that is not a
@@ -204,227 +199,28 @@ func (m *ConnectionManager) WithConnection(ctx context.Context, userID, machineI
 		return appErrors.ErrConnectionFailed
 	}
 	defer release()
-	return fn(connCtx)
-}
-
-// acquire returns a live connection context for machineID plus a release
-// func the caller MUST call exactly once when done (WithConnection does it
-// via defer).
-//
-// Cache hit: refCount is bumped and the cached context is served. Cache
-// miss: a pending entry is registered under the lock and the dial runs
-// OUTSIDE it, so cold dials to different machines don't serialize;
-// concurrent acquisitions for the same machine wait on the pending
-// entry's done channel and share the one dial.
-func (m *ConnectionManager) acquire(ctx context.Context, machineID, userID string) (context.Context, func(), error) {
-	m.mu.Lock()
-	if e, ok := m.entries[machineID]; ok {
-		if !e.ready {
-			// Dial in flight: wait for its outcome outside the lock.
-			m.mu.Unlock()
-			select {
-			case <-e.done:
-			case <-ctx.Done():
-				return nil, nil, ctx.Err()
-			}
-			m.mu.Lock()
-			if e.ready {
-				e.refCount++
-				e.lastUsed = time.Now()
-				connCtx := e.connCtx
-				m.mu.Unlock()
-				return connCtx, m.releaseFunc(e), nil
-			}
-			// The shared dial failed (or the machine was removed
-			// mid-dial). Fail-fast: the outcome propagates to every
-			// waiter, no retry within one request.
-			err := e.dialErr
-			m.mu.Unlock()
-			return nil, nil, err
-		}
-		e.refCount++
-		e.lastUsed = time.Now()
-		connCtx := e.connCtx
-		m.mu.Unlock()
-		return connCtx, m.releaseFunc(e), nil
-	}
-
-	// Cache full: evict the least recently used idle connection first.
-	// Soft cap, as before: when every entry is in flight nothing is
-	// evicted and the dial proceeds.
-	if len(m.entries) >= m.maxSize {
-		m.evictLRUIdle()
-	}
-
-	// Register the pending dial, then dial outside the lock.
-	e := &connectionEntry{machineID: machineID, done: make(chan struct{}), lastUsed: time.Now()}
-	m.entries[machineID] = e
-	m.mu.Unlock()
-
-	connCtx, closeFn, err := m.dial(ctx, machineID)
-
-	m.mu.Lock()
-	if err == nil {
-		e.close = closeFn
-	}
-	if err == nil && !e.dead {
-		// The dial honored the caller's context; what gets cached must
-		// not. A request-scoped ctx dies with its HTTP handler, which
-		// would kill the connection for every later cache hit — the
-		// stored context must live as long as the connection itself,
-		// governed by release/refcount, eviction, idle cleanup, and
-		// RemoveMachine. WithoutCancel drops cancellation and deadline
-		// but keeps values, so the bindings' client/version keys the
-		// podman calls rely on survive.
-		e.connCtx = context.WithoutCancel(connCtx)
-		e.ready = true
-		e.refCount = 1
-		m.mu.Unlock()
-		close(e.done)
-		return e.connCtx, m.releaseFunc(e), nil
-	}
-	delete(m.entries, machineID)
-	if err != nil {
-		e.dialErr = err
-	} else {
-		// The dial won the race against RemoveMachine: the fresh handle
-		// closes right away and never serves anyone.
-		e.dialErr = errMachineRemoved
-		closeEntry(e)
-	}
-	m.mu.Unlock()
-	close(e.done)
-	return nil, nil, e.dialErr
-}
-
-// releaseFunc returns a once-guarded release for one acquired use. An
-// entry whose machine was removed (dead) closes its SSH handle here when
-// the last use returns — that is RemoveMachine's graceful teardown.
-func (m *ConnectionManager) releaseFunc(e *connectionEntry) func() {
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			m.mu.Lock()
-			defer m.mu.Unlock()
-			releaseEntry(e)
-		})
-	}
-}
-
-// releaseEntry drops one in-flight use. Callers must hold m.mu.
-func releaseEntry(e *connectionEntry) {
-	e.refCount--
-	e.lastUsed = time.Now()
-	if e.refCount <= 0 && e.dead {
-		closeEntry(e)
-	}
-}
-
-// closeEntry tears an entry's SSH handle down at most once, no matter how
-// many paths (release, RemoveMachine, eviction, cleanup) reach it.
-// Callers must hold m.mu.
-func closeEntry(e *connectionEntry) {
-	if e.closed {
-		return
-	}
-	e.closed = true
-	e.close()
+	return fn(res.connCtx)
 }
 
 // RemoveMachine invalidates a machine's cached connection gracefully: the
-// entry leaves the map immediately (fresh acquisitions fail on the machine
+// entry leaves the cache immediately (fresh acquisitions fail on the machine
 // lookup), a dial already in flight completes and closes its fresh handle
 // right away, and a ready handle closes when the last in-flight user
 // releases.
 func (m *ConnectionManager) RemoveMachine(machineID string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	e, ok := m.entries[machineID]
-	if !ok {
-		return
-	}
-	delete(m.entries, machineID)
-	e.dead = true
-	if !e.ready {
-		// Dial in flight: its completion sees dead, closes the fresh
-		// handle immediately, and serves nobody.
-		return
-	}
-	if e.refCount <= 0 {
-		closeEntry(e)
-		return
-	}
-	// In-flight users hold release funcs (WithConnection): the handle
-	// closes when the last of them returns.
-}
-
-// evictLRUIdle closes and removes the least recently used idle entry.
-// Active entries (refCount > 0) are never evicted; pending and dead
-// entries are skipped. Callers must hold m.mu.
-func (m *ConnectionManager) evictLRUIdle() {
-	var lru *connectionEntry
-	for _, e := range m.entries {
-		if !e.ready || e.dead || e.refCount > 0 {
-			continue
-		}
-		if lru == nil || e.lastUsed.Before(lru.lastUsed) {
-			lru = e
-		}
-	}
-	if lru == nil {
-		return
-	}
-	lru.dead = true
-	delete(m.entries, lru.machineID)
-	closeEntry(lru)
-}
-
-// cleanupLoop periodically closes idle connections past the idle timeout.
-func (m *ConnectionManager) cleanupLoop() {
-	defer close(m.stoppedCh)
-	ticker := time.NewTicker(m.cleanupInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			m.cleanup()
-		case <-m.stopCh:
-			return
-		}
-	}
-}
-
-// cleanup closes connections that haven't been used for the idle timeout.
-func (m *ConnectionManager) cleanup() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	deadline := time.Now().Add(-m.idleTimeout)
-	for machineID, e := range m.entries {
-		if e.ready && !e.dead && e.refCount <= 0 && e.lastUsed.Before(deadline) {
-			e.dead = true
-			delete(m.entries, machineID)
-			closeEntry(e)
-		}
-	}
+	m.cache.Remove(machineID)
 }
 
 // Stop shuts the idle-cleanup goroutine down and blocks until it has
 // terminated. Safe to call any number of times — subsequent calls are
 // no-ops that return immediately. App.Close relies on both properties.
 func (m *ConnectionManager) Stop() {
-	m.stopOnce.Do(func() {
-		close(m.stopCh)
-	})
-	if m.stoppedCh != nil {
-		<-m.stoppedCh
-	}
+	m.cache.Stop()
 }
 
 // ProbeMachine performs a live status probe of a persisted machine: it
 // reuses the cached per-machine connection when one exists (a full SSH
-// dial only happens when cold, via acquire) and pings the Podman service
+// dial only happens when cold, via Acquire) and pings the Podman service
 // API through it. The probe is bounded by the same timeout regime as the
 // registration TestConnection (testTimeout /
 // MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS).
@@ -437,7 +233,7 @@ func (m *ConnectionManager) Stop() {
 func (m *ConnectionManager) ProbeMachine(machineID, userID string) error {
 	done := make(chan error, 1)
 	go func() {
-		done <- m.probe(machineID, userID)
+		done <- m.probe(machineID)
 	}()
 
 	timer := time.NewTimer(m.testTimeout)
@@ -454,13 +250,13 @@ func (m *ConnectionManager) ProbeMachine(machineID, userID string) error {
 // probe runs the actual dial-or-reuse plus ping. Both legs live inside the
 // raced goroutine so a slow cold dial is bounded by testTimeout too, not
 // just the ping — matching the registration TestConnection regime.
-func (m *ConnectionManager) probe(machineID, userID string) error {
-	connCtx, release, err := m.acquire(context.Background(), machineID, userID)
+func (m *ConnectionManager) probe(machineID string) error {
+	res, release, err := m.cache.Acquire(context.Background(), machineID)
 	if err != nil {
 		return fmt.Errorf("probe connection: %w", err)
 	}
 	release()
-	return pingPodman(connCtx)
+	return pingPodman(res.connCtx)
 }
 
 // pingPodman issues GET /_ping over an established podman bindings

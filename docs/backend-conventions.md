@@ -321,6 +321,7 @@ closest sibling that already exists. Rulings so far:
   delete — a failed delete evicts nothing — and access rows ride the
   schema's `ON DELETE CASCADE`, so the delete path cleans them up only
   implicitly.
+- **Resource-cache kit** — `internal/rescache` is the one owner of the per-machine cache lifecycle (architecture review 2026-10-19, candidate C1): acquire with dial dedup (the dial runs outside the lock; concurrent cold acquires for one machine share one dial; dials to different machines never serialize), refcounted release, LRU-idle eviction with the soft cap, idle cleanup that skips in-use entries, graceful `Remove`, fail-fast `Invalidate`/`InvalidateAll`, and an idempotent `Stop` that joins the cleanup goroutine. The podman Connection Cache (`internal/connections`) and the SSH-exec client cache (`internal/sshexec`) are its two adapters: each hands over its dial and close and keeps its own error vocabulary, probe regime, and payload (the connection-context detachment, §4, stays in the connections adapter's dial). The lifecycle's concurrency contract is pinned once in the kit's suite; the adapters' suites pin their projections. §4's wording is unchanged — the kit makes it true by construction for both caches. Settled 2026-10-19 (architecture-review candidate C1).
 
 ## Duplication across domains
 

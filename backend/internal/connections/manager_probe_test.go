@@ -31,7 +31,9 @@ var realDialMu sync.Mutex
 // newProbeManager returns a manager with live podman connection contexts
 // pre-seeded per machine, standing in for SSH-established tunnels so the
 // probe exercises the "cached connection" path without a real host. The
-// dial seam is rigged to fail the test if a probe ever tries to dial.
+// cache is warmed by acquiring each pre-seeded machine once (its dial
+// returns the pre-seeded context); the dial is then swapped for one that
+// fails loudly, so a probe that ever tries to dial fails the test.
 func newProbeManager(t *testing.T, connCtxByMachine map[string]context.Context, testTimeout time.Duration) *ConnectionManager {
 	t.Helper()
 	mgr := newManager(managerOptions{
@@ -39,30 +41,31 @@ func newProbeManager(t *testing.T, connCtxByMachine map[string]context.Context, 
 		testTimeout:     testTimeout,
 		idleTimeout:     15 * time.Minute,
 		cleanupInterval: 0, // no cleanup goroutine: entries must survive the test
-		dial: func(context.Context, string) (context.Context, bindings.CloseFunc, error) {
-			return nil, nil, errors.New("probe tests must not dial: connections are pre-seeded")
+		dial: func(_ context.Context, machineID string) (context.Context, bindings.CloseFunc, error) {
+			connCtx, ok := connCtxByMachine[machineID]
+			if !ok {
+				return nil, nil, errors.New("probe tests must not dial: connections are pre-seeded")
+			}
+			return connCtx, func() {}, nil
 		},
 	})
 	for machineID, connCtx := range connCtxByMachine {
 		if _, err := bindings.GetClient(connCtx); err != nil {
 			t.Fatalf("pre-seeded context for %s: %v", machineID, err)
 		}
-		mgr.entries[machineID] = &connectionEntry{
-			machineID: machineID,
-			connCtx:   connCtx,
-			close:     func() {},
-			lastUsed:  time.Now(),
-			ready:     true,
-			done:      closedChan(),
+		_, release, err := mgr.cache.Acquire(context.Background(), machineID)
+		if err != nil {
+			t.Fatalf("seed cache for %s: %v", machineID, err)
 		}
+		release()
+	}
+	// Seeding is done: from here on the dial must never be called again —
+	// the probe exercises the cached-connection path. Swap in a failing
+	// dial so a probe that dials fails loudly.
+	mgr.dial = func(context.Context, string) (context.Context, bindings.CloseFunc, error) {
+		return nil, nil, errors.New("probe tests must not dial: connections are pre-seeded")
 	}
 	return mgr
-}
-
-func closedChan() chan struct{} {
-	ch := make(chan struct{})
-	close(ch)
-	return ch
 }
 
 // pingServer starts an httptest server that answers /_ping with the given
