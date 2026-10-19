@@ -1,10 +1,23 @@
-import { FormControl, FormErrorMessage, FormLabel } from "@chakra-ui/react";
+import {
+	Alert,
+	AlertDescription,
+	AlertIcon,
+	AlertTitle,
+	Box,
+	FormControl,
+	FormErrorMessage,
+	FormLabel,
+	List,
+	ListItem,
+} from "@chakra-ui/react";
 import { containerDisplayName } from "@features/containers/components/containerDisplayName";
 import { useContainers } from "@features/containers/hooks/useContainers";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { runningContainers } from "@features/networks/components/containerOptions";
 import {
-	useConnectContainer,
+	ConnectError,
+	type ConnectFailure,
+	useConnectContainers,
 	useNetworks,
 } from "@features/networks/hooks/useNetworks";
 import type { NetworkSummary } from "@features/networks/services/networksApi";
@@ -16,12 +29,12 @@ import { SearchableSelect } from "@shared/components/SearchableSelect";
 import { useForm } from "react-hook-form";
 
 interface ConnectFormValues {
-	pick: string;
+	pick: string[];
 }
 
 // The fixed side discriminates the flow: the Networks tab passes the
-// network and the dialog picks the container; the Containers tab passes
-// the container and the dialog picks the network.
+// network and the dialog picks the containers; the Containers tab passes
+// the container and the dialog picks the networks.
 type ConnectSide =
 	| { kind: "network"; network: NetworkSummary }
 	| { kind: "container"; container: ContainerSummary };
@@ -34,18 +47,20 @@ type ConnectDialogProps = {
 	| { container: ContainerSummary; network?: never }
 );
 
-// The one owner of the connect ritual (issue 274): both tabs' connect
-// flows ride this dialog, entered with the fixed side and a picker for
-// the other. The dialog fetches its own options and drives the connect
-// mutation itself, including the both-lists invalidation that rides the
-// mutation. Options that can only produce an error never appear: the
-// container side offers running containers only, already-attached ones
-// excluded; the network side offers the networks the container is not on.
-// The chosen side is a required form field, so the module footer's submit
-// stays disabled until one is picked; confirm sends { networkName,
-// containerId }, the shape both connect surfaces share. Failure renders in
-// the module's error region and keeps the dialog open, success closes
-// through it.
+// The one owner of the connect ritual (issue 274), multi-select since
+// issue 320: both tabs' connect flows ride this dialog, entered with the
+// fixed side and a multi-picker for the other. The dialog fetches its own
+// options and drives the connect mutation itself — one request per picked
+// item, both lists invalidated once after all requests settle. Options
+// that can only produce an error never appear: the container side offers
+// running containers only, already-attached ones excluded; the network
+// side offers the networks the container is not on. The picked side is a
+// required form field ("at least one"), so the module footer's submit
+// stays disabled until something is picked; confirm sends one
+// { networkName, containerId } pair per pick. A partial failure renders
+// the aggregated summary in the module's error region, prunes the
+// selection to the failed items for retry, and keeps the dialog open;
+// only an all-success batch closes it.
 export function ConnectDialog(props: ConnectDialogProps) {
 	const { machineId, onClose } = props;
 	const side: ConnectSide =
@@ -59,8 +74,8 @@ export function ConnectDialog(props: ConnectDialogProps) {
 					title: `Connect container to ${side.network.name}`,
 					formId: "connect-container-form",
 					submitTestId: "connect-container-submit",
-					label: "Container",
-					requiredMessage: "Container is required",
+					label: "Containers",
+					requiredMessage: "Select at least one container",
 					searchPlaceholder: "Search containers…",
 					emptyMessage: "No running containers to connect.",
 				}
@@ -68,19 +83,19 @@ export function ConnectDialog(props: ConnectDialogProps) {
 					title: `Connect ${containerDisplayName(side.container)} to a network`,
 					formId: "connect-network-form",
 					submitTestId: "connect-network-submit",
-					label: "Network",
-					requiredMessage: "Network is required",
+					label: "Networks",
+					requiredMessage: "Select at least one network",
 					searchPlaceholder: "Search networks…",
 					emptyMessage: "No networks to connect.",
 				};
 
 	const { data: containers } = useContainers(machineId);
 	const { data: networks } = useNetworks(machineId);
-	const connect = useConnectContainer(machineId);
+	const connect = useConnectContainers(machineId);
 
 	const { register, handleSubmit, setValue, watch, formState } =
 		useForm<ConnectFormValues>({
-			defaultValues: { pick: "" },
+			defaultValues: { pick: [] },
 			// onChange so the footer submit's disabled state tracks validity
 			// as the user picks, not only after a failed submit attempt.
 			mode: "onChange",
@@ -89,8 +104,10 @@ export function ConnectDialog(props: ConnectDialogProps) {
 	const selected = watch("pick");
 	// The select is not a native input, so the field registers without
 	// props; setValue below drives it and shouldValidate keeps the footer's
-	// submit policy in step with the pick.
-	register("pick", { required: copy.requiredMessage });
+	// submit policy in step with the picks.
+	register("pick", {
+		validate: (value) => value.length > 0 || copy.requiredMessage,
+	});
 
 	// Already-attached = the container's networks include the fixed
 	// network; the container's current networks are excluded on the other
@@ -113,11 +130,23 @@ export function ConnectDialog(props: ConnectDialogProps) {
 					)
 					.map((network) => ({ value: network.name, label: network.name }));
 
+	// The picked value of a failed pair, in the option list's vocabulary:
+	// the container id on the network-fixed side, the network name on the
+	// container-fixed side.
+	const pickedValue = (failure: ConnectFailure) =>
+		side.kind === "network" ? failure.containerId : failure.networkName;
+
 	const submit = handleSubmit((values) => {
 		connect.mutate(
 			side.kind === "network"
-				? { networkName: side.network.name, containerId: values.pick }
-				: { networkName: values.pick, containerId: side.container.id },
+				? values.pick.map((containerId) => ({
+						networkName: side.network.name,
+						containerId,
+					}))
+				: values.pick.map((networkName) => ({
+						networkName,
+						containerId: side.container.id,
+					})),
 		);
 	});
 
@@ -130,12 +159,34 @@ export function ConnectDialog(props: ConnectDialogProps) {
 				formId={copy.formId}
 				submitLabel="Connect"
 				submitTestId={copy.submitTestId}
+				// A partial failure prunes the selection to the failed items,
+				// so a retry fires only those and the succeeded connections
+				// are not re-requested.
+				onError={(error) => {
+					if (!(error instanceof ConnectError)) return;
+					setValue("pick", error.failures.map(pickedValue), {
+						shouldValidate: true,
+					});
+				}}
+				// The seam's parsed envelope collapses the aggregate —
+				// getApiError passes through axios errors only — so the summary
+				// reads the failures off the same mutation result the dialog
+				// hands the module as `mutation` above.
+				renderError={() => (
+					<ConnectErrorSummary
+						failures={connect.error?.failures ?? []}
+						labelFor={(failure) =>
+							options.find((option) => option.value === pickedValue(failure))
+								?.label ?? pickedValue(failure)
+						}
+					/>
+				)}
 				body={
 					<form id={copy.formId} onSubmit={submit} noValidate>
 						<FormControl isInvalid={!!errors.pick} isRequired>
 							<FormLabel>{copy.label}</FormLabel>
 							<SearchableSelect
-								mode="single"
+								mode="multi"
 								options={options}
 								value={selected}
 								onChange={(value) =>
@@ -150,5 +201,44 @@ export function ConnectDialog(props: ConnectDialogProps) {
 				}
 			/>
 		</FormValidityScope>
+	);
+}
+
+// The partial-failure summary (issue 320): the module's error region is
+// replaced by a per-item list — every failed pair named by its option
+// label with the backend's message — so the user sees exactly what to
+// retry.
+function ConnectErrorSummary({
+	failures,
+	labelFor,
+}: {
+	failures: ConnectFailure[];
+	labelFor: (failure: ConnectFailure) => string;
+}) {
+	return (
+		<Alert
+			status="error"
+			variant="subtle"
+			role="alert"
+			data-testid="mutation-dialog-error"
+		>
+			<AlertIcon />
+			<Box>
+				<AlertTitle>
+					{failures.length === 1
+						? "1 connection failed"
+						: `${failures.length} connections failed`}
+				</AlertTitle>
+				<AlertDescription display="block">
+					<List spacing={1}>
+						{failures.map((failure) => (
+							<ListItem key={`${failure.networkName}/${failure.containerId}`}>
+								{labelFor(failure)}: {failure.error.message}
+							</ListItem>
+						))}
+					</List>
+				</AlertDescription>
+			</Box>
+		</Alert>
 	);
 }

@@ -80,9 +80,10 @@ export interface CreateNetworkInput {
 	containers?: string[];
 }
 
-// Variables of useConnectContainer: both connect surfaces (the Networks
-// tab's row dialog and the Containers tab's, issue 256) pass the target
-// network and the container at mutate time.
+// One connect pair of useConnectContainers: both connect surfaces (the
+// Networks tab's row dialog and the Containers tab's, issue 256) pass the
+// target network and the container at mutate time; the multi-select dialog
+// (issue 320) sends one pair per picked item.
 export interface ConnectContainerVariables {
 	networkName: string;
 	containerId: string;

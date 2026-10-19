@@ -9,8 +9,8 @@ import {
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 
 // The single owner of the combobox ritual the three #251 dialogs need
-// (the create-network multi-select and the two single-select connect
-// dialogs): a search input, a filtered option list, keyboard
+// (the create-network multi-select and the two connect dialogs, both
+// multi-select since issue 320): a search input, a filtered option list, keyboard
 // navigation, an explicit empty state, and single- and multi-select
 // modes. Chakra primitives only — no combobox library. The behavior is
 // pinned once in SearchableSelect.test.tsx at the rendered DOM; the

@@ -15,8 +15,13 @@ import {
 	networkQueryKey,
 	networksQueryKey,
 } from "@shared/queries/queryKeys";
-import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
-import { useQuery } from "@tanstack/react-query";
+import {
+	invalidateMachineResources,
+	useListInvalidatingMutation,
+} from "@shared/queries/useListInvalidatingMutation";
+import type { ApiError } from "@shared/types/api";
+import { getApiError } from "@shared/utils/api";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function useNetworks(machineId: string) {
 	return useQuery({
@@ -71,11 +76,64 @@ export function useCreateNetwork(machineId: string) {
 	);
 }
 
-export function useConnectContainer(machineId: string) {
-	return useListInvalidatingMutation(
-		machineId,
-		NETWORK_MUTATION_INVALIDATIONS,
-		({ networkName, containerId }: ConnectContainerVariables) =>
-			connectContainer(machineId, networkName, containerId),
-	);
+// One pair that failed among a multi-connect batch (issue 320): the pair
+// plus the display-ready error the backend answered with.
+export interface ConnectFailure {
+	networkName: string;
+	containerId: string;
+	error: ApiError;
+}
+
+// The aggregated error of a multi-connect batch: thrown when any request
+// fails, carrying every failed pair so the dialog can name them. All
+// requests fire regardless of individual failures; succeeded connections
+// stay connected (no rollback).
+export class ConnectError extends Error {
+	readonly failures: ConnectFailure[];
+	constructor(failures: ConnectFailure[]) {
+		super(`${failures.length} connection(s) failed`);
+		this.name = "ConnectError";
+		this.failures = failures;
+	}
+}
+
+// The multi-connect mutation (issue 320): one connectContainer call per
+// pair via Promise.allSettled, so every request fires regardless of
+// individual failures. Both lists invalidate once, after all requests
+// settle — success or partial failure alike — so succeeded items leave
+// the eligible options and failed ones remain for retry. Any failure
+// rejects the mutation with the aggregated ConnectError, which keeps the
+// dialog open; only an all-success batch resolves and closes it.
+export function useConnectContainers(machineId: string) {
+	const queryClient = useQueryClient();
+	// TError is ConnectError exactly: the mutationFn's only throw is the
+	// aggregated batch error — individual request failures are captured by
+	// allSettled and folded into it, never rethrown raw.
+	return useMutation<void, ConnectError, ConnectContainerVariables[]>({
+		mutationFn: async (pairs: ConnectContainerVariables[]) => {
+			const results = await Promise.allSettled(
+				pairs.map(({ networkName, containerId }) =>
+					connectContainer(machineId, networkName, containerId),
+				),
+			);
+			const failures: ConnectFailure[] = [];
+			for (const [index, result] of results.entries()) {
+				if (result.status === "rejected") {
+					failures.push({
+						...pairs[index],
+						error: getApiError(result.reason),
+					});
+				}
+			}
+			if (failures.length > 0) {
+				throw new ConnectError(failures);
+			}
+		},
+		onSettled: () =>
+			invalidateMachineResources(
+				queryClient,
+				machineId,
+				NETWORK_MUTATION_INVALIDATIONS,
+			),
+	});
 }
