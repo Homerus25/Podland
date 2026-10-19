@@ -50,7 +50,8 @@ One line each; full detail in `docs/architecture-decisions.md`.
 | **Machine** | A remote server with Podman installed that can be managed through this application |
 | **Owner** | The user who registered a machine and provided its SSH credentials |
 | **Shared User** | A user who has been granted access to a machine by its owner |
-| **Connection Cache** | In-memory cache of SSH connections to remote machines |
+| **Connection Cache** | In-memory cache of SSH connections to remote machines — one adapter of the Resource cache |
+| **Resource cache** | A per-machine cache of one expensive resource (the podman Connection Cache, the SSH-exec client cache) whose lifecycle — acquire with dial dedup, refcounted release, LRU-idle eviction, idle cleanup, graceful removal, fail-fast invalidation — is one ritual (§4); an adapter hands over its dial and close, never re-implements the lifecycle |
 | **Podman Service API** | The REST API provided by Podman for managing containers and images |
 | **Network** | A named podman network (bridge/macvlan/host…) containers attach to; podman pre-creates a default bridge network; quadlets can define `.network` files |
 | **SSE** | Server-Sent Events, a standard for push notifications from server to client |
