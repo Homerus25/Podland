@@ -115,6 +115,37 @@ describe("VolumeList create", () => {
 		});
 	});
 
+	it("renders the labels and options rows through the shared key/value editor", async () => {
+		installHandlers();
+		const user = await openCreateModal();
+
+		await user.click(screen.getByTestId("add-label"));
+		expect(screen.getByLabelText("label key 1")).toBeInTheDocument();
+		expect(screen.getByLabelText("label value 1")).toBeInTheDocument();
+		expect(screen.getByTestId("remove-label-0")).toHaveAttribute(
+			"aria-label",
+			"Remove label entry 1",
+		);
+
+		await user.click(screen.getByTestId("volume-advanced-toggle"));
+		await user.click(screen.getByTestId("add-option"));
+		expect(screen.getByLabelText("option key 1")).toBeInTheDocument();
+		expect(screen.getByTestId("remove-option-0")).toHaveAttribute(
+			"aria-label",
+			"Remove option entry 1",
+		);
+
+		// The adapter turns the per-row key validation on: a value without
+		// a key gates submit.
+		await user.type(screen.getByLabelText("label value 1"), "platform");
+		await user.click(screen.getByTestId("volume-form-submit"));
+
+		expect(
+			await screen.findByText("Key is required when a value is set"),
+		).toBeInTheDocument();
+		expect(createRequests.count).toBe(0);
+	});
+
 	it("creates an anonymous volume with an empty name and toasts the generated name", async () => {
 		installHandlers(() => ({
 			status: 201,

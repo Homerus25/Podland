@@ -213,9 +213,13 @@ copy/move composes it instead of re-deriving it:
   mints), and each domain maps them onto its own wire codes. The kit
   owns the bound's
   default too: `transfer.DefaultMaxVolumeUploadBytes` (2 GiB) is the
-  one constant both domains' zero-value fallbacks and the config
-  default for `VOLUME_UPLOAD_MAX_BYTES` read, so the uploads cap and
-  the transfer bound cannot drift apart.
+  one constant the config default for `VOLUME_UPLOAD_MAX_BYTES` and
+  the populate cap's unwired default read, and
+  `transfer.BoundOrDefault` is the one fallback helper both domains'
+  `volumeDataLimit()` resolve their wired bound through (zero falls
+  back to the constant; a non-zero wired value — negative included —
+  passes through untouched), so the uploads cap and the transfer
+  bound cannot drift apart.
 - **Three compositions, one kit**: the quadlet move's volume-data phase
   (`quadlets/move_volume_data.go`), the volumes domain's copy/move
   (`volumes/move.go`), and the secrets domain's copy/move

@@ -1,5 +1,6 @@
 import { createLogSource, type LogSource } from "@shared/streaming/logSource";
 import { api, machineApiPath, machineApiUrl } from "@shared/utils/api";
+import { keyValueRowsToRecord } from "@shared/utils/keyValueRows";
 
 // Container as returned by GET /api/machines/{id}/containers
 // (backend/internal/domain/containers/dto.go ContainerListResponse).
@@ -179,6 +180,191 @@ export interface CreateContainerInput {
 		hostPath: string;
 		containerPath: string;
 	}[];
+}
+
+// One row of the create-container form's environment field array
+// (spec 313): a key/value pair as typed in the dialog.
+export interface EnvRow {
+	key: string;
+	value: string;
+}
+
+// One row of the create-container form's port-bindings field array.
+export interface PortRow {
+	hostPort: string;
+	containerPort: string;
+	protocol: PortProtocol;
+}
+
+// One row of the create-container form's bind-mounts field array.
+export interface MountRow {
+	source: string;
+	destination: string;
+	mode: MountMode;
+}
+
+// One row of the create-container form's named-volumes field array.
+export interface VolumeRow {
+	name: string;
+	destination: string;
+	mode: MountMode;
+}
+
+// One row of the create-container form's devices field array.
+export interface DeviceRow {
+	hostPath: string;
+	containerPath: string;
+}
+
+// The create-container dialog's form values (spec 313): the form's own
+// shape, owned here so the payload builder below is the single owner of
+// the form-to-payload mapping and the dialog imports it.
+export interface CreateContainerFormValues {
+	image: string;
+	name: string;
+	command: string;
+	user: string;
+	timezone: string;
+	// "" is the "(none)" select option; a chosen policy is one of the
+	// backend's oneof values.
+	restartPolicy: ContainerRestartPolicy | "";
+	remove: boolean;
+	environment: EnvRow[];
+	portBindings: PortRow[];
+	mounts: MountRow[];
+	volumes: VolumeRow[];
+	// The checkbox lists select by option key: the network's name and the
+	// secret's id. The builder resolves keys back to payload names.
+	networks: string[];
+	secrets: string[];
+	devices: DeviceRow[];
+}
+
+// The backend takes the command as a string array; the form offers one text
+// input and splits it on whitespace ("redis-server --appendonly yes").
+function parseCommand(text: string): string[] | undefined {
+	const trimmed = text.trim();
+	return trimmed ? trimmed.split(/\s+/) : undefined;
+}
+
+// A port row is complete only when both ports parse to integers; empty or
+// non-numeric rows are filtered out of the payload.
+function parsePort(text: string): number | undefined {
+	const trimmed = text.trim();
+	if (trimmed === "") return undefined;
+	const port = Number(trimmed);
+	return Number.isInteger(port) ? port : undefined;
+}
+
+function portBindingsToInput(
+	rows: PortRow[],
+): CreateContainerInput["portBindings"] {
+	const bindings = rows.flatMap((row) => {
+		const hostPort = parsePort(row.hostPort);
+		const containerPort = parsePort(row.containerPort);
+		if (hostPort === undefined || containerPort === undefined) return [];
+		return [{ hostPort, containerPort, protocol: row.protocol || "tcp" }];
+	});
+	return bindings.length > 0 ? bindings : undefined;
+}
+
+// A mount/volume row is complete only when its primary field (the mount
+// source or the volume name) and its destination are filled; empty rows
+// are filtered out of the payload and the access mode defaults to rw.
+// The entry shape rides through buildEntry, so bind mounts and named
+// volumes share this one mapping.
+function storageRowsToInput<
+	Row extends { destination: string; mode: MountMode },
+	Entry,
+>(
+	rows: Row[],
+	primaryOf: (row: Row) => string,
+	buildEntry: (primary: string, destination: string, mode: MountMode) => Entry,
+): Entry[] | undefined {
+	const entries = rows.flatMap((row) => {
+		const primary = primaryOf(row).trim();
+		const destination = row.destination.trim();
+		if (!primary || !destination) return [];
+		return [buildEntry(primary, destination, row.mode || "rw")];
+	});
+	return entries.length > 0 ? entries : undefined;
+}
+
+// A device row is complete only when both paths are filled; empty rows
+// are filtered out of the payload.
+function devicesToInput(rows: DeviceRow[]): CreateContainerInput["devices"] {
+	const devices = rows.flatMap((row) => {
+		const hostPath = row.hostPath.trim();
+		const containerPath = row.containerPath.trim();
+		if (!hostPath || !containerPath) return [];
+		return [{ hostPath, containerPath }];
+	});
+	return devices.length > 0 ? devices : undefined;
+}
+
+// Builds the POST /api/machines/{id}/containers body from the
+// create-container dialog's form values (spec 313): the single owner of
+// the form-to-payload mapping — trims, the command whitespace split,
+// empty-key env skipping, integer-parseable port pairs, complete
+// mount/volume/device rows, protocol/mode defaults, network pass-through,
+// and omit-empty semantics for every optional field. `secrets` resolves
+// the form's secret ids to payload names; it is structurally typed and
+// undefined-tolerant because the dialog's option fetch may still be
+// pending at submit time. An id whose secret no longer exists in the
+// fetched list carries nothing and is skipped.
+export function buildCreateContainerInput(
+	values: CreateContainerFormValues,
+	secrets?: { id: string; name: string }[],
+): CreateContainerInput {
+	const command = parseCommand(values.command);
+	// The env rows map through the shared rows-to-record mapper — one
+	// owner for the ritual (candidate C4); the builder keeps the payload.
+	const environment = keyValueRowsToRecord(values.environment);
+	const portBindings = portBindingsToInput(values.portBindings);
+	const mounts = storageRowsToInput(
+		values.mounts,
+		(row) => row.source,
+		(source, destination, mode) => ({ source, destination, mode }),
+	);
+	const volumes = storageRowsToInput(
+		values.volumes,
+		(row) => row.name,
+		(name, destination, mode) => ({ name, destination, mode }),
+	);
+	const devices = devicesToInput(values.devices);
+	// Network keys are the network names, so the selection is the
+	// payload already.
+	const networks = values.networks.length > 0 ? values.networks : undefined;
+	// Secret keys are the secret ids; the payload carries the name. A
+	// secret mounts at /run/secrets/<name> unless a target is given;
+	// the form always sends the default target.
+	const secretNameById = new Map(
+		(secrets ?? []).map((secret) => [secret.id, secret.name]),
+	);
+	const secretEntries = values.secrets.flatMap((id) => {
+		const name = secretNameById.get(id);
+		return name ? [{ source: name, target: `/run/secrets/${name}` }] : [];
+	});
+	const secretPayload = secretEntries.length > 0 ? secretEntries : undefined;
+	const user = values.user.trim();
+	const timezone = values.timezone.trim();
+
+	return {
+		image: values.image.trim(),
+		...(values.name.trim() ? { name: values.name.trim() } : {}),
+		...(command ? { command } : {}),
+		...(user ? { user } : {}),
+		...(timezone ? { timezone } : {}),
+		...(values.restartPolicy ? { restartPolicy: values.restartPolicy } : {}),
+		...(values.remove ? { remove: true } : {}),
+		...(environment ? { environment } : {}),
+		...(portBindings ? { portBindings } : {}),
+		...(mounts ? { mounts } : {}),
+		...(volumes ? { volumes } : {}),
+		...(networks ? { networks } : {}),
+		...(secretPayload ? { secrets: secretPayload } : {}),
+		...(devices ? { devices } : {}),
+	};
 }
 
 // Response of POST /api/machines/{id}/containers -> 201

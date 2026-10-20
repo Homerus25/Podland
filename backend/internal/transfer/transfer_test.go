@@ -155,6 +155,23 @@ func TestCopyVolumeData_ZeroLimitNeverTrips(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestBoundOrDefault(t *testing.T) {
+	tests := []struct {
+		name  string
+		wired int64
+		want  int64
+	}{
+		{"zero falls back to the kit default", 0, DefaultMaxVolumeUploadBytes},
+		{"wired bound passes through", 1 << 20, 1 << 20},
+		{"negative wired value passes through untouched", -1, -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, BoundOrDefault(tt.wired))
+		})
+	}
+}
+
 func TestCopyVolumeData_ImportFailureComesBackUnwrapped(t *testing.T) {
 	cause := errors.New("import refused")
 	src := &fakeVolumeSource{entries: map[string][]byte{"a": []byte("x")}}

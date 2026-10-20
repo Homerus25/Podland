@@ -17,6 +17,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
+	"github.com/Homerus25/podland/backend/internal/transfer"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -29,15 +30,14 @@ type VolumeHandler struct {
 	maxUploadBytes int64
 }
 
-// DefaultMaxUploadBytes is the populate upload cap when no explicit
-// override is wired in (2 GiB, matching VOLUME_UPLOAD_MAX_BYTES).
-const DefaultMaxUploadBytes int64 = 2 << 30
-
-// NewVolumeHandler creates a new VolumeHandler
+// NewVolumeHandler creates a new VolumeHandler. The populate upload
+// cap's unwired default is the transfer kit's DefaultMaxVolumeUploadBytes
+// (2 GiB, matching VOLUME_UPLOAD_MAX_BYTES) — the kit owns the bound's
+// default (§19).
 func NewVolumeHandler(service *VolumeService) *VolumeHandler {
 	return &VolumeHandler{
 		service:        service,
-		maxUploadBytes: DefaultMaxUploadBytes,
+		maxUploadBytes: transfer.DefaultMaxVolumeUploadBytes,
 	}
 }
 

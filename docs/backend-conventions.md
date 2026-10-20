@@ -204,6 +204,26 @@ closest sibling that already exists. Rulings so far:
   (`removeSourceAfterInstall` in `move.go`) are its two callers, distinct
   only in op tag and terminal values. Settled 2026-10-05 (issue 231; the
   tail composed of the removal module, issue 264).
+- **Quadlet service split (the lean service and the transfer service)** —
+  `internal/domain/quadlets` carries two structs (architecture review
+  2026-10-19, candidate C2): the lean `QuadletService` (dependencies: the
+  engine provider, sshExec, machines — rituals: CRUD, lifecycle, logs,
+  generate, import, auto-update) and `QuadletTransferService`
+  (dependencies: the engine provider, secretEngines, accessRepo,
+  maxVolumeUploadBytes, plus the lifecycle seam — rituals: the move/copy
+  preview, the move plain and progress, the volume-data phase, and the
+  secret-transfer phase). The transfer ritual crosses into the lean half
+  through one consumer-declared, unexported interface (`lifecycleSeam` in
+  `move.go`): stop the source unit (the lifecycle's unit action with
+  `actionStop`), reload the target's systemd manager, and the
+  stop-and-remove source half with the move's terminals — satisfied
+  implicitly by `*QuadletService` and pinned by a compile-time
+  satisfaction assertion. The transfer service's constructor is flat
+  (all five dependencies required), so a missing wiring is a compile
+  error instead of a panic at the seam. One `QuadletHandler` is
+  constructed over both services, and `internal/app/app.go` wires the two
+  modules at two sites; the route table is unchanged. Settled 2026-10-19
+  (architecture-review candidate C2).
 - **Removal-terminals module** — `internal/removal` (`Run`) is the one kit
   behind every remove-and-classify tail (issue 264): one entry point
   taking a remove closure, the caller's removal terminals (GLOSSARY:

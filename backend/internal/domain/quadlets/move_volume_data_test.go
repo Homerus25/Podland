@@ -76,19 +76,18 @@ func volumeSourceFixture(content string, volumes map[string]*QuadletVolumeInspec
 	}
 }
 
-// newMoveVolumeTestService wires the two per-machine fake engines the data
-// phase dials, an SSH exec (the post-install reload and move-mode stops run
-// through it), and optionally a migration bound (0 keeps the default).
-func newMoveVolumeTestService(source, target *fakeQuadletEngine, limit int64) *QuadletService {
-	service := NewQuadletService(fakeEngineProvider{engines: map[string]QuadletEngine{
+// newMoveVolumeTestService wires the transfer service over the two
+// per-machine fake engines the data phase dials, with the real lean
+// service (SSH exec and machine lookup wired for the seam crossings — the
+// post-install reload and move-mode stops run through it) as its
+// lifecycle seam, and the migration bound (0 keeps the kit default).
+func newMoveVolumeTestService(source, target *fakeQuadletEngine, limit int64) *QuadletTransferService {
+	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
 		"machine-a": source,
 		"machine-b": target,
-	}}, testutils.NewMockSSHExec(), lookupForUser("core")).
-		WithAccessRepo(&fakeAccessRepo{getPermissionFn: allowTargetWrite})
-	if limit > 0 {
-		service = service.WithMaxVolumeUploadBytes(limit)
-	}
-	return service
+	}}
+	service := NewQuadletService(provider, testutils.NewMockSSHExec(), lookupForUser("core"))
+	return NewQuadletTransferService(provider, nil, &fakeAccessRepo{getPermissionFn: allowTargetWrite}, limit, service)
 }
 
 // migrateCopyRequest opts a copy transfer into volume data migration.
@@ -787,10 +786,12 @@ func TestQuadletService_MovePreview_VolumeMigrationFacts(t *testing.T) {
 		},
 	}
 
-	service := NewQuadletService(fakeEngineProvider{engines: map[string]QuadletEngine{
+	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
 		"machine-a": source,
 		"machine-b": target,
-	}}, nil, nil).WithAccessRepo(&fakeAccessRepo{getPermissionFn: allowTargetRead})
+	}}
+	lean := NewQuadletService(provider, nil, nil)
+	service := NewQuadletTransferService(provider, nil, &fakeAccessRepo{getPermissionFn: allowTargetRead}, 0, lean)
 
 	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
 

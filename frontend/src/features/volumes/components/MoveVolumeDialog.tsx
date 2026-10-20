@@ -1,17 +1,17 @@
-import { Box, Checkbox, HStack, Spinner, Text, VStack } from "@chakra-ui/react";
+import { Box, Checkbox, HStack, Spinner, Text } from "@chakra-ui/react";
 import type { VolumeMoveProgress } from "@features/volumes/hooks/useVolumeMoveStream";
 import { useVolumeMoveStream } from "@features/volumes/hooks/useVolumeMoveStream";
 import { useVolumeMovePreview } from "@features/volumes/hooks/useVolumes";
-import type {
-	VolumeMoveResult,
-	VolumeSummary,
-} from "@features/volumes/services/volumesApi";
+import type { VolumeSummary } from "@features/volumes/services/volumesApi";
 import {
 	TransferDialog,
 	useTransferState,
 } from "@shared/components/TransferDialog";
+import {
+	TransferReport,
+	transferProgressLabel,
+} from "@shared/transfers/transferPresentation";
 import type { Machine } from "@shared/types/api";
-import { formatBytes } from "@shared/utils/format";
 import { useState } from "react";
 
 // The two execution-time refusals the dialog can make actionable (issue
@@ -20,61 +20,16 @@ import { useState } from "react";
 const VOLUME_IN_USE_CODE = "VOLUME_IN_USE";
 const VOLUME_ALREADY_EXISTS_CODE = "VOLUME_ALREADY_EXISTS";
 
-// One data-phase progress line: the volume's latest phase winning.
-function progressLabel(progress: VolumeMoveProgress): string {
-	switch (progress.phase) {
-		case "start":
-			return "exporting…";
-		case "bytes":
-			return `${formatBytes(progress.bytes ?? 0)} exported…`;
-		default:
-			return `done (${formatBytes(progress.bytes ?? 0)})`;
-	}
-}
-
 // Live data-phase progress (issue 238): one line, updated in place as the
-// stream advances.
+// stream advances. The phase-to-label mapping is the shared
+// transfer-presentation module's (candidate C8); the entry passes directly.
 function TransferProgress({ progress }: { progress: VolumeMoveProgress }) {
 	return (
 		<HStack spacing={2} data-testid="move-progress">
 			<Spinner size="sm" />
 			<Text>Copying volume data…</Text>
-			<Text color="gray.500">{progressLabel(progress)}</Text>
+			<Text color="gray.500">{transferProgressLabel(progress)}</Text>
 		</HStack>
-	);
-}
-
-// The terminal report of a completed transfer (issue 238): the envelope's
-// status and byte count narrated in place — the dialog stays open on it,
-// the stay-open-report pattern, because the byte count is the answer's
-// point and the caller may want to read it before closing.
-function TransferReport({
-	result,
-	targetName,
-}: {
-	result: VolumeMoveResult;
-	targetName: string;
-}) {
-	return (
-		<VStack align="flex-start" spacing={2} data-testid="move-success-report">
-			<Text>
-				{result.status === "moved" ? "Moved" : "Copied"} “{result.name}” to “
-				{targetName}” ({formatBytes(result.bytes)} of data).
-			</Text>
-			{result.status === "partial" ? (
-				<VStack
-					align="flex-start"
-					spacing={1}
-					data-testid="move-partial-message"
-				>
-					<Text>
-						The data crossed but the source volume could not be removed. It
-						currently exists on both machines and must be cleaned up manually.
-					</Text>
-					{result.error ? <Text color="red.500">{result.error}</Text> : null}
-				</VStack>
-			) : null}
-		</VStack>
 	);
 }
 
@@ -112,10 +67,30 @@ export function MoveVolumeDialog({
 	// the stale preview says not-in-use — the refusal's hint names the
 	// checkbox, so it must exist to tick.
 	const inUseRefusal = moveStream.error?.code === VOLUME_IN_USE_CODE;
+	// The terminal report of a completed transfer (issue 238): the shared
+	// skeleton narrates the envelope's status and byte count in place — the
+	// dialog stays open on it, the stay-open-report pattern, because the byte
+	// count is the answer's point and the caller may want to read it before
+	// closing. The cause sentence is the volume domain's; the header shape,
+	// the both-machines tail, and the error line are the skeleton's
+	// (candidate C8).
 	const report = moveStream.result ? (
 		<TransferReport
-			result={moveStream.result}
-			targetName={transfer.targetName}
+			header={{
+				status: moveStream.result.status,
+				itemName: moveStream.result.name,
+				targetName: transfer.targetName,
+				bytes: moveStream.result.bytes,
+			}}
+			partial={
+				moveStream.result.status === "partial"
+					? {
+							cause:
+								"The data crossed but the source volume could not be removed.",
+							error: moveStream.result.error,
+						}
+					: undefined
+			}
 		/>
 	) : null;
 

@@ -74,15 +74,12 @@ func (s *VolumeService) WithMaxVolumeUploadBytes(max int64) *VolumeService {
 	return s
 }
 
-// volumeDataLimit answers the wired transfer bound; zero (unset in
-// tests) falls back to the transfer kit's DefaultMaxVolumeUploadBytes
-// — the kit owns the default (§19), so this fallback and the quadlets
+// volumeDataLimit answers the wired transfer bound; the zero-value
+// fallback resolves through the transfer kit's BoundOrDefault — the
+// kit owns the default (§19), so this fallback and the quadlets
 // domain's migration bound cannot drift apart.
 func (s *VolumeService) volumeDataLimit() int64 {
-	if s.maxVolumeUploadBytes == 0 {
-		return transfer.DefaultMaxVolumeUploadBytes
-	}
-	return s.maxVolumeUploadBytes
+	return transfer.BoundOrDefault(s.maxVolumeUploadBytes)
 }
 
 // List returns every volume on the specified machine, named and anonymous

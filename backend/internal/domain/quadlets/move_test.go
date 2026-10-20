@@ -32,16 +32,28 @@ func (f *fakeAccessRepo) GetPermission(machineID, userID string) (string, error)
 	return f.getPermissionFn(machineID, userID)
 }
 
-// newMovePreviewTestService builds the service over per-machine fake
-// engines (the two-lease shape MovePreview exercises) and the given
-// access store. The source machine's quadlet is web.container, stopped
-// on machine-a; engines map machine IDs to their fakes so each lease
-// dials its own machine's engine.
-func newMovePreviewTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo) *QuadletService {
-	return NewQuadletService(fakeEngineProvider{engines: map[string]QuadletEngine{
+// newMovePreviewTestServices builds both quadlet modules over per-machine
+// fake engines (the two-lease shape MovePreview exercises) and the given
+// access store: the real lean service over the same engines, passed to
+// the transfer service as its lifecycle seam (architecture review
+// 2026-10-19, candidate C2). The source machine's quadlet is
+// web.container, stopped on machine-a; engines map machine IDs to their
+// fakes so each lease dials its own machine's engine.
+func newMovePreviewTestServices(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo) (*QuadletService, *QuadletTransferService) {
+	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
 		"machine-a": sourceEngine,
 		"machine-b": targetEngine,
-	}}, nil, nil).WithAccessRepo(access)
+	}}
+	service := NewQuadletService(provider, nil, nil)
+	return service, NewQuadletTransferService(provider, nil, access, 0, service)
+}
+
+// newMovePreviewTestService builds the transfer service over per-machine
+// fake engines and the given access store, with the real lean service as
+// its seam — the shape the preview suites drive.
+func newMovePreviewTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo) *QuadletTransferService {
+	_, transfer := newMovePreviewTestServices(sourceEngine, targetEngine, access)
+	return transfer
 }
 
 // movePreviewSourceFixture is the source lease's answer: one stopped
@@ -343,14 +355,26 @@ func TestQuadletService_MovePreview_MissingSourceQuadletIs404(t *testing.T) {
 
 // --- The transfer (copy mode, issue 210) ---
 
-// newMoveTransferTestService builds the service over per-machine fake engines
-// and the given access store, with an SSH exec and machine lookup wired for
-// the post-install manager reload the transfer performs on the target.
-func newMoveTransferTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, sshExec sshexec.SSHExecInterface) *QuadletService {
-	return NewQuadletService(fakeEngineProvider{engines: map[string]QuadletEngine{
+// newMoveTransferTestServices builds both quadlet modules over per-machine
+// fake engines and the given access store, with an SSH exec and machine
+// lookup wired on the lean service for the post-install manager reload the
+// transfer performs on the target and the move-mode stops — both cross
+// the lifecycle seam, so the SSH-exec mock pins keep crossing both modules.
+func newMoveTransferTestServices(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, sshExec sshexec.SSHExecInterface) (*QuadletService, *QuadletTransferService) {
+	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
 		"machine-a": sourceEngine,
 		"machine-b": targetEngine,
-	}}, sshExec, lookupForUser("core")).WithAccessRepo(access)
+	}}
+	service := NewQuadletService(provider, sshExec, lookupForUser("core"))
+	return service, NewQuadletTransferService(provider, nil, access, 0, service)
+}
+
+// newMoveTransferTestService builds the transfer service over per-machine
+// fake engines and the given access store, with the real lean service as
+// its seam — the shape the transfer suites drive.
+func newMoveTransferTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, sshExec sshexec.SSHExecInterface) *QuadletTransferService {
+	_, transfer := newMoveTransferTestServices(sourceEngine, targetEngine, access, sshExec)
+	return transfer
 }
 
 // moveSourceFixture is the source lease's answer: one quadlet with printable

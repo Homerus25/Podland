@@ -9,29 +9,33 @@ import { describe, expect, it, vi } from "vitest";
 import { renderWithQuery } from "@/test/render";
 
 // Pins the combobox ritual once, at the rendered DOM: filtering as the
-// user types, keyboard navigation, single vs multi selection, and the
-// empty state. The three #251 dialogs consume the component as adapters
-// and do not re-pin any of this.
+// user types, keyboard navigation, single vs multi selection, the empty
+// state, and the ARIA 1.2 combobox pattern. Every combobox in the app
+// consumes the component as an adapter — the three #251 dialogs
+// (string-valued multi-select) and the users feature's UserPicker
+// (object-valued single-select) — and none of them re-pins any of this.
 
-const options: SearchableSelectOption[] = [
+const options: SearchableSelectOption<string>[] = [
 	{ value: "alpha", label: "Alpha" },
 	{ value: "beta", label: "Beta" },
 	{ value: "gamma", label: "Gamma" },
 ];
 
 type HarnessProps = {
-	options?: SearchableSelectOption[];
+	options?: SearchableSelectOption<string>[];
 	searchPlaceholder?: string;
 	emptyMessage?: string;
+	id?: string;
 };
 
 function SingleSelect({
 	options: opts = options,
 	searchPlaceholder,
 	emptyMessage,
+	id,
 	onChange,
-}: HarnessProps & { onChange?: (value: string) => void }) {
-	const [value, setValue] = useState("");
+}: HarnessProps & { onChange?: (value: string | null) => void }) {
+	const [value, setValue] = useState<string | null>(null);
 	return (
 		<SearchableSelect
 			mode="single"
@@ -43,6 +47,7 @@ function SingleSelect({
 			}}
 			searchPlaceholder={searchPlaceholder}
 			emptyMessage={emptyMessage}
+			id={id}
 		/>
 	);
 }
@@ -66,7 +71,7 @@ function MultiSelect({
 }
 
 function renderSingle(
-	props: HarnessProps & { onChange?: (value: string) => void } = {},
+	props: HarnessProps & { onChange?: (value: string | null) => void } = {},
 ) {
 	return renderWithQuery(<SingleSelect {...props} />, { chakra: true });
 }
@@ -249,9 +254,10 @@ describe("SearchableSelect", () => {
 			screen.getByTestId("searchable-select-option-beta"),
 		).toBeInTheDocument();
 
-		// removing the chip clears the value and brings the option back
+		// removing the chip clears the value (null in single mode) and
+		// brings the option back
 		await user.click(screen.getByTestId("searchable-select-remove-alpha"));
-		expect(onChange).toHaveBeenLastCalledWith("");
+		expect(onChange).toHaveBeenLastCalledWith(null);
 		expect(
 			screen.queryByTestId("searchable-select-chip-alpha"),
 		).not.toBeInTheDocument();
@@ -354,5 +360,167 @@ describe("SearchableSelect", () => {
 		for (const option of screen.getAllByRole("option")) {
 			expect(option).toHaveAttribute("aria-selected", "false");
 		}
+	});
+
+	it("follows the ARIA 1.2 combobox pattern on the input", () => {
+		renderSingle();
+
+		const input = screen.getByTestId("searchable-select-input");
+		expect(input).toHaveAttribute("role", "combobox");
+		expect(input).toHaveAttribute("aria-autocomplete", "list");
+		expect(input).toHaveAttribute("autocomplete", "off");
+	});
+
+	it("passes the id prop through to the input for label association", () => {
+		renderSingle({ id: "grant-user-search" });
+
+		expect(screen.getByTestId("searchable-select-input")).toHaveAttribute(
+			"id",
+			"grant-user-search",
+		);
+	});
+
+	it("single mode starts from a null selection and renders no chip", () => {
+		renderSingle();
+
+		expect(
+			screen.queryByTestId("searchable-select-chips"),
+		).not.toBeInTheDocument();
+	});
+
+	it("supports object-valued options: the full object reaches onChange and the chip keys off the label", async () => {
+		const onChange = vi.fn();
+		const user = userEvent.setup();
+		const alice = { id: "u-1", username: "alice" };
+		const bob = { id: "u-2", username: "bob" };
+		function ObjectSelect() {
+			const [value, setValue] = useState<{
+				id: string;
+				username: string;
+			} | null>(null);
+			return (
+				<SearchableSelect
+					mode="single"
+					options={[
+						{ value: alice, label: "alice" },
+						{ value: bob, label: "bob" },
+					]}
+					value={value}
+					onChange={(next) => {
+						setValue(next);
+						onChange(next);
+					}}
+				/>
+			);
+		}
+		renderWithQuery(<ObjectSelect />, { chakra: true });
+
+		const input = screen.getByTestId("searchable-select-input");
+		await user.click(input);
+		await user.click(screen.getByTestId("searchable-select-option-alice"));
+
+		expect(onChange).toHaveBeenCalledWith(alice);
+		expect(
+			screen.getByTestId("searchable-select-chip-alice"),
+		).toHaveTextContent("alice");
+		expect(
+			screen.queryByTestId("searchable-select-option-alice"),
+		).not.toBeInTheDocument();
+
+		await user.click(screen.getByTestId("searchable-select-remove-alice"));
+		expect(onChange).toHaveBeenLastCalledWith(null);
+		expect(
+			screen.queryByTestId("searchable-select-chip-alice"),
+		).not.toBeInTheDocument();
+
+		// the option returns to the list once the selection is cleared
+		await user.click(input);
+		expect(
+			screen.getByTestId("searchable-select-option-alice"),
+		).toBeInTheDocument();
+	});
+
+	it("keyOf: selection compares by key, so rebuilt option objects cannot strand a held value", async () => {
+		const onChange = vi.fn();
+		const user = userEvent.setup();
+		// The "refetched" directory: same users, fresh objects.
+		const directory = [
+			{ id: "u-1", username: "alice" },
+			{ id: "u-2", username: "bob" },
+		];
+		// The caller holds a summary from the previous fetch — a distinct
+		// object from anything in the current options array.
+		const heldBob = { id: "u-2", username: "bob" };
+		function KeyedSelect() {
+			const [value, setValue] = useState<{
+				id: string;
+				username: string;
+			} | null>(heldBob);
+			return (
+				<SearchableSelect
+					mode="single"
+					options={directory.map((u) => ({ value: u, label: u.username }))}
+					value={value}
+					keyOf={(u) => u.id}
+					onChange={(next) => {
+						setValue(next);
+						onChange(next);
+					}}
+				/>
+			);
+		}
+		renderWithQuery(<KeyedSelect />, { chakra: true });
+
+		// The held value renders as the chip (keyed off the id) and bob
+		// leaves the offered list — no re-pick, no onChange.
+		expect(screen.getByTestId("searchable-select-chip-u-2")).toHaveTextContent(
+			"bob",
+		);
+		const input = screen.getByTestId("searchable-select-input");
+		await user.click(input);
+		expect(
+			screen.getByTestId("searchable-select-option-u-1"),
+		).toHaveTextContent("alice");
+		expect(
+			screen.queryByTestId("searchable-select-option-u-2"),
+		).not.toBeInTheDocument();
+		expect(onChange).not.toHaveBeenCalled();
+
+		// Removing the chip clears the selection by key.
+		await user.click(screen.getByTestId("searchable-select-remove-u-2"));
+		expect(onChange).toHaveBeenLastCalledWith(null);
+		expect(
+			screen.getByTestId("searchable-select-option-u-2"),
+		).toBeInTheDocument();
+	});
+
+	it("keyOf: per-option testids key off the key, so duplicate labels cannot collide", async () => {
+		const user = userEvent.setup();
+		function KeyedSelect() {
+			const [value, setValue] = useState<{ id: string; name: string } | null>(
+				null,
+			);
+			return (
+				<SearchableSelect
+					mode="single"
+					options={[
+						{ value: { id: "n-1", name: "nfs" }, label: "nfs" },
+						{ value: { id: "n-2", name: "nfs" }, label: "nfs" },
+					]}
+					value={value}
+					keyOf={(v) => v.id}
+					onChange={setValue}
+				/>
+			);
+		}
+		renderWithQuery(<KeyedSelect />, { chakra: true });
+
+		await user.click(screen.getByTestId("searchable-select-input"));
+		expect(
+			screen.getByTestId("searchable-select-option-n-1"),
+		).toHaveTextContent("nfs");
+		expect(
+			screen.getByTestId("searchable-select-option-n-2"),
+		).toHaveTextContent("nfs");
 	});
 });

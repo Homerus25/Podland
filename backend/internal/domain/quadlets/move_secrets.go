@@ -48,7 +48,7 @@ func secretTransferFailed(name string, err error) error {
 // yet, the caller returns the error and the transfer stays a no-op on
 // both machines' quadlet sets. Secrets delivered earlier in the phase
 // stay on the target — inert, skipped on re-run by the same-name rule.
-func (s *QuadletService) transferSecrets(ctx context.Context, userID, sourceMachineID, targetMachineID, content string) ([]QuadletMoveSecretOutcome, error) {
+func (s *QuadletTransferService) transferSecrets(ctx context.Context, userID, sourceMachineID, targetMachineID, content string) ([]QuadletMoveSecretOutcome, error) {
 	outcomes := []QuadletMoveSecretOutcome{}
 	err := s.secretEngines.WithEngine(ctx, userID, sourceMachineID, "quadlets.MoveSecretsSource", func(src moveSecretEngine) error {
 		return s.secretEngines.WithEngine(ctx, userID, targetMachineID, "quadlets.MoveSecretsTarget", func(tgt moveSecretEngine) error {

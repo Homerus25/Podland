@@ -43,6 +43,19 @@ const BytesReportIncrement int64 = 1 << 20
 // reader treats a non-positive limit as unbounded.
 const DefaultMaxVolumeUploadBytes int64 = 2 << 30
 
+// BoundOrDefault answers the wired transfer bound, falling back to
+// DefaultMaxVolumeUploadBytes when the wired value is zero (unset).
+// The fallback is zero-only: a negative wired value passes through
+// untouched, exactly as the domains' own rituals behaved. It is the
+// one fallback both transfer-composing domains and the config default
+// resolve through (§19).
+func BoundOrDefault(wired int64) int64 {
+	if wired == 0 {
+		return DefaultMaxVolumeUploadBytes
+	}
+	return wired
+}
+
 // errProbeNotEmpty terminates the emptiness probe's export once a content
 // entry shows up: closing the pipe with it unblocks the export goroutine
 // mid-stream — the probe is bounded and never reads a big volume to its end.

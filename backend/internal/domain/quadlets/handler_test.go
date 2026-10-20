@@ -20,18 +20,26 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// newTestHandler builds the handler around the real service running over
-// the given fake engine (and a passing SSH exec, which the lifecycle
-// endpoints run systemctl through). Tests arm only the operations their
-// scenario needs; an unarmed operation panics if the handler reaches it.
+// newTestHandler builds the handler around the real lean service running
+// over the given fake engine (and a passing SSH exec, which the lifecycle
+// endpoints run systemctl through), with the transfer service wired over
+// the same engine and the lean service as its seam. Tests arm only the
+// operations their scenario needs; an unarmed operation panics if the
+// handler reaches it.
 func newTestHandler(engine *fakeQuadletEngine) *QuadletHandler {
-	return NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core")))
+	provider := fakeEngineProvider{engine: engine}
+	service := NewQuadletService(provider, testutils.NewMockSSHExec(), lookupForUser("core"))
+	return NewQuadletHandler(service, NewQuadletTransferService(provider, nil, nil, 0, service))
 }
 
-// newLifecycleTestHandler builds the handler around the real service whose
-// systemctl runs through the given SSH exec double.
+// newLifecycleTestHandler builds the handler around the real lean service
+// whose systemctl runs through the given SSH exec double, with the
+// transfer service wired over the same engine and the lean service as its
+// seam.
 func newLifecycleTestHandler(engine *fakeQuadletEngine, sshExec sshexec.SSHExecInterface) *QuadletHandler {
-	return NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core")))
+	provider := fakeEngineProvider{engine: engine}
+	service := NewQuadletService(provider, sshExec, lookupForUser("core"))
+	return NewQuadletHandler(service, NewQuadletTransferService(provider, nil, nil, 0, service))
 }
 
 // quadletFixture builds a ListQuadlet like podman's list answer: the name,

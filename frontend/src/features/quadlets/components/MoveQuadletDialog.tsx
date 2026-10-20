@@ -1,17 +1,25 @@
-import { Box, Checkbox, HStack, Spinner, Text, VStack } from "@chakra-ui/react";
-import { can } from "@features/machines/permissions";
-import type { QuadletMoveVolumeProgress } from "@features/quadlets/hooks/useQuadletMoveStream";
+import { Checkbox, Text, VStack } from "@chakra-ui/react";
+import {
+	MigrationProgress,
+	MoveQuadletReport,
+	selectMoveQuadletReport,
+} from "@features/quadlets/components/MoveQuadletReport";
+import {
+	anyVolumeExistsOnTarget,
+	hasMigratableVolume,
+	isSecretTransferOffered,
+	MoveQuadletWarnings,
+	moveCompanionNames,
+	moveCompanions,
+	moveDifferingCompanions,
+	movePreviewSecrets,
+} from "@features/quadlets/components/MoveQuadletWarnings";
 import { useQuadletMoveStream } from "@features/quadlets/hooks/useQuadletMoveStream";
 import {
 	type useMoveQuadlet,
 	useQuadletMovePreview,
 } from "@features/quadlets/hooks/useQuadlets";
-import type {
-	QuadletMovePreviewSecret,
-	QuadletMovePreviewVolume,
-	QuadletMoveResult,
-	QuadletSummary,
-} from "@features/quadlets/services/quadletsApi";
+import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { buildMoveInput } from "@features/quadlets/services/quadletsApi";
 import {
 	TransferDialog,
@@ -19,8 +27,7 @@ import {
 } from "@shared/components/TransferDialog";
 import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
-import { formatBytes } from "@shared/utils/format";
-import { type ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 // The one refusal that has an in-dialog answer (issue 214): the target
 // volume holds data and the transfer refused. The hint names the checkbox
@@ -35,263 +42,24 @@ const TARGET_NOT_EMPTY_CODE = "VOLUME_MIGRATION_TARGET_NOT_EMPTY";
 // re-confirm, already-delivered secrets are skipped, not duplicated.
 const SECRET_TRANSFER_FAILED_CODE = "SECRET_TRANSFER_FAILED";
 
-// The preview's kind labels: the DTO carries the backend's coarse split —
-// the podman store kind ("volume" for volumes, "secret" for secrets) versus
-// a host path — and the dialog spells both out through one helper, so the
-// shared vocabulary lives once for the volume and the secret list alike.
-function kindLabel(kind: "volume" | "secret" | "hostPath", store: string) {
-	return kind === "hostPath" ? "host path" : store;
-}
-
-// The companion annotation in the volume list (issue 218): what happens to
-// the companion .volume definition. "will be copied" answers the default
-// transfer only — with the option unchecked the definition stays here. The
-// other two states describe the target file and hold regardless of the
-// option.
-function companionNote(volume: QuadletMovePreviewVolume, transfer: boolean) {
-	switch (volume.targetState) {
-		case "identical":
-			return "already present on target";
-		case "differs":
-			return "differs on target";
-		default:
-			return transfer
-				? "definition will be copied"
-				: "definition will not be transferred";
-	}
-}
-
-// The data facts of one volume row (issue 214): the resolved podman volume
-// with its source size, the target state with the target's size, and — for
-// an entry migration cannot carry — the honest reason. Host paths claim
-// nothing beyond their reason: no podman volume resolves, so there is no
-// target state to speak of.
-function VolumeDataNotes({ volume }: { volume: QuadletMovePreviewVolume }) {
-	if (volume.kind !== "volume") {
-		return (
-			<Text color="gray.500" data-testid="move-volume-reason">
-				{volume.reason}
-			</Text>
-		);
-	}
-	return (
-		<>
-			{volume.podmanVolume ? (
-				<Text color="gray.500" data-testid="move-volume-resolved">
-					resolves to “{volume.podmanVolume}”
-					{volume.sizeBytes !== undefined
-						? ` (${formatBytes(volume.sizeBytes)})`
-						: ""}
-				</Text>
-			) : null}
-			<Text
-				color={volume.existsOnTarget ? "orange.500" : "gray.500"}
-				data-testid="move-volume-target"
-			>
-				{volume.existsOnTarget
-					? `already on target${volume.targetSizeBytes !== undefined ? ` (${formatBytes(volume.targetSizeBytes)})` : ""}`
-					: "new on target"}
-			</Text>
-			{!volume.migratable ? (
-				<Text color="gray.500" data-testid="move-volume-reason">
-					{volume.reason}
-				</Text>
-			) : null}
-		</>
-	);
-}
-
-// One secret row's existence facts (issue 222): the stranded-dependency
-// truth in the volume list's vocabulary — "already on target" is the
-// warning (the value stays behind, orange), "new on target" the fresh
-// shape, and a dangling reference renders honestly as missing here. A
-// hostPath reference claims nothing: podman reads it off the host
-// filesystem at run time, so no store ever holds it and both booleans are
-// meaningless.
-function SecretExistenceNotes({
-	secret,
-}: {
-	secret: QuadletMovePreviewSecret;
-}) {
-	if (secret.kind !== "secret") return null;
-	return (
-		<>
-			{!secret.existsOnSource ? (
-				<Text color="gray.500" data-testid="move-secret-source">
-					missing on this machine
-				</Text>
-			) : null}
-			<Text
-				color={secret.existsOnTarget ? "orange.500" : "gray.500"}
-				data-testid="move-secret-target"
-			>
-				{secret.existsOnTarget ? "already on target" : "new on target"}
-			</Text>
-		</>
-	);
-}
-
-// One data-phase progress line, the volume's latest phase winning.
-function progressLabel(entry: QuadletMoveVolumeProgress): string {
-	switch (entry.phase) {
-		case "start":
-			return "exporting…";
-		case "bytes":
-			return `${formatBytes(entry.bytes ?? 0)} exported…`;
-		case "done":
-			return `done (${formatBytes(entry.bytes ?? 0)})`;
-		default:
-			return `skipped — ${entry.reason ?? ""}`;
-	}
-}
-
-// Live data-phase progress (issue 214): one line per volume, updated in
-// place as its stream advances.
-function MigrationProgress({
-	progress,
-}: {
-	progress: QuadletMoveVolumeProgress[];
-}) {
-	return (
-		<VStack
-			align="flex-start"
-			spacing={1}
-			data-testid="move-migration-progress"
-		>
-			<HStack spacing={2}>
-				<Spinner size="sm" />
-				<Text>Migrating volume data…</Text>
-			</HStack>
-			{progress.map((entry) => (
-				<HStack
-					key={entry.podmanVolume}
-					spacing={2}
-					data-testid={`move-migration-volume-${entry.podmanVolume}`}
-				>
-					<Text fontFamily="mono">{entry.ref}</Text>
-					<Text color="gray.500">{progressLabel(entry)}</Text>
-				</HStack>
-			))}
-		</VStack>
-	);
-}
-
-// The outcome-row narration shape both phases share (issue 222 review): a
-// bold header line, then one row per outcome — a mono-font name and a
-// colored result — keyed by testid. The phases differ only in their
-// block testid, row testid prefix, entries' identity, display name, and
-// result wording, so the shape lives here once and each phase's narration
-// is a thin adapter.
-function OutcomeNarration<Entry>({
-	testid,
-	rowTestidPrefix,
-	label,
-	entries,
-	identity,
-	name,
-	renderOutcome,
-}: {
-	testid: string;
-	rowTestidPrefix: string;
-	label: string;
-	entries: Entry[];
-	identity: (entry: Entry) => string;
-	name: (entry: Entry) => string;
-	renderOutcome: (entry: Entry) => ReactNode;
-}) {
-	if (entries.length === 0) return null;
-	return (
-		<VStack align="flex-start" spacing={1} data-testid={testid}>
-			<Text fontWeight="semibold">{label}</Text>
-			{entries.map((outcome) => (
-				<HStack
-					key={identity(outcome)}
-					spacing={2}
-					data-testid={`${rowTestidPrefix}-${identity(outcome)}`}
-				>
-					<Text fontFamily="mono">{name(outcome)}</Text>
-					{renderOutcome(outcome)}
-				</HStack>
-			))}
-		</VStack>
-	);
-}
-
-// The data phase's outcomes (issue 214): one line per referenced volume,
-// migrated or skipped with its reason — rendered as a successful transfer's
-// narration and under a partial message alike.
-function MigrationNarration({ result }: { result: QuadletMoveResult }) {
-	return (
-		<OutcomeNarration
-			testid="move-migration-report"
-			rowTestidPrefix="move-migration-outcome"
-			label="Volume data:"
-			entries={result.volumeMigration?.volumes ?? []}
-			identity={(outcome) => outcome.podmanVolume}
-			name={(outcome) => outcome.ref}
-			renderOutcome={(outcome) =>
-				outcome.outcome === "migrated" ? (
-					<Text color="green.500">data migrated</Text>
-				) : (
-					<Text color="gray.500">skipped — {outcome.reason}</Text>
-				)
-			}
-		/>
-	);
-}
-
-// The secrets phase's outcomes (issue 222): one line per referenced
-// secret, transferred or skipped with its reason — rendered beside the
-// volume narration wherever the transfer's outcomes are told (a stay-open
-// success report and a partial result alike).
-function SecretNarration({ result }: { result: QuadletMoveResult }) {
-	return (
-		<OutcomeNarration
-			testid="move-secret-report"
-			rowTestidPrefix="move-secret-outcome"
-			label="Secrets:"
-			entries={result.secretTransfer?.secrets ?? []}
-			identity={(outcome) => outcome.name}
-			name={(outcome) => outcome.name}
-			renderOutcome={(outcome) =>
-				outcome.outcome === "transferred" ? (
-					<Text color="green.500">value transferred</Text>
-				) : (
-					<Text color="gray.500">skipped — {outcome.reason}</Text>
-				)
-			}
-		/>
-	);
-}
-
 // One dialog for the whole transfer (issue 212): the shared transfer-dialog
 // preset carries the skeleton — the capability-filtered target select
 // (source excluded), the mode radio (default Move), the target-scoped
 // preview's pending/error/collision states, the stay-open report, and the
-// error region. This adapter keeps the quadlet domain: the manage-quadlets
-// capability and its "you can write to" picker copy, the quadlet preview
-// query, the preview-driven volume and secret warnings for both modes, and
-// — move mode only — the delete modal's stop/force checkboxes with its
-// defaults (stop on, force off). When the preview reports companion .volume
-// quadlets (issue 218), a checkbox (default on) offers carrying their
-// definitions along, the volume list annotates each companion entry, and a
-// differing companion blocks confirm exactly like a collision. When the
-// preview reports migratable volumes (issue 214), a checkbox (default off)
-// opts the transfer into carrying their data along — the heavy,
-// consequential act — the volume list shows each entry's resolved volume,
-// sizes, and target state, an overwrite option appears wherever the target
-// already holds a volume, a hot-export caveat shows for a running source,
-// and the transfer rides the NDJSON transport: per-volume progress in
-// flight, the outcomes narrated on success, a 409 refusal answered with the
-// overwrite hint. When the preview reports `Secret=` references (issue 222),
-// the warning area lists each with its kind and source/target existence in
-// both modes; a checkbox (default off) offers carrying the values along —
-// offered only to a caller who is admin on the source and when at least one
-// transferable secret exists, absent otherwise — and the answer's
-// secretTransfer outcomes narrate in place, keeping the dialog open the way
-// the migrating transport's report does. Confirm stays disabled until the
-// stranded-data warning is explicitly acknowledged — in copy and move mode
-// alike, because volume data never follows the file by default.
+// error region. This adapter keeps the quadlet domain's state and wiring
+// only (issue 331, architecture review 2026-10-19 candidate C6): the
+// manage-quadlets capability and its "you can write to" picker copy, the
+// quadlet preview query, the option checkboxes and their defaults —
+// stop/force (stop on, force off), companions on, migrate/overwrite and
+// secret transfer off — the target-scoped stranded-data acknowledgement
+// (issue 207), the confirm gating (a differing companion blocks confirm
+// exactly like a collision, so does an unacknowledged stranded-data
+// warning), the payload builder call with its transport choice, and the
+// error-code hints. What the transfer warns about lives in
+// MoveQuadletWarnings — the pure preview projections and the warning
+// lists, handed the resolved facts as props; what it narrates lives in
+// MoveQuadletReport — the narrations, the live migration progress, and the
+// report precedence this adapter's close-on-success effect consumes.
 //
 // The success behavior is mixed — a file-only copied/moved closes, while a
 // "partial" result must keep the dialog open narrating the both-machines
@@ -347,72 +115,39 @@ export function MoveQuadletDialog({
 		targetId || null,
 	);
 
+	// The preview projections live in the warnings module as exported
+	// functions; the adapter computes none of them inline.
+	const volumes = preview.data?.volumes ?? [];
+	const companions = moveCompanions(volumes);
+	const differsCompanions = moveDifferingCompanions(companions);
+	const companionNames = moveCompanionNames(companions);
+	const migratable = hasMigratableVolume(volumes);
+	const anyExistsOnTarget = anyVolumeExistsOnTarget(volumes);
+	const secrets = movePreviewSecrets(preview.data);
+	const secretTransferOffered = isSecretTransferOffered(machine, secrets);
+
 	// copied/moved close the dialog — the plain transport only; a migrating
 	// transfer narrates its outcomes in place below, and so does a plain
 	// transfer whose answer carries a secretTransfer block (issue 222): the
 	// outcomes are the answer's point, and closing would drop them. A
 	// partial result deliberately falls through and keeps it open on either
-	// transport.
+	// transport. The close decision consumes the report module's precedence
+	// projection, evaluated for the plain transfer's own answer.
 	const result = moveQuadlet.data;
-	const plainSecretReport =
-		result?.secretTransfer &&
-		(result.status === "copied" || result.status === "moved")
-			? result
-			: null;
 	useEffect(() => {
 		if (
 			(result?.status === "copied" || result?.status === "moved") &&
-			!plainSecretReport
+			selectMoveQuadletReport(result, null)?.kind !== "secret"
 		) {
 			onClose();
 		}
-	}, [result, plainSecretReport, onClose]);
+	}, [result, onClose]);
 
-	const volumes = preview.data?.volumes ?? [];
-	// Companion .volume entries (issue 217/218): the preview marks them with
-	// the source quadlet file the reference resolves to.
-	const companions = volumes.filter(
-		(volume): volume is QuadletMovePreviewVolume & { quadletFile: string } =>
-			volume.quadletFile !== undefined,
-	);
-	const differsCompanions = companions.filter(
-		(volume) => volume.targetState === "differs",
-	);
-	const differsNames = [
-		...new Set(differsCompanions.map((volume) => volume.quadletFile)),
-	];
-	const companionNames = [
-		...new Set(companions.map((volume) => volume.quadletFile)),
-	];
-	// Migration candidates (issue 214): the checkbox exists only when the
-	// preview reports at least one reference whose data can follow.
-	const migratable = volumes.some((volume) => volume.migratable);
-	const anyExistsOnTarget = volumes.some((volume) => volume.existsOnTarget);
-	// Secret references (issue 222): the warning list renders whatever the
-	// preview scanned, both modes. The transfer checkbox exists only for a
-	// caller who is admin on the SOURCE machine — the reveal gate's
-	// capability, read from the per-caller permission the app already holds,
-	// no new preview field — and only when the preview reports at least one
-	// transferable secret (kind secret, present on the source).
-	const secrets = preview.data?.secrets ?? [];
-	const secretTransferOffered =
-		can(machine, "reveal-secrets") &&
-		secrets.some((secret) => secret.kind === "secret" && secret.existsOnSource);
-	const isPartial =
-		result?.status === "partial" || moveStream.result?.status === "partial";
-	// A migrating transfer's completed narration: the dialog stays open on it
-	// instead of closing, the stay-open-report pattern.
-	const migrationReport =
-		moveStream.result?.status === "copied" ||
-		moveStream.result?.status === "moved"
-			? moveStream.result
-			: null;
 	// The stream's error is already an ApiError; the plain mutation's is an
 	// axios error for the shared extractor.
 	const errorDisplay = moveQuadlet.error
 		? getApiError(moveQuadlet.error)
 		: moveStream.error;
-	const partialResult = moveStream.result ?? result;
 
 	const confirmTransfer = () => {
 		// The builder owns the whole guard set (issue 228): which flags the
@@ -443,43 +178,17 @@ export function MoveQuadletDialog({
 		}
 	};
 
-	// The stay-open report: a partial result, a migrating transfer's
-	// outcomes, or a plain transfer's secret outcomes — each narrates in
-	// place; anything else stays the form.
-	const report = isPartial ? (
-		<VStack align="flex-start" spacing={3} data-testid="move-partial-message">
-			<Text>
-				The quadlet was installed on “{targetName}” but could not be removed
-				from “{machine.name}”. It currently exists on both machines and must be
-				cleaned up manually.
-			</Text>
-			{partialResult?.error ? (
-				<Text color="red.500">{partialResult.error}</Text>
-			) : null}
-			{partialResult ? (
-				<>
-					<MigrationNarration result={partialResult} />
-					<SecretNarration result={partialResult} />
-				</>
-			) : null}
-		</VStack>
-	) : migrationReport ? (
-		<VStack align="flex-start" spacing={4} data-testid="move-migration-success">
-			<Text>
-				{migrationReport.status === "moved" ? "Moved" : "Copied"} “
-				{quadlet.name}” to “{targetName}”.
-			</Text>
-			<MigrationNarration result={migrationReport} />
-			<SecretNarration result={migrationReport} />
-		</VStack>
-	) : plainSecretReport ? (
-		<VStack align="flex-start" spacing={4} data-testid="move-secret-success">
-			<Text>
-				{plainSecretReport.status === "moved" ? "Moved" : "Copied"} “
-				{quadlet.name}” to “{targetName}”.
-			</Text>
-			<SecretNarration result={plainSecretReport} />
-		</VStack>
+	// The stay-open report: the report module's precedence projection picks
+	// what narrates — a partial result, a migrating transfer's outcomes, or
+	// a plain transfer's secret outcomes; anything else stays the form.
+	const selection = selectMoveQuadletReport(result, moveStream.result);
+	const report = selection ? (
+		<MoveQuadletReport
+			selection={selection}
+			quadletName={quadlet.name}
+			sourceName={machine.name}
+			targetName={targetName}
+		/>
 	) : null;
 
 	return (
@@ -520,70 +229,18 @@ export function MoveQuadletDialog({
 			report={report}
 			reset={moveQuadlet.reset}
 			warnings={
-				<>
-					{differsCompanions.length > 0 ? (
-						<Text color="red.500" data-testid="move-companion-conflict-warning">
-							A volume quadlet named “{differsNames.join("”, “")}” already
-							exists on {targetName} with different content. Choose another
-							target or remove it there first.
-						</Text>
-					) : null}
-					{volumes.length > 0 ? (
-						<Box data-testid="move-volume-warning">
-							<Text>
-								This quadlet references volumes. Volume data does not move with
-								the file — it stays behind on {machine.name}:
-							</Text>
-							<VStack align="flex-start" mt={2} spacing={1}>
-								{volumes.map((volume, index) => (
-									// biome-ignore lint/suspicious/noArrayIndexKey: a quadlet can mount the same source twice, so source+kind is not unique; position is the row's identity
-									<HStack key={index} spacing={2} data-testid="move-volume-row">
-										<Text fontFamily="mono">{volume.source}</Text>
-										<Text color="gray.500">
-											{kindLabel(volume.kind, "podman volume")}
-										</Text>
-										{volume.quadletFile ? (
-											<Text color="gray.500" data-testid="move-companion-note">
-												{companionNote(volume, transferCompanions)}
-											</Text>
-										) : null}
-										<VolumeDataNotes volume={volume} />
-									</HStack>
-								))}
-							</VStack>
-							<Checkbox
-								isChecked={volumesAcknowledged}
-								onChange={(event) =>
-									setAcknowledgedFor(event.target.checked ? targetId : null)
-								}
-								mt={3}
-								data-testid="move-volume-confirm-option"
-							>
-								I understand this data stays behind
-							</Checkbox>
-						</Box>
-					) : null}
-					{secrets.length > 0 ? (
-						<Box data-testid="move-secret-warning">
-							<Text>
-								This quadlet references secrets. Secret values do not move with
-								the file — they stay behind on {machine.name}:
-							</Text>
-							<VStack align="flex-start" mt={2} spacing={1}>
-								{secrets.map((secret, index) => (
-									// biome-ignore lint/suspicious/noArrayIndexKey: a quadlet can reference the same name twice, so name alone is not unique; position is the row's identity
-									<HStack key={index} spacing={2} data-testid="move-secret-row">
-										<Text fontFamily="mono">{secret.name}</Text>
-										<Text color="gray.500">
-											{kindLabel(secret.kind, "podman secret")}
-										</Text>
-										<SecretExistenceNotes secret={secret} />
-									</HStack>
-								))}
-							</VStack>
-						</Box>
-					) : null}
-				</>
+				<MoveQuadletWarnings
+					volumes={volumes}
+					differsCompanions={differsCompanions}
+					secrets={secrets}
+					sourceName={machine.name}
+					targetName={targetName}
+					transferCompanions={transferCompanions}
+					volumesAcknowledged={volumesAcknowledged}
+					onAcknowledge={(acknowledged) =>
+						setAcknowledgedFor(acknowledged ? targetId : null)
+					}
+				/>
 			}
 			onConfirm={confirmTransfer}
 			onClose={onClose}

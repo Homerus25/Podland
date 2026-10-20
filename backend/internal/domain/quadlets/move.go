@@ -13,6 +13,99 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
+// lifecycleSeam is the narrow seam the transfer ritual crosses into the
+// lean service's lifecycle half (architecture review 2026-10-19, candidate
+// C2): the three callbacks MoveWithProgress makes there — stop the source
+// unit (the lifecycle's unit action with actionStop), reload the target's
+// systemd manager, and the stop-and-remove source half with the move's
+// terminals. It is consumer-declared here, in the transfer module, and
+// satisfied implicitly by *QuadletService.
+type lifecycleSeam interface {
+	applyUnitAction(ctx context.Context, userID, machineID string, action lifecycleAction, unit string, opts LifecycleOptions) error
+	reloadUserSystemd(ctx context.Context, machineID, userID string) error
+	stopAndRemove(ctx context.Context, userID, machineID, name string, force, stop bool, op string, terminals removeTerminals) error
+}
+
+// Compile-time pin: the lean service satisfies the transfer's seam.
+var _ lifecycleSeam = (*QuadletService)(nil)
+
+// QuadletTransferService owns the cross-machine move/copy transfer (issues
+// 209-215): the preview, the move (plain and progress), the volume-data
+// phase, and the secret-transfer phase. It is the transfer half of the
+// quadlets domain split (architecture review 2026-10-19, candidate C2) —
+// the lean QuadletService keeps CRUD, lifecycle, logs, generate, import,
+// and auto-update, and this service crosses into that half through the
+// lifecycleSeam.
+type QuadletTransferService struct {
+	// engines is the connection seam both machines' leases cross.
+	engines QuadletEngineProvider
+	// secretEngines resolves the podman secret stores the move/copy's
+	// secret surface crosses (issue 215): the existence reads for the
+	// preview, the value reveal on the source and the create on the
+	// target for the transfer.
+	secretEngines moveSecretEngineProvider
+	// accessRepo resolves the caller's permission level for the
+	// cross-machine operations: route middleware only sees the route's
+	// machine, so the target machine's access is checked here, against
+	// the store, before any podman call.
+	accessRepo permission.PermissionGetter
+	// maxVolumeUploadBytes bounds the volume data migration's stream
+	// (issue 214, §18), enforced by the data phase's counting reader —
+	// the same VOLUME_UPLOAD_MAX_BYTES config value the volumes domain
+	// caps populate uploads with; zero resolves through the transfer
+	// kit's BoundOrDefault to its DefaultMaxVolumeUploadBytes (the kit
+	// owns the default per §19).
+	maxVolumeUploadBytes int64
+	// lifecycle is the seam into the lean service's lifecycle half: the
+	// migrating move's source stop, the target's manager reload, and the
+	// move mode's stop-and-remove source half.
+	lifecycle lifecycleSeam
+}
+
+// NewQuadletTransferService creates the transfer service with all five
+// dependencies wired. The constructor is flat — a missing wiring is a
+// compile error instead of a panic at the seam. maxVolumeUploadBytes == 0
+// keeps the transfer kit's default fallback meaning for tests.
+func NewQuadletTransferService(engines QuadletEngineProvider, secretEngines moveSecretEngineProvider, accessRepo permission.PermissionGetter, maxVolumeUploadBytes int64, lifecycle lifecycleSeam) *QuadletTransferService {
+	return &QuadletTransferService{
+		engines:              engines,
+		secretEngines:        secretEngines,
+		accessRepo:           accessRepo,
+		maxVolumeUploadBytes: maxVolumeUploadBytes,
+		lifecycle:            lifecycle,
+	}
+}
+
+// volumeDataLimit answers the wired migration bound; the zero-value
+// fallback resolves through the transfer kit's BoundOrDefault — the
+// kit owns the default (§19), so this fallback and the volumes
+// domain's copy/move bound cannot drift apart.
+func (s *QuadletTransferService) volumeDataLimit() int64 {
+	return transfer.BoundOrDefault(s.maxVolumeUploadBytes)
+}
+
+// checkDeletePreconditions evaluates the not-found and running-resource guards
+// for a delete operation against the target quadlet's parsed state. It returns
+// ErrQuadletNotFound when the target is absent, ErrQuadletResourceRunning when
+// the managed resource is running and neither force nor the stop-before-remove
+// waiver applies, or nil when the delete may proceed (with a stop first when
+// the resource is running and stop is set).
+//
+// Its surviving caller is the move preflight (MoveWithProgress below); Delete's
+// own pre-check is the shared ritual in remove.go now. The running test
+// delegates to quadletResourceRunning, the one derivation the ritual's
+// body also evaluates, so the preflight and the ritual cannot drift
+// apart (issue 231).
+func checkDeletePreconditions(target *entities.ListQuadlet, force, stop bool) error {
+	if target == nil {
+		return appErrors.ErrQuadletNotFound
+	}
+	if quadletResourceRunning(target) && !force && !stop {
+		return appErrors.ErrQuadletResourceRunning
+	}
+	return nil
+}
+
 // MovePreview answers everything the move/copy transfer dialog must show
 // before confirming (issue 209): the volumes the quadlet references, whether
 // the target machine already has a quadlet of the same name and resource,
@@ -35,7 +128,7 @@ import (
 // so a caller without target access gets the standard 403 ACCESS_DENIED and
 // never a false preview. The target's quadlet list itself is read through
 // the connection seam on the target's machine ID.
-func (s *QuadletService) MovePreview(ctx context.Context, userID, machineID, quadletID, targetMachineID string) (*QuadletMovePreviewResponse, error) {
+func (s *QuadletTransferService) MovePreview(ctx context.Context, userID, machineID, quadletID, targetMachineID string) (*QuadletMovePreviewResponse, error) {
 	// The target gate fires before the connection lease (the same shape as
 	// the secrets reveal gate): a lookup failure is 500, a level below read
 	// — an absent row included — is 403, per permission.RequireLevel's
@@ -317,14 +410,14 @@ func fetchQuadletWithList(e QuadletEngine, quadletID string) (content string, li
 // Move answers through the plain JSON envelope; MoveWithProgress is the
 // full orchestration and reports data-phase progress. The two share every
 // semantic — Move just discards the progress callback.
-func (s *QuadletService) Move(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest) (*QuadletMoveResponse, error) {
+func (s *QuadletTransferService) Move(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest) (*QuadletMoveResponse, error) {
 	return s.MoveWithProgress(ctx, userID, machineID, quadletID, req, nil)
 }
 
 // MoveWithProgress performs the transfer and reports volume data-phase
 // progress through onProgress (the NDJSON transport's feed; nil progress
 // simply emits nothing). See Move for the transfer semantics.
-func (s *QuadletService) MoveWithProgress(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest, onProgress func(QuadletMoveEvent)) (*QuadletMoveResponse, error) {
+func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest, onProgress func(QuadletMoveEvent)) (*QuadletMoveResponse, error) {
 	// The target gate fires before any connection lease (the same shape as
 	// the secrets reveal gate, one level up from MovePreview's read gate):
 	// a lookup failure is 500, a level below write — an absent row included
@@ -461,7 +554,7 @@ func (s *QuadletService) MoveWithProgress(ctx context.Context, userID, machineID
 	var stopApplied bool
 	if req.MigrateVolumeData {
 		if req.Mode == MoveModeMove && parseStateFromStatus(source.Status) == "running" && req.Stop && !req.Force {
-			if err := s.applyUnitAction(ctx, userID, machineID, actionStop, resolveUnitName(source, quadletID), LifecycleOptions{}); err != nil {
+			if err := s.lifecycle.applyUnitAction(ctx, userID, machineID, actionStop, resolveUnitName(source, quadletID), LifecycleOptions{}); err != nil {
 				return nil, fmt.Errorf("failed to stop quadlet before volume migration: %w", err)
 			}
 			stopApplied = true
@@ -551,7 +644,7 @@ func (s *QuadletService) MoveWithProgress(ctx context.Context, userID, machineID
 	// so the TARGET's manager is reloaded explicitly. A reload failure fails
 	// the transfer with ErrConnectionFailed even though the file is
 	// installed — and, in move mode, before the source is touched at all.
-	if err := s.reloadUserSystemd(ctx, req.TargetMachineID, userID); err != nil {
+	if err := s.lifecycle.reloadUserSystemd(ctx, req.TargetMachineID, userID); err != nil {
 		return nil, noteStopped(err, stopApplied)
 	}
 
@@ -570,7 +663,8 @@ func (s *QuadletService) MoveWithProgress(ctx context.Context, userID, machineID
 
 // removeSourceAfterInstall performs the move mode's source-side half after
 // the target install succeeded: the shared stop-and-remove ritual
-// (stopAndRemove, remove.go — issue 231) with the transfer's terminals. A
+// (stopAndRemove, remove.go — issue 231) with the transfer's terminals,
+// crossed through the lifecycle seam into the lean service. A
 // vanished source quadlet answers nil — the transfer's goal is met and a
 // "partial" would falsely claim the quadlet exists on both machines — and a
 // running-resource refusal answers the wrapped sentinel that becomes the
@@ -585,8 +679,8 @@ func (s *QuadletService) MoveWithProgress(ctx context.Context, userID, machineID
 // issue 231's accepted tightening: same partial status, byte-identical
 // detail, where the old path asked podman to refuse at the remove instead.
 // No existing test pinned the old path.
-func (s *QuadletService) removeSourceAfterInstall(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest) error {
-	return s.stopAndRemove(ctx, userID, machineID, quadletID, req.Force, req.Stop, "quadlets.MoveSourceRemove", removeTerminals{
+func (s *QuadletTransferService) removeSourceAfterInstall(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest) error {
+	return s.lifecycle.stopAndRemove(ctx, userID, machineID, quadletID, req.Force, req.Stop, "quadlets.MoveSourceRemove", removeTerminals{
 		missing: nil,
 		// The running refusal's cause (podman's text) is dropped today:
 		// the wire answers the wrapped sentinel that becomes the partial

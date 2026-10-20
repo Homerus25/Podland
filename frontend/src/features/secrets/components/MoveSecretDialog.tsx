@@ -1,16 +1,14 @@
-import { Text, VStack } from "@chakra-ui/react";
+import { Text } from "@chakra-ui/react";
 import {
 	useMoveSecret,
 	useSecretMovePreview,
 } from "@features/secrets/hooks/useSecrets";
-import type {
-	SecretMoveResult,
-	SecretSummary,
-} from "@features/secrets/services/secretsApi";
+import type { SecretSummary } from "@features/secrets/services/secretsApi";
 import {
 	TransferDialog,
 	useTransferState,
 } from "@shared/components/TransferDialog";
+import { TransferReport } from "@shared/transfers/transferPresentation";
 import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 
@@ -18,40 +16,6 @@ import { getApiError } from "@shared/utils/api";
 // a same-named secret that appeared on the target since the preview names
 // the way out.
 const SECRET_ALREADY_EXISTS_CODE = "SECRET_ALREADY_EXISTS";
-
-// The terminal report of a completed transfer (issue 239): the envelope's
-// status narrated in place — the dialog stays open on it, the
-// stay-open-report pattern, because a "partial" result must keep the dialog
-// open naming the both-machines state.
-function TransferReport({
-	result,
-	targetName,
-}: {
-	result: SecretMoveResult;
-	targetName: string;
-}) {
-	return (
-		<VStack align="flex-start" spacing={2} data-testid="move-success-report">
-			<Text>
-				{result.status === "moved" ? "Moved" : "Copied"} “{result.name}” to “
-				{targetName}”.
-			</Text>
-			{result.status === "partial" ? (
-				<VStack
-					align="flex-start"
-					spacing={1}
-					data-testid="move-partial-message"
-				>
-					<Text>
-						The value crossed but the source secret could not be removed. It
-						currently exists on both machines and must be cleaned up manually.
-					</Text>
-					{result.error ? <Text color="red.500">{result.error}</Text> : null}
-				</VStack>
-			) : null}
-		</VStack>
-	);
-}
 
 // One dialog for the whole secret transfer (issue 239): the shared
 // transfer-dialog preset carries the skeleton — the capability-filtered
@@ -81,8 +45,29 @@ export function MoveSecretDialog({
 		transfer.targetId || null,
 	);
 
+	// The terminal report of a completed transfer (issue 239): the shared
+	// skeleton narrates the envelope's status in place — the dialog stays
+	// open on it, the stay-open-report pattern, because a "partial" result
+	// must keep the dialog open naming the both-machines state. The cause
+	// sentence is the secret domain's; the header shape, the both-machines
+	// tail, and the error line are the skeleton's (candidate C8).
 	const report = moveSecret.data ? (
-		<TransferReport result={moveSecret.data} targetName={transfer.targetName} />
+		<TransferReport
+			header={{
+				status: moveSecret.data.status,
+				itemName: moveSecret.data.name,
+				targetName: transfer.targetName,
+			}}
+			partial={
+				moveSecret.data.status === "partial"
+					? {
+							cause:
+								"The value crossed but the source secret could not be removed.",
+							error: moveSecret.data.error,
+						}
+					: undefined
+			}
+		/>
 	) : null;
 
 	return (

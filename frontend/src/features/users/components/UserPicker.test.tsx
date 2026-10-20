@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { userFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -52,13 +53,18 @@ function renderUserPicker(
 	return onChange;
 }
 
-async function openListbox() {
+// Opens the list through the form label, pinning the label association
+// the share form relies on.
+async function openList() {
 	const user = userEvent.setup();
-	await user.click(screen.getByTestId("user-picker-input"));
-	const listbox = await screen.findByTestId("user-picker-listbox");
-	return { user, options: within(listbox).getAllByRole("option") };
+	await user.click(screen.getByLabelText("User"));
+	const list = await screen.findByTestId("searchable-select-list");
+	return { user, list };
 }
 
+// Adapter concerns only: the directory fetch, the exclusion pre-filter,
+// the loading copy, and the onChange shape. Keyboard and ARIA behavior is
+// pinned once in the core's suite (SearchableSelect.test.tsx).
 describe("UserPicker", () => {
 	beforeEach(() => {
 		users = defaultUsers;
@@ -66,29 +72,30 @@ describe("UserPicker", () => {
 		server.use(...usersHandlers());
 	});
 
-	it("lists the directory when opened", async () => {
+	it("fetches the directory once and lists it when opened", async () => {
 		renderUserPicker();
 
-		const { options } = await openListbox();
+		const { list } = await openList();
 
-		expect(options.map((option) => option.textContent)).toEqual([
-			"alice",
-			"bob",
-			"carol",
-		]);
+		expect(
+			within(list)
+				.getAllByRole("option")
+				.map((option) => option.textContent),
+		).toEqual(["alice", "bob", "carol"]);
+		expect(usersRequests).toBe(1);
 	});
 
-	it("filters client-side while typing: the options narrow without refetching the directory", async () => {
+	it("narrows the offered users while typing without refetching the directory", async () => {
 		renderUserPicker();
 		const user = userEvent.setup();
 
-		await user.click(screen.getByTestId("user-picker-input"));
-		await screen.findByTestId("user-picker-listbox");
-		await user.type(screen.getByTestId("user-picker-input"), "ca");
+		await user.click(screen.getByLabelText("User"));
+		await screen.findByTestId("searchable-select-list");
+		await user.type(screen.getByLabelText("User"), "ca");
 
-		const listbox = screen.getByTestId("user-picker-listbox");
+		const list = screen.getByTestId("searchable-select-list");
 		expect(
-			within(listbox)
+			within(list)
 				.getAllByRole("option")
 				.map((option) => option.textContent),
 		).toEqual(["carol"]);
@@ -97,102 +104,120 @@ describe("UserPicker", () => {
 		expect(usersRequests).toBe(1);
 	});
 
-	it("selects with the mouse: onChange receives the user and the input shows the username", async () => {
-		const onChange = renderUserPicker();
-
-		const { user } = await openListbox();
-		await user.click(screen.getByTestId("user-option-u-2"));
-
-		expect(onChange).toHaveBeenCalledWith(
-			expect.objectContaining({ id: "u-2", username: "bob" }),
-		);
-		expect(screen.getByTestId("user-picker-input")).toHaveValue("bob");
-		expect(screen.queryByTestId("user-picker-listbox")).not.toBeInTheDocument();
-	});
-
-	it("selects with the keyboard: ArrowDown/ArrowUp move the highlight, Enter picks", async () => {
-		const onChange = renderUserPicker();
-		const user = userEvent.setup();
-
-		const input = screen.getByTestId("user-picker-input");
-		await user.click(input);
-		await screen.findByTestId("user-picker-listbox");
-		// The highlight starts on the first choice; one ArrowDown reaches bob.
-		await user.keyboard("{ArrowDown}");
-
-		const options = within(
-			screen.getByTestId("user-picker-listbox"),
-		).getAllByRole("option");
-		expect(options[1]).toHaveAttribute("aria-selected", "true");
-		expect(input).toHaveAttribute("aria-activedescendant", options[1].id);
-
-		// ArrowUp walks back to the first choice.
-		await user.keyboard("{ArrowUp}");
-		expect(options[0]).toHaveAttribute("aria-selected", "true");
-
-		await user.keyboard("{ArrowDown}{Enter}");
-
-		expect(onChange).toHaveBeenCalledWith(
-			expect.objectContaining({ id: "u-2", username: "bob" }),
-		);
-		expect(input).toHaveValue("bob");
-	});
-
-	it("reopens on a second click after a selection, focus having never left the input", async () => {
-		renderUserPicker();
-
-		const { user } = await openListbox();
-		await user.click(screen.getByTestId("user-option-u-2"));
-		expect(screen.queryByTestId("user-picker-listbox")).not.toBeInTheDocument();
-
-		await user.click(screen.getByTestId("user-picker-input"));
-
-		expect(
-			await screen.findByTestId("user-picker-listbox"),
-		).toBeInTheDocument();
-	});
-
 	it("never offers excluded users", async () => {
 		renderUserPicker({ excludeUserIds: ["u-1", "u-3"] });
 
-		const { options } = await openListbox();
+		const { list } = await openList();
 
-		expect(options.map((option) => option.textContent)).toEqual(["bob"]);
+		expect(
+			within(list)
+				.getAllByRole("option")
+				.map((option) => option.textContent),
+		).toEqual(["bob"]);
 	});
 
-	it("reports no match when the query filters everything out", async () => {
+	it("shows the loading copy while the directory is in flight", async () => {
+		// Deferred rather than timed: the request stays in flight until the
+		// test releases it, so the loading assertion cannot race the fetch.
+		let resolveUsers: () => void = () => {};
+		server.use(
+			http.get("*/api/users", async () => {
+				await new Promise<void>((resolve) => {
+					resolveUsers = resolve;
+				});
+				return HttpResponse.json(users);
+			}),
+		);
+		renderUserPicker();
+
+		await openList();
+
+		expect(screen.getByTestId("searchable-select-empty")).toHaveTextContent(
+			"Loading users…",
+		);
+		// The directory lands and the options appear without a second
+		// interaction.
+		resolveUsers();
+		expect(
+			await screen.findByTestId("searchable-select-option-u-1"),
+		).toBeInTheDocument();
+	});
+
+	it("reports no match through the core's empty state when the query filters everything out", async () => {
 		renderUserPicker();
 		const user = userEvent.setup();
 
-		await user.type(screen.getByTestId("user-picker-input"), "zzz");
+		await user.type(screen.getByLabelText("User"), "zzz");
 
-		expect(screen.getByTestId("user-picker-empty")).toHaveTextContent(
+		expect(screen.getByTestId("searchable-select-empty")).toHaveTextContent(
 			"No matching users",
 		);
 	});
 
-	it("closes the listbox on Escape without changing the selection", async () => {
+	it("hands the full user summary to the caller and renders it as a removable chip", async () => {
 		const onChange = renderUserPicker();
-		const user = userEvent.setup();
 
-		await user.click(screen.getByTestId("user-picker-input"));
-		await screen.findByTestId("user-picker-listbox");
-		await user.keyboard("{Escape}");
+		const { user } = await openList();
+		await user.click(screen.getByTestId("searchable-select-option-u-2"));
 
-		expect(screen.queryByTestId("user-picker-listbox")).not.toBeInTheDocument();
+		expect(onChange).toHaveBeenCalledWith(
+			expect.objectContaining({ id: "u-2", username: "bob" }),
+		);
+		expect(screen.getByTestId("searchable-select-chip-u-2")).toHaveTextContent(
+			"bob",
+		);
+		expect(
+			screen.queryByTestId("searchable-select-list"),
+		).not.toBeInTheDocument();
+	});
+
+	it("clears the selection when the chip is removed", async () => {
+		const onChange = renderUserPicker();
+
+		const { user } = await openList();
+		await user.click(screen.getByTestId("searchable-select-option-u-2"));
+		expect(
+			screen.getByTestId("searchable-select-chip-u-2"),
+		).toBeInTheDocument();
+
+		await user.click(screen.getByTestId("searchable-select-remove-u-2"));
+
+		expect(onChange).toHaveBeenLastCalledWith(null);
+		expect(
+			screen.queryByTestId("searchable-select-chip-u-2"),
+		).not.toBeInTheDocument();
+	});
+
+	it("keeps a held selection when the directory refetch rebuilds the option objects", async () => {
+		// The caller holds a summary object from the previous fetch; a
+		// background refetch rebuilds every option object. The selection
+		// compares by id, so the chip survives, the user is not
+		// re-offered, and onChange never fires.
+		const staleBob = userFixture({ id: "u-2", username: "bob" });
+		const onChange = renderUserPicker({ value: staleBob });
+
+		const { list } = await openList();
+
+		expect(screen.getByTestId("searchable-select-chip-u-2")).toHaveTextContent(
+			"bob",
+		);
+		expect(
+			within(list)
+				.getAllByRole("option")
+				.map((option) => option.textContent),
+		).toEqual(["alice", "carol"]);
 		expect(onChange).not.toHaveBeenCalled();
 	});
 
-	it("discards the selection when the user edits the text", async () => {
-		const onChange = renderUserPicker({
-			value: userFixture({ id: "u-2", username: "bob" }),
-		});
-		const user = userEvent.setup();
+	it("renders the error state when the directory fetch fails", async () => {
+		server.use(
+			http.get("*/api/users", () =>
+				errorResponse(500, "INTERNAL_ERROR", "Directory unavailable", "req-1"),
+			),
+		);
+		renderUserPicker();
 
-		const input = screen.getByTestId("user-picker-input");
-		expect(input).toHaveValue("bob");
-		await user.type(input, "x");
-
-		expect(onChange).toHaveBeenCalledWith(null);
+		expect(await screen.findByRole("alert")).toBeInTheDocument();
+		expect(screen.getByText("INTERNAL_ERROR")).toBeInTheDocument();
 	});
 });

@@ -27,16 +27,17 @@ import (
 
 // --- preview ----------------------------------------------------------
 
-// newMoveSecretPreviewTestService builds the preview service with the
+// newMoveSecretPreviewTestService builds the transfer service with the
 // secret provider wired: quadlet engines per machine, the access store,
-// and per-machine secret engines.
-func newMoveSecretPreviewTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, secrets map[string]moveSecretEngine) *QuadletService {
-	return NewQuadletService(fakeEngineProvider{engines: map[string]QuadletEngine{
+// and per-machine secret engines — with the real lean service over the
+// same engines as its lifecycle seam.
+func newMoveSecretPreviewTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, secrets map[string]moveSecretEngine) *QuadletTransferService {
+	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
 		"machine-a": sourceEngine,
 		"machine-b": targetEngine,
-	}}, nil, nil).
-		WithAccessRepo(access).
-		WithSecretEngines(fakeSecretEngineProvider{engines: secrets})
+	}}
+	service := NewQuadletService(provider, nil, nil)
+	return NewQuadletTransferService(provider, fakeSecretEngineProvider{engines: secrets}, access, 0, service)
 }
 
 // secretStoreFixture builds a secret engine holding the given names;
@@ -187,14 +188,16 @@ func TestQuadletService_MovePreview_HostPathOnlyNeverDialsTheStores(t *testing.T
 // --- transfer ---------------------------------------------------------
 
 // newMoveSecretTransferTestService builds the transfer service with the
-// secret provider wired, mirroring newMoveTransferTestService.
-func newMoveSecretTransferTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, sshExec sshexec.SSHExecInterface, secrets map[string]moveSecretEngine) *QuadletService {
-	return NewQuadletService(fakeEngineProvider{engines: map[string]QuadletEngine{
+// secret provider wired, mirroring newMoveTransferTestService: the real
+// lean service over the same engines (SSH exec and machine lookup wired
+// for the seam crossings) passed as the lifecycle seam.
+func newMoveSecretTransferTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, sshExec sshexec.SSHExecInterface, secrets map[string]moveSecretEngine) *QuadletTransferService {
+	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
 		"machine-a": sourceEngine,
 		"machine-b": targetEngine,
-	}}, sshExec, lookupForUser("core")).
-		WithAccessRepo(access).
-		WithSecretEngines(fakeSecretEngineProvider{engines: secrets})
+	}}
+	service := NewQuadletService(provider, sshExec, lookupForUser("core"))
+	return NewQuadletTransferService(provider, fakeSecretEngineProvider{engines: secrets}, access, 0, service)
 }
 
 // moveSecretTransferContent is the secret-bearing source content the

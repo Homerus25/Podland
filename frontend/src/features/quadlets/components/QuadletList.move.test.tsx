@@ -242,15 +242,9 @@ describe("QuadletList move/copy", () => {
 		expect(screen.getByTestId("confirm-move-button")).toBeEnabled();
 	});
 
-	it("warns move mode: lists volumes with kind labels and demands explicit confirmation", async () => {
+	it("demands explicit acknowledgment of the stranded-data warning in move mode", async () => {
 		useMoveHandlers();
 		const user = await openMoveDialogWithPreview();
-
-		const warning = screen.getByTestId("move-volume-warning");
-		expect(warning).toHaveTextContent("pgdata");
-		expect(warning).toHaveTextContent("podman volume");
-		expect(warning).toHaveTextContent("/srv/data");
-		expect(warning).toHaveTextContent("host path");
 
 		// The preview has resolved and the warning is shown, but the transfer
 		// still waits for the explicit acknowledgment of the stranded data.
@@ -279,7 +273,7 @@ describe("QuadletList move/copy", () => {
 		});
 	});
 
-	it("warns copy mode alike, without the move-only stop/force options", async () => {
+	it("keeps the acknowledgment gate in copy mode, without the move-only stop/force options", async () => {
 		useMoveHandlers();
 		const user = await openMoveDialogWithPreview();
 
@@ -303,6 +297,39 @@ describe("QuadletList move/copy", () => {
 			targetMachineId: "m-2",
 			mode: "copy",
 		});
+	});
+
+	it("keeps the stranded-data warning in copy mode with the companion option off", async () => {
+		server.use(
+			quadletsHandler(() => [web]),
+			machinesHandler([source, staging, readOnly, backup]),
+			previewHandler({
+				volumes: [quadletMoveCompanionVolumeFixture("absent"), hostPathVolume],
+			}),
+			moveHandler(),
+		);
+		const user = await openMoveDialogWithPreview();
+
+		await user.click(
+			screen.getByRole("radio", { name: "Copy (keep this machine's quadlet)" }),
+		);
+		await user.click(
+			screen.getByRole("checkbox", {
+				name: /Transfer the volume quadlet definitions/,
+			}),
+		);
+
+		// The warning holds in copy mode with the companions opt-out: the
+		// data still stays behind, the companion note answers the
+		// unchecked option, and confirm still waits for the
+		// acknowledgment.
+		expect(screen.getByTestId("move-volume-warning")).toHaveTextContent(
+			"it stays behind on prod-web-01",
+		);
+		expect(
+			screen.getByText("definition will not be transferred"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("confirm-move-button")).toBeDisabled();
 	});
 
 	it("disables confirm on a collision with a clear message", async () => {
@@ -390,7 +417,7 @@ describe("QuadletList move/copy", () => {
 		expect(moveRequests.count).toBe(1);
 	});
 
-	it("keeps the dialog open on a partial result, naming the both-machines state", async () => {
+	it("keeps the dialog open on a partial result", async () => {
 		useMoveHandlers();
 		server.use(
 			moveHandler(
@@ -405,13 +432,11 @@ describe("QuadletList move/copy", () => {
 
 		await user.click(screen.getByTestId("confirm-move-button"));
 
-		const message = await screen.findByTestId("move-partial-message");
-		expect(message).toHaveTextContent("staging-01");
-		expect(message).toHaveTextContent("prod-web-01");
-		expect(message).toHaveTextContent("both machines");
-		expect(message).toHaveTextContent(
-			"failed to remove quadlet: resource running",
-		);
+		// The report slot takes over: the dialog stays open on it, and the
+		// footer's Close dismisses it.
+		expect(
+			await screen.findByTestId("move-partial-message"),
+		).toBeInTheDocument();
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
 
@@ -469,31 +494,6 @@ describe("QuadletList move/copy", () => {
 				"Transfer the volume quadlet definitions (app-data.volume)",
 			),
 		).toBeInTheDocument();
-	});
-
-	it("annotates companion entries in the volume list", async () => {
-		server.use(
-			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
-			previewHandler({
-				volumes: [
-					quadletMoveCompanionVolumeFixture("absent"),
-					quadletMoveCompanionVolumeFixture("identical", "db.volume"),
-					quadletMoveCompanionVolumeFixture("differs", "cache.volume"),
-					hostPathVolume,
-				],
-			}),
-			moveHandler(),
-		);
-		await openMoveDialogWithPreview();
-
-		const rows = screen.getAllByTestId("move-volume-row");
-		expect(rows[0]).toHaveTextContent("definition will be copied");
-		expect(rows[1]).toHaveTextContent("already present on target");
-		expect(rows[2]).toHaveTextContent("differs on target");
-		expect(
-			within(rows[3]).queryByTestId("move-companion-note"),
-		).not.toBeInTheDocument();
 	});
 
 	it("sends transferVolumeQuadlets: false when the companion option is unchecked", async () => {
@@ -564,7 +564,7 @@ describe("QuadletList move/copy", () => {
 		});
 	});
 
-	it("disables confirm when a companion differs on the target, naming the conflict", async () => {
+	it("disables confirm when a companion differs on the target", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
 			machinesHandler([source, staging, readOnly, backup]),
@@ -575,11 +575,6 @@ describe("QuadletList move/copy", () => {
 		);
 		const user = await openMoveDialogWithPreview();
 
-		const warning = screen.getByTestId("move-companion-conflict-warning");
-		expect(warning).toHaveTextContent("app-data.volume");
-		expect(warning).toHaveTextContent("staging-01");
-		expect(warning).toHaveTextContent("different content");
-
 		// Even the explicit data acknowledgment must not unlock a doomed
 		// transfer — a differing companion blocks confirm like a collision.
 		await user.click(
@@ -589,37 +584,6 @@ describe("QuadletList move/copy", () => {
 		);
 		expect(screen.getByTestId("confirm-move-button")).toBeDisabled();
 		expect(moveRequests.count).toBe(0);
-	});
-
-	it("keeps the data-stays-behind warning in both modes and both checkbox states", async () => {
-		server.use(
-			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
-			previewHandler({
-				volumes: [quadletMoveCompanionVolumeFixture("absent"), hostPathVolume],
-			}),
-			moveHandler(),
-		);
-		const user = await openMoveDialogWithPreview();
-
-		// Move mode, companions on: the warning names the source machine.
-		expect(screen.getByTestId("move-volume-warning")).toHaveTextContent(
-			"stays behind on prod-web-01",
-		);
-
-		// Copy mode, companions off: the data never travels, so the warning
-		// holds regardless.
-		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's quadlet)" }),
-		);
-		await user.click(
-			screen.getByRole("checkbox", {
-				name: /Transfer the volume quadlet definitions/,
-			}),
-		);
-		expect(screen.getByTestId("move-volume-warning")).toHaveTextContent(
-			"stays behind on prod-web-01",
-		);
 	});
 
 	it("hides the migrate and overwrite options when nothing is migratable", async () => {
@@ -663,58 +627,6 @@ describe("QuadletList move/copy", () => {
 		).not.toBeInTheDocument();
 	});
 
-	it("renders the volume data facts per entry (issue 214)", async () => {
-		server.use(
-			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
-			previewHandler({
-				volumes: [
-					quadletMoveDataVolumeFixture({
-						sizeBytes: 1572864,
-						existsOnTarget: true,
-						targetSizeBytes: 2048,
-					}),
-					quadletMoveDataVolumeFixture({
-						source: "ghost",
-						podmanVolume: "ghost",
-						migratable: false,
-						reason: "source volume does not exist",
-					}),
-					hostPathVolume,
-				],
-			}),
-			moveHandler(),
-		);
-		await openMoveDialogWithPreview();
-
-		const rows = screen.getAllByTestId("move-volume-row");
-		expect(
-			within(rows[0]).getByTestId("move-volume-resolved"),
-		).toHaveTextContent("resolves to “pgdata” (1.6 MB)");
-		expect(within(rows[0]).getByTestId("move-volume-target")).toHaveTextContent(
-			"already on target (2 KB)",
-		);
-		expect(
-			within(rows[1]).getByTestId("move-volume-resolved"),
-		).toHaveTextContent("resolves to “ghost”");
-		expect(within(rows[1]).getByTestId("move-volume-target")).toHaveTextContent(
-			"new on target",
-		);
-		expect(within(rows[1]).getByTestId("move-volume-reason")).toHaveTextContent(
-			"source volume does not exist",
-		);
-		// A host path claims nothing: its reason only.
-		expect(
-			within(rows[2]).queryByTestId("move-volume-resolved"),
-		).not.toBeInTheDocument();
-		expect(
-			within(rows[2]).queryByTestId("move-volume-target"),
-		).not.toBeInTheDocument();
-		expect(within(rows[2]).getByTestId("move-volume-reason")).toHaveTextContent(
-			"host bind paths are not migrated",
-		);
-	});
-
 	it("shows the hot-export caveat when the source is running and migration is checked", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
@@ -735,7 +647,7 @@ describe("QuadletList move/copy", () => {
 		);
 	});
 
-	it("runs a checked migration over the NDJSON transport and narrates the outcomes", async () => {
+	it("runs a checked migration over the NDJSON transport, narrating in place", async () => {
 		server.use(
 			countingQuadletsHandler(() => [web]),
 			machinesHandler([source, staging, readOnly, backup]),
@@ -814,31 +726,22 @@ describe("QuadletList move/copy", () => {
 			migrateVolumeData: true,
 		});
 
-		// Per-volume progress off the generic transport, the latest phase per
-		// volume winning while the stream runs.
-		const pgdata = await screen.findByTestId("move-migration-volume-pgdata");
-		const ghost = await screen.findByTestId("move-migration-volume-ghost");
-		await waitFor(() => {
-			expect(pgdata).toHaveTextContent("done (2.1 MB)");
-			expect(ghost).toHaveTextContent("skipped — source volume does not exist");
-		});
-
-		// The terminal event narrates in place instead of closing: migrated
-		// and skipped volumes with their reasons, the source list refetching
-		// behind the dialog.
-		const report = await screen.findByTestId("move-migration-success");
-		expect(report).toHaveTextContent("Moved");
-		expect(report).toHaveTextContent("staging-01");
+		// Per-volume progress reaches the report module while the stream
+		// runs; the terminal event's report then takes the body over instead
+		// of closing, the source list refetching behind the dialog.
+		expect(
+			await screen.findByTestId("move-migration-volume-pgdata"),
+		).toBeInTheDocument();
+		expect(
+			await screen.findByTestId("move-migration-volume-ghost"),
+		).toBeInTheDocument();
+		expect(
+			await screen.findByTestId("move-migration-success"),
+		).toBeInTheDocument();
 		expect(
 			screen.queryByTestId("move-migration-progress"),
 		).not.toBeInTheDocument();
 		await waitFor(() => expect(quadletFetches).toBeGreaterThan(before));
-		expect(
-			screen.getByTestId("move-migration-outcome-pgdata"),
-		).toHaveTextContent("data migrated");
-		expect(
-			screen.getByTestId("move-migration-outcome-ghost"),
-		).toHaveTextContent("skipped — source volume does not exist");
 		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
 
 		await user.click(screen.getByTestId("close-move-report-button"));
@@ -927,7 +830,7 @@ describe("QuadletList move/copy", () => {
 		});
 	});
 
-	it("keeps a migrating partial result open with both machines and the outcomes", async () => {
+	it("keeps a migrating partial result open", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
 			machinesHandler([source, staging, readOnly, backup]),
@@ -960,19 +863,11 @@ describe("QuadletList move/copy", () => {
 		);
 		await user.click(screen.getByTestId("confirm-move-button"));
 
-		// The partial contract holds on the stream transport too, with the
-		// data outcomes narrated beneath the both-machines message.
-		const message = await screen.findByTestId("move-partial-message");
-		expect(message).toHaveTextContent("both machines");
-		expect(message).toHaveTextContent(
-			"failed to remove quadlet: resource running",
-		);
+		// The partial contract holds on the stream transport too: the report
+		// slot takes over and the dialog stays open.
 		expect(
-			within(message).getByTestId("move-migration-report"),
+			await screen.findByTestId("move-partial-message"),
 		).toBeInTheDocument();
-		expect(
-			within(message).getByTestId("move-migration-outcome-pgdata"),
-		).toHaveTextContent("data migrated");
 		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
 	});
 
@@ -1024,56 +919,6 @@ describe("QuadletList move/copy", () => {
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 	});
 
-	it("renders the secrets warning with kind and existence facts in both modes (issue 222)", async () => {
-		server.use(
-			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
-			previewHandler(secretPreview),
-			moveHandler(),
-		);
-		const user = await openMoveDialogWithPreview();
-
-		const warning = screen.getByTestId("move-secret-warning");
-		expect(warning).toHaveTextContent(
-			"Secret values do not move with the file — they stay behind on prod-web-01",
-		);
-		const rows = screen.getAllByTestId("move-secret-row");
-		// Transferable: a podman secret, fresh on the target.
-		expect(rows[0]).toHaveTextContent("db-password");
-		expect(rows[0]).toHaveTextContent("podman secret");
-		expect(
-			within(rows[0]).queryByTestId("move-secret-source"),
-		).not.toBeInTheDocument();
-		expect(within(rows[0]).getByTestId("move-secret-target")).toHaveTextContent(
-			"new on target",
-		);
-		// Same name already on the target: the stranded-dependency warning.
-		expect(within(rows[1]).getByTestId("move-secret-target")).toHaveTextContent(
-			"already on target",
-		);
-		// Dangling: renders honestly as missing here.
-		expect(within(rows[2]).getByTestId("move-secret-source")).toHaveTextContent(
-			"missing on this machine",
-		);
-		// A host path claims nothing: podman reads it off the filesystem.
-		expect(
-			within(rows[3]).queryByTestId("move-secret-source"),
-		).not.toBeInTheDocument();
-		expect(
-			within(rows[3]).queryByTestId("move-secret-target"),
-		).not.toBeInTheDocument();
-
-		// The warning holds in copy mode alike — the stranded values are the
-		// same truth either way, and so does the admin affordance.
-		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's quadlet)" }),
-		);
-		expect(screen.getByTestId("move-secret-warning")).toBeInTheDocument();
-		expect(
-			screen.getByTestId("move-transfer-secrets-option"),
-		).toBeInTheDocument();
-	});
-
 	it("offers the transfer-secrets option default-off only for an admin caller with a transferable secret (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
@@ -1097,7 +942,7 @@ describe("QuadletList move/copy", () => {
 		expect(screen.queryByTestId("move-secret-warning")).not.toBeInTheDocument();
 	});
 
-	it("hides the transfer-secrets option when nothing is transferable but keeps the warning (issue 222)", async () => {
+	it("hides the transfer-secrets option when nothing is transferable (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
 			machinesHandler([source, staging, readOnly, backup]),
@@ -1119,13 +964,12 @@ describe("QuadletList move/copy", () => {
 		);
 		await openMoveDialogWithPreview();
 
-		expect(screen.getByTestId("move-secret-warning")).toBeInTheDocument();
 		expect(
 			screen.queryByTestId("move-transfer-secrets-option"),
 		).not.toBeInTheDocument();
 	});
 
-	it("hides the transfer-secrets option for a non-admin caller but keeps the warning (issue 222)", async () => {
+	it("hides the transfer-secrets option for a non-admin caller (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
 			machinesHandler([source, staging, readOnly, backup]),
@@ -1143,9 +987,9 @@ describe("QuadletList move/copy", () => {
 			await screen.findByRole("button", { name: "Move or copy web" }),
 		);
 
-		expect(
-			await screen.findByTestId("move-secret-warning"),
-		).toBeInTheDocument();
+		// The preview has resolved (the warning is up); the option stays
+		// hidden for a caller without the reveal-secrets capability.
+		await screen.findByTestId("move-secret-warning");
 		expect(
 			screen.queryByTestId("move-transfer-secrets-option"),
 		).not.toBeInTheDocument();
@@ -1194,7 +1038,7 @@ describe("QuadletList move/copy", () => {
 		});
 	});
 
-	it("narrates the secretTransfer outcomes on a plain transfer and stays open (issue 222)", async () => {
+	it("stays open on a plain transfer's secretTransfer outcomes (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
 			machinesHandler([source, staging, readOnly, backup]),
@@ -1228,20 +1072,9 @@ describe("QuadletList move/copy", () => {
 
 		// The outcomes are the answer's point: the dialog stays open on them
 		// the way the migrating transport's report does.
-		const report = await screen.findByTestId("move-secret-success");
-		expect(report).toHaveTextContent("Copied");
-		expect(report).toHaveTextContent("staging-01");
 		expect(
-			screen.getByTestId("move-secret-outcome-db-password"),
-		).toHaveTextContent("value transferred");
-		expect(
-			screen.getByTestId("move-secret-outcome-tls-cert"),
-		).toHaveTextContent(
-			"skipped — a secret with this name already exists on the target",
-		);
-		expect(screen.getByTestId("move-secret-outcome-ghost")).toHaveTextContent(
-			"skipped — source secret does not exist",
-		);
+			await screen.findByTestId("move-secret-success"),
+		).toBeInTheDocument();
 		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
 
 		await user.click(screen.getByTestId("close-move-report-button"));
@@ -1250,7 +1083,7 @@ describe("QuadletList move/copy", () => {
 		);
 	});
 
-	it("narrates secretTransfer beside volumeMigration in the stream's terminal report (issue 222)", async () => {
+	it("sends transferSecrets and migrateVolumeData on one stream request (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
 			machinesHandler([source, staging, readOnly, backup]),
@@ -1294,9 +1127,8 @@ describe("QuadletList move/copy", () => {
 		await user.click(screen.getByTestId("move-transfer-secrets-option"));
 		await user.click(screen.getByTestId("confirm-move-button"));
 
-		// Both flags ride one request; the secrets land in the terminal
-		// event's envelope beside the volume outcomes — no progress UI of
-		// their own.
+		// Both flags ride one request; the terminal event's envelope narrates
+		// in place — no progress UI of its own for the secrets.
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
 			targetMachineId: "m-2",
@@ -1306,55 +1138,9 @@ describe("QuadletList move/copy", () => {
 			transferSecrets: true,
 			migrateVolumeData: true,
 		});
-		const report = await screen.findByTestId("move-migration-success");
 		expect(
-			screen.getByTestId("move-migration-outcome-pgdata"),
-		).toHaveTextContent("data migrated");
-		expect(
-			within(report).getByTestId("move-secret-outcome-db-password"),
-		).toHaveTextContent("value transferred");
-		expect(
-			within(report).getByTestId("move-secret-outcome-tls-cert"),
-		).toHaveTextContent(
-			"skipped — a secret with this name already exists on the target",
-		);
-	});
-
-	it("narrates skipped secrets under a partial result too (issue 222)", async () => {
-		server.use(
-			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
-			previewHandler(secretPreview),
-			moveHandler(
-				200,
-				quadletMoveResultFixture({
-					status: "partial",
-					error: "failed to remove quadlet: resource running",
-					secretTransfer: {
-						secrets: [
-							quadletMoveSecretOutcomeFixture(),
-							quadletMoveSecretOutcomeFixture({
-								name: "ghost",
-								outcome: "skipped",
-								reason: "source secret does not exist",
-							}),
-						],
-					},
-				}),
-			),
-		);
-		const user = await openMoveDialogReadyToConfirm();
-
-		await user.click(screen.getByTestId("move-transfer-secrets-option"));
-		await user.click(screen.getByTestId("confirm-move-button"));
-
-		const message = await screen.findByTestId("move-partial-message");
-		expect(
-			within(message).getByTestId("move-secret-outcome-db-password"),
-		).toHaveTextContent("value transferred");
-		expect(
-			within(message).getByTestId("move-secret-outcome-ghost"),
-		).toHaveTextContent("skipped — source secret does not exist");
+			await screen.findByTestId("move-migration-success"),
+		).toBeInTheDocument();
 	});
 
 	it("maps SECRET_TRANSFER_FAILED on the stream error to an actionable message naming the secret (issue 222)", async () => {

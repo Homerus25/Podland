@@ -18,16 +18,19 @@ import (
 // transferSecrets flag decoding through to the secretTransfer block, and
 // the below-admin 403 envelope. The semantics live in the service tests.
 
-// newMoveSecretTestHandler builds the handler over the real service with
-// per-machine fake engines, the given access store, and per-machine fake
-// secret stores — the wiring the secret surface exercises.
+// newMoveSecretTestHandler builds the handler over both quadlet modules
+// with per-machine fake engines, the given access store, and per-machine
+// fake secret stores — the wiring the secret surface exercises. The real
+// lean service (SSH exec and machine lookup wired for the seam crossings)
+// is passed to the transfer service as its lifecycle seam.
 func newMoveSecretTestHandler(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, secrets map[string]moveSecretEngine) *QuadletHandler {
-	return NewQuadletHandler(NewQuadletService(fakeEngineProvider{engines: map[string]QuadletEngine{
+	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
 		"machine-a": sourceEngine,
 		"machine-b": targetEngine,
-	}}, testutils.NewMockSSHExec(), lookupForUser("core")).
-		WithAccessRepo(access).
-		WithSecretEngines(fakeSecretEngineProvider{engines: secrets}))
+	}}
+	service := NewQuadletService(provider, testutils.NewMockSSHExec(), lookupForUser("core"))
+	transfer := NewQuadletTransferService(provider, fakeSecretEngineProvider{engines: secrets}, access, 0, service)
+	return NewQuadletHandler(service, transfer)
 }
 
 func TestQuadletHandler_MovePreview_RendersSecretsArray(t *testing.T) {

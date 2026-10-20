@@ -1,5 +1,4 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
 import {
@@ -8,9 +7,7 @@ import {
 	openCreateModal,
 	optionRequests,
 	populateAllFields,
-	renderContainerList,
 	reopenCreateModal,
-	resetCounters,
 	setupCreateDialog,
 	submitForm,
 	typeImage,
@@ -18,11 +15,12 @@ import {
 
 // Integration tests for the extended create-container dialog (spec 313,
 // ticket #318). They drive the real ContainerList -> CreateContainerDialog
-// -> MSW handler path and assert the exact JSON payload the backend
-// receives: the full 14-field create flow, empty-row filtering, dropdown
-// loading, error-envelope value preservation, and the per-field payload
-// shapes. ContainerList.create.test.tsx owns the per-field basics; this
-// file owns the end-to-end contract.
+// -> MSW handler path: one full-payload smoke (wiring, not mapping — the
+// form-to-payload contract is pinned without a DOM in
+// services/containersApi.create.test.ts, issue 328 candidate C3) plus the
+// dialog-behavior pins — reset on reopen, option-list fetching through
+// MSW, and error-envelope value preservation.
+// ContainerList.create.test.tsx owns the form-shape and validation pins.
 
 // The heavy tests drive long userEvent interaction chains (the full 14-field
 // flow, five dialog open/submit cycles); under full-suite parallel load they
@@ -62,104 +60,6 @@ describe("ContainerList create integration", () => {
 						containerPath: "/dev/dri/renderD128",
 					},
 				],
-			});
-		},
-		TEST_TIMEOUT,
-	);
-
-	it(
-		"filters empty rows from every field array",
-		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
-			await typeImage(user);
-
-			// Environment: a row with an empty key is skipped.
-			await user.click(screen.getByTestId("add-env-variable"));
-			await user.type(
-				screen.getByLabelText("Environment variable 1 key"),
-				"FOO",
-			);
-			await user.type(
-				screen.getByLabelText("Environment variable 1 value"),
-				"bar",
-			);
-			await user.click(screen.getByTestId("add-env-variable"));
-			await user.type(
-				screen.getByLabelText("Environment variable 2 value"),
-				"ignored",
-			);
-			// Ports: a row with empty ports is skipped.
-			await user.click(screen.getByTestId("add-port-binding"));
-			await user.type(screen.getByLabelText("Host port 1"), "8080");
-			await user.type(screen.getByLabelText("Container port 1"), "80");
-			await user.click(screen.getByTestId("add-port-binding"));
-			// Mounts: a row with an empty destination is skipped.
-			await user.click(screen.getByTestId("add-bind-mount"));
-			await user.type(screen.getByLabelText("Mount source 1"), "/srv/app");
-			await user.type(screen.getByLabelText("Mount destination 1"), "/app");
-			await user.click(screen.getByTestId("add-bind-mount"));
-			await user.type(screen.getByLabelText("Mount source 2"), "/srv/other");
-			// Volumes: a row with no selected name is skipped.
-			await user.click(screen.getByTestId("add-named-volume"));
-			const volumeSelect = screen.getByLabelText("Volume name 1");
-			await within(volumeSelect).findByText("pgdata");
-			await user.selectOptions(volumeSelect, "pgdata");
-			await user.type(screen.getByLabelText("Volume destination 1"), "/data");
-			await user.click(screen.getByTestId("add-named-volume"));
-			await user.type(
-				screen.getByLabelText("Volume destination 2"),
-				"/var/lib",
-			);
-			// Devices: a row with an empty container path is skipped.
-			await user.click(screen.getByTestId("add-device"));
-			await user.type(
-				screen.getByLabelText("Device host path 1"),
-				"/dev/dri/renderD128",
-			);
-			await user.type(
-				screen.getByLabelText("Device container path 1"),
-				"/dev/dri/renderD128",
-			);
-			await user.click(screen.getByTestId("add-device"));
-			await user.type(screen.getByLabelText("Device host path 2"), "/dev/kvm");
-
-			await submitForm(user);
-
-			expect(createRequests.body).toEqual({
-				image: "docker.io/library/redis:7",
-				environment: { FOO: "bar" },
-				portBindings: [{ hostPort: 8080, containerPort: 80, protocol: "tcp" }],
-				mounts: [{ source: "/srv/app", destination: "/app", mode: "rw" }],
-				volumes: [{ name: "pgdata", destination: "/data", mode: "rw" }],
-				devices: [
-					{
-						hostPath: "/dev/dri/renderD128",
-						containerPath: "/dev/dri/renderD128",
-					},
-				],
-			});
-		},
-		TEST_TIMEOUT,
-	);
-
-	it(
-		"omits every optional field when all rows are empty",
-		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
-			await typeImage(user);
-
-			await user.click(screen.getByTestId("add-env-variable"));
-			await user.click(screen.getByTestId("add-port-binding"));
-			await user.click(screen.getByTestId("add-bind-mount"));
-			await user.click(screen.getByTestId("add-named-volume"));
-			await user.click(screen.getByTestId("add-device"));
-
-			await submitForm(user);
-
-			expect(createRequests.body).toEqual({
-				image: "docker.io/library/redis:7",
 			});
 		},
 		TEST_TIMEOUT,
@@ -275,186 +175,23 @@ describe("ContainerList create integration", () => {
 	);
 
 	it(
-		"sends the selected restart policy string and omits it for (none)",
+		"resets the form when the dialog is reopened after a successful create",
 		async () => {
 			setupCreateDialog();
-			renderContainerList();
-			await screen.findByText("existing");
-			const user = userEvent.setup();
+			const user = await openCreateModal();
+			await typeImage(user);
+			await user.type(screen.getByLabelText(/name/i), "cache");
+			await submitForm(user);
+			await waitFor(() =>
+				expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
+			);
 
-			for (const policy of ["no", "always", "unless-stopped", "on-failure"]) {
-				resetCounters();
-				await reopenCreateModal(user);
-				await typeImage(user);
-				await user.selectOptions(
-					screen.getByLabelText(/restart policy/i),
-					policy,
-				);
-				await submitForm(user);
-				expect(createRequests.body).toEqual({
-					image: "docker.io/library/redis:7",
-					restartPolicy: policy,
-				});
-				await waitFor(() =>
-					expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-				);
-			}
-
-			// "(none)" leaves the field out of the payload entirely.
-			resetCounters();
 			await reopenCreateModal(user);
-			await typeImage(user);
-			await submitForm(user);
-			expect(createRequests.body).toEqual({
-				image: "docker.io/library/redis:7",
-			});
-		},
-		TEST_TIMEOUT,
-	);
 
-	it(
-		"sends remove: true when the remove-on-exit checkbox is checked",
-		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
-			await typeImage(user);
-
-			await user.click(screen.getByLabelText(/remove on exit/i));
-
-			await submitForm(user);
-
-			expect(createRequests.body).toEqual({
-				image: "docker.io/library/redis:7",
-				remove: true,
-			});
-		},
-		TEST_TIMEOUT,
-	);
-
-	it(
-		"omits remove when the remove-on-exit checkbox is left unchecked",
-		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
-			await typeImage(user);
-
-			await submitForm(user);
-
-			expect(createRequests.body).toEqual({
-				image: "docker.io/library/redis:7",
-			});
-		},
-		TEST_TIMEOUT,
-	);
-
-	it(
-		"sends selected secrets as { source, target } with the default target path",
-		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
-			await typeImage(user);
-
-			await user.click(await screen.findByLabelText("db-password"));
-			await user.click(screen.getByLabelText("api-token"));
-
-			await submitForm(user);
-
-			expect(createRequests.body).toEqual({
-				image: "docker.io/library/redis:7",
-				secrets: [
-					{ source: "db-password", target: "/run/secrets/db-password" },
-					{ source: "api-token", target: "/run/secrets/api-token" },
-				],
-			});
-		},
-		TEST_TIMEOUT,
-	);
-
-	it(
-		"sends the selected networks as a string array, dropping toggled-off ones",
-		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
-			await typeImage(user);
-
-			await user.click(await screen.findByLabelText("app-net"));
-			await user.click(screen.getByLabelText("other-net"));
-			// Toggling a selected network off removes it from the payload.
-			await user.click(screen.getByLabelText("app-net"));
-
-			await submitForm(user);
-
-			expect(createRequests.body).toEqual({
-				image: "docker.io/library/redis:7",
-				networks: ["other-net"],
-			});
-		},
-		TEST_TIMEOUT,
-	);
-
-	it(
-		"sends device rows as { hostPath, containerPath } entries",
-		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
-			await typeImage(user);
-
-			await user.click(screen.getByTestId("add-device"));
-			await user.type(
-				screen.getByLabelText("Device host path 1"),
-				"/dev/dri/renderD128",
-			);
-			await user.type(
-				screen.getByLabelText("Device container path 1"),
-				"/dev/dri/renderD128",
-			);
-			await user.click(screen.getByTestId("add-device"));
-			await user.type(screen.getByLabelText("Device host path 2"), "/dev/kvm");
-			await user.type(
-				screen.getByLabelText("Device container path 2"),
-				"/dev/kvm",
-			);
-
-			await submitForm(user);
-
-			expect(createRequests.body).toEqual({
-				image: "docker.io/library/redis:7",
-				devices: [
-					{
-						hostPath: "/dev/dri/renderD128",
-						containerPath: "/dev/dri/renderD128",
-					},
-					{ hostPath: "/dev/kvm", containerPath: "/dev/kvm" },
-				],
-			});
-		},
-		TEST_TIMEOUT,
-	);
-
-	it(
-		"offers the machine's volumes in the named-volume dropdown and sends { name, destination, mode }",
-		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
-			await typeImage(user);
-
-			await user.click(screen.getByTestId("add-named-volume"));
-			const volumeSelect = screen.getByLabelText("Volume name 1");
-			// The dropdown lists the volumes fetched through useVolumes.
-			expect(
-				await within(volumeSelect).findByText("app-data"),
-			).toBeInTheDocument();
-			expect(within(volumeSelect).getByText("pgdata")).toBeInTheDocument();
-			await user.selectOptions(volumeSelect, "pgdata");
-			await user.type(screen.getByLabelText("Volume destination 1"), "/data");
-			await user.selectOptions(screen.getByLabelText("Volume mode 1"), "ro");
-
-			await submitForm(user);
-
-			expect(createRequests.body).toEqual({
-				image: "docker.io/library/redis:7",
-				volumes: [{ name: "pgdata", destination: "/data", mode: "ro" }],
-			});
+			// The reopened dialog starts from the empty default form.
+			expect(screen.getByLabelText(/image/i)).toHaveValue("");
+			expect(screen.getByLabelText(/name/i)).toHaveValue("");
+			expect(screen.getByTestId("container-form-submit")).toBeDisabled();
 		},
 		TEST_TIMEOUT,
 	);

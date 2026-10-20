@@ -43,7 +43,9 @@ func parseNDJSON(t *testing.T, body string) []AutoUpdateEvent {
 func newAutoUpdateTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*chi.Mux, *httptest.ResponseRecorder) {
 	t.Helper()
 	engine := &fakeQuadletEngine{}
-	handler := NewQuadletHandler(NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core")))
+	provider := fakeEngineProvider{engine: engine}
+	service := NewQuadletService(provider, sshExec, lookupForUser("core"))
+	handler := NewQuadletHandler(service, NewQuadletTransferService(provider, nil, nil, 0, service))
 	r := chi.NewRouter()
 	r.Post("/api/machines/{id}/quadlets/auto-update", handler.AutoUpdate)
 	rec := httptest.NewRecorder()
@@ -205,12 +207,16 @@ func TestQuadletHandler_AutoUpdate_FilterForwarded(t *testing.T) {
 // semantics the ACs promise are exercised through the real middleware.
 
 func autoUpdateAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *QuadletService) http.Handler {
+	// The auto-update route never crosses the transfer module; the handler
+	// is still constructed over both services, with an unused engine
+	// provider for the transfer half.
+	transfer := NewQuadletTransferService(fakeEngineProvider{}, nil, nil, 0, service)
 	r := chi.NewRouter()
 	r.Route("/api/machines", func(r chi.Router) {
 		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
 			requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
 			r.Route("/quadlets", func(r chi.Router) {
-				r.With(requireWrite).Post("/auto-update", NewQuadletHandler(service).AutoUpdate)
+				r.With(requireWrite).Post("/auto-update", NewQuadletHandler(service, transfer).AutoUpdate)
 			})
 		})
 	})

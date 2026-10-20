@@ -18,14 +18,22 @@ import (
 // and the move's migrateVolumeData half stream NDJSON through the
 // streaming kit's progress seam (internal/streaming.HandleProgress)
 // rather than encoding one DTO.
+//
+// The handler is constructed over both quadlet modules (architecture
+// review 2026-10-19, candidate C2): the lean service owns CRUD, lifecycle,
+// logs, generate, import, and auto-update; the transfer service owns the
+// cross-machine move/copy.
 type QuadletHandler struct {
-	service *QuadletService
+	service  *QuadletService
+	transfer *QuadletTransferService
 }
 
-// NewQuadletHandler creates a new QuadletHandler
-func NewQuadletHandler(service *QuadletService) *QuadletHandler {
+// NewQuadletHandler creates a new QuadletHandler over both quadlet
+// modules: the lean service and the transfer service.
+func NewQuadletHandler(service *QuadletService, transfer *QuadletTransferService) *QuadletHandler {
 	return &QuadletHandler{
-		service: service,
+		service:  service,
+		transfer: transfer,
 	}
 }
 
@@ -205,7 +213,7 @@ func (h *QuadletHandler) MovePreview(w http.ResponseWriter, r *http.Request) {
 			return nil, guard
 		}
 
-		return h.service.MovePreview(ctx, userID, machineID, quadletID, targetMachineID)
+		return h.transfer.MovePreview(ctx, userID, machineID, quadletID, targetMachineID)
 	})
 }
 
@@ -242,14 +250,14 @@ func (h *QuadletHandler) Move(w http.ResponseWriter, r *http.Request) {
 
 	if !request.MigrateVolumeData {
 		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletMoveResponse, error) {
-			return h.service.Move(ctx, userID, machineID, quadletID, request)
+			return h.transfer.Move(ctx, userID, machineID, quadletID, request)
 		})
 		return
 	}
 
 	streaming.HandleProgress(w, r, "Move quadlet with volume data migration", []slog.Attr{slog.String("quadletID", quadletID)}, streaming.ProgressConfig[QuadletMoveEvent, *QuadletMoveResponse]{
 		Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(QuadletMoveEvent)) (*QuadletMoveResponse, error) {
-			return h.service.MoveWithProgress(ctx, op.UserID, op.MachineID, quadletID, request, func(event QuadletMoveEvent) {
+			return h.transfer.MoveWithProgress(ctx, op.UserID, op.MachineID, quadletID, request, func(event QuadletMoveEvent) {
 				event.OperationID = op.OperationID
 				event.MachineID = op.MachineID
 				onProgress(event)

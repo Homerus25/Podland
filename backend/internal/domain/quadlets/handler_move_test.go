@@ -27,14 +27,14 @@ type moveErrorEnvelope struct {
 	} `json:"error"`
 }
 
-// newMovePreviewTestHandler builds the handler over the real service with
-// per-machine fake engines and a passing access store — the wiring the
-// move-preview handler exercises (one lease per machine, plus the target
-// gate).
+// newMovePreviewTestHandler builds the handler over both quadlet modules
+// with per-machine fake engines and a passing access store — the wiring
+// the move-preview handler exercises (one lease per machine, plus the
+// target gate).
 func newMovePreviewTestHandler(sourceEngine, targetEngine *fakeQuadletEngine) *QuadletHandler {
-	service := newMovePreviewTestService(sourceEngine, targetEngine,
+	service, transfer := newMovePreviewTestServices(sourceEngine, targetEngine,
 		&fakeAccessRepo{getPermissionFn: allowTargetRead})
-	return NewQuadletHandler(service)
+	return NewQuadletHandler(service, transfer)
 }
 
 func movePreviewRequest(target, userID, machineID, quadletID string) *http.Request {
@@ -137,12 +137,13 @@ func TestQuadletHandler_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
 			panic("source engine must not be reached when the target gate refuses")
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engines: map[string]QuadletEngine{
+	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
 		"machine-a": sourceEngine,
-	}}, nil, nil).WithAccessRepo(&fakeAccessRepo{getPermissionFn: func(string, string) (string, error) {
+	}}
+	lean := NewQuadletService(provider, nil, nil)
+	handler := NewQuadletHandler(lean, NewQuadletTransferService(provider, nil, &fakeAccessRepo{getPermissionFn: func(string, string) (string, error) {
 		return "", nil
-	}})
-	handler := NewQuadletHandler(service)
+	}}, 0, lean))
 
 	req := movePreviewRequest("/api/machines/machine-a/quadlets/web.container/move-preview?targetMachineId=machine-b",
 		"user123", "machine-a", "web.container")
@@ -183,14 +184,14 @@ func TestQuadletHandler_MovePreview_MissingSourceQuadletIs404(t *testing.T) {
 
 // --- The transfer handler (copy mode, issue 210) ---
 
-// newMoveTestHandler builds the handler over the real service with
+// newMoveTestHandler builds the handler over both quadlet modules with
 // per-machine fake engines, a write-allowing access store, and a succeeding
 // SSH exec — the wiring the transfer handler exercises (the target gate,
 // both engine leases, and the post-install reload on the target).
 func newMoveTestHandler(sourceEngine, targetEngine *fakeQuadletEngine) *QuadletHandler {
-	service := newMoveTransferTestService(sourceEngine, targetEngine,
+	service, transfer := newMoveTransferTestServices(sourceEngine, targetEngine,
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite}, testutils.NewMockSSHExec())
-	return NewQuadletHandler(service)
+	return NewQuadletHandler(service, transfer)
 }
 
 // moveTransferSourceFixture is the source lease's answer: one stopped
@@ -282,17 +283,18 @@ func TestQuadletHandler_Move_TargetAccessDeniedIs403(t *testing.T) {
 			panic("source engine must not be reached when the target gate refuses")
 		},
 	}
-	service := NewQuadletService(fakeEngineProvider{engines: map[string]QuadletEngine{
+	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
 		"machine-a": sourceEngine,
-	}}, testutils.NewMockSSHExec(), lookupForUser("core")).WithAccessRepo(&fakeAccessRepo{
+	}}
+	lean := NewQuadletService(provider, testutils.NewMockSSHExec(), lookupForUser("core"))
+	handler := NewQuadletHandler(lean, NewQuadletTransferService(provider, nil, &fakeAccessRepo{
 		getPermissionFn: func(machineID, _ string) (string, error) {
 			if machineID == "machine-b" {
 				return models.PermissionRead, nil
 			}
 			return models.PermissionAdmin, nil
 		},
-	})
-	handler := NewQuadletHandler(service)
+	}, 0, lean))
 
 	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy"}`)
 
@@ -665,8 +667,9 @@ func migrateMoveHandler() (*QuadletHandler, *string) {
 			return err
 		},
 	}
-	handler := NewQuadletHandler(newMoveTransferTestService(source, target,
-		&fakeAccessRepo{getPermissionFn: allowTargetWrite}, testutils.NewMockSSHExec()))
+	lean, transfer := newMoveTransferTestServices(source, target,
+		&fakeAccessRepo{getPermissionFn: allowTargetWrite}, testutils.NewMockSSHExec())
+	handler := NewQuadletHandler(lean, transfer)
 	return handler, &gotImported
 }
 
@@ -737,8 +740,9 @@ func TestQuadletHandler_Move_MigrateErrorEventTerminal(t *testing.T) {
 			return err
 		},
 	}
-	handler := NewQuadletHandler(newMoveTransferTestService(source, target,
-		&fakeAccessRepo{getPermissionFn: allowTargetWrite}, testutils.NewMockSSHExec()))
+	lean, transfer := newMoveTransferTestServices(source, target,
+		&fakeAccessRepo{getPermissionFn: allowTargetWrite}, testutils.NewMockSSHExec())
+	handler := NewQuadletHandler(lean, transfer)
 
 	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy","migrateVolumeData":true}`)
 

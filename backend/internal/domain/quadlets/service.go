@@ -8,11 +8,9 @@ import (
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
-	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/streaming"
-	"github.com/Homerus25/podland/backend/internal/transfer"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -33,10 +31,14 @@ type ListFilters struct {
 	Name     string
 }
 
-// QuadletService provides business logic for quadlets. Every machine-scoped
+// QuadletService provides business logic for quadlets — the lean half of
+// the domain (architecture review 2026-10-19, candidate C2): CRUD,
+// lifecycle, logs, generate, import, and auto-update. Every machine-scoped
 // podman call crosses the QuadletEngineProvider (the connection seam); the
 // service itself owns only domain mapping, composition, and the lifecycle's
-// systemctl-via-SSH transport.
+// systemctl-via-SSH transport. The cross-machine transfer lives in
+// QuadletTransferService (move.go), which crosses into this half through
+// the lifecycleSeam.
 type QuadletService struct {
 	engines QuadletEngineProvider
 	// sshExec runs systemctl over SSH for the lifecycle (Start/Stop/Restart)
@@ -47,25 +49,6 @@ type QuadletService struct {
 	// systemctl invocations: a non-root login targets the user manager
 	// (`systemctl --user`), root targets the system manager.
 	machines machineLookup
-	// accessRepo resolves the caller's permission level for the cross-machine
-	// operations (move/copy preview and transfer): route middleware only sees
-	// the route's machine, so the target machine's access is checked here,
-	// against the store, before any podman call. Wired via WithAccessRepo.
-	accessRepo permission.PermissionGetter
-	// maxVolumeUploadBytes bounds the volume data migration's stream (issue
-	// 214, §18), enforced by the data phase's counting reader. Wired via
-	// WithMaxVolumeUploadBytes from the same config value the volumes
-	// domain caps populate uploads with; zero falls back to the transfer
-	// kit's DefaultMaxVolumeUploadBytes (the kit owns the default per
-	// §19).
-	maxVolumeUploadBytes int64
-	// secretEngines resolves the podman secret stores the move/copy's
-	// secret surface crosses (issue 215): the existence reads for the
-	// preview, the value reveal on the source and the create on the
-	// target for the transfer. Wired via WithSecretEngines; production
-	// wiring always sets it — calling a secret-touching path on a service
-	// without it is a wiring bug and panics at the seam.
-	secretEngines moveSecretEngineProvider
 }
 
 // NewQuadletService creates a new QuadletService with the given engine
@@ -80,48 +63,6 @@ func NewQuadletService(engines QuadletEngineProvider, sshExec sshexec.SSHExecInt
 		sshExec:  sshExec,
 		machines: machines,
 	}
-}
-
-// WithAccessRepo wires the machine-access store the cross-machine
-// operations (move/copy, issue 207) gate the target machine on, and
-// returns the service for chaining. Production wiring always sets it;
-// calling a cross-machine operation on a service without it is a wiring
-// bug and panics at the gate.
-func (s *QuadletService) WithAccessRepo(accessRepo permission.PermissionGetter) *QuadletService {
-	s.accessRepo = accessRepo
-	return s
-}
-
-// WithMaxVolumeUploadBytes wires the volume data migration's bound (issue
-// 214, §18) and returns the service for chaining. The bound is
-// service-owned — the same VOLUME_UPLOAD_MAX_BYTES config value the
-// volumes domain caps populate uploads with — so the migration cannot
-// stream past what the deployment already accepts for volume data.
-func (s *QuadletService) WithMaxVolumeUploadBytes(max int64) *QuadletService {
-	s.maxVolumeUploadBytes = max
-	return s
-}
-
-// WithSecretEngines wires the podman secret-store seam the move/copy's
-// secret surface crosses (issue 215) and returns the service for
-// chaining. Production wiring always sets it; calling a secret-touching
-// path (a preview of quadlet content with `Secret=` lines, or a transfer
-// with transferSecrets set) on a service without it is a wiring bug and
-// panics at the seam.
-func (s *QuadletService) WithSecretEngines(secretEngines moveSecretEngineProvider) *QuadletService {
-	s.secretEngines = secretEngines
-	return s
-}
-
-// volumeDataLimit answers the wired migration bound; zero (unset in
-// tests) falls back to the transfer kit's DefaultMaxVolumeUploadBytes
-// — the kit owns the default (§19), so this fallback and the volumes
-// domain's copy/move bound cannot drift apart.
-func (s *QuadletService) volumeDataLimit() int64 {
-	if s.maxVolumeUploadBytes == 0 {
-		return transfer.DefaultMaxVolumeUploadBytes
-	}
-	return s.maxVolumeUploadBytes
 }
 
 // List returns a list of quadlets on the specified machine.
@@ -427,28 +368,6 @@ func findQuadletByName(quadlets []*entities.ListQuadlet, name string) *entities.
 	return nil
 }
 
-// checkDeletePreconditions evaluates the not-found and running-resource guards
-// for a delete operation against the target quadlet's parsed state. It returns
-// ErrQuadletNotFound when the target is absent, ErrQuadletResourceRunning when
-// the managed resource is running and neither force nor the stop-before-remove
-// waiver applies, or nil when the delete may proceed (with a stop first when
-// the resource is running and stop is set).
-//
-// Its surviving caller is the move preflight (move.go); Delete's own
-// pre-check is the shared ritual in remove.go now. The running test
-// delegates to quadletResourceRunning, the one derivation the ritual's
-// body also evaluates, so the preflight and the ritual cannot drift
-// apart (issue 231).
-func checkDeletePreconditions(target *entities.ListQuadlet, force, stop bool) error {
-	if target == nil {
-		return appErrors.ErrQuadletNotFound
-	}
-	if quadletResourceRunning(target) && !force && !stop {
-		return appErrors.ErrQuadletResourceRunning
-	}
-	return nil
-}
-
 // isResourceRunningError reports whether err is podman's refusal to remove
 // a quadlet whose managed resource is still running. Podman phrases that
 // refusal ("quadlet %s is running and force is not set, refusing to
@@ -544,75 +463,16 @@ func (s *QuadletService) resolveForLogs(e QuadletEngine, quadletName string) (st
 	return resolveManagedContainerName(target, quadletName), nil
 }
 
-// resourceType represents a resource type that can be converted to a quadlet.
-// Each resource type knows its own inspection logic, name extraction,
-// and conversion logic. This eliminates primitive obsession on resource type
-// strings and consolidates switch-case logic into type methods, following
-// the lifecycleAction pattern from lifecycle.go.
-type resourceType string
-
-const (
-	resourceTypeContainer resourceType = "container"
-	resourceTypePod       resourceType = "pod"
-)
-
-func (rt resourceType) inspectAndConvert(engine QuadletEngine, resourceID string) (string, string, error) {
-	switch rt {
-	case resourceTypeContainer:
-		containerReports, _, err := engine.InspectContainer(resourceID)
-		if err != nil {
-			return "", "", appErrors.ErrContainerNotFound
-		}
-		if len(containerReports) == 0 {
-			return "", "", appErrors.ErrContainerNotFound
-		}
-
-		inspectReport := containerReports[0]
-		quadletName := inspectReport.Name
-		if quadletName == "" {
-			quadletName = resourceID
-		}
-
-		content, err := generateContainerQuadlet(containerReports[0])
-		if err != nil {
-			return "", "", appErrors.ErrQuadletGenerationFailed
-		}
-		return quadletName, content, nil
-
-	case resourceTypePod:
-		podReports, _, err := engine.InspectPod(resourceID)
-		if err != nil {
-			return "", "", appErrors.ErrPodNotFound
-		}
-		if len(podReports) == 0 {
-			return "", "", appErrors.ErrPodNotFound
-		}
-
-		inspectReport := podReports[0]
-		quadletName := inspectReport.Name
-		if quadletName == "" {
-			quadletName = resourceID
-		}
-
-		content, err := generatePodQuadlet(podReports[0])
-		if err != nil {
-			return "", "", appErrors.ErrQuadletGenerationFailed
-		}
-		return quadletName, content, nil
-
-	default:
-		return "", "", appErrors.ErrInvalidRequest
-	}
-}
-
 // Generate generates a quadlet file from an existing container or pod on the
-// remote machine. It inspects the source resource via the podman API and
-// converts it to quadlet format using the pkg/systemd/quadlet converter.
+// remote machine. The conversion ritual — the resourceType vocabulary, the
+// inspect-and-convert dispatch, and the two converters — lives in the
+// generate module (generate.go, architecture review 2026-10-19 candidate
+// C7); the service keeps the connection-seam crossing (WithEngine, op tag)
+// and the DTO assembly.
 func (s *QuadletService) Generate(ctx context.Context, userID, machineID string, req QuadletGenerateRequest) (*QuadletGenerateResponse, error) {
 	var response *QuadletGenerateResponse
 	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Generate", func(e QuadletEngine) error {
-		rt := resourceType(req.ResourceType)
-		quadletName, content, err := rt.inspectAndConvert(e, req.ResourceID)
+		quadletName, content, err := ConvertToQuadlet(e, resourceType(req.ResourceType), req.ResourceID)
 		if err != nil {
 			return err
 		}
@@ -627,113 +487,6 @@ func (s *QuadletService) Generate(ctx context.Context, userID, machineID string,
 		return nil
 	})
 	return response, err
-}
-
-// generateContainerQuadlet converts a container inspect report to quadlet format.
-// This implements the conversion logic from podman's pkg/systemd/quadlet package.
-func generateContainerQuadlet(inspect *entities.ContainerInspectReport) (string, error) {
-	if inspect == nil || inspect.Config == nil {
-		return "", fmt.Errorf("invalid container inspect data")
-	}
-
-	var builder strings.Builder
-
-	quadletName := inspect.Name
-	if quadletName == "" {
-		return "", fmt.Errorf("container name is required")
-	}
-
-	fmt.Fprintf(&builder, "# Generated by Podland from container %s\n", quadletName)
-	fmt.Fprintf(&builder, "[Unit]\n")
-	fmt.Fprintf(&builder, "Description=Podman container %s\n\n", quadletName)
-
-	fmt.Fprintf(&builder, "[Container]\n")
-	fmt.Fprintf(&builder, "ContainerName=%s\n", quadletName)
-
-	if inspect.Config.Image != "" {
-		fmt.Fprintf(&builder, "Image=%s\n", inspect.Config.Image)
-	}
-
-	if len(inspect.Config.Env) > 0 {
-		for _, env := range inspect.Config.Env {
-			fmt.Fprintf(&builder, "Environment=%s\n", env)
-		}
-	}
-
-	if inspect.HostConfig != nil {
-		if inspect.HostConfig.RestartPolicy != nil {
-			policy := inspect.HostConfig.RestartPolicy.Name
-			if policy != "" && policy != "no" {
-				fmt.Fprintf(&builder, "RestartPolicy=%s\n", policy)
-			}
-		}
-
-		if len(inspect.HostConfig.PortBindings) > 0 {
-			builder.WriteString("PublishPort=")
-			var ports []string
-			for containerPort, bindings := range inspect.HostConfig.PortBindings {
-				for _, binding := range bindings {
-					ports = append(ports, fmt.Sprintf("%s:%s", binding.HostPort, containerPort))
-				}
-			}
-			builder.WriteString(strings.Join(ports, ","))
-			builder.WriteString("\n")
-		}
-
-		if len(inspect.HostConfig.Binds) > 0 {
-			for _, bind := range inspect.HostConfig.Binds {
-				fmt.Fprintf(&builder, "Volume=%s\n", bind)
-			}
-		}
-
-		if len(inspect.HostConfig.NetworkMode) > 0 {
-			fmt.Fprintf(&builder, "Network=%s\n", inspect.HostConfig.NetworkMode)
-		}
-	}
-
-	if inspect.Config.Labels != nil {
-		for key, value := range inspect.Config.Labels {
-			fmt.Fprintf(&builder, "Label=%s=%s\n", key, value)
-		}
-	}
-
-	return builder.String(), nil
-}
-
-// generatePodQuadlet converts a pod inspect report to quadlet format.
-// This implements the conversion logic from podman's pkg/systemd/quadlet package.
-func generatePodQuadlet(inspect *entities.PodInspectReport) (string, error) {
-	if inspect == nil {
-		return "", fmt.Errorf("invalid pod inspect data")
-	}
-
-	var builder strings.Builder
-
-	podName := inspect.Name
-	if podName == "" {
-		return "", fmt.Errorf("pod name is required")
-	}
-
-	fmt.Fprintf(&builder, "# Generated by Podland from pod %s\n", podName)
-	fmt.Fprintf(&builder, "[Unit]\n")
-	fmt.Fprintf(&builder, "Description=Podman pod %s\n\n", podName)
-
-	fmt.Fprintf(&builder, "[Pod]\n")
-	fmt.Fprintf(&builder, "PodName=%s\n", podName)
-
-	if len(inspect.CreateCommand) > 0 {
-		builder.WriteString("PodmanArgs=")
-		builder.WriteString(strings.Join(inspect.CreateCommand, " "))
-		builder.WriteString("\n")
-	}
-
-	if len(inspect.Labels) > 0 {
-		for key, value := range inspect.Labels {
-			fmt.Fprintf(&builder, "Label=%s=%s\n", key, value)
-		}
-	}
-
-	return builder.String(), nil
 }
 
 // Import installs multiple quadlets on the specified machine from uploaded content.

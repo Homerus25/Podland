@@ -167,10 +167,20 @@ func New(cfg *config.Config) (*App, error) {
 	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService, sshExecService)
 	containerService := containers.NewContainerService(containers.NewContainerEngineProvider(connectionManager))
 	imageService := images.NewImageService(images.NewImageEngineProvider(connectionManager))
-	quadletService := quadlets.NewQuadletService(quadlets.NewQuadletEngineProvider(connectionManager), sshExecService, machineRepo).
-		WithAccessRepo(accessRepo).
-		WithMaxVolumeUploadBytes(cfg.Volumes.MaxUploadBytes).
-		WithSecretEngines(quadlets.NewQuadletSecretEngineProvider(connectionManager))
+	// The quadlets domain is two modules (architecture review 2026-10-19,
+	// candidate C2): the lean QuadletService (CRUD, lifecycle, logs,
+	// generate, import, auto-update) and the QuadletTransferService
+	// (cross-machine move/copy), which crosses into the lean half through
+	// the lifecycle seam the lean service satisfies.
+	quadletEngineProvider := quadlets.NewQuadletEngineProvider(connectionManager)
+	quadletService := quadlets.NewQuadletService(quadletEngineProvider, sshExecService, machineRepo)
+	quadletTransferService := quadlets.NewQuadletTransferService(
+		quadletEngineProvider,
+		quadlets.NewQuadletSecretEngineProvider(connectionManager),
+		accessRepo,
+		cfg.Volumes.MaxUploadBytes,
+		quadletService,
+	)
 	secretService := secrets.NewSecretService(secrets.NewSecretEngineProvider(connectionManager), accessRepo).
 		WithUsageEngines(secrets.NewSecretUsageEngineProvider(connectionManager))
 	volumeService := volumes.NewVolumeService(volumes.NewVolumeEngineProvider(connectionManager)).
@@ -189,7 +199,7 @@ func New(cfg *config.Config) (*App, error) {
 	machineHandler := machines.NewMachineHandler(machineService)
 	containerHandler := containers.NewContainerHandler(containerService)
 	imageHandler := images.NewImageHandler(imageService)
-	quadletHandler := quadlets.NewQuadletHandler(quadletService)
+	quadletHandler := quadlets.NewQuadletHandler(quadletService, quadletTransferService)
 	secretHandler := secrets.NewSecretHandler(secretService)
 	volumeHandler := volumes.NewVolumeHandler(volumeService).
 		WithMaxUploadBytes(cfg.Volumes.MaxUploadBytes)

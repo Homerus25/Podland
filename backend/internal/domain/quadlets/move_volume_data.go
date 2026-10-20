@@ -192,7 +192,7 @@ func deriveVolumeMigrationPlan(resolution volumeResolution) []volumeMigrationPla
 // volume content size for the target either. Errors are AppErrors: 409
 // VOLUME_MIGRATION_TARGET_NOT_EMPTY naming the volume, 500
 // VOLUME_MIGRATION_FAILED for engine failures.
-func (s *QuadletService) preflightVolumeMigration(ctx context.Context, userID, targetMachineID string, plan []volumeMigrationPlanEntry, overwrite bool) error {
+func (s *QuadletTransferService) preflightVolumeMigration(ctx context.Context, userID, targetMachineID string, plan []volumeMigrationPlanEntry, overwrite bool) error {
 	return s.engines.WithEngine(ctx, userID, targetMachineID, "quadlets.MoveVolumePreflight", func(e QuadletEngine) error {
 		for _, entry := range plan {
 			if !entry.SourceExists {
@@ -224,7 +224,7 @@ func (s *QuadletService) preflightVolumeMigration(ctx context.Context, userID, t
 // so the nested WithEngine is deliberate. Any volume's failure fails the
 // whole phase: nothing has been installed yet, the caller returns the error
 // and the transfer stays a no-op on both machines' quadlet sets.
-func (s *QuadletService) migrateVolumeData(ctx context.Context, userID, sourceMachineID, targetMachineID string, plan []volumeMigrationPlanEntry, onProgress func(QuadletMoveEvent)) ([]QuadletMoveVolumeOutcome, error) {
+func (s *QuadletTransferService) migrateVolumeData(ctx context.Context, userID, sourceMachineID, targetMachineID string, plan []volumeMigrationPlanEntry, onProgress func(QuadletMoveEvent)) ([]QuadletMoveVolumeOutcome, error) {
 	outcomes := []QuadletMoveVolumeOutcome{}
 	err := s.engines.WithEngine(ctx, userID, sourceMachineID, "quadlets.MoveVolumeDataSource", func(src QuadletEngine) error {
 		return s.engines.WithEngine(ctx, userID, targetMachineID, "quadlets.MoveVolumeDataTarget", func(tgt QuadletEngine) error {
@@ -252,7 +252,7 @@ func (s *QuadletService) migrateVolumeData(ctx context.Context, userID, sourceMa
 // every 1 MiB actually streamed. The source volume may have vanished since
 // the plan was derived; a dangling reference then skips with a visible
 // outcome instead of failing the transfer.
-func (s *QuadletService) migrateOneVolume(ctx context.Context, src, tgt QuadletEngine, machineID string, entry volumeMigrationPlanEntry, onProgress func(QuadletMoveEvent)) (QuadletMoveVolumeOutcome, error) {
+func (s *QuadletTransferService) migrateOneVolume(ctx context.Context, src, tgt QuadletEngine, machineID string, entry volumeMigrationPlanEntry, onProgress func(QuadletMoveEvent)) (QuadletMoveVolumeOutcome, error) {
 	emit := func(phase string, bytes int64, reason string) {
 		if onProgress != nil {
 			// OperationID stays empty: the streaming handler stamps its

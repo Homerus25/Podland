@@ -68,16 +68,21 @@ async function renderWithGrants() {
 async function offeredUsernames() {
 	const user = userEvent.setup();
 	await user.click(screen.getByLabelText("User"));
-	const listbox = await screen.findByTestId("user-picker-listbox");
-	return within(listbox)
+	const list = await screen.findByTestId("searchable-select-list");
+	return within(list)
 		.getAllByRole("option")
 		.map((option) => option.textContent);
 }
 
-async function pickUser(username: string, id: string) {
+// Picks by typing the username (the label narrows the list) and clicking
+// the option's id-keyed testid — the core keys object-valued options off
+// the keyOf key.
+async function pickUser(username: string, userId: string) {
 	const user = await renderWithGrants();
 	await user.type(screen.getByLabelText("User"), username);
-	await user.click(await screen.findByTestId(`user-option-${id}`));
+	await user.click(
+		await screen.findByTestId(`searchable-select-option-${userId}`),
+	);
 }
 
 describe("ShareMachineSection", () => {
@@ -192,17 +197,37 @@ describe("ShareMachineSection", () => {
 
 		const input = screen.getByLabelText("User");
 		await user.type(input, "carol");
-		await screen.findByTestId("user-picker-listbox");
+		await screen.findByTestId("searchable-select-list");
 		await user.keyboard("{ArrowDown}{Enter}");
 
 		// The selection landed but no grant was sent: Enter belongs to the
-		// picker, not to the form.
-		expect(input).toHaveValue("carol");
+		// picker, not to the form. The chip is the selection; the input is
+		// only the query.
+		expect(
+			screen.getByTestId("searchable-select-chip-u-carol"),
+		).toHaveTextContent("carol");
+		expect(input).toHaveValue("");
 		expect(grantRequests).toBe(0);
 
 		await user.click(screen.getByTestId("grant-access-button"));
 		await waitFor(() => expect(grantRequests).toBe(1));
 		expect(grantPayload).toMatchObject({ userId: "u-carol" });
+	});
+
+	it("clears the selection when the picked user's chip is removed", async () => {
+		await pickUser("carol", "u-carol");
+		expect(
+			screen.getByTestId("searchable-select-chip-u-carol"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("grant-access-button")).toBeEnabled();
+
+		const user = userEvent.setup();
+		await user.click(screen.getByTestId("searchable-select-remove-u-carol"));
+
+		expect(
+			screen.queryByTestId("searchable-select-chip-u-carol"),
+		).not.toBeInTheDocument();
+		expect(screen.getByTestId("grant-access-button")).toBeDisabled();
 	});
 
 	it("clears the picker after a successful grant and hides the new grantee from the choices", async () => {
@@ -213,6 +238,9 @@ describe("ShareMachineSection", () => {
 		await screen.findByTestId("grant-row-u-carol");
 
 		expect(screen.getByLabelText("User")).toHaveValue("");
+		expect(
+			screen.queryByTestId("searchable-select-chip-u-carol"),
+		).not.toBeInTheDocument();
 		expect(await offeredUsernames()).toEqual(["dave"]);
 	});
 
