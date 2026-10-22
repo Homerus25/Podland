@@ -1,14 +1,17 @@
 import type {
 	CreateQuadletInput,
 	DeleteQuadletOptions,
+	QuadletImportRequest,
 	QuadletLifecycleOptions,
 	QuadletMoveInput,
 	UpdateQuadletInput,
 } from "@features/quadlets/services/quadletsApi";
 import {
+	convertCompose,
 	createQuadlet,
 	deleteQuadlet,
 	getQuadlet,
+	importQuadlets,
 	listQuadlets,
 	moveQuadlet,
 	quadletMovePreview,
@@ -129,6 +132,24 @@ export function useQuadletMovePreview(
 		(target) => quadletMovePreviewQueryKey(machineId, quadletId, target),
 		(target) => quadletMovePreview(machineId, quadletId, target),
 		targetMachineId,
+	);
+}
+
+// Compose-to-quadlet conversion touches no machine data, so it rides a
+// plain mutation — never a cached query (spec #336).
+export function useConvertCompose() {
+	return useMutation({
+		mutationFn: (content: string) => convertCompose(content),
+	});
+}
+
+// Installing the converted quadlets changes the machine's quadlet list, so
+// the list refetches on success (spec #336).
+export function useImportQuadlets(machineId: string) {
+	return useListInvalidatingMutation(
+		machineId,
+		"quadlets",
+		(request: QuadletImportRequest) => importQuadlets(machineId, request),
 	);
 }
 

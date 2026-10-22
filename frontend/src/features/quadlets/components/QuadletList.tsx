@@ -1,6 +1,7 @@
 import { Button, Checkbox, Text, VStack } from "@chakra-ui/react";
 import { can } from "@features/machines/permissions";
 import { AutoUpdateModal } from "@features/quadlets/components/AutoUpdateModal";
+import { ImportComposeModal } from "@features/quadlets/components/ImportComposeModal";
 import { MoveQuadletDialog } from "@features/quadlets/components/MoveQuadletDialog";
 import {
 	CreateQuadletDialog,
@@ -99,6 +100,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 	// modal cannot derive this — the list tracks it and hands it down.
 	const [openedAsCheck, setOpenedAsCheck] = useState(false);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
+	const [isImportOpen, setIsImportOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<QuadletSummary | null>(null);
 	const [moveTarget, setMoveTarget] = useState<QuadletSummary | null>(null);
@@ -146,6 +148,14 @@ export function QuadletList({ machine }: { machine: Machine }) {
 							data-testid="create-quadlet-button"
 						>
 							Create quadlet
+						</Button>
+						<Button
+							size="sm"
+							colorScheme="teal"
+							onClick={() => setIsImportOpen(true)}
+							data-testid="import-compose-button"
+						>
+							Import compose file
 						</Button>
 						<Button
 							size="sm"
@@ -230,6 +240,12 @@ export function QuadletList({ machine }: { machine: Machine }) {
 				<CreateQuadletDialog
 					mutation={createQuadlet}
 					onClose={() => setIsCreateOpen(false)}
+				/>
+			) : null}
+			{isImportOpen ? (
+				<ImportComposeModal
+					machineId={machineId}
+					onClose={() => setIsImportOpen(false)}
 				/>
 			) : null}
 		</>

@@ -49,6 +49,19 @@ Object.defineProperty(window, "matchMedia", {
 // view on open.
 Element.prototype.scrollTo = () => {};
 
+// jsdom does not implement Blob.text(); the import-compose modal reads a
+// picked file's content through it.
+if (!Blob.prototype.text) {
+	Blob.prototype.text = function text(this: Blob): Promise<string> {
+		return new Promise((resolve, reject) => {
+			const reader = new FileReader();
+			reader.onload = () => resolve(reader.result as string);
+			reader.onerror = () => reject(reader.error);
+			reader.readAsText(this);
+		});
+	};
+}
+
 beforeAll(() => {
 	server.listen({ onUnhandledRequest: "error" });
 	relayForeignAbortSignals();

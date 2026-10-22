@@ -49,6 +49,11 @@ type QuadletService struct {
 	// systemctl invocations: a non-root login targets the user manager
 	// (`systemctl --user`), root targets the system manager.
 	machines machineLookup
+	// composeConverter runs the compose-to-quadlet conversion behind the
+	// ComposeConverter seam (spec #336): the service never touches exec.
+	// Wired via WithComposeConverter; ConvertCompose on a service without
+	// it fails loudly (500) — a wiring bug, not a client error.
+	composeConverter ComposeConverter
 }
 
 // NewQuadletService creates a new QuadletService with the given engine
@@ -63,6 +68,15 @@ func NewQuadletService(engines QuadletEngineProvider, sshExec sshexec.SSHExecInt
 		sshExec:  sshExec,
 		machines: machines,
 	}
+}
+
+// WithComposeConverter wires the compose-to-quadlet conversion seam (spec
+// #336) and returns the service for chaining. Production wiring always
+// sets it; ConvertCompose on a service without it fails loudly (500) — a
+// wiring bug, not a client error.
+func (s *QuadletService) WithComposeConverter(converter ComposeConverter) *QuadletService {
+	s.composeConverter = converter
+	return s
 }
 
 // List returns a list of quadlets on the specified machine.

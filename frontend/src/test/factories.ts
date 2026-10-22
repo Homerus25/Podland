@@ -12,6 +12,8 @@ import type {
 	NetworkSummary,
 } from "@features/networks/services/networksApi";
 import type {
+	QuadletImportEntry,
+	QuadletImportResponse,
 	QuadletMoveCompanionState,
 	QuadletMovePreview,
 	QuadletMovePreviewSecret,
@@ -163,6 +165,41 @@ export function quadletFixture(
 		unit: "web.service",
 		resource: "container",
 		state: "running",
+		...overrides,
+	};
+}
+
+// One entry of the import/convert entry shape {name, resource, content}
+// (backend QuadletImportEntry; spec #336): the quadlet name without
+// extension, its resource type, and the file content. The convert-compose
+// response carries this shape, so tests build both bodies from it.
+export function quadletImportEntryFixture(
+	overrides: Partial<QuadletImportEntry> = {},
+): QuadletImportEntry {
+	return {
+		name: "web",
+		resource: "container",
+		content: "[Container]\nImage=docker.io/library/nginx:1.27\n",
+		...overrides,
+	};
+}
+
+// Response of POST /api/machines/{id}/quadlets/import -> 201
+// (backend QuadletImportResponse; spec #336): one imported entry by
+// default; tests override `imported`/`failed` per scenario.
+export function quadletImportResponseFixture(
+	overrides: Partial<QuadletImportResponse> = {},
+): QuadletImportResponse {
+	return {
+		imported: [
+			{
+				id: "web",
+				name: "web",
+				path: "/etc/containers/systemd/web.container",
+				state: "unknown",
+			},
+		],
+		failed: [],
 		...overrides,
 	};
 }

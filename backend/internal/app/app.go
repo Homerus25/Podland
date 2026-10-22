@@ -173,7 +173,11 @@ func New(cfg *config.Config) (*App, error) {
 	// (cross-machine move/copy), which crosses into the lean half through
 	// the lifecycle seam the lean service satisfies.
 	quadletEngineProvider := quadlets.NewQuadletEngineProvider(connectionManager)
-	quadletService := quadlets.NewQuadletService(quadletEngineProvider, sshExecService, machineRepo)
+	// The compose-to-quadlet conversion (spec #336) runs behind the
+	// quadlets domain's ComposeConverter seam; the production adapter
+	// shells out to the podlet binary on PATH.
+	quadletService := quadlets.NewQuadletService(quadletEngineProvider, sshExecService, machineRepo).
+		WithComposeConverter(quadlets.NewPodletComposeConverter())
 	quadletTransferService := quadlets.NewQuadletTransferService(
 		quadletEngineProvider,
 		quadlets.NewQuadletSecretEngineProvider(connectionManager),
@@ -440,6 +444,13 @@ func New(cfg *config.Config) (*App, error) {
 					})
 				})
 			})
+
+			// Quadlets — the compose conversion endpoint is the first
+			// quadlets route OUTSIDE the machine subtree (spec #336):
+			// conversion touches no machine data, so any authenticated
+			// user may call it — no RequireMachineAccess, no write
+			// gate. It sits beside /machines and /users.
+			r.Post("/quadlets/convert-compose", quadletHandler.ConvertCompose)
 
 			// Users — the list endpoint is available to any authenticated
 			// caller; the response shape depends on the caller's role

@@ -297,6 +297,29 @@ func (h *QuadletHandler) Import(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ConvertCompose handles converting compose file content into quadlet
+// entries (spec #336). The endpoint is the first quadlets route OUTSIDE
+// the machine subtree: it crosses the user-scoped envelope (web.HandleUser)
+// — any authenticated user may call it, with no machine access check —
+// because conversion touches no machine data. The response carries the
+// import endpoint's entry shape so the frontend can forward it unchanged.
+func (h *QuadletHandler) ConvertCompose(w http.ResponseWriter, r *http.Request) {
+	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (*QuadletConvertComposeResponse, error) {
+		// The 1 MiB cap is on the raw request body, enforced at the HTTP
+		// layer so an oversized body is never fully buffered: a body over
+		// the cap trips the reader inside web.Decode's json.Decode and
+		// answers 400 INVALID_REQUEST (the volumes Populate precedent).
+		r.Body = http.MaxBytesReader(w, r.Body, MaxComposeContentBytes)
+
+		var request QuadletConvertComposeRequest
+		if appErr := web.Decode(r, &request); appErr != nil {
+			return nil, appErr
+		}
+
+		return h.service.ConvertCompose(ctx, request)
+	})
+}
+
 // AutoUpdate handles running `podman auto-update` on the machine with live
 // NDJSON streaming of remote output, terminating in a parsed report event.
 // The streaming kit's progress seam (HandleProgress) owns the handler-side

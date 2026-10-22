@@ -823,6 +823,52 @@ Import quadlets from uploaded content.
 
 ---
 
+### POST /api/quadlets/convert-compose
+
+Convert compose file content into quadlet entries (spec #336).
+
+This endpoint is **global, not machine-scoped**: it sits outside the
+`/api/machines/{id}` subtree, so there is no machine ID and no machine
+access check — any authenticated user may call it, because conversion
+touches no machine data. The response carries the import endpoint's entry
+shape, so the frontend can forward the body to
+`POST /api/machines/{id}/quadlets/import` unchanged.
+
+Conversion runs `podlet compose` in default mode (no `--pod`/`--kube`) with
+the compose content piped via stdin; relative host paths are left
+untouched.
+
+**Authentication:** Required (any authenticated user; no machine access)
+
+**Request:**
+```json
+{
+  "content": "string (required, compose file content; the raw request body is capped at 1 MiB — 1,048,576 bytes)"
+}
+```
+
+**Response (Success - 200):**
+```json
+{
+  "quadlets": [
+    {
+      "name": "string (quadlet name without extension)",
+      "resource": "container|pod|image|volume|network",
+      "content": "string (quadlet file content)"
+    }
+  ]
+}
+```
+Entries are sorted by name. The shape is exactly the import endpoint's
+request body, so the response can be forwarded unchanged.
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed JSON body, or a raw request body over the 1 MiB cap — the cap is enforced at the HTTP layer before decode, so an oversized body is never fully buffered), `VALIDATION_FAILED` (empty content; a compose file the converter rejects, e.g. one using an unsupported option such as `build` together with `image`, answers `VALIDATION_FAILED` with the converter's stderr as the message — ANSI color escapes stripped, the text otherwise verbatim)
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 500: `INTERNAL_ERROR`
+
+---
+
 ### POST /api/machines/{id}/quadlets/auto-update
 
 Run `podman auto-update` on the machine's quadlet-managed containers, streaming

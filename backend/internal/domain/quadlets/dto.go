@@ -338,6 +338,32 @@ type QuadletImportError struct {
 	Error string `json:"error"`
 }
 
+// MaxComposeContentBytes caps the raw request body the convert-compose
+// endpoint accepts: 1 MiB (1 << 20 = 1,048,576 bytes), no slack. Enforced
+// at the HTTP layer — the handler wraps r.Body in http.MaxBytesReader
+// before web.Decode — so an oversized body is never fully buffered and
+// answers 400 INVALID_REQUEST. With the raw cap at exactly 1 MiB, the
+// decoded content string can be at most 1,048,562 characters, so no
+// post-decode size tag is needed.
+const MaxComposeContentBytes = 1 << 20
+
+// QuadletConvertComposeRequest represents a request to convert compose file
+// content into quadlet entries (spec #336). The endpoint is global — not
+// machine-scoped — so the body carries only the compose text.
+type QuadletConvertComposeRequest struct {
+	// Compose file content. Required; the 1 MiB body cap is enforced at
+	// the HTTP layer (see MaxComposeContentBytes).
+	Content string `json:"content" validate:"required"`
+}
+
+// QuadletConvertComposeResponse carries the generated quadlet entries in
+// the import endpoint's {name, resource, content} shape, so the frontend
+// can forward the body to the machine-scoped import endpoint unchanged.
+type QuadletConvertComposeResponse struct {
+	// Generated quadlet entries, sorted by name.
+	Quadlets []QuadletImportEntry `json:"quadlets"`
+}
+
 // Kind labels for QuadletMovePreviewVolume.Source: a volume source
 // containing no path separator is a named podman volume, anything else is
 // a host bind path (issue 209).

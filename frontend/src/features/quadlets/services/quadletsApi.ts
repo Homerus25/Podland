@@ -513,3 +513,88 @@ export function moveQuadletStreamUrl(
 ): string {
 	return machineApiUrl(machineId, "quadlets", quadletId, "move");
 }
+
+// --- Import compose file (spec #336) ---
+
+// One entry of the import/convert entry shape
+// (backend/internal/domain/quadlets/dto.go QuadletImportEntry): the quadlet
+// name without extension, its resource type, and the file content. The
+// convert-compose response carries this shape, so the modal forwards the
+// entries to the import endpoint unchanged.
+export interface QuadletImportEntry {
+	name: string;
+	resource: QuadletResource;
+	content: string;
+}
+
+// Body of POST /api/machines/{id}/quadlets/import
+// (backend/internal/domain/quadlets/dto.go QuadletImportRequest).
+export interface QuadletImportRequest {
+	quadlets: QuadletImportEntry[];
+}
+
+// One successfully imported quadlet
+// (backend/internal/domain/quadlets/dto.go QuadletImportResult).
+export interface QuadletImportResult {
+	id: string;
+	name: string;
+	path: string;
+	state: string;
+}
+
+// One failed import (backend/internal/domain/quadlets/dto.go
+// QuadletImportError).
+export interface QuadletImportError {
+	name: string;
+	error: string;
+}
+
+// Response of POST /api/machines/{id}/quadlets/import -> 201
+// (backend/internal/domain/quadlets/dto.go QuadletImportResponse): the
+// imported/failed report per file.
+export interface QuadletImportResponse {
+	imported: QuadletImportResult[];
+	failed: QuadletImportError[];
+}
+
+// Installs quadlet files on the machine from their content. This is the
+// first frontend caller of the import endpoint (spec #336).
+export async function importQuadlets(
+	machineId: string,
+	request: QuadletImportRequest,
+): Promise<QuadletImportResponse> {
+	const response = await api.post<QuadletImportResponse>(
+		machineApiPath(machineId, "quadlets", "import"),
+		request,
+	);
+	return response.data;
+}
+
+// Body of POST /api/quadlets/convert-compose
+// (backend/internal/domain/quadlets/dto.go QuadletConvertComposeRequest):
+// the compose file content, at most 1 MiB.
+export interface QuadletConvertComposeRequest {
+	content: string;
+}
+
+// Response of POST /api/quadlets/convert-compose -> 200
+// (backend/internal/domain/quadlets/dto.go QuadletConvertComposeResponse):
+// the generated quadlet entries in the import endpoint's entry shape, so
+// the response body forwards to the import endpoint unchanged.
+export interface QuadletConvertComposeResponse {
+	quadlets: QuadletImportEntry[];
+}
+
+// Converts compose file content into quadlet entries. The endpoint is
+// global — not machine-scoped — so the call rides the shared instance's
+// literal path, like usersApi's listUsers (spec #336).
+export async function convertCompose(
+	content: string,
+): Promise<QuadletConvertComposeResponse> {
+	const body: QuadletConvertComposeRequest = { content };
+	const response = await api.post<QuadletConvertComposeResponse>(
+		"/quadlets/convert-compose",
+		body,
+	);
+	return response.data;
+}

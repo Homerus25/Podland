@@ -121,6 +121,17 @@ describe("QuadletList", () => {
 		expect(screen.getByTestId("create-quadlet-button")).toBeInTheDocument();
 	});
 
+	it("opens the import compose modal from the toolbar button", async () => {
+		mockQuadlets([quadletFixture()]);
+		renderQuadletList();
+		const user = userEvent.setup();
+
+		await user.click(screen.getByTestId("import-compose-button"));
+
+		expect(await screen.findByTestId("modal")).toBeInTheDocument();
+		expect(screen.getByTestId("compose-content-input")).toBeInTheDocument();
+	});
+
 	it("sorts rows when a column header is clicked", async () => {
 		mockQuadlets([
 			quadletFixture({ id: "z-1", name: "zebra" }),

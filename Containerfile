@@ -38,7 +38,20 @@ RUN CGO_ENABLED=1 GOOS=linux go build -o /podland ./cmd/server
 
 # --- Stage 3: runtime -------------------------------------------------------
 FROM alpine:latest
-RUN apk --no-cache add ca-certificates tzdata gpgme-dev openssl
+# Pinned podlet release for compose-to-quadlet conversion (spec #336);
+# override at build time with --build-arg PODLET_VERSION=<version>.
+ARG PODLET_VERSION=0.3.2
+RUN apk --no-cache add ca-certificates tzdata gpgme-dev openssl xz tar
+# Prebuilt x86_64 musl binary from the containers/podlet GitHub release,
+# verified against the published .sha256 before install. The published
+# file ends in a blank line that busybox sha256sum -c rejects, hence the
+# grep -v.
+RUN wget -q -O /tmp/podlet-x86_64-unknown-linux-musl.tar.xz "https://github.com/containers/podlet/releases/download/v${PODLET_VERSION}/podlet-x86_64-unknown-linux-musl.tar.xz" \
+    && wget -q -O /tmp/podlet-x86_64-unknown-linux-musl.tar.xz.sha256 "https://github.com/containers/podlet/releases/download/v${PODLET_VERSION}/podlet-x86_64-unknown-linux-musl.tar.xz.sha256" \
+    && (cd /tmp && grep -v '^$' podlet-x86_64-unknown-linux-musl.tar.xz.sha256 | sha256sum -c -) \
+    && tar -xJf /tmp/podlet-x86_64-unknown-linux-musl.tar.xz -C /tmp \
+    && install -m 0755 /tmp/podlet-x86_64-unknown-linux-musl/podlet /usr/local/bin/podlet \
+    && rm -rf /tmp/podlet-x86_64-unknown-linux-musl /tmp/podlet-x86_64-unknown-linux-musl.tar.xz /tmp/podlet-x86_64-unknown-linux-musl.tar.xz.sha256
 WORKDIR /app
 COPY --from=builder /podland ./podland
 COPY --from=builder /src/migrations ./migrations
