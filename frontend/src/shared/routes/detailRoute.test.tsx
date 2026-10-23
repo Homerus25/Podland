@@ -1,4 +1,8 @@
-import { detailPath, machineTabPath } from "@shared/routes/detailRoute";
+import {
+	containerCreatePath,
+	detailPath,
+	machineTabPath,
+} from "@shared/routes/detailRoute";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, Route, Routes, useLocation, useParams } from "react-router-dom";
@@ -48,6 +52,16 @@ describe("machineTabPath", () => {
 		expect(machineTabPath("m/1", "networks")).toBe(
 			"/machines/m%2F1?tab=networks",
 		);
+	});
+});
+
+describe("containerCreatePath", () => {
+	it("builds the create-page path in the containers area's route shape", () => {
+		expect(containerCreatePath("m-1")).toBe("/machines/m-1/containers/new");
+	});
+
+	it("percent-encodes the machineId", () => {
+		expect(containerCreatePath("m/1")).toBe("/machines/m%2F1/containers/new");
 	});
 });
 

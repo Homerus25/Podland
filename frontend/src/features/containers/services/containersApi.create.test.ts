@@ -28,6 +28,8 @@ const baseValues: CreateContainerFormValues = {
 	networks: [],
 	secrets: [],
 	devices: [],
+	privileged: false,
+	capAdd: [],
 };
 
 const values = (
@@ -206,6 +208,65 @@ describe("buildCreateContainerInput", () => {
 		]);
 	});
 
+	it("maps checked bind-mount flags onto the payload's selinuxShared/selinuxPrivate/chownUser booleans", () => {
+		const input = buildCreateContainerInput(
+			values({
+				mounts: [
+					{
+						source: "/srv/app",
+						destination: "/app",
+						mode: "rw",
+						selinuxShared: true,
+						chownUser: true,
+					},
+					{
+						source: "/srv/other",
+						destination: "/opt",
+						mode: "ro",
+						selinuxPrivate: true,
+					},
+				],
+			}),
+		);
+
+		expect(input.mounts).toEqual([
+			{
+				source: "/srv/app",
+				destination: "/app",
+				mode: "rw",
+				selinuxShared: true,
+				chownUser: true,
+			},
+			{
+				source: "/srv/other",
+				destination: "/opt",
+				mode: "ro",
+				selinuxPrivate: true,
+			},
+		]);
+	});
+
+	it("sends no flag fields for bind-mount rows with every flag unchecked", () => {
+		const input = buildCreateContainerInput(
+			values({
+				mounts: [
+					{
+						source: "/srv/app",
+						destination: "/app",
+						mode: "rw",
+						selinuxShared: false,
+						selinuxPrivate: false,
+						chownUser: false,
+					},
+				],
+			}),
+		);
+
+		expect(input.mounts).toEqual([
+			{ source: "/srv/app", destination: "/app", mode: "rw" },
+		]);
+	});
+
 	it("keeps volume rows with a name and a destination, defaulting the mode to rw", () => {
 		const input = buildCreateContainerInput(
 			values({
@@ -304,6 +365,38 @@ describe("buildCreateContainerInput", () => {
 		).toEqual({ image: "docker.io/library/redis:7" });
 	});
 
+	it("sends privileged only when the checkbox is checked", () => {
+		expect(buildCreateContainerInput(values({ privileged: true }))).toEqual({
+			image: "docker.io/library/redis:7",
+			privileged: true,
+		});
+		expect(buildCreateContainerInput(values({ privileged: false }))).toEqual({
+			image: "docker.io/library/redis:7",
+		});
+	});
+
+	it("keeps the trimmed, non-empty cap-add rows and drops empty ones", () => {
+		const input = buildCreateContainerInput(
+			values({
+				capAdd: [
+					{ capability: "NET_ADMIN" },
+					{ capability: "  SYS_TIME  " },
+					// An empty row carries no capability, so it is skipped.
+					{ capability: "" },
+					{ capability: "   " },
+				],
+			}),
+		);
+
+		expect(input.capAdd).toEqual(["NET_ADMIN", "SYS_TIME"]);
+	});
+
+	it("omits capAdd when no row carries a capability", () => {
+		expect(
+			buildCreateContainerInput(values({ capAdd: [{ capability: "" }] })),
+		).toEqual({ image: "docker.io/library/redis:7" });
+	});
+
 	it("builds the complete payload when every field is populated", () => {
 		const input = buildCreateContainerInput(
 			values({
@@ -330,6 +423,8 @@ describe("buildCreateContainerInput", () => {
 						containerPath: "/dev/dri/renderD128",
 					},
 				],
+				privileged: true,
+				capAdd: [{ capability: "NET_ADMIN" }],
 			}),
 			secrets,
 		);
@@ -354,6 +449,8 @@ describe("buildCreateContainerInput", () => {
 					containerPath: "/dev/dri/renderD128",
 				},
 			],
+			privileged: true,
+			capAdd: ["NET_ADMIN"],
 		});
 	});
 });

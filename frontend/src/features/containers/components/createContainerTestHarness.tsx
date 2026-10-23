@@ -1,8 +1,15 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
+import { CreateContainerPage } from "@features/containers/components/CreateContainerPage";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { HttpResponse, http, type JsonBodyType } from "msw";
+import {
+	type DefaultBodyType,
+	HttpResponse,
+	http,
+	type JsonBodyType,
+} from "msw";
+import { Route, Routes, useSearchParams } from "react-router-dom";
 import { expect } from "vitest";
 import {
 	containerFixture,
@@ -14,12 +21,14 @@ import {
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
-// Shared MSW + render harness for the create-container dialog suites
-// (ContainerList.create.test.tsx and
-// ContainerList.create.integration.test.tsx): the request counters, the
+// Shared MSW + render harness for the create-container page suites
+// (CreateContainerPage.test.tsx and
+// CreateContainerPage.integration.test.tsx): the request counters, the
 // list/option/create handlers, and the open/type/submit helpers both
 // files drive. The option-list handlers count their requests so the
-// integration suite can prove the dropdown data travels through MSW.
+// integration suite can prove the dropdown data travels through MSW, and
+// the list handler counts its requests so the suites can prove the
+// navigate-back refetches the containers tab's list.
 
 export const existing = containerFixture({ names: ["/existing"] });
 
@@ -28,6 +37,15 @@ export const createRequests: { count: number; body: unknown } = {
 	body: null,
 };
 export const optionRequests = { networks: 0, volumes: 0, secrets: 0 };
+export const listRequests = { count: 0 };
+// The image pull stream the create page's image-not-found flow rides
+// (spec 341 ticket #349); counted like the create request so the pull
+// flow's request shape is assertable.
+export const pullRequests: { count: number; body: unknown } = {
+	count: 0,
+	body: null,
+};
+export const startRequests = { count: 0 };
 
 export function resetCounters() {
 	createRequests.count = 0;
@@ -35,19 +53,24 @@ export function resetCounters() {
 	optionRequests.networks = 0;
 	optionRequests.volumes = 0;
 	optionRequests.secrets = 0;
+	listRequests.count = 0;
+	pullRequests.count = 0;
+	pullRequests.body = null;
+	startRequests.count = 0;
 }
 
 export function containersHandler(containers: () => ContainerSummary[]) {
-	return http.get("*/api/machines/m-1/containers", () =>
-		HttpResponse.json({
+	return http.get("*/api/machines/m-1/containers", () => {
+		listRequests.count++;
+		return HttpResponse.json({
 			containers: containers(),
 			total: containers().length,
 			timestamp: "2026-08-26T00:00:00Z",
-		}),
-	);
+		});
+	});
 }
 
-// The create dialog fetches the machine's networks, volumes, and secrets to
+// The create page fetches the machine's networks, volumes, and secrets to
 // populate its dropdowns and checkbox lists (spec 313 ticket #317); the
 // counters prove the requests travel through the MSW handlers.
 export function optionListHandlers() {
@@ -94,38 +117,105 @@ export function createHandler(status = 201, body?: JsonBodyType) {
 	});
 }
 
-// The standard preamble of a create-dialog test: reset the counters and
-// arm the list, option, and create handlers. A test that needs a failing
-// create passes its own create handler.
-export function setupCreateDialog(create = createHandler()) {
+// The image pull stream endpoint (spec 341 ticket #349): the create page's
+// image-not-found flow pulls the missing image through the real stream
+// transport. The handler counts the request and captures its body; the
+// caller hands the built NDJSON response (ndjsonResponse /
+// abortableNdjsonResponse from @/test/stream).
+export function pullStreamHandler(response: HttpResponse<DefaultBodyType>) {
+	return http.post("*/api/machines/m-1/images/pull", async ({ request }) => {
+		pullRequests.count++;
+		pullRequests.body = await request.json();
+		return response;
+	});
+}
+
+// The start endpoint the run-after-create flow chains onto after a
+// successful create (spec 341, ticket #346). The URL pins the created
+// container's ID (the create handler answers with "c-new"), so a request
+// here proves the chain carries the create response's ID.
+export function startHandler(status = 200, body?: JsonBodyType) {
+	return http.post("*/api/machines/m-1/containers/c-new/start", () => {
+		startRequests.count++;
+		if (status !== 200) return HttpResponse.json(body, { status });
+		return new HttpResponse(null, { status: 200 });
+	});
+}
+
+// The standard preamble of a create-page test: reset the counters and
+// arm the list, option, create, and start handlers. A test that needs a
+// failing create (or a failing start) passes its own handler.
+export function setupCreatePage(create = createHandler()) {
 	resetCounters();
 	server.use(
 		containersHandler(() => [existing]),
 		create,
+		startHandler(),
 		...optionListHandlers(),
 	);
 }
 
-export function renderContainerList() {
-	renderWithQuery(<ContainerList machine={machineFixture()} />, {
-		router: true,
-	});
+// The machine detail page's containers-tab stand-in at the create page's
+// return target: the real ContainerList (so a navigate-back exercises the
+// tab's fresh list fetch) behind a marker exposing the ?tab= param the
+// page's cancel/success navigation carries.
+function ContainersTab() {
+	const [searchParams] = useSearchParams();
+	return (
+		<div>
+			<span data-testid="containers-tab">{searchParams.get("tab")}</span>
+			<ContainerList machine={machineFixture()} />
+		</div>
+	);
 }
 
-export async function openCreateModal() {
-	renderContainerList();
-	await screen.findByText("existing");
-	const user = userEvent.setup();
-	await user.click(screen.getByTestId("create-container-button"));
-	expect(await screen.findByTestId("modal")).toBeInTheDocument();
-	return user;
+function renderCreateRoutes(initialEntry: string) {
+	renderWithQuery(
+		<Routes>
+			<Route path="/machines/:machineId" element={<ContainersTab />} />
+			<Route
+				path="/machines/:machineId/containers/new"
+				element={<CreateContainerPage />}
+			/>
+		</Routes>,
+		{
+			// chakra for the run-after-create toast portal (spec 341,
+			// ticket #346); the router seeds the entry route.
+			chakra: true,
+			router: { initialEntries: [initialEntry] },
+		},
+	);
+}
+
+// Renders the containers tab first, the way the user arrives at the page.
+export function renderContainersTab() {
+	renderCreateRoutes("/machines/m-1");
+}
+
+// Renders the create page directly, for tests that only exercise the form.
+export function renderCreatePage() {
+	renderCreateRoutes("/machines/m-1/containers/new");
 }
 
 export type User = ReturnType<typeof userEvent.setup>;
 
-export async function reopenCreateModal(user: User) {
+// The standard entry of a create-page test: render the containers tab,
+// then click the toolbar's Create container button to navigate to the
+// page. Returns the user once the form is up.
+export async function openCreatePage() {
+	renderContainersTab();
+	await screen.findByText("existing");
+	const user = userEvent.setup();
 	await user.click(screen.getByTestId("create-container-button"));
-	expect(await screen.findByTestId("modal")).toBeInTheDocument();
+	expect(await screen.findByLabelText(/image/i)).toBeInTheDocument();
+	return user;
+}
+
+// Navigates from the containers tab back to the create page (the form
+// remounts, so it starts from the empty defaults).
+export async function reopenCreatePage(user: User) {
+	await user.click(screen.getByTestId("create-container-button"));
+	expect(await screen.findByLabelText(/image/i)).toBeInTheDocument();
 }
 
 export async function typeImage(

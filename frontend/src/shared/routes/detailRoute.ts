@@ -28,3 +28,11 @@ export function detailPath(
 export function machineTabPath(machineId: string, tab: string): string {
 	return `/machines/${encodeURIComponent(machineId)}?tab=${tab}`;
 }
+
+// The create-container page's path (spec 341): the one builder of the
+// containers area's create route, percent-encoded like every
+// machine-scoped segment. The static `new` segment ranks above the
+// `:containerId` detail segment in the router, so both routes coexist.
+export function containerCreatePath(machineId: string): string {
+	return `/machines/${encodeURIComponent(machineId)}/containers/new`;
+}

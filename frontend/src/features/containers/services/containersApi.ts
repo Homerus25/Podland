@@ -165,6 +165,13 @@ export interface CreateContainerInput {
 		source: string;
 		destination: string;
 		mode?: MountMode;
+		// SELinux relabeling and chown flags (spec 341, ticket #343):
+		// z (shared), Z (private), U (chown-to-user). Absent means
+		// untouched — the backend maps them onto the spec's mount
+		// options and rejects z+Z together.
+		selinuxShared?: boolean;
+		selinuxPrivate?: boolean;
+		chownUser?: boolean;
 	}[];
 	volumes?: {
 		name: string;
@@ -180,6 +187,15 @@ export interface CreateContainerInput {
 		hostPath: string;
 		containerPath: string;
 	}[];
+	// Run the container in privileged mode
+	// (backend/internal/domain/containers/dto.go ContainerCreateRequest
+	// privileged): granted exactly when the form's checkbox is checked.
+	privileged?: boolean;
+	// Linux capabilities to add to the container
+	// (backend/internal/domain/containers/dto.go ContainerCreateRequest
+	// capAdd): capability names passed through verbatim — podman is the
+	// validator of the names.
+	capAdd?: string[];
 }
 
 // One row of the create-container form's environment field array
@@ -196,11 +212,17 @@ export interface PortRow {
 	protocol: PortProtocol;
 }
 
-// One row of the create-container form's bind-mounts field array.
+// One row of the create-container form's bind-mounts field array. The
+// z/Z/U flags (spec 341, ticket #348) are optional so a row built
+// without them counts as untouched; the form's add button always
+// appends them as false.
 export interface MountRow {
 	source: string;
 	destination: string;
 	mode: MountMode;
+	selinuxShared?: boolean;
+	selinuxPrivate?: boolean;
+	chownUser?: boolean;
 }
 
 // One row of the create-container form's named-volumes field array.
@@ -214,6 +236,12 @@ export interface VolumeRow {
 export interface DeviceRow {
 	hostPath: string;
 	containerPath: string;
+}
+
+// One row of the create-container form's cap-add field array (spec 341):
+// a capability name as typed in the form.
+export interface CapAddRow {
+	capability: string;
 }
 
 // The create-container dialog's form values (spec 313): the form's own
@@ -238,6 +266,10 @@ export interface CreateContainerFormValues {
 	networks: string[];
 	secrets: string[];
 	devices: DeviceRow[];
+	// The Security section (spec 341): privileged grants full device and
+	// kernel access; capAdd rows grant individual capabilities.
+	privileged: boolean;
+	capAdd: CapAddRow[];
 }
 
 // The backend takes the command as a string array; the form offers one text
@@ -272,20 +304,27 @@ function portBindingsToInput(
 // source or the volume name) and its destination are filled; empty rows
 // are filtered out of the payload and the access mode defaults to rw.
 // The entry shape rides through buildEntry, so bind mounts and named
-// volumes share this one mapping.
+// volumes share this one mapping; buildEntry also receives the whole
+// row so a feature-specific entry can carry extra row fields (the bind
+// mount's z/Z/U flags) without the volumes entry growing them.
 function storageRowsToInput<
 	Row extends { destination: string; mode: MountMode },
 	Entry,
 >(
 	rows: Row[],
 	primaryOf: (row: Row) => string,
-	buildEntry: (primary: string, destination: string, mode: MountMode) => Entry,
+	buildEntry: (
+		primary: string,
+		destination: string,
+		mode: MountMode,
+		row: Row,
+	) => Entry,
 ): Entry[] | undefined {
 	const entries = rows.flatMap((row) => {
 		const primary = primaryOf(row).trim();
 		const destination = row.destination.trim();
 		if (!primary || !destination) return [];
-		return [buildEntry(primary, destination, row.mode || "rw")];
+		return [buildEntry(primary, destination, row.mode || "rw", row)];
 	});
 	return entries.length > 0 ? entries : undefined;
 }
@@ -300,6 +339,16 @@ function devicesToInput(rows: DeviceRow[]): CreateContainerInput["devices"] {
 		return [{ hostPath, containerPath }];
 	});
 	return devices.length > 0 ? devices : undefined;
+}
+
+// A cap-add row is complete only when its capability is filled; empty
+// rows are filtered out of the payload.
+function capAddToInput(rows: CapAddRow[]): string[] | undefined {
+	const capabilities = rows.flatMap((row) => {
+		const capability = row.capability.trim();
+		return capability ? [capability] : [];
+	});
+	return capabilities.length > 0 ? capabilities : undefined;
 }
 
 // Builds the POST /api/machines/{id}/containers body from the
@@ -324,7 +373,16 @@ export function buildCreateContainerInput(
 	const mounts = storageRowsToInput(
 		values.mounts,
 		(row) => row.source,
-		(source, destination, mode) => ({ source, destination, mode }),
+		(source, destination, mode, row) => ({
+			source,
+			destination,
+			mode,
+			// Only a checked flag travels; an untouched row sends none of
+			// the three (spec 341, ticket #348).
+			...(row.selinuxShared ? { selinuxShared: true } : {}),
+			...(row.selinuxPrivate ? { selinuxPrivate: true } : {}),
+			...(row.chownUser ? { chownUser: true } : {}),
+		}),
 	);
 	const volumes = storageRowsToInput(
 		values.volumes,
@@ -332,6 +390,7 @@ export function buildCreateContainerInput(
 		(name, destination, mode) => ({ name, destination, mode }),
 	);
 	const devices = devicesToInput(values.devices);
+	const capAdd = capAddToInput(values.capAdd);
 	// Network keys are the network names, so the selection is the
 	// payload already.
 	const networks = values.networks.length > 0 ? values.networks : undefined;
@@ -364,6 +423,8 @@ export function buildCreateContainerInput(
 		...(networks ? { networks } : {}),
 		...(secretPayload ? { secrets: secretPayload } : {}),
 		...(devices ? { devices } : {}),
+		...(values.privileged ? { privileged: true } : {}),
+		...(capAdd ? { capAdd } : {}),
 	};
 }
 

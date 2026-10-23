@@ -1,4 +1,5 @@
 import { ContainerDetailPage } from "@features/containers/components/ContainerDetailPage";
+import { CreateContainerPage } from "@features/containers/components/CreateContainerPage";
 import { ImageDetailPage } from "@features/images/components/ImageDetailPage";
 import { NetworkDetailPage } from "@features/networks/components/NetworkDetailPage";
 import { SecretDetailPage } from "@features/secrets/components/SecretDetailPage";
@@ -32,6 +33,13 @@ export function App() {
 				<Route index element={<DashboardPage />} />
 				<Route path="machines" element={<MachinesPage />} />
 				<Route path="machines/:machineId" element={<MachineDetailPage />} />
+				{/* The static `new` segment ranks above the dynamic
+				`:containerId` below, so the create page and the detail page
+				coexist in the containers area. */}
+				<Route
+					path="machines/:machineId/containers/new"
+					element={<CreateContainerPage />}
+				/>
 				<Route
 					path="machines/:machineId/containers/:containerId"
 					element={<ContainerDetailPage />}

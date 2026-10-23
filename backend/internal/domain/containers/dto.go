@@ -168,6 +168,9 @@ type ContainerCreateRequest struct {
 	Devices []DeviceRequest `json:"devices,omitempty" validate:"omitempty,dive"`
 	// Run container in privileged mode (optional)
 	Privileged bool `json:"privileged,omitempty"`
+	// Linux capabilities to add to the container (optional); entries pass
+	// through to podman verbatim, so an unknown name fails at podman
+	CapAdd []string `json:"capAdd,omitempty"`
 	// Restart policy (optional)
 	RestartPolicy string `json:"restartPolicy,omitempty" validate:"omitempty,oneof=no always unless-stopped on-failure"`
 	// Remove the container when it exits (optional)
@@ -194,6 +197,16 @@ type MountRequest struct {
 	Source      string `json:"source" validate:"required,min=1"`
 	Destination string `json:"destination" validate:"required,min=1"`
 	Mode        string `json:"mode,omitempty" validate:"omitempty,oneof=ro rw"`
+	// SELinux shared relabel (z): the mounted content is shared between
+	// containers (optional). Mutually exclusive with SelinuxPrivate —
+	// enforced by an explicit check in the handler next to validate.Struct,
+	// because go-playground/validator has no cross-field tag.
+	SelinuxShared bool `json:"selinuxShared,omitempty"`
+	// SELinux private relabel (Z): only this container may access the
+	// mounted content (optional). Mutually exclusive with SelinuxShared.
+	SelinuxPrivate bool `json:"selinuxPrivate,omitempty"`
+	// Chown the mounted content to the container's user (U) (optional)
+	ChownUser bool `json:"chownUser,omitempty"`
 }
 
 // VolumeRequest represents a named volume to mount into the container

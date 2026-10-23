@@ -169,6 +169,41 @@ func TestContainerHandler_Create_MapsMounts(t *testing.T) {
 	}, spec.Mounts, "mounts must reach the spec as bind mounts with rbind and the requested mode, defaulting to rw")
 }
 
+// TestContainerHandler_Create_MapsMountFlags pins the bind-mount flag
+// mapping: selinuxPrivate, chownUser, and selinuxShared reach the spec
+// mount's options as Z, U, and z, riding alongside the rbind propagation
+// and the requested access mode.
+func TestContainerHandler_Create_MapsMountFlags(t *testing.T) {
+	spec := createSpec(t, `{
+		"image": "nginx:latest",
+		"mounts": [
+			{"source": "/host/ssl", "destination": "/etc/ssl", "selinuxPrivate": true, "chownUser": true},
+			{"source": "/host/html", "destination": "/usr/share/nginx/html", "mode": "ro", "selinuxShared": true}
+		]
+	}`)
+
+	assert.Equal(t, []runtimespec.Mount{
+		{Type: "bind", Source: "/host/ssl", Destination: "/etc/ssl", Options: []string{"rbind", "rw", "Z", "U"}},
+		{Type: "bind", Source: "/host/html", Destination: "/usr/share/nginx/html", Options: []string{"rbind", "ro", "z"}},
+	}, spec.Mounts, "the mount flags must reach the spec's mount options as z/Z/U alongside rbind and the mode")
+}
+
+// TestContainerHandler_Create_MountFlagsMutuallyExclusive pins the z+Z
+// guard: a mount carrying both selinuxShared and selinuxPrivate is
+// refused with 400 VALIDATION_FAILED before the machine is asked (the
+// engine stays unarmed and would panic on a call).
+func TestContainerHandler_Create_MountFlagsMutuallyExclusive(t *testing.T) {
+	engine := &fakeContainerEngine{}
+
+	rr := createRequest(newTestHandler(engine).Create, `{
+		"image": "nginx:latest",
+		"mounts": [{"source": "/host/html", "destination": "/usr/share/nginx/html", "selinuxShared": true, "selinuxPrivate": true}]
+	}`)
+
+	assert.Equal(t, http.StatusBadRequest, rr.Code, "a mount with both selinuxShared and selinuxPrivate must be refused with 400")
+	assert.Contains(t, rr.Body.String(), "VALIDATION_FAILED")
+}
+
 // TestContainerHandler_Create_MapsRestartPolicy pins the restartPolicy
 // mapping straight through to the spec.
 func TestContainerHandler_Create_MapsRestartPolicy(t *testing.T) {
@@ -184,6 +219,58 @@ func TestContainerHandler_Create_MapsRemove(t *testing.T) {
 
 	require.NotNil(t, spec.Remove, "the request remove flag must reach the spec's Remove pointer")
 	assert.True(t, *spec.Remove)
+}
+
+// TestContainerHandler_Create_MapsPrivileged pins the privileged mapping:
+// a privileged request reaches the spec's Privileged pointer as true.
+func TestContainerHandler_Create_MapsPrivileged(t *testing.T) {
+	spec := createSpec(t, `{"image": "nginx:latest", "privileged": true}`)
+
+	require.NotNil(t, spec.Privileged, "a privileged request must reach the spec's Privileged pointer")
+	assert.True(t, *spec.Privileged, "the spec must be privileged when the request asks for it")
+}
+
+// TestContainerHandler_Create_WithoutPrivilegedStaysUnprivileged pins the
+// default: a request without privileged leaves the spec's Privileged
+// pointer unset, so the container is created unprivileged as before.
+func TestContainerHandler_Create_WithoutPrivilegedStaysUnprivileged(t *testing.T) {
+	spec := createSpec(t, `{"image": "nginx:latest"}`)
+
+	assert.Nil(t, spec.Privileged, "a request without privileged must leave the spec unprivileged")
+	assert.False(t, spec.IsPrivileged(), "the spec must not be privileged when the request omits the flag")
+}
+
+// TestContainerHandler_Create_MapsCapAdd pins the capAdd mapping: the
+// requested capability names reach the spec's CapAdd verbatim — no
+// validation or rewriting happens on Podland's side.
+func TestContainerHandler_Create_MapsCapAdd(t *testing.T) {
+	spec := createSpec(t, `{"image": "nginx:latest", "capAdd": ["NET_ADMIN", "SYS_TIME"]}`)
+
+	assert.Equal(t, []string{"NET_ADMIN", "SYS_TIME"}, spec.CapAdd, "the requested capabilities must reach the spec verbatim")
+}
+
+// TestContainerHandler_Create_UnknownCapabilitySurfacesError pins that an
+// unknown capability is not silently ignored: podman refuses the create
+// and the refusal surfaces through the error envelope, not a 201.
+func TestContainerHandler_Create_UnknownCapabilitySurfacesError(t *testing.T) {
+	engine := &fakeContainerEngine{
+		createFn: func(spec *specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
+			if len(spec.CapAdd) > 0 {
+				return nil, &errorhandling.ErrorModel{
+					ResponseCode: http.StatusBadRequest,
+					Message:      "unknown capability \"NOT_A_CAP\"",
+				}
+			}
+			return &entities.ContainerCreateReport{Id: "container-123"}, nil
+		},
+	}
+
+	rr := createRequest(newTestHandler(engine).Create, `{"image": "nginx:latest", "capAdd": ["NOT_A_CAP"]}`)
+
+	require.Equal(t, http.StatusInternalServerError, rr.Code, "podman's refusal of an unknown capability must surface, not silently succeed")
+	var got appErrors.ErrorResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	assert.Equal(t, "INTERNAL_ERROR", got.Error.Code, "the refusal must surface through the error envelope")
 }
 
 // TestContainerHandler_Create_MapsUser pins the user mapping straight

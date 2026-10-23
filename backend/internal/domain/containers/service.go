@@ -102,10 +102,11 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 			}
 		}
 
-		// Bind mounts map to the spec's mounts: rbind propagation plus
-		// the requested access mode (rw when omitted).
+		// Bind mounts map to the spec's mounts: rbind propagation, the
+		// requested access mode (rw when omitted), and the SELinux
+		// relabel (z/Z) and chown (U) flags the request carries.
 		for _, mount := range request.Mounts {
-			spec.Mounts = append(spec.Mounts, bindMount(mount.Source, mount.Destination, "rbind", defaultMode(mount.Mode)))
+			spec.Mounts = append(spec.Mounts, bindMount(mount.Source, mount.Destination, mountOptions(mount)...))
 		}
 
 		// Restart policy, remove-on-exit, user, and timezone map
@@ -165,7 +166,21 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 			}
 		}
 
-		// Privileged, memory, and cpus stay unmapped (out of scope).
+		// Privileged maps through a pointer, mirroring Remove: only a
+		// request that asks for it sets the spec's flag, so the default
+		// stays an unprivileged container.
+		if request.Privileged {
+			spec.Privileged = &request.Privileged
+		}
+
+		// CapAdd maps verbatim: capability names are podman's
+		// vocabulary, so an unknown name is podman's refusal to answer,
+		// not a silent drop here.
+		if len(request.CapAdd) > 0 {
+			spec.CapAdd = request.CapAdd
+		}
+
+		// Memory and cpus stay unmapped (out of scope).
 
 		// Create the container using Podman API. A not-found answer is
 		// the missing-image terminal: the doku documents 404
@@ -195,6 +210,24 @@ func bindMount(source, destination string, options ...string) runtimespec.Mount 
 		Destination: destination,
 		Options:     options,
 	}
+}
+
+// mountOptions assembles one request mount's spec options: rbind
+// propagation, the access mode (rw when omitted), then the SELinux
+// relabel (z for shared, Z for private) and chown (U) flags the request
+// carries, in that order.
+func mountOptions(mount MountRequest) []string {
+	options := []string{"rbind", defaultMode(mount.Mode)}
+	if mount.SelinuxShared {
+		options = append(options, "z")
+	}
+	if mount.SelinuxPrivate {
+		options = append(options, "Z")
+	}
+	if mount.ChownUser {
+		options = append(options, "U")
+	}
+	return options
 }
 
 // defaultMode returns the requested mount access mode, defaulting to rw

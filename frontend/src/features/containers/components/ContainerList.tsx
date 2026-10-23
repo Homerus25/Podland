@@ -1,9 +1,7 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
-import { CreateContainerDialog } from "@features/containers/components/CreateContainerDialog";
 import { containerDisplayName } from "@features/containers/components/containerDisplayName";
 import {
 	useContainers,
-	useCreateContainer,
 	useDeleteContainer,
 	useStartContainer,
 	useStopContainer,
@@ -16,7 +14,7 @@ import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { useOpenLogs } from "@shared/logs/logRoute";
-import { detailPath } from "@shared/routes/detailRoute";
+import { containerCreatePath, detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { useState } from "react";
@@ -195,9 +193,9 @@ export function ContainerList({ machine }: { machine: Machine }) {
 	const machineId = machine.id;
 	const { data: containers, isPending, error } = useContainers(machineId);
 	const deleteContainer = useDeleteContainer(machineId);
-	const createContainer = useCreateContainer(machineId);
 	const canManage = can(machine, "manage-containers");
 	const canManageNetworks = can(machine, "manage-networks");
+	const navigate = useNavigate();
 	const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(
 		null,
 	);
@@ -205,7 +203,6 @@ export function ContainerList({ machine }: { machine: Machine }) {
 		null,
 	);
 	const openLogs = useOpenLogs(machineId, "container");
-	const [isCreateOpen, setIsCreateOpen] = useState(false);
 
 	return (
 		<>
@@ -242,7 +239,7 @@ export function ContainerList({ machine }: { machine: Machine }) {
 					<Button
 						size="sm"
 						colorScheme="blue"
-						onClick={() => setIsCreateOpen(true)}
+						onClick={() => navigate(containerCreatePath(machineId))}
 						data-testid="create-container-button"
 					>
 						Create container
@@ -255,13 +252,6 @@ export function ContainerList({ machine }: { machine: Machine }) {
 					container={pendingDelete}
 					deleteContainer={deleteContainer}
 					onClose={() => setPendingDelete(null)}
-				/>
-			) : null}
-			{isCreateOpen ? (
-				<CreateContainerDialog
-					mutation={createContainer}
-					machineId={machineId}
-					onClose={() => setIsCreateOpen(false)}
 				/>
 			) : null}
 			{pendingConnect ? (

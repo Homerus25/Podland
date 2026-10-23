@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -79,6 +80,57 @@ func TestContainerService_Create_BuildsSpecFromRequest(t *testing.T) {
 	assert.Equal(t, map[string]string{"app": "test"}, captured.Labels)
 }
 
+// TestContainerService_Create_MapsSecurityOptions pins the security
+// mappings at the service seam: a privileged request sets the spec's
+// Privileged pointer, the capAdd list reaches the spec verbatim, and a
+// request without either leaves the spec unprivileged with no caps.
+func TestContainerService_Create_MapsSecurityOptions(t *testing.T) {
+	var captured *specgen.SpecGenerator
+	engine := &fakeContainerEngine{
+		createFn: func(s *specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
+			captured = s
+			return &entities.ContainerCreateReport{Id: "c-123"}, nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	_, err := service.Create(context.Background(), "user", "machine", ContainerCreateRequest{
+		Image:      "nginx:latest",
+		Privileged: true,
+		CapAdd:     []string{"NET_ADMIN", "SYS_TIME"},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, captured)
+	require.NotNil(t, captured.Privileged, "a privileged request must set the spec's Privileged pointer")
+	assert.True(t, *captured.Privileged)
+	assert.Equal(t, []string{"NET_ADMIN", "SYS_TIME"}, captured.CapAdd, "the capAdd list must reach the spec verbatim")
+}
+
+// TestContainerService_Create_WithoutSecurityOptionsStaysDefault pins the
+// default: a request without privileged or capAdd leaves the spec's
+// Privileged pointer unset and CapAdd empty.
+func TestContainerService_Create_WithoutSecurityOptionsStaysDefault(t *testing.T) {
+	var captured *specgen.SpecGenerator
+	engine := &fakeContainerEngine{
+		createFn: func(s *specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
+			captured = s
+			return &entities.ContainerCreateReport{Id: "c-123"}, nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	_, err := service.Create(context.Background(), "user", "machine", ContainerCreateRequest{
+		Image: "nginx:latest",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, captured)
+	assert.Nil(t, captured.Privileged, "a request without privileged must leave the spec unprivileged")
+	assert.False(t, captured.IsPrivileged())
+	assert.Empty(t, captured.CapAdd, "a request without capAdd must leave the spec's CapAdd empty")
+}
+
 func TestContainerService_Create_WrapsEngineFailure(t *testing.T) {
 	engine := &fakeContainerEngine{
 		createFn: func(*specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
@@ -93,6 +145,36 @@ func TestContainerService_Create_WrapsEngineFailure(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, got)
 	assert.Contains(t, err.Error(), "failed to create container")
+}
+
+// TestContainerService_Create_MapsMountFlags pins the bind-mount flag
+// mapping at the service seam: selinuxShared, selinuxPrivate, and
+// chownUser reach the spec mount's options as z, Z, and U, riding
+// alongside the rbind propagation and the requested access mode.
+func TestContainerService_Create_MapsMountFlags(t *testing.T) {
+	var captured *specgen.SpecGenerator
+	engine := &fakeContainerEngine{
+		createFn: func(s *specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
+			captured = s
+			return &entities.ContainerCreateReport{Id: "c-123"}, nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	_, err := service.Create(context.Background(), "user", "machine", ContainerCreateRequest{
+		Image: "nginx:latest",
+		Mounts: []MountRequest{
+			{Source: "/host/ssl", Destination: "/etc/ssl", SelinuxPrivate: true, ChownUser: true},
+			{Source: "/host/html", Destination: "/usr/share/nginx/html", Mode: "ro", SelinuxShared: true},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, captured)
+	assert.Equal(t, []runtimespec.Mount{
+		{Type: "bind", Source: "/host/ssl", Destination: "/etc/ssl", Options: []string{"rbind", "rw", "Z", "U"}},
+		{Type: "bind", Source: "/host/html", Destination: "/usr/share/nginx/html", Options: []string{"rbind", "ro", "z"}},
+	}, captured.Mounts, "the mount flags must reach the spec's mount options as z/Z/U alongside rbind and the mode")
 }
 
 // TestContainerService_AcquireFailureIsThe502Sentinel pins the service-side

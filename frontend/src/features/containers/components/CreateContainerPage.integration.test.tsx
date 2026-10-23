@@ -4,35 +4,37 @@ import { errorJson } from "@/test/errors";
 import {
 	createHandler,
 	createRequests,
-	openCreateModal,
+	openCreatePage,
 	optionRequests,
 	populateAllFields,
-	reopenCreateModal,
-	setupCreateDialog,
+	reopenCreatePage,
+	setupCreatePage,
 	submitForm,
 	typeImage,
 } from "./createContainerTestHarness";
 
-// Integration tests for the extended create-container dialog (spec 313,
-// ticket #318). They drive the real ContainerList -> CreateContainerDialog
-// -> MSW handler path: one full-payload smoke (wiring, not mapping — the
+// Integration tests for the create-container page (spec 341, ticket
+// #344). They drive the real containers tab -> CreateContainerPage ->
+// MSW handler path: one full-payload smoke (wiring, not mapping — the
 // form-to-payload contract is pinned without a DOM in
-// services/containersApi.create.test.ts, issue 328 candidate C3) plus the
-// dialog-behavior pins — reset on reopen, option-list fetching through
-// MSW, and error-envelope value preservation.
-// ContainerList.create.test.tsx owns the form-shape and validation pins.
+// services/containersApi.create.test.ts, issue 328 candidate C3) plus
+// the page-behavior pins — option-list fetching through MSW,
+// error-envelope value preservation, and the discard-on-navigate reset.
+// CreateContainerPage.test.tsx owns the form-shape, validation, and
+// navigation pins.
 
-// The heavy tests drive long userEvent interaction chains (the full 14-field
-// flow, five dialog open/submit cycles); under full-suite parallel load they
-// outgrow vitest's default 5s test timeout, so the file sets its own.
+// The heavy tests drive long userEvent interaction chains (the full
+// 14-field flow, five page open/submit cycles); under full-suite
+// parallel load they outgrow vitest's default 5s test timeout, so the
+// file sets its own.
 const TEST_TIMEOUT = 20_000;
 
-describe("ContainerList create integration", () => {
+describe("CreateContainerPage integration", () => {
 	it(
 		"sends the complete backend DTO payload when all 14 fields are populated",
 		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
+			setupCreatePage();
+			const user = await openCreatePage();
 
 			await populateAllFields(user);
 
@@ -68,8 +70,8 @@ describe("ContainerList create integration", () => {
 	it(
 		"loads networks, volumes, and secrets through MSW and populates the options",
 		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
+			setupCreatePage();
+			const user = await openCreatePage();
 
 			// The network checkboxes render from the fetched network list.
 			expect(await screen.findByLabelText("app-net")).toBeInTheDocument();
@@ -92,15 +94,15 @@ describe("ContainerList create integration", () => {
 	);
 
 	it(
-		"keeps the dialog open and preserves every form value on a 404 IMAGE_NOT_FOUND",
+		"stays on the page and preserves every form value on a 404 IMAGE_NOT_FOUND",
 		async () => {
-			setupCreateDialog(
+			setupCreatePage(
 				createHandler(
 					404,
 					errorJson("IMAGE_NOT_FOUND", "image not found", "req-318"),
 				),
 			);
-			const user = await openCreateModal();
+			const user = await openCreatePage();
 
 			await populateAllFields(user, "docker.io/library/nope:latest");
 
@@ -128,12 +130,12 @@ describe("ContainerList create integration", () => {
 				],
 			});
 
-			// The error envelope renders in the dialog's error region and the
-			// dialog stays open.
+			// The error envelope renders in the page's error region and the
+			// page stays put.
 			expect(await screen.findByRole("alert")).toBeInTheDocument();
 			expect(screen.getByText("IMAGE_NOT_FOUND")).toBeInTheDocument();
 			expect(screen.getByText("image not found")).toBeInTheDocument();
-			expect(screen.getByTestId("modal")).toBeInTheDocument();
+			expect(screen.getByLabelText(/image/i)).toBeInTheDocument();
 
 			// Every populated field keeps its value.
 			expect(
@@ -175,23 +177,71 @@ describe("ContainerList create integration", () => {
 	);
 
 	it(
-		"resets the form when the dialog is reopened after a successful create",
+		"discards the form silently when navigating away and returning",
 		async () => {
-			setupCreateDialog();
-			const user = await openCreateModal();
+			setupCreatePage();
+			const user = await openCreatePage();
 			await typeImage(user);
 			await user.type(screen.getByLabelText(/name/i), "cache");
 			await submitForm(user);
+			// The success navigation returned to the containers tab.
 			await waitFor(() =>
-				expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
+				expect(screen.queryByLabelText(/image/i)).not.toBeInTheDocument(),
 			);
 
-			await reopenCreateModal(user);
+			await reopenCreatePage(user);
 
-			// The reopened dialog starts from the empty default form.
+			// The remounted page starts from the empty default form —
+			// navigating away discarded the values with no guard.
 			expect(screen.getByLabelText(/image/i)).toHaveValue("");
 			expect(screen.getByLabelText(/name/i)).toHaveValue("");
 			expect(screen.getByTestId("container-form-submit")).toBeDisabled();
+		},
+		TEST_TIMEOUT,
+	);
+
+	it(
+		"sends the checked bind-mount flags and no flag fields for untouched rows",
+		async () => {
+			setupCreatePage();
+			const user = await openCreatePage();
+			await typeImage(user);
+			await user.click(screen.getByTestId("add-bind-mount"));
+			await user.type(screen.getByLabelText("Mount source 1"), "/srv/app");
+			await user.type(screen.getByLabelText("Mount destination 1"), "/app");
+			await user.click(
+				screen.getByLabelText("Bind mount 1 SELinux shared (z)"),
+			);
+			await user.click(screen.getByTestId("add-bind-mount"));
+			await user.type(screen.getByLabelText("Mount source 2"), "/srv/other");
+			await user.type(screen.getByLabelText("Mount destination 2"), "/opt");
+			await user.click(screen.getByLabelText("Bind mount 2 chown to user (U)"));
+
+			await submitForm(user);
+
+			// The checked flags travel as the wire booleans; the untouched
+			// row and the unchecked flags of both rows send nothing.
+			const body = createRequests.body as {
+				mounts: {
+					selinuxShared?: boolean;
+					selinuxPrivate?: boolean;
+					chownUser?: boolean;
+				}[];
+			};
+			expect(body.mounts).toEqual([
+				{
+					source: "/srv/app",
+					destination: "/app",
+					mode: "rw",
+					selinuxShared: true,
+				},
+				{
+					source: "/srv/other",
+					destination: "/opt",
+					mode: "rw",
+					chownUser: true,
+				},
+			]);
 		},
 		TEST_TIMEOUT,
 	);

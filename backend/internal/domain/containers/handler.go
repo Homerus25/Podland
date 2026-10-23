@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -70,6 +71,16 @@ func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		var request ContainerCreateRequest
 		if appErr := web.Decode(r, &request); appErr != nil {
 			return nil, appErr
+		}
+
+		// A mount carrying both SELinux labels is refused next to
+		// validate.Struct (the volumes populate handler's pattern):
+		// go-playground/validator has no cross-field tag, and podman's
+		// z and Z labels are mutually exclusive by definition.
+		for _, mount := range request.Mounts {
+			if mount.SelinuxShared && mount.SelinuxPrivate {
+				return nil, appErrors.ErrValidationFailed.WithMessage("mounts: selinuxShared and selinuxPrivate are mutually exclusive")
+			}
 		}
 
 		report, err := h.service.Create(ctx, userID, machineID, request)

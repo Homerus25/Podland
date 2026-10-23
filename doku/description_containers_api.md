@@ -83,7 +83,10 @@ Create a new container on a machine.
     {
       "source": "string (required)",
       "destination": "string (required)",
-      "mode": "ro|rw" (optional, default: rw)
+      "mode": "ro|rw" (optional, default: rw),
+      "selinuxShared": boolean (optional, default: false, SELinux shared relabel 'z'),
+      "selinuxPrivate": boolean (optional, default: false, SELinux private relabel 'Z'),
+      "chownUser": boolean (optional, default: false, chown the mounted content to the container's user 'U')
     }
   ] (optional),
   "volumes": [
@@ -106,7 +109,8 @@ Create a new container on a machine.
       "containerPath": "string (required)"
     }
   ] (optional),
-  "privileged": boolean (optional, default: false),
+  "privileged": boolean (optional, default: false, run the container in privileged mode),
+  "capAdd": ["string"] (optional, Linux capability names e.g. 'NET_ADMIN', passed to podman verbatim — an unknown name is refused by podman),
   "restartPolicy": "no|always|unless-stopped|on-failure" (optional, default: no),
   "remove": boolean (optional, default: false, remove the container when it exits),
   "user": "string (optional, UID or username)",
@@ -120,11 +124,18 @@ The `portBindings`, `mounts`, `volumes`, `secrets`, and `devices` arrays
 validate each entry's required sub-fields (a missing `hostPort`,
 `source`, `name`, `destination`, or device path is a 400
 `VALIDATION_FAILED`). `mounts` are applied as bind mounts with `rbind`
-propagation; `volumes` are applied as named volumes; `networks` attaches
+propagation; a mount's `selinuxShared`, `selinuxPrivate`, and `chownUser`
+flags ride along as the `z`, `Z`, and `U` mount options, and a mount
+carrying both `selinuxShared` and `selinuxPrivate` is refused with 400
+`VALIDATION_FAILED` (the labels are mutually exclusive);
+`volumes` are applied as named volumes; `networks` attaches
 the container to each named network; a `device` whose `containerPath`
 differs from its `hostPath` is additionally bind-mounted at the
-container path. `privileged`, `memory`, and `cpus` are accepted but not
-yet applied.
+container path. `privileged` runs the container in privileged mode;
+`capAdd` grants the listed Linux capabilities, with each name passed to
+podman verbatim (an unknown capability name is refused by podman and
+surfaces as an error, not a silent ignore). `memory` and `cpus` are
+accepted but not yet applied.
 
 **Response (Success - 201):**
 ```json
