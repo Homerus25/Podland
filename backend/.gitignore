@@ -9,7 +9,6 @@ go.work
 go.work.sum
 
 # Dependency directories
-go.sum
 vendor/
 
 # IDE specific

@@ -1,0 +1,69 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to push"
+        required: false
+        default: "latest"
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: build
+    env:
+      IMAGE: rack.home:9250/homerus/podland
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Forgejo's registry on :9250 is plain HTTP; without --tls-verify=false
+      # podman pings https://.../v2/ and aborts before sending credentials.
+      # The run-scoped GITHUB_TOKEN can log in but lacks package-write scope,
+      # so pushes authenticate with PODLAND_CI_TOKEN.
+      - name: Log in to container registry
+        run: echo "${{ secrets.PODLAND_CI_TOKEN }}" | podman login rack.home:9250 -u homerus --password-stdin --tls-verify=false
+
+      - name: Determine image tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            TAG="pr-${{ github.event.pull_request.number }}"
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="${INPUT_TAG:-latest}"
+          else
+            TAG="latest"
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+      # The Containerfile's podman build context points at a sibling
+      # checkout of the patched Podman bindings fork (../../podman,
+      # matching backend/go.mod's replace directive). The fork repo is
+      # private, so the clone authenticates with PODLAND_CI_TOKEN.
+      - name: Check out podman fork
+        env:
+          PODLAND_CI_TOKEN: ${{ secrets.PODLAND_CI_TOKEN }}
+        run: git clone --depth 1 "http://homerus:${PODLAND_CI_TOKEN}@rack.home:9250/homerus/podman.git" ../podman
+
+      # Same three named contexts as the documented build (README/Containerfile).
+      # Runs from backend/ so the podman fork is referenced exactly as
+      # backend/go.mod's replace directive spells it: ../../podman.
+      - name: Build image
+        working-directory: backend
+        run: |
+          podman build \
+            --build-context backend=. \
+            --build-context frontend=../frontend \
+            --build-context podman=../../podman \
+            -t "$IMAGE:$TAG" ..
+
+      - name: Push image
+        run: podman push --tls-verify=false "$IMAGE:$TAG"
