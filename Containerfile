@@ -30,11 +30,17 @@ COPY --from=podman . /srv/podman
 # the replace directive is normalized to one in-image path — here for
 # the dependency layer, and again once the full backend tree re-copies
 # go.mod below.
-RUN sed -i 's|^replace go.podman.io/podman/v6 => .*|replace go.podman.io/podman/v6 => /srv/podman|' go.mod && go mod download
+# Cache mounts keep the module and compiler caches in the builder's storage
+# across builds, so a source change recompiles incrementally instead of from
+# scratch. The module cache must be mounted on both RUN lines: modules
+# downloaded into the mount are invisible to later steps without it.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    sed -i 's|^replace go.podman.io/podman/v6 => .*|replace go.podman.io/podman/v6 => /srv/podman|' go.mod && go mod download
 COPY --from=backend . .
 RUN sed -i 's|^replace go.podman.io/podman/v6 => .*|replace go.podman.io/podman/v6 => /srv/podman|' go.mod && rm -rf internal/webui/dist
 COPY --from=ui /ui/dist ./internal/webui/dist/
-RUN CGO_ENABLED=1 GOOS=linux go build -o /podland ./cmd/server
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=1 GOOS=linux go build -o /podland ./cmd/server
 
 # --- Stage 3: runtime -------------------------------------------------------
 FROM alpine:latest

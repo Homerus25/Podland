@@ -44,25 +44,17 @@ jobs:
           fi
           echo "TAG=$TAG" >> "$GITHUB_ENV"
 
-      # The Containerfile's podman build context points at a sibling
-      # checkout of the patched Podman bindings fork (../../podman,
-      # matching backend/go.mod's replace directive). The fork repo is
-      # private, so the clone authenticates with PODLAND_CI_TOKEN.
-      - name: Check out podman fork
-        env:
-          PODLAND_CI_TOKEN: ${{ secrets.PODLAND_CI_TOKEN }}
-        run: git clone --depth 1 "http://homerus:${PODLAND_CI_TOKEN}@rack.home:9250/homerus/podman.git" ../podman
-
       # Same three named contexts as the documented build (README/Containerfile).
-      # Runs from backend/ so the podman fork is referenced exactly as
-      # backend/go.mod's replace directive spells it: ../../podman.
+      # The podman fork is not cloned here: the build runner keeps a persistent,
+      # up-to-date checkout at /root/podman (baked into the runner image), which
+      # doubles as a warm cache for the fork's source.
       - name: Build image
         working-directory: backend
         run: |
           podman build \
             --build-context backend=. \
             --build-context frontend=../frontend \
-            --build-context podman=../../podman \
+            --build-context podman=/root/podman \
             -t "$IMAGE:$TAG" ..
 
       - name: Push image
