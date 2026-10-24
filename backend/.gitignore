@@ -52,6 +52,8 @@ internal/webui/dist/*
 
 # Test files
 coverage.txt
+coverage.out
+coverage.html
 profile.out
 
 # Migration tracking

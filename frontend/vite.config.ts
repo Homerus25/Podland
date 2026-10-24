@@ -29,5 +29,21 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html'],
+      // Vitest replaces its default exclude list when this is set, so the
+      // defaults we rely on are restated alongside the project additions.
+      // src/test/** is test scaffolding, src/main.tsx is the Vite entry.
+      exclude: [
+        'coverage/**',
+        'dist/**',
+        '**/node_modules/**',
+        '**/*.d.ts',
+        '**/*{.,-}{test,spec}.?(c|m)[jt]s?(x)',
+        'src/test/**',
+        'src/main.tsx',
+      ],
+    },
   },
 })

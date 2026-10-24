@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "coverage": "vitest run --coverage --testTimeout=30000 --minWorkers=1 --maxWorkers=8",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "biome check src",
     "format": "biome format --write src"
@@ -37,6 +38,7 @@
     "@types/react": "^18.3.14",
     "@types/react-dom": "^18.3.2",
     "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^2.1.9",
     "jsdom": "^25.0.1",
     "msw": "^2.6.6",
     "typescript": "^5.7.2",

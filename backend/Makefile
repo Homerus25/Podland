@@ -1,6 +1,6 @@
 # Makefile for Podland Backend
 
-.PHONY: all build run clean deps lint test test-integration testhost-build migrate generate-keys ui ui-clean
+.PHONY: all build run clean deps lint test coverage test-integration testhost-build migrate generate-keys ui ui-clean
 
 # Go parameters
 GOCMD=go
@@ -73,6 +73,17 @@ tidy:
 # Testing
 test:
 	$(GOCMD) test -v ./...
+
+# Coverage — unit tests only; the integration suite is deliberately left
+# out (it boots the containerized podman test host and skips cleanly
+# where podman is missing, which would make the number machine-dependent).
+# Writes coverage.out, prints the per-function summary, and renders
+# coverage.html for browsing. Both artifacts are gitignored.
+coverage:
+	$(GOCMD) test -coverprofile=coverage.out ./internal/...
+	$(GOCMD) tool cover -func=coverage.out
+	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+	@echo "HTML report: coverage.html"
 
 # Integration tests — boots the containerized podman test host (see the
 # testhost-build target below), brings the backend up in-process via
@@ -175,6 +186,7 @@ help:
 	@echo "  make debug     - Run in debug mode"
 	@echo "  make clean     - Clean build artifacts"
 	@echo "  make test      - Run tests"
+	@echo "  make coverage  - Run unit tests with coverage (summary + coverage.html)"
 	@echo "  make ui        - Build the frontend and embed it into the backend"
 	@echo "  make ui-clean  - Reset the embedded UI to the committed placeholder"
 	@echo "  make test-integration - Run integration tests against the containerized podman test host"
