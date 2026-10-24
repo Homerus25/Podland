@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/errorhandling"
 	"go.podman.io/podman/v6/pkg/specgen"
 )
 
@@ -129,6 +130,99 @@ func TestContainerService_Create_WithoutSecurityOptionsStaysDefault(t *testing.T
 	assert.Nil(t, captured.Privileged, "a request without privileged must leave the spec unprivileged")
 	assert.False(t, captured.IsPrivileged())
 	assert.Empty(t, captured.CapAdd, "a request without capAdd must leave the spec's CapAdd empty")
+}
+
+// TestContainerService_Create_MapsPod pins the pod mapping at the service
+// seam: the request's pod field (name or ID, free string) reaches the
+// spec's Pod field.
+func TestContainerService_Create_MapsPod(t *testing.T) {
+	var captured *specgen.SpecGenerator
+	engine := &fakeContainerEngine{
+		createFn: func(s *specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
+			captured = s
+			return &entities.ContainerCreateReport{Id: "c-123"}, nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	_, err := service.Create(context.Background(), "user", "machine", ContainerCreateRequest{
+		Image: "nginx:latest",
+		Pod:   "my-pod",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, captured)
+	assert.Equal(t, "my-pod", captured.Pod, "the requested pod must reach the spec's Pod field")
+}
+
+// TestContainerService_Create_WithoutPodLeavesSpecUnset pins the default:
+// a request without a pod leaves the spec's Pod field empty, so the
+// container is created outside any pod as before.
+func TestContainerService_Create_WithoutPodLeavesSpecUnset(t *testing.T) {
+	var captured *specgen.SpecGenerator
+	engine := &fakeContainerEngine{
+		createFn: func(s *specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
+			captured = s
+			return &entities.ContainerCreateReport{Id: "c-123"}, nil
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	_, err := service.Create(context.Background(), "user", "machine", ContainerCreateRequest{
+		Image: "nginx:latest",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, captured)
+	assert.Empty(t, captured.Pod, "a request without a pod must leave the spec's Pod field empty")
+}
+
+// TestContainerService_Create_MissingPodIsPodNotFound pins the not-found
+// classification when a pod was requested: podman's not-found answer maps
+// to the 404 POD_NOT_FOUND sentinel, not IMAGE_NOT_FOUND.
+func TestContainerService_Create_MissingPodIsPodNotFound(t *testing.T) {
+	engine := &fakeContainerEngine{
+		createFn: func(*specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
+			return nil, &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such pod"}
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Create(context.Background(), "user", "machine", ContainerCreateRequest{
+		Image: "nginx:latest",
+		Pod:   "missing-pod",
+	})
+
+	// WithMessage copies the sentinel (the pods domain's precedent), so
+	// the classification asserts on the AppError's code, not the chain.
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr, "a create whose pod is missing must answer POD_NOT_FOUND")
+	assert.Equal(t, "POD_NOT_FOUND", appErr.Code)
+	assert.Equal(t, http.StatusNotFound, appErr.Status)
+	assert.Contains(t, appErr.Message, "no such pod", "the message must carry podman's not-found text")
+	assert.Nil(t, got)
+}
+
+// TestContainerService_Create_MissingImageWithoutPodStaysImageNotFound
+// pins the not-found classification when no pod was requested: podman's
+// not-found answer keeps mapping to the 404 IMAGE_NOT_FOUND sentinel.
+func TestContainerService_Create_MissingImageWithoutPodStaysImageNotFound(t *testing.T) {
+	engine := &fakeContainerEngine{
+		createFn: func(*specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
+			return nil, &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such image"}
+		},
+	}
+	service := NewContainerService(fakeEngineProvider{engine: engine})
+
+	got, err := service.Create(context.Background(), "user", "machine", ContainerCreateRequest{
+		Image: "missing:latest",
+	})
+
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr, "a create without a pod keeps the IMAGE_NOT_FOUND mapping")
+	assert.Equal(t, "IMAGE_NOT_FOUND", appErr.Code)
+	assert.Contains(t, appErr.Message, "no such image", "the message must carry podman's not-found text")
+	assert.Nil(t, got)
 }
 
 func TestContainerService_Create_WrapsEngineFailure(t *testing.T) {

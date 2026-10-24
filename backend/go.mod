@@ -5,12 +5,14 @@ go 1.26.4
 replace go.podman.io/podman/v6 => ../../podman
 
 require (
+	github.com/docker/go-units v0.5.0
 	github.com/go-chi/chi/v5 v5.0.10
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/mattn/go-sqlite3 v1.14.45
 	github.com/opencontainers/image-spec v1.1.1
+	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/stretchr/testify v1.11.1
 	go.podman.io/common v0.68.1-0.20260611132908-ea2c6da53f91
 	go.podman.io/podman/v6 v6.0.0
@@ -54,7 +56,6 @@ require (
 	github.com/docker/distribution v2.8.3+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.9.8 // indirect
 	github.com/docker/go-connections v0.7.0 // indirect
-	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
@@ -105,7 +106,6 @@ require (
 	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/opencontainers/cgroups v0.0.6 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
-	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/runtime-tools v0.9.1-0.20260316125833-8a4db579f5c8 // indirect
 	github.com/opencontainers/selinux v1.15.1 // indirect
 	github.com/openshift/imagebuilder v1.2.21 // indirect

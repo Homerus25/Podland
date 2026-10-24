@@ -15,6 +15,7 @@ import { MachineSettingsTab } from "@features/machines/components/MachineSetting
 import { PermissionBadge } from "@features/machines/components/PermissionBadge";
 import { useMachine } from "@features/machines/hooks/useMachines";
 import { NetworkList } from "@features/networks/components/NetworkList";
+import { PodList } from "@features/pods/components/PodList";
 import { QuadletList } from "@features/quadlets/components/QuadletList";
 import { SecretList } from "@features/secrets/components/SecretList";
 import { VolumeList } from "@features/volumes/components/VolumeList";
@@ -33,6 +34,7 @@ const MACHINE_TAB_KEYS = [
 	"images",
 	"networks",
 	"quadlets",
+	"pods",
 	"secrets",
 	"settings",
 ] as const;
@@ -88,6 +90,7 @@ export function MachineDetailPage() {
 					<Tab>Images</Tab>
 					<Tab>Networks</Tab>
 					<Tab>Quadlets</Tab>
+					<Tab>Pods</Tab>
 					<Tab>Secrets</Tab>
 					<Tab>Settings</Tab>
 				</TabList>
@@ -106,6 +109,9 @@ export function MachineDetailPage() {
 					</TabPanel>
 					<TabPanel>
 						<QuadletList machine={machine} />
+					</TabPanel>
+					<TabPanel>
+						<PodList machine={machine} />
 					</TabPanel>
 					<TabPanel>
 						<SecretList machine={machine} />

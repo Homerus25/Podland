@@ -35,9 +35,11 @@ export interface PruneMutationSlice<TEntry> {
 // to render what the mutation returned), the report table, the empty-report
 // and confirm copy derived from the singular `resource` noun, and the
 // in-modal error region. Everything per-feature is handed over as data:
-// the noun, the entry key, and the label renderer.
+// the noun, the entry key, and the label renderer. size is optional: the
+// pods prune (spec #355) reports removed IDs only, and a size-less entry
+// renders an em dash in the reclaimed column.
 export function PruneReportDialog<
-	TEntry extends { size: number; error?: string },
+	TEntry extends { size?: number; error?: string },
 >({
 	mutation,
 	resource,
@@ -114,7 +116,11 @@ export function PruneReportDialog<
 										{entry.error ? (
 											<Td color="red.500">{entry.error}</Td>
 										) : (
-											<Td isNumeric>{formatBytes(entry.size)}</Td>
+											<Td isNumeric>
+												{entry.size === undefined
+													? "—"
+													: formatBytes(entry.size)}
+											</Td>
 										)}
 									</Tr>
 								))}

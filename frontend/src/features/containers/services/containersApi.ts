@@ -179,6 +179,10 @@ export interface CreateContainerInput {
 		mode?: MountMode;
 	}[];
 	networks?: string[];
+	// Pod to join (optional, name or ID — the form sends the name chosen
+	// in the pod selector, spec 352/356). When set, the pod owns the
+	// container's networking.
+	pod?: string;
 	secrets?: {
 		source: string;
 		target?: string;
@@ -264,6 +268,8 @@ export interface CreateContainerFormValues {
 	// The checkbox lists select by option key: the network's name and the
 	// secret's id. The builder resolves keys back to payload names.
 	networks: string[];
+	// "" is the "No pod" select option; a chosen pod travels as its name.
+	pod: string;
 	secrets: string[];
 	devices: DeviceRow[];
 	// The Security section (spec 341): privileged grants full device and
@@ -407,6 +413,7 @@ export function buildCreateContainerInput(
 	const secretPayload = secretEntries.length > 0 ? secretEntries : undefined;
 	const user = values.user.trim();
 	const timezone = values.timezone.trim();
+	const pod = values.pod.trim();
 
 	return {
 		image: values.image.trim(),
@@ -420,13 +427,18 @@ export function buildCreateContainerInput(
 		...(portBindings ? { portBindings } : {}),
 		...(mounts ? { mounts } : {}),
 		...(volumes ? { volumes } : {}),
-		...(networks ? { networks } : {}),
+		// The pod owns networking (a networks list alongside a pod is
+		// podman's refusal to answer), so a chosen pod drops the network
+		// selection.
+		...(!pod && networks ? { networks } : {}),
+		...(pod ? { pod } : {}),
 		...(secretPayload ? { secrets: secretPayload } : {}),
 		...(devices ? { devices } : {}),
 		...(values.privileged ? { privileged: true } : {}),
 		...(capAdd ? { capAdd } : {}),
 	};
 }
+
 
 // Response of POST /api/machines/{id}/containers -> 201
 // (backend/internal/domain/containers/dto.go ContainerCreateResponse).

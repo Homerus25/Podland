@@ -12,6 +12,7 @@ Endpoint documentation is split by domain:
 - [Containers](description_containers_api.md) - Container CRUD, lifecycle, logs
 - [Images](description_images_api.md) - Image listing, pull, removal
 - [Networks](description_networks_api.md) - Network listing (read-only)
+- [Pods](description_pods_api.md) - Pod list, create, lifecycle, prune, inspect
 - [Quadlets](description_quadlets_api.md) - Quadlet CRUD, lifecycle, generate, import
 - [Secrets](description_secrets_api.md) - Secret list/inspect/create/delete with admin-only value reveal
 

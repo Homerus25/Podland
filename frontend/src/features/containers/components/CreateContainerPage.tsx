@@ -27,6 +27,7 @@ import {
 	type MountRow,
 } from "@features/containers/services/containersApi";
 import { usePullImage } from "@features/images/hooks/usePullImage";
+import { usePods } from "@features/pods/hooks/usePods";
 import { useNetworks } from "@features/networks/hooks/useNetworks";
 import { useSecrets } from "@features/secrets/hooks/useSecrets";
 import { CreateVolumeDialog } from "@features/volumes/components/CreateVolumeDialog";
@@ -34,6 +35,7 @@ import {
 	useCreateVolume,
 	useVolumes,
 } from "@features/volumes/hooks/useVolumes";
+import { CheckboxList } from "@shared/components/CheckboxList";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { KeyValueEditor } from "@shared/components/KeyValueEditor";
 import { machineTabPath } from "@shared/routes/detailRoute";
@@ -172,35 +174,6 @@ function RowSelect({
 	);
 }
 
-// A multi-select checkbox list over a fetched option list (the Network
-// and Secrets sections share this shape). The option's key is the
-// selection identity — not its label, so two same-named options cannot
-// toggle together. The checkbox is controlled by the watched selection
-// and toggling rewrites it.
-function CheckboxList({
-	options,
-	selected,
-	onToggle,
-}: {
-	options: { key: string; label: string }[];
-	selected: string[];
-	onToggle: (key: string, checked: boolean) => void;
-}) {
-	return (
-		<>
-			{options.map((option) => (
-				<Checkbox
-					key={option.key}
-					isChecked={selected.includes(option.key)}
-					onChange={(event) => onToggle(option.key, event.target.checked)}
-				>
-					{option.label}
-				</Checkbox>
-			))}
-		</>
-	);
-}
-
 // The z/Z/U flag checkboxes of one bind-mount row (spec 341, ticket
 // #348): z (SELinux shared relabel) and Z (SELinux private relabel) are
 // mutually exclusive — checking one unchecks the other — while U (chown
@@ -281,6 +254,8 @@ export function CreateContainerPage() {
 	const { data: networks } = useNetworks(machineId!);
 	const { data: volumes } = useVolumes(machineId!);
 	const { data: secrets } = useSecrets(machineId!);
+	// The pod selector's option list (spec 356).
+	const { data: pods } = usePods(machineId!);
 	const [isCreateVolumeOpen, setIsCreateVolumeOpen] = useState(false);
 
 	// Run-after-create (spec 341, ticket #346): checked by default, the
@@ -309,6 +284,7 @@ export function CreateContainerPage() {
 			timezone: "",
 			restartPolicy: "",
 			remove: false,
+			pod: "",
 			environment: [],
 			portBindings: [],
 			mounts: [],
@@ -353,6 +329,8 @@ export function CreateContainerPage() {
 	// toggling rewrites it.
 	const selectedNetworks = watch("networks");
 	const selectedSecrets = watch("secrets");
+	// The pod select drives the Network section's disablement (spec 356).
+	const selectedPod = watch("pod");
 	// The bind-mount rows' z/Z/U checkboxes read the watched rows so
 	// toggling one re-renders the row with the new checked state.
 	const mountValues = watch("mounts");
@@ -498,6 +476,21 @@ export function CreateContainerPage() {
 						</FormControl>
 						<FormControl>
 							<Checkbox {...register("remove")}>Remove on exit</Checkbox>
+						</FormControl>
+						<FormControl>
+							<FormLabel htmlFor="container-pod">Pod</FormLabel>
+							<Select
+								id="container-pod"
+								data-testid="container-pod-select"
+								{...register("pod")}
+							>
+								<option value="">No pod</option>
+								{(pods ?? []).map((pod) => (
+									<option key={pod.id} value={pod.name}>
+										{pod.name}
+									</option>
+								))}
+							</Select>
 						</FormControl>
 					</Section>
 
@@ -703,12 +696,23 @@ export function CreateContainerPage() {
 					<Divider />
 
 					<Section title="Network">
+						{selectedPod ? (
+							<Text
+								fontSize="sm"
+								color="gray.500"
+								data-testid="container-pod-network-hint"
+							>
+								The container joins a pod — the pod owns networking, so
+								container-level networks are unavailable.
+							</Text>
+						) : null}
 						<CheckboxList
 							options={(networks ?? []).map((network) => ({
 								key: network.name,
 								label: network.name,
 							}))}
 							selected={selectedNetworks}
+							isDisabled={!!selectedPod}
 							onToggle={(name, checked) =>
 								setValue(
 									"networks",

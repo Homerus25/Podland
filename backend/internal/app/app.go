@@ -29,6 +29,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/domain/images"
 	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	"github.com/Homerus25/podland/backend/internal/domain/networks"
+	"github.com/Homerus25/podland/backend/internal/domain/pods"
 	"github.com/Homerus25/podland/backend/internal/domain/quadlets"
 	"github.com/Homerus25/podland/backend/internal/domain/secrets"
 	"github.com/Homerus25/podland/backend/internal/domain/users"
@@ -192,6 +193,7 @@ func New(cfg *config.Config) (*App, error) {
 		WithUsageEngines(volumes.NewVolumeUsageEngineProvider(connectionManager)).
 		WithMaxVolumeUploadBytes(cfg.Volumes.MaxUploadBytes)
 	networkService := networks.NewNetworkService(networks.NewNetworkEngineProvider(connectionManager))
+	podService := pods.NewPodService(pods.NewPodEngineProvider(connectionManager))
 
 	// Initialize handlers. Each credential endpoint's failure-budget
 	// surface is the same value its service checks and spends — the
@@ -208,6 +210,7 @@ func New(cfg *config.Config) (*App, error) {
 	volumeHandler := volumes.NewVolumeHandler(volumeService).
 		WithMaxUploadBytes(cfg.Volumes.MaxUploadBytes)
 	networkHandler := networks.NewNetworkHandler(networkService)
+	podHandler := pods.NewPodHandler(podService)
 
 	// Initialize middleware
 	rateLimiter := appmiddleware.NewRateLimiter(
@@ -441,6 +444,27 @@ func New(cfg *config.Config) (*App, error) {
 						r.Get("/{networkName}/inspect", networkHandler.Inspect)
 						r.With(requireWrite).Post("/", networkHandler.Create)
 						r.With(requireWrite).Post("/{networkName}/connect", networkHandler.Connect)
+					})
+
+					// Pods — the list, detail, and raw inspect
+					// endpoints stay at the subtree's read level;
+					// create, prune, lifecycle actions, and remove
+					// mutate remote state, so they gate at write
+					// (spec #353). The prune route is literal so it
+					// is not shadowed by the {podId} subtree.
+					r.Route("/pods", func(r chi.Router) {
+						r.Get("/", podHandler.List)
+						r.With(requireWrite).Post("/", podHandler.Create)
+						r.With(requireWrite).Post("/prune", podHandler.Prune)
+						r.Route("/{podId}", func(r chi.Router) {
+							r.Get("/", podHandler.Get)
+							r.Get("/inspect", podHandler.Inspect)
+							r.With(requireWrite).Post("/pause", podHandler.Pause)
+							r.With(requireWrite).Post("/unpause", podHandler.Unpause)
+							r.With(requireWrite).Post("/kill", podHandler.Kill)
+							r.With(requireWrite).Post("/restart", podHandler.Restart)
+							r.With(requireWrite).Delete("/", podHandler.Remove)
+						})
 					})
 				})
 			})

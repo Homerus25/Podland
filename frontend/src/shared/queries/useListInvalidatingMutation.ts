@@ -3,6 +3,7 @@ import {
 	containersQueryKey,
 	imagesQueryKey,
 	networksQueryKey,
+	podsQueryKey,
 	quadletsQueryKey,
 	secretsQueryKey,
 	volumesQueryKey,
@@ -15,6 +16,7 @@ const resourceKeys: Record<
 	(machineId: string) => readonly unknown[]
 > = {
 	containers: containersQueryKey,
+	pods: podsQueryKey,
 	volumes: volumesQueryKey,
 	images: imagesQueryKey,
 	networks: networksQueryKey,

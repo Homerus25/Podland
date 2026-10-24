@@ -133,6 +133,13 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 			}
 		}
 
+		// The pod field maps straight through: podman accepts a pod
+		// name or ID, so the free string reaches the spec's Pod field
+		// as-is and podman resolves it at create time.
+		if request.Pod != "" {
+			spec.Pod = request.Pod
+		}
+
 		// Named volumes map to the spec's volumes; the access mode
 		// rides along as the mount option (rw when omitted).
 		for _, volume := range request.Volumes {
@@ -183,13 +190,22 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 		// Memory and cpus stay unmapped (out of scope).
 
 		// Create the container using Podman API. A not-found answer is
-		// the missing-image terminal: the doku documents 404
-		// IMAGE_NOT_FOUND for this endpoint, so the classification
-		// happens here, not in the envelope's 500 fallback.
+		// the missing-image terminal — unless the request asked for a
+		// pod, in which case the missing pod is the terminal: the doku
+		// documents 404 IMAGE_NOT_FOUND, plus 404 POD_NOT_FOUND when a
+		// pod was requested, so the classification happens here, not in
+		// the envelope's 500 fallback. The classification is ambiguous
+		// (podman's not-found covers the image, the pod, and anything
+		// else in the spec), so podman's own message travels through
+		// WithMessage as the only disambiguator — the pods domain's
+		// create precedent.
 		createReport, err := e.Create(spec)
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrImageNotFound
+				if request.Pod != "" {
+					return appErrors.ErrPodNotFound.WithMessage(podmanerr.Message(err))
+				}
+				return appErrors.ErrImageNotFound.WithMessage(podmanerr.Message(err))
 			}
 			return fmt.Errorf("failed to create container: %w", err)
 		}

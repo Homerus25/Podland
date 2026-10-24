@@ -15,6 +15,7 @@ import {
 	containerFixture,
 	machineFixture,
 	networkFixture,
+	podFixture,
 	secretFixture,
 	volumeFixture,
 } from "@/test/factories";
@@ -36,7 +37,12 @@ export const createRequests: { count: number; body: unknown } = {
 	count: 0,
 	body: null,
 };
-export const optionRequests = { networks: 0, volumes: 0, secrets: 0 };
+export const optionRequests = {
+	networks: 0,
+	volumes: 0,
+	secrets: 0,
+	pods: 0,
+};
 export const listRequests = { count: 0 };
 // The image pull stream the create page's image-not-found flow rides
 // (spec 341 ticket #349); counted like the create request so the pull
@@ -53,6 +59,7 @@ export function resetCounters() {
 	optionRequests.networks = 0;
 	optionRequests.volumes = 0;
 	optionRequests.secrets = 0;
+	optionRequests.pods = 0;
 	listRequests.count = 0;
 	pullRequests.count = 0;
 	pullRequests.body = null;
@@ -95,6 +102,16 @@ export function optionListHandlers() {
 				secretFixture(),
 				secretFixture({ id: "s-2", name: "api-token" }),
 			]);
+		}),
+		// The pod selector's option list (spec 356): the pods list endpoint
+		// the create page fetches on mount.
+		http.get("*/api/machines/m-1/pods", () => {
+			optionRequests.pods++;
+			return HttpResponse.json({
+				pods: [podFixture(), podFixture({ id: "p-2", name: "db-pod" })],
+				total: 2,
+				timestamp: "2026-08-26T00:00:00Z",
+			});
 		}),
 	];
 }

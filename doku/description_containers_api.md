@@ -97,6 +97,7 @@ Create a new container on a machine.
     }
   ] (optional),
   "networks": ["string"] (optional),
+  "pod": "string (optional, name or ID of an existing pod the new container joins)",
   "secrets": [
     {
       "source": "string (required)",
@@ -135,7 +136,15 @@ container path. `privileged` runs the container in privileged mode;
 `capAdd` grants the listed Linux capabilities, with each name passed to
 podman verbatim (an unknown capability name is refused by podman and
 surfaces as an error, not a silent ignore). `memory` and `cpus` are
-accepted but not yet applied.
+accepted but not yet applied. `pod` names (or IDs) an existing pod the
+new container joins; when set, the value is passed to podman verbatim
+and the pod owns the container's networking (a `networks` list alongside
+a `pod` is podman's refusal to answer). A create whose requested pod
+does not exist answers 404 `POD_NOT_FOUND`; without a `pod` requested, a
+not-found create stays `IMAGE_NOT_FOUND`. The classification is
+ambiguous by nature — podman's not-found answer covers the image, the
+pod, and anything else in the spec — so the envelope's `message` carries
+podman's own not-found text as the disambiguator.
 
 **Response (Success - 201):**
 ```json
@@ -153,7 +162,7 @@ accepted but not yet applied.
 - 400: `VALIDATION_FAILED`, `INVALID_REQUEST`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`
+- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`, `POD_NOT_FOUND` (a create that requested a pod which does not exist)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 

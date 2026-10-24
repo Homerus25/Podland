@@ -87,8 +87,14 @@ describe("CreateContainerPage integration", () => {
 			).toBeInTheDocument();
 			expect(within(volumeSelect).getByText("pgdata")).toBeInTheDocument();
 
-			// Each list endpoint was requested exactly once through MSW.
-			expect(optionRequests).toEqual({ networks: 1, volumes: 1, secrets: 1 });
+			// Each list endpoint was requested exactly once through MSW
+			// (the pods list rides along for the pod selector, spec 356).
+			expect(optionRequests).toEqual({
+				networks: 1,
+				volumes: 1,
+				secrets: 1,
+				pods: 1,
+			});
 		},
 		TEST_TIMEOUT,
 	);

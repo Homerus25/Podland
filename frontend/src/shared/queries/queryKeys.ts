@@ -8,6 +8,7 @@
 // tabs.
 export type MachineResource =
 	| "containers"
+	| "pods"
 	| "volumes"
 	| "images"
 	| "networks"
@@ -21,6 +22,10 @@ export const usersQueryKey = ["users"] as const;
 
 export function containersQueryKey(machineId: string) {
 	return ["machines", machineId, "containers"] as const;
+}
+
+export function podsQueryKey(machineId: string) {
+	return ["machines", machineId, "pods"] as const;
 }
 
 export function volumesQueryKey(machineId: string) {
@@ -119,6 +124,20 @@ export function machineAccessQueryKey(id: string) {
 // of its own: containers-prefix invalidation covers it.
 export function containerQueryKey(machineId: string, containerId: string) {
 	return [...containersQueryKey(machineId), containerId] as const;
+}
+
+// The detail view is a pod sub-resource keyed by the pod, so every page
+// visit resolves to its own entry. Never an invalidation target of its
+// own: pods-prefix invalidation covers it.
+export function podQueryKey(machineId: string, podId: string) {
+	return [...podsQueryKey(machineId), podId] as const;
+}
+
+// The raw inspect report is a pod sub-resource keyed by the pod, so every
+// reveal resolves to its own entry. Never an invalidation target of its
+// own: pods-prefix invalidation covers it.
+export function podInspectQueryKey(machineId: string, podId: string) {
+	return [...podsQueryKey(machineId), podId, "inspect"] as const;
 }
 
 // The raw inspect report is a container sub-resource keyed by the container,

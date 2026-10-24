@@ -6,6 +6,7 @@
 // and the router decodes params on the far side, so the round trip is safe.
 export type DetailResource =
 	| "containers"
+	| "pods"
 	| "volumes"
 	| "images"
 	| "networks"

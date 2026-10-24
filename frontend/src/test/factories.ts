@@ -11,6 +11,7 @@ import type {
 	NetworkDetail,
 	NetworkSummary,
 } from "@features/networks/services/networksApi";
+import type { PodDetail, PodSummary } from "@features/pods/services/podsApi";
 import type {
 	QuadletImportEntry,
 	QuadletImportResponse,
@@ -375,6 +376,48 @@ export function secretFixture(
 		...overrides,
 	};
 }
+
+// --- spec 352 ticket #355: pods tab ---------------------------------------
+// Pod list entry (GET .../pods, backend PodListResponse): default shape is
+// a running two-container pod on one network; tests override per scenario.
+export function podFixture(overrides: Partial<PodSummary> = {}): PodSummary {
+	return {
+		id: "p-1",
+		name: "app-pod",
+		state: "Running",
+		createdAt: "2026-08-20T10:00:00Z",
+		containerCount: 2,
+		networks: ["app-net"],
+		labels: {},
+		...overrides,
+	};
+}
+
+// Pod detail (GET .../pods/{podId}, backend PodDetailResponse): the list
+// fields plus restart policy, mounts, and the pod's containers; tests
+// override per scenario.
+export function podDetailFixture(
+	overrides: Partial<PodDetail> = {},
+): PodDetail {
+	return {
+		id: "p-1",
+		name: "app-pod",
+		state: "Running",
+		createdAt: "2026-08-20T10:00:00Z",
+		restartPolicy: "always",
+		mounts: [
+			"type=volume,source=/var/lib/containers/storage/volumes/app-data/_data,destination=/data",
+		],
+		containers: [
+			{ id: "c-1", name: "web", state: "running" },
+			{ id: "c-infra", name: "app-pod-infra", state: "running" },
+		],
+		networks: ["app-net"],
+		labels: { app: "web" },
+		...overrides,
+	};
+}
+// --- end spec 352 ticket #355 ---------------------------------------------
 
 // Secret copy/move preview (GET .../secrets/{id}/move-preview, issue 239):
 // default shape is a clean target and one referencing quadlet; tests

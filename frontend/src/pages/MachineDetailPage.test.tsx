@@ -61,6 +61,7 @@ function renderMachineDetailPage(id = "m-1") {
 interface TabCounts {
 	machine: number;
 	containers: number;
+	pods: number;
 	volumes: number;
 	images: number;
 	networks: number;
@@ -90,6 +91,16 @@ function machineTabHandlers(
 		http.get(
 			"*/api/machines/m-1/containers",
 			counted("containers", emptyContainersResolver),
+		),
+		http.get(
+			"*/api/machines/m-1/pods",
+			counted("pods", () =>
+				HttpResponse.json({
+					pods: [],
+					total: 0,
+					timestamp: "2026-10-24T12:00:00Z",
+				}),
+			),
 		),
 		http.get(
 			"*/api/machines/m-1/volumes",
@@ -126,6 +137,7 @@ function countingTabHandlers(machine: Machine = machineFixture()) {
 	const counts: TabCounts = {
 		machine: 0,
 		containers: 0,
+		pods: 0,
 		volumes: 0,
 		images: 0,
 		networks: 0,
@@ -184,7 +196,7 @@ describe("MachineDetailPage", () => {
 		expect(screen.getByTestId("machine-permission")).toHaveTextContent("admin");
 	});
 
-	it("switches between the Containers, Images, Networks, Quadlets, Secrets, and Settings tabs", async () => {
+	it("switches between the Containers, Pods, Images, Networks, Quadlets, Secrets, and Settings tabs", async () => {
 		server.use(
 			machineHandler(machineFixture()),
 			emptyContainersHandler,
@@ -194,14 +206,29 @@ describe("MachineDetailPage", () => {
 		);
 		server.use(
 			http.get("*/api/machines/m-1/images", () => HttpResponse.json([])),
+			http.get("*/api/machines/m-1/pods", () =>
+				HttpResponse.json({
+					pods: [],
+					total: 0,
+					timestamp: "2026-10-24T12:00:00Z",
+				}),
+			),
 		);
 		renderMachineDetailPage();
 
 		await screen.findByText("prod-web-01");
+		// The Pods tab sits after Quadlets, before Secrets (spec 352).
+		const tabNames = screen.getAllByRole("tab").map((tab) => tab.textContent);
+		expect(tabNames[0]).toBe("Containers");
+		expect(tabNames[5]).toBe("Pods");
+		expect(tabNames[6]).toBe("Secrets");
 		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
 		expect(
 			screen.queryByTestId("tab-containers-placeholder"),
 		).not.toBeInTheDocument();
+
+		await userEvent.click(screen.getByRole("tab", { name: /pods/i }));
+		expect(await screen.findByTestId("pods-empty")).toBeInTheDocument();
 
 		await userEvent.click(screen.getByRole("tab", { name: /images/i }));
 		expect(await screen.findByTestId("images-empty")).toBeInTheDocument();
@@ -604,6 +631,7 @@ describe("deep-linked tab via ?tab=", () => {
 
 	it.each([
 		["containers", "Containers", "containers-empty"],
+		["pods", "Pods", "pods-empty"],
 		["volumes", "Volumes", "volumes-empty"],
 		["images", "Images", "images-empty"],
 		["networks", "Networks", "networks-empty"],
@@ -634,6 +662,7 @@ describe("deep-linked tab via ?tab=", () => {
 		expect(counts.machine).toBe(1);
 		expect(counts.images).toBe(1);
 		expect(counts.containers).toBe(0);
+		expect(counts.pods).toBe(0);
 		expect(counts.volumes).toBe(0);
 		expect(counts.networks).toBe(0);
 		expect(counts.quadlets).toBe(0);

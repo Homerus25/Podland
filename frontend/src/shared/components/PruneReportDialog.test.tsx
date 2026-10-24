@@ -158,6 +158,16 @@ describe("PruneReportDialog report state", () => {
 		expect(within(rows[1]).getByText("image is in use")).toBeInTheDocument();
 	});
 
+	it("renders an em dash for a size-less entry (pods report IDs only)", () => {
+		renderDialog(
+			makeMutation({ data: [{ id: "cccc" }] as unknown as StubEntry[] }),
+		);
+
+		const rows = screen.getAllByTestId("prune-report-row");
+		expect(within(rows[0]).getByText("cccc")).toBeInTheDocument();
+		expect(within(rows[0]).getByText("—")).toBeInTheDocument();
+	});
+
 	it("renders the empty-report copy under the empty testid", () => {
 		renderDialog(makeMutation({ data: [] }));
 

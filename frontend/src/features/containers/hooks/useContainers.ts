@@ -13,8 +13,11 @@ import {
 	containerQueryKey,
 	containersQueryKey,
 } from "@shared/queries/queryKeys";
-import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
-import { useQuery } from "@tanstack/react-query";
+import {
+	invalidateMachineResources,
+	useListInvalidatingMutation,
+} from "@shared/queries/useListInvalidatingMutation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 export function useContainers(machineId: string) {
 	return useQuery({
@@ -81,9 +84,19 @@ export function useDeleteContainer(machineId: string) {
 }
 
 export function useCreateContainer(machineId: string) {
-	return useListInvalidatingMutation(
-		machineId,
-		"containers",
-		(input: CreateContainerInput) => createContainer(machineId, input),
-	);
+	const queryClient = useQueryClient();
+	// Hand-rolled instead of useListInvalidatingMutation (spec 356): the
+	// create additionally invalidates the pods list when the container
+	// joins one — a create that joins a pod changes the pods list's
+	// container counts (spec 352), so only then does the pods list refetch.
+	return useMutation({
+		mutationFn: (input: CreateContainerInput) =>
+			createContainer(machineId, input),
+		onSuccess: (_created, input) => {
+			invalidateMachineResources(queryClient, machineId, "containers");
+			if (input.pod) {
+				invalidateMachineResources(queryClient, machineId, "pods");
+			}
+		},
+	});
 }

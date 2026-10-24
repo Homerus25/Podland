@@ -2,6 +2,7 @@ import { ContainerDetailPage } from "@features/containers/components/ContainerDe
 import { CreateContainerPage } from "@features/containers/components/CreateContainerPage";
 import { ImageDetailPage } from "@features/images/components/ImageDetailPage";
 import { NetworkDetailPage } from "@features/networks/components/NetworkDetailPage";
+import { PodDetailPage } from "@features/pods/components/PodDetailPage";
 import { SecretDetailPage } from "@features/secrets/components/SecretDetailPage";
 import { VolumeDetailPage } from "@features/volumes/components/VolumeDetailPage";
 import { AdminRoute } from "@shared/components/AdminRoute";
@@ -43,6 +44,10 @@ export function App() {
 				<Route
 					path="machines/:machineId/containers/:containerId"
 					element={<ContainerDetailPage />}
+				/>
+				<Route
+					path="machines/:machineId/pods/:podId"
+					element={<PodDetailPage />}
 				/>
 				<Route
 					path="machines/:machineId/volumes/:volumeName"

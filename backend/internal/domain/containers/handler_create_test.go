@@ -94,6 +94,45 @@ func TestContainerHandler_Create_MissingImage(t *testing.T) {
 	assert.Contains(t, rr.Body.String(), "VALIDATION_FAILED")
 }
 
+// TestContainerHandler_Create_MapsPod pins the pod mapping: the request's
+// pod field (name or ID, free string) reaches the spec's Pod field.
+func TestContainerHandler_Create_MapsPod(t *testing.T) {
+	spec := createSpec(t, `{"image": "nginx:latest", "pod": "my-pod"}`)
+
+	assert.Equal(t, "my-pod", spec.Pod, "the requested pod must reach the spec's Pod field")
+}
+
+// TestContainerHandler_Create_WithoutPodLeavesSpecUnset pins the default:
+// a request without a pod leaves the spec's Pod field empty, so the
+// container is created outside any pod as before.
+func TestContainerHandler_Create_WithoutPodLeavesSpecUnset(t *testing.T) {
+	spec := createSpec(t, `{"image": "nginx:latest"}`)
+
+	assert.Empty(t, spec.Pod, "a request without a pod must leave the spec's Pod field empty")
+}
+
+// TestContainerHandler_Create_MissingPodAnswers404 pins the documented
+// 404 through the HTTP surface: podman's not-found answer on a create
+// that requested a pod surfaces as the POD_NOT_FOUND envelope.
+func TestContainerHandler_Create_MissingPodAnswers404(t *testing.T) {
+	engine := &fakeContainerEngine{
+		createFn: func(*specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
+			return nil, &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such pod"}
+		},
+	}
+
+	rr := createRequest(newTestHandler(engine).Create, `{"image": "nginx:latest", "pod": "missing-pod"}`)
+
+	require.Equal(t, http.StatusNotFound, rr.Code, "a create against a missing pod must answer 404, not 500")
+	var got appErrors.ErrorResponse
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
+	assert.Equal(t, "POD_NOT_FOUND", got.Error.Code)
+	// The classification is ambiguous (podman's not-found covers the
+	// image, the pod, anything in the spec), so the message carries
+	// podman's own not-found text as the disambiguator.
+	assert.Equal(t, "no such pod", got.Error.Message)
+}
+
 // TestContainerHandler_Create_MissingImageAnswers404 pins the documented
 // 404 through the HTTP surface: podman's not-found answer on create (a
 // missing image) surfaces as the IMAGE_NOT_FOUND envelope, not a 500.
@@ -110,7 +149,7 @@ func TestContainerHandler_Create_MissingImageAnswers404(t *testing.T) {
 	var got appErrors.ErrorResponse
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
 	assert.Equal(t, "IMAGE_NOT_FOUND", got.Error.Code)
-	assert.Equal(t, "Image not found", got.Error.Message)
+	assert.Equal(t, "no such image", got.Error.Message)
 }
 
 // createSpec serves a create request through the handler over the fake

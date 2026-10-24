@@ -149,6 +149,14 @@ var (
 	ErrPodNotFound             = NewAppError("POD_NOT_FOUND", "Pod not found", http.StatusNotFound)
 )
 
+// Pods
+var (
+	// ErrPodStateConflict is 409: podman refuses a lifecycle action
+	// because the pod's containers are in the wrong state (pausing a
+	// paused pod, removing a running pod without force).
+	ErrPodStateConflict = NewAppError("POD_STATE_CONFLICT", "Pod state conflict", http.StatusConflict)
+)
+
 // Images
 var (
 	ErrImageNotFound         = NewAppError("IMAGE_NOT_FOUND", "Image not found", http.StatusNotFound)

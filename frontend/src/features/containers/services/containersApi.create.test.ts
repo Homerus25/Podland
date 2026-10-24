@@ -21,6 +21,7 @@ const baseValues: CreateContainerFormValues = {
 	timezone: "",
 	restartPolicy: "",
 	remove: false,
+	pod: "",
 	environment: [],
 	portBindings: [],
 	mounts: [],
@@ -395,6 +396,29 @@ describe("buildCreateContainerInput", () => {
 		expect(
 			buildCreateContainerInput(values({ capAdd: [{ capability: "" }] })),
 		).toEqual({ image: "docker.io/library/redis:7" });
+	});
+
+	it("sends the chosen pod and omits it while No pod stays selected", () => {
+		expect(buildCreateContainerInput(values({ pod: " web-pod " })).pod).toBe(
+			"web-pod",
+		);
+		expect(buildCreateContainerInput(values({ pod: "" }))).toEqual({
+			image: "docker.io/library/redis:7",
+		});
+	});
+
+	it("drops the network selection when a pod is chosen — the pod owns networking", () => {
+		// A networks list alongside a pod is podman's refusal to answer, so
+		// the payload carries the pod alone (spec 352).
+		const withPod = buildCreateContainerInput(
+			values({ pod: "web-pod", networks: ["app-net"] }),
+		);
+		expect(withPod.pod).toBe("web-pod");
+		expect(withPod.networks).toBeUndefined();
+		// Without a pod the network selection travels unchanged.
+		expect(
+			buildCreateContainerInput(values({ networks: ["app-net"] })).networks,
+		).toEqual(["app-net"]);
 	});
 
 	it("builds the complete payload when every field is populated", () => {

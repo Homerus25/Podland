@@ -162,6 +162,9 @@ type ContainerCreateRequest struct {
 	Volumes []VolumeRequest `json:"volumes,omitempty" validate:"omitempty,dive"`
 	// Networks to attach the container to (optional)
 	Networks []string `json:"networks,omitempty"`
+	// Pod to join (optional, name or ID); when set, the container is
+	// created inside that pod and the pod owns its networking
+	Pod string `json:"pod,omitempty"`
 	// Secrets to mount into the container (optional)
 	Secrets []SecretRequest `json:"secrets,omitempty" validate:"omitempty,dive"`
 	// Host devices to pass through to the container (optional)

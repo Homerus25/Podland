@@ -182,6 +182,8 @@ type containerCreateBody struct {
 	Name    string   `json:"name,omitempty"`
 	Image   string   `json:"image"`
 	Command []string `json:"command,omitempty"`
+	// Pod joins the container to an existing pod (spec 352, ticket #354).
+	Pod string `json:"pod,omitempty"`
 }
 
 // containerCreateResponse mirrors the fields of
