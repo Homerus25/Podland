@@ -3,19 +3,13 @@ package pods
 import (
 	"context"
 	"fmt"
-	"maps"
 	"strings"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/inspect"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/removal"
-	units "github.com/docker/go-units"
-	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
-	netTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/domain/entities"
-	"go.podman.io/podman/v6/pkg/specgen"
-	podmanUtil "go.podman.io/podman/v6/pkg/util"
 )
 
 // PodService provides business logic for pods. Pods live only in the
@@ -49,87 +43,22 @@ func (s *PodService) List(ctx context.Context, userID, machineID string, opts en
 	return pods, err
 }
 
-// Create creates a new pod on the specified machine. The request's
-// networks map onto the pod spec's network map with empty per-network
-// options (mirroring containers), volumes and mounts map onto the pod
-// spec's storage config, and the infra container stays at podman's
-// default. cpus maps onto the spec's CPU limit (quota = cpus x 100000,
-// period 100000); memory parses through podman's units parser into a
-// byte limit — an unparseable value is a 400 VALIDATION_FAILED. The
-// service returns podman's create report; the handler maps the response
-// DTO.
+// Create creates a new pod on the specified machine. The request →
+// specgen mapping lives in the pure builder (buildCreateSpec,
+// create_spec.go — the per-domain create builder settlement,
+// backend-conventions); the spec is built before the lease is acquired,
+// so a request-local validation failure (the unparseable memory) never
+// costs an engine lease, and this closure is a thin lease: the engine
+// call plus the podman-side 4xx classification. The service returns
+// podman's create report; the handler maps the response DTO.
 func (s *PodService) Create(ctx context.Context, userID, machineID string, request PodCreateRequest) (*entities.PodCreateReport, error) {
+	spec, err := buildCreateSpec(request)
+	if err != nil {
+		return nil, err
+	}
+
 	var report *entities.PodCreateReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "pods.Create", func(e PodEngine) error {
-		spec := specgen.NewPodSpecGenerator()
-		spec.Name = request.Name
-
-		if len(request.Labels) > 0 {
-			spec.Labels = make(map[string]string, len(request.Labels))
-			maps.Copy(spec.Labels, request.Labels)
-		}
-
-		// Networks map to the spec's network map, one empty-options
-		// entry per requested network, mirroring containers.
-		if len(request.Networks) > 0 {
-			spec.Networks = make(map[string]netTypes.PerNetworkOptions, len(request.Networks))
-			for _, network := range request.Networks {
-				spec.Networks[network] = netTypes.PerNetworkOptions{}
-			}
-		}
-
-		// Named volumes map to the spec's volumes; the access mode
-		// rides along as the mount option (rw when omitted).
-		for _, volume := range request.Volumes {
-			spec.Volumes = append(spec.Volumes, &specgen.NamedVolume{
-				Name:    volume.Name,
-				Dest:    volume.Destination,
-				Options: []string{defaultMode(volume.Mode)},
-			})
-		}
-
-		// Bind mounts map to the spec's mounts: rbind propagation and
-		// the requested access mode (rw when omitted), mirroring the
-		// containers create mapping.
-		for _, mount := range request.Mounts {
-			options := []string{"rbind", defaultMode(mount.Mode)}
-			if mount.SelinuxShared {
-				options = append(options, "z")
-			}
-			if mount.SelinuxPrivate {
-				options = append(options, "Z")
-			}
-			if mount.ChownUser {
-				options = append(options, "U")
-			}
-			spec.Mounts = append(spec.Mounts, runtimespec.Mount{
-				Type:        "bind",
-				Source:      mount.Source,
-				Destination: mount.Destination,
-				Options:     options,
-			})
-		}
-
-		// Resource limits: cpus maps onto the spec's CPU limit (quota =
-		// cpus x 100000, period 100000, podman's own cores conversion);
-		// memory parses through podman's units parser into a byte limit.
-		// An unparseable value is the documented 400 VALIDATION_FAILED.
-		if request.CPUs != 0 || request.Memory != "" {
-			limits := &runtimespec.LinuxResources{}
-			if request.CPUs != 0 {
-				period, quota := podmanUtil.CoresToPeriodAndQuota(request.CPUs)
-				limits.CPU = &runtimespec.LinuxCPU{Period: &period, Quota: &quota}
-			}
-			if request.Memory != "" {
-				memoryBytes, err := units.RAMInBytes(request.Memory)
-				if err != nil {
-					return appErrors.ErrValidationFailed.WithMessage(fmt.Sprintf("memory: %q is not a valid size (e.g. \"512m\", \"1g\")", request.Memory))
-				}
-				limits.Memory = &runtimespec.LinuxMemory{Limit: &memoryBytes}
-			}
-			spec.ResourceLimits = limits
-		}
-
+	err = s.engines.WithEngine(ctx, userID, machineID, "pods.Create", func(e PodEngine) error {
 		// Create the pod. A podman-side 4xx rejection (duplicate name,
 		// invalid name format) means the request itself was bad: it
 		// surfaces as 400 INVALID_REQUEST carrying podman's message,
@@ -146,15 +75,6 @@ func (s *PodService) Create(ctx context.Context, userID, machineID string, reque
 		return nil
 	})
 	return report, err
-}
-
-// defaultMode returns the requested mount access mode, defaulting to rw
-// when the request omits it.
-func defaultMode(mode string) string {
-	if mode == "" {
-		return "rw"
-	}
-	return mode
 }
 
 // Get returns detailed information about a specific pod. The raw inspect

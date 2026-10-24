@@ -90,14 +90,11 @@ describe("PodList remove", () => {
 		await user.click(screen.getByTestId("remove-pod-button"));
 		await user.click(screen.getByTestId("confirm-delete-button"));
 
-		// The refusal surfaces as the running warning and the footer swaps
-		// to the force button.
+		// The refusal surfaces as the running warning; the footer swap and
+		// the rest of the ritual are pinned in the shared MutationDialog suite.
 		expect(
 			await screen.findByTestId("pod-running-warning"),
 		).toBeInTheDocument();
-		expect(
-			screen.queryByTestId("confirm-delete-button"),
-		).not.toBeInTheDocument();
 
 		await user.click(screen.getByTestId("force-remove-button"));
 

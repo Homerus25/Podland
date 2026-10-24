@@ -272,35 +272,24 @@ describe("CreateContainerPage", () => {
 		});
 	});
 
-	it("renders z, Z, and U checkboxes per bind-mount row with z and Z mutually exclusive", async () => {
+	// The flags render per bind-mount row through the shared row-editor
+	// module; the z/Z mutual-exclusion ritual is pinned once in the
+	// module suite (shared/components/RowEditor.test.tsx) and the
+	// flags' payload shape in the integration suite below.
+	it("renders the z, Z, and U checkboxes per bind-mount row", async () => {
 		setupCreatePage();
 		const user = await openCreatePage();
 		await user.click(screen.getByTestId("add-bind-mount"));
 
-		const shared = screen.getByLabelText("Bind mount 1 SELinux shared (z)");
-		const privateLabel = screen.getByLabelText(
-			"Bind mount 1 SELinux private (Z)",
-		);
-		const chown = screen.getByLabelText("Bind mount 1 chown to user (U)");
-		expect(shared).not.toBeChecked();
-		expect(privateLabel).not.toBeChecked();
-		expect(chown).not.toBeChecked();
-
-		// Checking z unchecks Z and vice versa.
-		await user.click(shared);
-		expect(shared).toBeChecked();
-		await user.click(privateLabel);
-		expect(privateLabel).toBeChecked();
-		expect(shared).not.toBeChecked();
-		await user.click(shared);
-		expect(shared).toBeChecked();
-		expect(privateLabel).not.toBeChecked();
-
-		// U is independent of the z/Z toggling.
-		await user.click(chown);
-		expect(chown).toBeChecked();
-		expect(shared).toBeChecked();
-		expect(privateLabel).not.toBeChecked();
+		expect(
+			screen.getByLabelText("Bind mount 1 SELinux shared (z)"),
+		).not.toBeChecked();
+		expect(
+			screen.getByLabelText("Bind mount 1 SELinux private (Z)"),
+		).not.toBeChecked();
+		expect(
+			screen.getByLabelText("Bind mount 1 chown to user (U)"),
+		).not.toBeChecked();
 	});
 });
 

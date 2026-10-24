@@ -2,6 +2,7 @@ import { Button, Text } from "@chakra-ui/react";
 import {
 	ActionDialog,
 	ConfirmDialog,
+	ForceConfirmDialog,
 	FormDialog,
 	FormFooter,
 	type FormStateSlice,
@@ -17,9 +18,9 @@ import { renderWithQuery } from "@/test/render";
 
 // The module drives the mutation result the caller hands it, never
 // react-query itself: the stub below is the whole interface under test.
-function makeMutation(
-	overrides: Partial<MutationSlice<string>> = {},
-): MutationSlice<string> {
+function makeMutation<TVariables = string>(
+	overrides: Partial<MutationSlice<TVariables>> = {},
+): MutationSlice<TVariables> {
 	return {
 		mutate: vi.fn(),
 		isPending: false,
@@ -445,6 +446,159 @@ describe("ConfirmDialog confirm knobs", () => {
 			screen.queryByTestId("confirm-delete-button"),
 		).not.toBeInTheDocument();
 		expect(colorSchemeOf(confirmButton)).toBe("gray");
+	});
+});
+
+describe("ForceConfirmDialog force-refusal preset", () => {
+	// The preset's payload builder takes the force flag; the stub variables
+	// mirror the shape both adapters send.
+	interface GadgetVariables {
+		id: string;
+		force: boolean;
+	}
+
+	function renderForceDialog(
+		mutation: MutationSlice<GadgetVariables>,
+		onClose: () => void = vi.fn(),
+	) {
+		return render(
+			<ForceConfirmDialog
+				mutation={mutation}
+				title="Delete gadget"
+				onClose={onClose}
+				body={stubBody()}
+				refusalCode="GADGET_IN_USE"
+				hint="One or more widgets use this gadget; force delete removes it anyway."
+				hintTestId="gadget-in-use-warning"
+				confirmLabel="Delete gadget"
+				forceLabel="Force delete"
+				forceTestId="force-delete-button"
+				confirm={(force) => ({ id: "g-1", force })}
+			/>,
+		);
+	}
+
+	it("sends the plain request first: the confirm button carries the confirm label and mutates with force=false", async () => {
+		const user = userEvent.setup();
+		const mutation = makeMutation<GadgetVariables>();
+
+		renderForceDialog(mutation);
+
+		const confirmButton = screen.getByTestId("confirm-delete-button");
+		expect(confirmButton).toHaveTextContent("Delete gadget");
+		expect(screen.queryByTestId("force-delete-button")).not.toBeInTheDocument();
+		await user.click(confirmButton);
+
+		expect(mutation.mutate).toHaveBeenCalledTimes(1);
+		expect(mutation.mutate).toHaveBeenCalledWith({ id: "g-1", force: false });
+	});
+
+	it("after the refusal error, the hint replaces the error region, the footer swaps to the force button, and the retry carries force=true", async () => {
+		const user = userEvent.setup();
+		const mutation = makeMutation<GadgetVariables>();
+		const refusal = axiosError(
+			409,
+			"GADGET_IN_USE",
+			"Gadget is in use",
+			"req-9",
+		);
+
+		const view = renderForceDialog(mutation);
+		await user.click(screen.getByTestId("confirm-delete-button"));
+		expect(mutation.mutate).toHaveBeenCalledWith({ id: "g-1", force: false });
+
+		view.rerender(
+			<ForceConfirmDialog
+				mutation={{ ...mutation, error: refusal }}
+				title="Delete gadget"
+				onClose={vi.fn()}
+				body={stubBody()}
+				refusalCode="GADGET_IN_USE"
+				hint="One or more widgets use this gadget; force delete removes it anyway."
+				hintTestId="gadget-in-use-warning"
+				confirmLabel="Delete gadget"
+				forceLabel="Force delete"
+				forceTestId="force-delete-button"
+				confirm={(force) => ({ id: "g-1", force })}
+			/>,
+		);
+
+		const hint = screen.getByTestId("gadget-in-use-warning");
+		expect(hint).toHaveTextContent(
+			"One or more widgets use this gadget; force delete removes it anyway.",
+		);
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("confirm-delete-button"),
+		).not.toBeInTheDocument();
+		const forceButton = screen.getByTestId("force-delete-button");
+		expect(forceButton).toHaveTextContent("Force delete");
+
+		await user.click(forceButton);
+
+		expect(mutation.mutate).toHaveBeenCalledTimes(2);
+		expect(mutation.mutate).toHaveBeenLastCalledWith({
+			id: "g-1",
+			force: true,
+		});
+	});
+
+	it("renders non-refusal errors through the shared error display, keeping the plain confirm and force=false", async () => {
+		const user = userEvent.setup();
+		const mutation = makeMutation<GadgetVariables>({
+			error: axiosError(400, "GADGET_BROKEN", "Gadget broke", "req-10"),
+		});
+
+		renderForceDialog(mutation);
+
+		const alert = screen.getByRole("alert");
+		expect(alert).toHaveTextContent("GADGET_BROKEN");
+		expect(alert).toHaveTextContent("Gadget broke");
+		expect(
+			screen.queryByTestId("gadget-in-use-warning"),
+		).not.toBeInTheDocument();
+		const confirmButton = screen.getByTestId("confirm-delete-button");
+		expect(screen.queryByTestId("force-delete-button")).not.toBeInTheDocument();
+
+		await user.click(confirmButton);
+
+		expect(mutation.mutate).toHaveBeenCalledWith({ id: "g-1", force: false });
+	});
+
+	it("wires pending into whichever footer button shows, keeping cancel enabled", () => {
+		const mutation = makeMutation<GadgetVariables>({ isPending: true });
+
+		const view = renderForceDialog(mutation);
+		expect(screen.getByTestId("confirm-delete-button")).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+
+		view.rerender(
+			<ForceConfirmDialog
+				mutation={
+					{
+						...mutation,
+						error: axiosError(
+							409,
+							"GADGET_IN_USE",
+							"Gadget is in use",
+							"req-9",
+						),
+					} as MutationSlice<GadgetVariables>
+				}
+				title="Delete gadget"
+				onClose={vi.fn()}
+				body={stubBody()}
+				refusalCode="GADGET_IN_USE"
+				hint="One or more widgets use this gadget; force delete removes it anyway."
+				hintTestId="gadget-in-use-warning"
+				confirmLabel="Delete gadget"
+				forceLabel="Force delete"
+				forceTestId="force-delete-button"
+				confirm={(force) => ({ id: "g-1", force })}
+			/>,
+		);
+		expect(screen.getByTestId("force-delete-button")).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
 	});
 });
 

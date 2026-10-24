@@ -12,27 +12,20 @@ import type {
 	PodPruneEntry,
 	PodSummary,
 } from "@features/pods/services/podsApi";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { ConfirmDialog } from "@shared/components/MutationDialog";
+import { ForceConfirmDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
-import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const POD_STATE_CONFLICT_CODE = "POD_STATE_CONFLICT";
-
-function isStateConflict(error: unknown): boolean {
-	return getApiError(error).code === POD_STATE_CONFLICT_CODE;
-}
-
-// The remove adapter over ConfirmDialog, mirroring the images delete
-// adapter's force flow: the first confirm requests a plain remove, and
-// after the 409 POD_STATE_CONFLICT refusal (running containers) the footer
-// swaps to the outline force button whose request carries force=true.
+// The remove adapter over the shared force-refusal preset: the module owns
+// the confirm-to-force ritual (the running hint, the footer swap, the force
+// flag keyed off the current error); this adapter keeps its domain only —
+// the POD_STATE_CONFLICT refusal code, the hint copy, the labels, the
+// testids, and the payload shape.
 function RemovePodModal({
 	pod,
 	onClose,
@@ -42,48 +35,19 @@ function RemovePodModal({
 	onClose: () => void;
 	removePod: ReturnType<typeof useRemovePod>;
 }) {
-	const conflicted = isStateConflict(removePod.error);
-
 	return (
-		<ConfirmDialog
+		<ForceConfirmDialog
 			mutation={removePod}
 			title="Remove pod"
-			confirm={() => ({ podId: pod.id, force: conflicted })}
 			onClose={onClose}
+			refusalCode="POD_STATE_CONFLICT"
+			hint="This pod has running containers, so it cannot be removed normally. Force remove also removes its running containers; they may lose work."
+			hintTestId="pod-running-warning"
+			confirmLabel="Remove pod"
+			forceLabel="Force remove"
+			forceTestId="force-remove-button"
+			confirm={(force) => ({ podId: pod.id, force })}
 			body={<Text>Remove pod “{pod.name}”? This cannot be undone.</Text>}
-			renderError={(apiError) =>
-				apiError.code === POD_STATE_CONFLICT_CODE ? (
-					<Text mt={2} color="orange.500" data-testid="pod-running-warning">
-						This pod has running containers, so it cannot be removed normally.
-						Force remove also removes its running containers; they may lose
-						work.
-					</Text>
-				) : (
-					<ErrorDisplay error={apiError} />
-				)
-			}
-			renderConfirm={({ error, isPending, onConfirm }) =>
-				isStateConflict(error) ? (
-					<Button
-						colorScheme="red"
-						variant="outline"
-						onClick={onConfirm}
-						isLoading={isPending}
-						data-testid="force-remove-button"
-					>
-						Force remove
-					</Button>
-				) : (
-					<Button
-						colorScheme="red"
-						onClick={onConfirm}
-						isLoading={isPending}
-						data-testid="confirm-delete-button"
-					>
-						Remove pod
-					</Button>
-				)
-			}
 		/>
 	);
 }

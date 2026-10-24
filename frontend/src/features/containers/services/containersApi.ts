@@ -439,7 +439,6 @@ export function buildCreateContainerInput(
 	};
 }
 
-
 // Response of POST /api/machines/{id}/containers -> 201
 // (backend/internal/domain/containers/dto.go ContainerCreateResponse).
 export interface ContainerCreated {

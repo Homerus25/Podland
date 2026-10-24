@@ -28,9 +28,7 @@ func stoppedInspect(string) ([]*entities.ContainerInspectReport, []error, error)
 func TestContainerService_Start_ResolvesContainerName(t *testing.T) {
 	engine := &fakeContainerEngine{
 		inspectFn: stoppedInspect,
-		startFn: func(string) ([]*entities.ContainerStartReport, error) {
-			return []*entities.ContainerStartReport{{Id: "container-123"}}, nil
-		},
+		startFn:   func(string) error { return nil },
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
@@ -123,12 +121,10 @@ func TestContainerService_Start_MapsNotFoundTo404(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
-	t.Run("transport-level refusal", func(t *testing.T) {
+	t.Run("start refusal", func(t *testing.T) {
 		engine := &fakeContainerEngine{
 			inspectFn: stoppedInspect,
-			startFn: func(string) ([]*entities.ContainerStartReport, error) {
-				return nil, notFound
-			},
+			startFn:   func(string) error { return notFound },
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
@@ -137,70 +133,12 @@ func TestContainerService_Start_MapsNotFoundTo404(t *testing.T) {
 		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 		assert.Nil(t, got)
 	})
-
-	t.Run("per-report refusal", func(t *testing.T) {
-		engine := &fakeContainerEngine{
-			inspectFn: stoppedInspect,
-			startFn: func(string) ([]*entities.ContainerStartReport, error) {
-				return []*entities.ContainerStartReport{{Id: "container-123", Err: notFound}}, nil
-			},
-		}
-		service := NewContainerService(fakeEngineProvider{engine: engine})
-
-		got, err := service.Start(context.Background(), "user", "machine", "container-123")
-
-		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
-		assert.Nil(t, got)
-	})
-}
-
-// TestContainerService_Start_WrapsPerItemReportError pins that a
-// per-item report error is classified and wrapped — a failed start must
-// not answer a success result.
-func TestContainerService_Start_WrapsPerItemReportError(t *testing.T) {
-	engine := &fakeContainerEngine{
-		inspectFn: stoppedInspect,
-		startFn: func(string) ([]*entities.ContainerStartReport, error) {
-			return []*entities.ContainerStartReport{{Id: "container-123", Err: assert.AnError}}, nil
-		},
-	}
-	service := NewContainerService(fakeEngineProvider{engine: engine})
-
-	got, err := service.Start(context.Background(), "user", "machine", "container-123")
-
-	require.Error(t, err)
-	assert.Nil(t, got, "a failed start must not answer a success result")
-	assert.NotErrorIs(t, err, appErrors.ErrContainerNotFound)
-	assert.Contains(t, err.Error(), "failed to start container")
-}
-
-// TestContainerService_Start_ZeroReportsIsWrappedAnomaly pins that
-// podman returning zero reports for a requested ID stays a wrapped
-// error — an anomaly, not a contract case. With the pre-action
-// inspect, it is reachable only in the race window between the
-// inspect and the start call.
-func TestContainerService_Start_ZeroReportsIsWrappedAnomaly(t *testing.T) {
-	engine := &fakeContainerEngine{
-		inspectFn: stoppedInspect,
-		startFn: func(string) ([]*entities.ContainerStartReport, error) {
-			return nil, nil
-		},
-	}
-	service := NewContainerService(fakeEngineProvider{engine: engine})
-
-	got, err := service.Start(context.Background(), "user", "machine", "container-123")
-
-	require.Error(t, err)
-	assert.Nil(t, got)
-	assert.Contains(t, err.Error(), "no start report returned for container")
 }
 
 func TestContainerService_Start_WrapsEngineFailure(t *testing.T) {
 	engine := &fakeContainerEngine{
 		inspectFn: stoppedInspect,
-		startFn: func(string) ([]*entities.ContainerStartReport, error) {
-			return nil, assert.AnError
-		},
+		startFn:   func(string) error { return assert.AnError },
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
@@ -208,5 +146,6 @@ func TestContainerService_Start_WrapsEngineFailure(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, got)
+	assert.NotErrorIs(t, err, appErrors.ErrContainerNotFound)
 	assert.Contains(t, err.Error(), "failed to start container")
 }

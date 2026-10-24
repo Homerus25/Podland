@@ -41,9 +41,9 @@ func TestContainerHandler_Stop_Success(t *testing.T) {
 				},
 			}}, nil, nil
 		},
-		stopFn: func(id string) ([]*entities.StopReport, error) {
+		stopFn: func(id string) error {
 			gotID = id
-			return []*entities.StopReport{{Id: id}}, nil
+			return nil
 		},
 	}
 
@@ -100,8 +100,8 @@ func TestContainerHandler_Stop_MissingContainerAnswers404(t *testing.T) {
 				},
 			}}, nil, nil
 		},
-		stopFn: func(string) ([]*entities.StopReport, error) {
-			return nil, &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
+		stopFn: func(string) error {
+			return &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
 		},
 	}
 
@@ -114,10 +114,10 @@ func TestContainerHandler_Stop_MissingContainerAnswers404(t *testing.T) {
 	assert.Equal(t, "Container not found", got.Error.Message)
 }
 
-// TestContainerHandler_Stop_PerItemFailureAnswers500 pins that a
-// per-item report error is classified through the HTTP surface — a
-// failed stop must not answer state "stopped".
-func TestContainerHandler_Stop_PerItemFailureAnswers500(t *testing.T) {
+// TestContainerHandler_Stop_FailureAnswers500 pins that a failed stop
+// is classified through the HTTP surface — a failed stop must not
+// answer state "stopped".
+func TestContainerHandler_Stop_FailureAnswers500(t *testing.T) {
 	engine := &fakeContainerEngine{
 		inspectFn: func(id string) ([]*entities.ContainerInspectReport, []error, error) {
 			return []*entities.ContainerInspectReport{{
@@ -127,9 +127,7 @@ func TestContainerHandler_Stop_PerItemFailureAnswers500(t *testing.T) {
 				},
 			}}, nil, nil
 		},
-		stopFn: func(id string) ([]*entities.StopReport, error) {
-			return []*entities.StopReport{{Id: id, Err: assert.AnError}}, nil
-		},
+		stopFn: func(string) error { return assert.AnError },
 	}
 
 	w := stopRequest(newTestHandler(engine).Stop, "container-123")

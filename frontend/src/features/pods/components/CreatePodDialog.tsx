@@ -1,18 +1,11 @@
-import { AddIcon, DeleteIcon } from "@chakra-ui/icons";
 import {
-	Box,
-	Button,
-	Checkbox,
 	Divider,
 	FormControl,
 	FormErrorMessage,
 	FormHelperText,
 	FormLabel,
-	Heading,
 	HStack,
-	IconButton,
 	Input,
-	Select,
 	Text,
 	VStack,
 } from "@chakra-ui/react";
@@ -20,7 +13,6 @@ import { useNetworks } from "@features/networks/hooks/useNetworks";
 import type {
 	CreatePodInput,
 	PodFormValues,
-	PodMountRow,
 } from "@features/pods/services/podsApi";
 import { buildCreatePodInput } from "@features/pods/services/podsApi";
 import { useVolumes } from "@features/volumes/hooks/useVolumes";
@@ -31,196 +23,14 @@ import {
 	FormValidityScope,
 	type MutationSlice,
 } from "@shared/components/MutationDialog";
-import type { ReactNode } from "react";
 import {
-	type UseFormRegisterReturn,
-	type UseFormSetValue,
-	useFieldArray,
-	useForm,
-} from "react-hook-form";
-
-// The row-editor chrome is the containers create page's, copied
-// feature-local (second copy, per the duplication threshold): the pod
-// create dialog is a form dialog, not a full page, so the page-level
-// Section/Divider composition does not transfer wholesale.
-
-// One labeled block inside the form; sections are separated by Dividers.
-function Section({ title, children }: { title: string; children: ReactNode }) {
-	return (
-		<Box>
-			<Heading as="h3" size="sm" mb={3}>
-				{title}
-			</Heading>
-			<VStack spacing={3} align="stretch">
-				{children}
-			</VStack>
-		</Box>
-	);
-}
-
-// The shared chrome of one field-array row: the row's controls in an
-// HStack with the remove button at the end.
-function FieldRow({
-	removeLabel,
-	removeTestId,
-	onRemove,
-	children,
-}: {
-	removeLabel: string;
-	removeTestId: string;
-	onRemove: () => void;
-	children: ReactNode;
-}) {
-	return (
-		<HStack spacing={2} align="flex-start">
-			{children}
-			<IconButton
-				aria-label={removeLabel}
-				icon={<DeleteIcon />}
-				size="sm"
-				variant="ghost"
-				onClick={onRemove}
-				data-testid={removeTestId}
-			/>
-		</HStack>
-	);
-}
-
-// The add button under a field-array row list.
-function AddRowButton({
-	label,
-	testId,
-	onAdd,
-}: {
-	label: string;
-	testId: string;
-	onAdd: () => void;
-}) {
-	return (
-		<Button
-			leftIcon={<AddIcon />}
-			size="sm"
-			variant="ghost"
-			onClick={onAdd}
-			data-testid={testId}
-		>
-			{label}
-		</Button>
-	);
-}
-
-// One text input inside a field-array row.
-function RowInput({
-	ariaLabel,
-	placeholder,
-	mono,
-	registration,
-}: {
-	ariaLabel: string;
-	placeholder?: string;
-	mono?: boolean;
-	registration: UseFormRegisterReturn;
-}) {
-	return (
-		<Input
-			fontFamily={mono ? "mono" : undefined}
-			placeholder={placeholder}
-			aria-label={ariaLabel}
-			{...registration}
-		/>
-	);
-}
-
-// One select inside a field-array row.
-function RowSelect({
-	ariaLabel,
-	options,
-	registration,
-}: {
-	ariaLabel: string;
-	options: { value: string; label: string }[];
-	registration: UseFormRegisterReturn;
-}) {
-	return (
-		<Select aria-label={ariaLabel} {...registration}>
-			{options.map((option) => (
-				<option key={option.value} value={option.value}>
-					{option.label}
-				</option>
-			))}
-		</Select>
-	);
-}
-
-// Toggling a checkbox rewrites the watched selection: checked appends
-// the option's key, unchecked removes it.
-function toggleSelection(
-	selected: string[],
-	name: string,
-	checked: boolean,
-): string[] {
-	return checked
-		? [...selected, name]
-		: selected.filter((item) => item !== name);
-}
-
-// The z/Z/U flag checkboxes of one bind-mount row — the containers create
-// page's MountFlags, copied feature-local (second copy, per the
-// duplication threshold). z (SELinux shared relabel) and Z (SELinux
-// private relabel) are mutually exclusive — checking one unchecks the
-// other — while U (chown to the container's user) is independent. The
-// checkboxes are controlled by the watched row values; toggling rewrites
-// them through setValue, the same watch+setValue shape the option
-// checkbox lists use.
-function MountFlags({
-	index,
-	row,
-	setValue,
-}: {
-	index: number;
-	row: PodMountRow | undefined;
-	setValue: UseFormSetValue<PodFormValues>;
-}) {
-	return (
-		<HStack spacing={3} pt={2}>
-			<Checkbox
-				isChecked={row?.selinuxShared ?? false}
-				onChange={(event) => {
-					const checked = event.target.checked;
-					setValue(`mounts.${index}.selinuxShared`, checked);
-					if (checked) {
-						setValue(`mounts.${index}.selinuxPrivate`, false);
-					}
-				}}
-				aria-label={`Bind mount ${index + 1} SELinux shared (z)`}
-			>
-				z
-			</Checkbox>
-			<Checkbox
-				isChecked={row?.selinuxPrivate ?? false}
-				onChange={(event) => {
-					const checked = event.target.checked;
-					setValue(`mounts.${index}.selinuxPrivate`, checked);
-					if (checked) {
-						setValue(`mounts.${index}.selinuxShared`, false);
-					}
-				}}
-				aria-label={`Bind mount ${index + 1} SELinux private (Z)`}
-			>
-				Z
-			</Checkbox>
-			<Checkbox
-				isChecked={row?.chownUser ?? false}
-				onChange={(event) =>
-					setValue(`mounts.${index}.chownUser`, event.target.checked)
-				}
-				aria-label={`Bind mount ${index + 1} chown to user (U)`}
-			>
-				U
-			</Checkbox>
-		</HStack>
-	);
-}
+	FormSection,
+	MountFlags,
+	RowInput,
+	RowListEditor,
+	RowSelect,
+} from "@shared/components/RowEditor";
+import { useFieldArray, useForm } from "react-hook-form";
 
 // Podman's units parser accepts a byte count with an optional unit
 // suffix; the client-side check mirrors it loosely — the backend's units
@@ -237,14 +47,14 @@ interface CreatePodDialogProps {
 // Create-pod dialog: a form dialog (the shared mutation-dialog preset)
 // with sections for the name, the networks the pod's infra container
 // joins (the shared checkbox list over the machine's networks), named
-// volumes and bind mounts (the containers create page's row chrome,
-// copied feature-local — second copy, per the duplication threshold),
-// labels (the shared key/value editor), and the resource limits. The
-// form-to-payload mapping lives in the services module
-// (buildCreatePodInput); the dialog keeps form ownership only. The
-// memory field's client-side check (user story 11) rides the register
-// validation, so an unparseable value disables the submit before a
-// round trip; the backend's units parser stays the validator.
+// volumes and bind mounts (the shared row-editor module — the dialog
+// keeps the row shapes, options, and copy), labels (the shared key/value
+// editor), and the resource limits. The form-to-payload mapping lives in
+// the services module (buildCreatePodInput); the dialog keeps form
+// ownership only. The memory field's client-side check (user story 11)
+// rides the register validation, so an unparseable value disables the
+// submit before a round trip; the backend's units parser stays the
+// validator.
 export function CreatePodDialog({
 	mutation,
 	machineId,
@@ -288,7 +98,7 @@ export function CreatePodDialog({
 				body={
 					<form id="create-pod-form" onSubmit={submit} noValidate>
 						<VStack spacing={4} align="stretch">
-							<Section title="Name">
+							<FormSection title="Name">
 								<FormControl isInvalid={!!errors.name}>
 									<FormLabel htmlFor="pod-name">Name</FormLabel>
 									<Input
@@ -302,71 +112,70 @@ export function CreatePodDialog({
 									/>
 									<FormErrorMessage>{errors.name?.message}</FormErrorMessage>
 								</FormControl>
-							</Section>
+							</FormSection>
 
 							<Divider />
 
-							<Section title="Networks">
+							<FormSection title="Networks">
 								<CheckboxList
 									options={(networks ?? []).map((network) => ({
 										key: network.name,
 										label: network.name,
 									}))}
 									selected={selectedNetworks}
-									onToggle={(name, checked) =>
-										setValue(
-											"networks",
-											toggleSelection(selectedNetworks, name, checked),
-										)
+									onSelect={(nextSelection) =>
+										setValue("networks", nextSelection)
 									}
 								/>
-							</Section>
+							</FormSection>
 
 							<Divider />
 
-							<Section title="Storage">
+							<FormSection title="Storage">
 								<Text fontWeight="bold" fontSize="sm">
 									Bind mounts
 								</Text>
-								{mountRows.fields.map((field, index) => (
-									<FieldRow
-										key={field.id}
-										removeLabel={`Remove bind mount ${index + 1}`}
-										removeTestId={`remove-bind-mount-${index}`}
-										onRemove={() => mountRows.remove(index)}
-									>
-										<RowInput
-											mono
-											placeholder="Source"
-											ariaLabel={`Mount source ${index + 1}`}
-											registration={register(`mounts.${index}.source` as const)}
-										/>
-										<RowInput
-											mono
-											placeholder="Destination"
-											ariaLabel={`Mount destination ${index + 1}`}
-											registration={register(
-												`mounts.${index}.destination` as const,
-											)}
-										/>
-										<RowSelect
-											ariaLabel={`Mount mode ${index + 1}`}
-											options={[
-												{ value: "rw", label: "rw" },
-												{ value: "ro", label: "ro" },
-											]}
-											registration={register(`mounts.${index}.mode` as const)}
-										/>
-										<MountFlags
-											index={index}
-											row={mountValues?.[index]}
-											setValue={setValue}
-										/>
-									</FieldRow>
-								))}
-								<AddRowButton
-									label="Add bind mount"
-									testId="add-bind-mount"
+								<RowListEditor
+									rows={mountRows}
+									noun="bind-mount"
+									addLabel="Add bind mount"
+									removeAriaLabel={(rowNumber) =>
+										`Remove bind mount ${rowNumber}`
+									}
+									renderRow={(index) => (
+										<>
+											<RowInput
+												mono
+												placeholder="Source"
+												ariaLabel={`Mount source ${index + 1}`}
+												registration={register(
+													`mounts.${index}.source` as const,
+												)}
+											/>
+											<RowInput
+												mono
+												placeholder="Destination"
+												ariaLabel={`Mount destination ${index + 1}`}
+												registration={register(
+													`mounts.${index}.destination` as const,
+												)}
+											/>
+											<RowSelect
+												ariaLabel={`Mount mode ${index + 1}`}
+												options={[
+													{ value: "rw", label: "rw" },
+													{ value: "ro", label: "ro" },
+												]}
+												registration={register(`mounts.${index}.mode` as const)}
+											/>
+											<MountFlags
+												name="mounts"
+												index={index}
+												row={mountValues?.[index]}
+												setValue={setValue}
+											/>
+										</>
+									)}
 									onAdd={() =>
 										mountRows.append({
 											source: "",
@@ -381,45 +190,48 @@ export function CreatePodDialog({
 								<Text fontWeight="bold" fontSize="sm" mt={3}>
 									Named volumes
 								</Text>
-								{volumeRows.fields.map((field, index) => (
-									<FieldRow
-										key={field.id}
-										removeLabel={`Remove named volume ${index + 1}`}
-										removeTestId={`remove-named-volume-${index}`}
-										onRemove={() => volumeRows.remove(index)}
-									>
-										<RowSelect
-											ariaLabel={`Volume name ${index + 1}`}
-											options={[
-												{ value: "", label: "Select a volume" },
-												...(volumes ?? []).map((volume) => ({
-													value: volume.name,
-													label: volume.name,
-												})),
-											]}
-											registration={register(`volumes.${index}.name` as const)}
-										/>
-										<RowInput
-											mono
-											placeholder="Destination"
-											ariaLabel={`Volume destination ${index + 1}`}
-											registration={register(
-												`volumes.${index}.destination` as const,
-											)}
-										/>
-										<RowSelect
-											ariaLabel={`Volume mode ${index + 1}`}
-											options={[
-												{ value: "rw", label: "rw" },
-												{ value: "ro", label: "ro" },
-											]}
-											registration={register(`volumes.${index}.mode` as const)}
-										/>
-									</FieldRow>
-								))}
-								<AddRowButton
-									label="Add volume"
-									testId="add-named-volume"
+								<RowListEditor
+									rows={volumeRows}
+									noun="named-volume"
+									addLabel="Add volume"
+									removeAriaLabel={(rowNumber) =>
+										`Remove named volume ${rowNumber}`
+									}
+									renderRow={(index) => (
+										<>
+											<RowSelect
+												ariaLabel={`Volume name ${index + 1}`}
+												options={[
+													{ value: "", label: "Select a volume" },
+													...(volumes ?? []).map((volume) => ({
+														value: volume.name,
+														label: volume.name,
+													})),
+												]}
+												registration={register(
+													`volumes.${index}.name` as const,
+												)}
+											/>
+											<RowInput
+												mono
+												placeholder="Destination"
+												ariaLabel={`Volume destination ${index + 1}`}
+												registration={register(
+													`volumes.${index}.destination` as const,
+												)}
+											/>
+											<RowSelect
+												ariaLabel={`Volume mode ${index + 1}`}
+												options={[
+													{ value: "rw", label: "rw" },
+													{ value: "ro", label: "ro" },
+												]}
+												registration={register(
+													`volumes.${index}.mode` as const,
+												)}
+											/>
+										</>
+									)}
 									onAdd={() =>
 										volumeRows.append({
 											name: "",
@@ -428,11 +240,11 @@ export function CreatePodDialog({
 										})
 									}
 								/>
-							</Section>
+							</FormSection>
 
 							<Divider />
 
-							<Section title="Labels">
+							<FormSection title="Labels">
 								<KeyValueEditor
 									name="labels"
 									rows={labelRows}
@@ -449,11 +261,11 @@ export function CreatePodDialog({
 									}
 									requireKeyWithValue
 								/>
-							</Section>
+							</FormSection>
 
 							<Divider />
 
-							<Section title="Resource limits">
+							<FormSection title="Resource limits">
 								<HStack spacing={4} align="flex-start">
 									<FormControl isInvalid={!!errors.cpus}>
 										<FormLabel htmlFor="pod-cpus">CPUs</FormLabel>
@@ -495,7 +307,7 @@ export function CreatePodDialog({
 										</FormErrorMessage>
 									</FormControl>
 								</HStack>
-							</Section>
+							</FormSection>
 						</VStack>
 					</form>
 				}

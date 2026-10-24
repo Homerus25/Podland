@@ -5,7 +5,6 @@ import (
 	"io"
 
 	"go.podman.io/podman/v6/pkg/domain/entities"
-	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	"go.podman.io/podman/v6/pkg/specgen"
 )
 
@@ -16,9 +15,9 @@ type fakeContainerEngine struct {
 	listFn    func(opts entities.ContainerListOptions) ([]entities.ListContainer, error)
 	createFn  func(spec *specgen.SpecGenerator) (*entities.ContainerCreateReport, error)
 	inspectFn func(id string) ([]*entities.ContainerInspectReport, []error, error)
-	startFn   func(id string) ([]*entities.ContainerStartReport, error)
-	stopFn    func(id string) ([]*entities.StopReport, error)
-	removeFn  func(id string, force bool) ([]*reports.RmReport, error)
+	startFn   func(id string) error
+	stopFn    func(id string) error
+	removeFn  func(id string, force bool) error
 	logsFn    func(name string, opts entities.ContainerLogsOptions) error
 }
 
@@ -43,21 +42,21 @@ func (f *fakeContainerEngine) Inspect(id string) ([]*entities.ContainerInspectRe
 	return f.inspectFn(id)
 }
 
-func (f *fakeContainerEngine) Start(id string) ([]*entities.ContainerStartReport, error) {
+func (f *fakeContainerEngine) Start(id string) error {
 	if f.startFn == nil {
 		panic("unexpected ContainerEngine.Start call")
 	}
 	return f.startFn(id)
 }
 
-func (f *fakeContainerEngine) Stop(id string) ([]*entities.StopReport, error) {
+func (f *fakeContainerEngine) Stop(id string) error {
 	if f.stopFn == nil {
 		panic("unexpected ContainerEngine.Stop call")
 	}
 	return f.stopFn(id)
 }
 
-func (f *fakeContainerEngine) Remove(id string, force bool) ([]*reports.RmReport, error) {
+func (f *fakeContainerEngine) Remove(id string, force bool) error {
 	if f.removeFn == nil {
 		panic("unexpected ContainerEngine.Remove call")
 	}

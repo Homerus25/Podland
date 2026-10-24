@@ -18,9 +18,15 @@ type ContainerEngine interface {
 	List(opts entities.ContainerListOptions) ([]entities.ListContainer, error)
 	Create(spec *specgen.SpecGenerator) (*entities.ContainerCreateReport, error)
 	Inspect(id string) ([]*entities.ContainerInspectReport, []error, error)
-	Start(id string) ([]*entities.ContainerStartReport, error)
-	Stop(id string) ([]*entities.StopReport, error)
-	Remove(id string, force bool) ([]*reports.RmReport, error)
+	// Start starts the container and answers one error: the adapter
+	// folds podman's one-entry report slice into the single error the
+	// service classifies.
+	Start(id string) error
+	// Stop stops the container and answers one error, like Start.
+	Stop(id string) error
+	// Remove removes the container (force also removes a running one)
+	// and answers one error, like Start.
+	Remove(id string, force bool) error
 	// Logs writes the container's logs into the writers carried by opts
 	// (follow or one-shot is the caller's choice via opts).
 	Logs(name string, opts entities.ContainerLogsOptions) error
@@ -75,16 +81,69 @@ func (e *podmanContainerEngine) Inspect(id string) ([]*entities.ContainerInspect
 	return e.tunnelEngine().ContainerInspect(e.ctx, []string{id}, entities.InspectOptions{})
 }
 
-func (e *podmanContainerEngine) Start(id string) ([]*entities.ContainerStartReport, error) {
-	return e.tunnelEngine().ContainerStart(e.ctx, []string{id}, entities.ContainerStartOptions{})
+// narrowReports narrows podman's report-slice lifecycle answer to the
+// single error the service classifies, mirroring the pods engine's
+// Remove fold: a transport error becomes the error, and the one-entry
+// report slice's per-container error — the race window where the
+// container's state changed between the call's precondition inspect
+// and its execution — becomes the error too; a clean (or empty)
+// answer is nil.
+func narrowReports[T any](reports []T, err error, errOf func(T) error) error {
+	if err != nil {
+		return err
+	}
+	for _, report := range reports {
+		if reportErr := errOf(report); reportErr != nil {
+			return reportErr
+		}
+	}
+	return nil
 }
 
-func (e *podmanContainerEngine) Stop(id string) ([]*entities.StopReport, error) {
-	return e.tunnelEngine().ContainerStop(e.ctx, []string{id}, entities.StopOptions{})
+// startReportErr reads one start report's per-container error, nil-safe
+// like the pods engine's Remove fold.
+func startReportErr(report *entities.ContainerStartReport) error {
+	if report == nil {
+		return nil
+	}
+	return report.Err
 }
 
-func (e *podmanContainerEngine) Remove(id string, force bool) ([]*reports.RmReport, error) {
-	return e.tunnelEngine().ContainerRm(e.ctx, []string{id}, entities.RmOptions{Force: force})
+// stopReportErr reads one stop report's per-container error like
+// startReportErr.
+func stopReportErr(report *entities.StopReport) error {
+	if report == nil {
+		return nil
+	}
+	return report.Err
+}
+
+// removeReportErr reads one remove report's per-container error like
+// startReportErr.
+func removeReportErr(report *reports.RmReport) error {
+	if report == nil {
+		return nil
+	}
+	return report.Err
+}
+
+// Start narrows podman's report-slice start to the single error the
+// service classifies.
+func (e *podmanContainerEngine) Start(id string) error {
+	reports, err := e.tunnelEngine().ContainerStart(e.ctx, []string{id}, entities.ContainerStartOptions{})
+	return narrowReports(reports, err, startReportErr)
+}
+
+// Stop narrows podman's report-slice stop like Start above.
+func (e *podmanContainerEngine) Stop(id string) error {
+	reports, err := e.tunnelEngine().ContainerStop(e.ctx, []string{id}, entities.StopOptions{})
+	return narrowReports(reports, err, stopReportErr)
+}
+
+// Remove narrows podman's report-slice remove like Start above.
+func (e *podmanContainerEngine) Remove(id string, force bool) error {
+	reports, err := e.tunnelEngine().ContainerRm(e.ctx, []string{id}, entities.RmOptions{Force: force})
+	return narrowReports(reports, err, removeReportErr)
 }
 
 func (e *podmanContainerEngine) Logs(name string, opts entities.ContainerLogsOptions) error {

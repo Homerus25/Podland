@@ -41,9 +41,9 @@ func TestContainerHandler_Start_Success(t *testing.T) {
 				},
 			}}, nil, nil
 		},
-		startFn: func(id string) ([]*entities.ContainerStartReport, error) {
+		startFn: func(id string) error {
 			gotID = id
-			return []*entities.ContainerStartReport{{Id: id}}, nil
+			return nil
 		},
 	}
 
@@ -100,8 +100,8 @@ func TestContainerHandler_Start_MissingContainerAnswers404(t *testing.T) {
 				},
 			}}, nil, nil
 		},
-		startFn: func(string) ([]*entities.ContainerStartReport, error) {
-			return nil, &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
+		startFn: func(string) error {
+			return &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
 		},
 	}
 
@@ -114,10 +114,10 @@ func TestContainerHandler_Start_MissingContainerAnswers404(t *testing.T) {
 	assert.Equal(t, "Container not found", got.Error.Message)
 }
 
-// TestContainerHandler_Start_PerItemFailureAnswers500 pins that a
-// per-item report error is classified through the HTTP surface — a
-// failed start must not answer state "running".
-func TestContainerHandler_Start_PerItemFailureAnswers500(t *testing.T) {
+// TestContainerHandler_Start_FailureAnswers500 pins that a failed start
+// is classified through the HTTP surface — a failed start must not
+// answer state "running".
+func TestContainerHandler_Start_FailureAnswers500(t *testing.T) {
 	engine := &fakeContainerEngine{
 		inspectFn: func(id string) ([]*entities.ContainerInspectReport, []error, error) {
 			return []*entities.ContainerInspectReport{{
@@ -127,9 +127,7 @@ func TestContainerHandler_Start_PerItemFailureAnswers500(t *testing.T) {
 				},
 			}}, nil, nil
 		},
-		startFn: func(id string) ([]*entities.ContainerStartReport, error) {
-			return []*entities.ContainerStartReport{{Id: id, Err: assert.AnError}}, nil
-		},
+		startFn: func(string) error { return assert.AnError },
 	}
 
 	w := startRequest(newTestHandler(engine).Start, "container-123")

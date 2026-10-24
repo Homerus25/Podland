@@ -1,4 +1,4 @@
-import { Box, Button, type ButtonProps } from "@chakra-ui/react";
+import { Box, Button, type ButtonProps, Text } from "@chakra-ui/react";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
 import type { ApiError } from "@shared/types/api";
@@ -161,6 +161,94 @@ export function ConfirmDialog<TVariables>({
 						</Button>
 					)}
 				</>
+			}
+		/>
+	);
+}
+
+// The force-refusal preset over ConfirmDialog: the confirm-to-force ritual
+// a destructive delete hand-rolled per feature until now. The preset owns
+// the ritual through ConfirmDialog's existing replacement seams — the
+// refusal-code hint replaces the error region (renderError, orange text,
+// with the shared ErrorDisplay for every other error), and the footer
+// swaps the confirm for the outline force button (renderConfirm) — plus
+// the force flag keyed off the current error: the first confirm sends
+// the plain request, and only after the refusal does the retry carry
+// force=true. The adapter keeps its domain only: the refusal code, the
+// hint copy and its testid, the labels, the force button's testid, and
+// the payload builder taking the force flag. Settled 2026-10-24
+// (2026-10-24 architecture review, ticket 358).
+export function ForceConfirmDialog<TVariables>({
+	mutation,
+	title,
+	onClose,
+	body,
+	refusalCode,
+	hint,
+	hintTestId,
+	confirmLabel,
+	forceLabel,
+	forceTestId,
+	confirm,
+	onSuccess,
+	onError,
+}: {
+	mutation: MutationSlice<TVariables>;
+	title: string;
+	onClose: () => void;
+	body: ReactNode;
+	refusalCode: string;
+	hint: string;
+	hintTestId: string;
+	confirmLabel: string;
+	forceLabel: string;
+	forceTestId: string;
+	confirm: (force: boolean) => TVariables;
+	onSuccess?: () => void;
+	onError?: (error: unknown) => void;
+}) {
+	const refused = (error: unknown) => getApiError(error).code === refusalCode;
+
+	return (
+		<ConfirmDialog
+			mutation={mutation}
+			title={title}
+			onClose={onClose}
+			body={body}
+			confirm={() => confirm(refused(mutation.error))}
+			confirmLabel={confirmLabel}
+			onSuccess={onSuccess}
+			onError={onError}
+			renderError={(apiError) =>
+				apiError.code === refusalCode ? (
+					<Text mt={2} color="orange.500" data-testid={hintTestId}>
+						{hint}
+					</Text>
+				) : (
+					<ErrorDisplay error={apiError} />
+				)
+			}
+			renderConfirm={({ error, isPending, onConfirm }) =>
+				refused(error) ? (
+					<Button
+						colorScheme="red"
+						variant="outline"
+						onClick={onConfirm}
+						isLoading={isPending}
+						data-testid={forceTestId}
+					>
+						{forceLabel}
+					</Button>
+				) : (
+					<Button
+						colorScheme="red"
+						onClick={onConfirm}
+						isLoading={isPending}
+						data-testid="confirm-delete-button"
+					>
+						{confirmLabel}
+					</Button>
+				)
 			}
 		/>
 	);

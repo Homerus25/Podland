@@ -30,7 +30,10 @@ describe("PasswordField", () => {
 
 	it("registers the field, so typed values reach the form", async () => {
 		renderWithQuery(<Harness />);
-		await userEvent.type(screen.getByLabelText(/^Test password/), "typed-value");
+		await userEvent.type(
+			screen.getByLabelText(/^Test password/),
+			"typed-value",
+		);
 		expect(screen.getByLabelText(/^Test password/)).toHaveValue("typed-value");
 	});
 

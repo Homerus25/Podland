@@ -7,7 +7,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
-	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
 func newTestHandler(engine *fakeContainerEngine) *ContainerHandler {
@@ -32,9 +31,9 @@ func TestContainerHandler_Delete_Success(t *testing.T) {
 	var gotID string
 	var gotForce bool
 	engine := &fakeContainerEngine{
-		removeFn: func(id string, force bool) ([]*reports.RmReport, error) {
+		removeFn: func(id string, force bool) error {
 			gotID, gotForce = id, force
-			return []*reports.RmReport{{Id: id}}, nil
+			return nil
 		},
 	}
 
@@ -49,9 +48,9 @@ func TestContainerHandler_Delete_Success(t *testing.T) {
 func TestContainerHandler_Delete_Force(t *testing.T) {
 	var gotForce bool
 	engine := &fakeContainerEngine{
-		removeFn: func(id string, force bool) ([]*reports.RmReport, error) {
+		removeFn: func(id string, force bool) error {
 			gotForce = force
-			return []*reports.RmReport{{Id: id}}, nil
+			return nil
 		},
 	}
 

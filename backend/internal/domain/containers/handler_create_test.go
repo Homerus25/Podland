@@ -9,14 +9,18 @@ import (
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	netTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 	"go.podman.io/podman/v6/pkg/specgen"
 )
+
+// The create handler suite pins only what the wire owns: the 201
+// response contract, the decode/validation 400s, the two 404 forks,
+// and the unknown-capability error surfacing. The request → specgen
+// mapping is pinned as direct builder table tests (create_spec_test.go)
+// — no handler, no fake engine, no HTTP ride.
 
 // createRequest serves POST /api/machines/{id}/containers with the given
 // JSON body through the handler with an authenticated test identity.
@@ -30,48 +34,23 @@ func createRequest(create http.HandlerFunc, body string) *httptest.ResponseRecor
 	})
 }
 
-// TestContainerHandler_Create_Success pins the create contract through the
-// real service: 201 with the created container's ID, name, state, and
-// image, and the request decoded into the machine's spec.
+// TestContainerHandler_Create_Success pins the 201 contract: a decoded
+// create request answers 201 with the created container's ID, name,
+// state, and image.
 func TestContainerHandler_Create_Success(t *testing.T) {
-	requestBody := `{
-		"name": "test-container",
-		"image": "nginx:latest",
-		"command": ["/bin/sh", "-c", "echo hello"],
-		"environment": {
-			"ENV1": "value1"
-		},
-		"labels": {
-			"app": "test"
-		}
-	}`
-
-	var gotImage string
-	var gotName string
-	var gotCommand []string
-	var gotEnv map[string]string
-	var gotLabels map[string]string
 	engine := &fakeContainerEngine{
-		createFn: func(spec *specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
-			gotImage = spec.Image
-			gotName = spec.Name
-			gotCommand = spec.Command
-			gotEnv = spec.Env
-			gotLabels = spec.Labels
+		createFn: func(*specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
 			return &entities.ContainerCreateReport{Id: "container-123"}, nil
 		},
 	}
 
-	rr := createRequest(newTestHandler(engine).Create, requestBody)
+	rr := createRequest(newTestHandler(engine).Create, `{
+		"name": "test-container",
+		"image": "nginx:latest"
+	}`)
 
 	assert.Equal(t, http.StatusCreated, rr.Code, "Should return 201 Created for successful container creation")
 	assert.Equal(t, "application/json", rr.Header().Get("Content-Type"), "Should return JSON content type")
-
-	assert.Equal(t, "nginx:latest", gotImage, "the request image must reach the machine's spec")
-	assert.Equal(t, "test-container", gotName, "the request name must reach the machine's spec")
-	assert.Equal(t, []string{"/bin/sh", "-c", "echo hello"}, gotCommand, "the request command must reach the machine's spec")
-	assert.Equal(t, map[string]string{"ENV1": "value1"}, gotEnv, "the request environment must reach the machine's spec")
-	assert.Equal(t, map[string]string{"app": "test"}, gotLabels, "the request labels must reach the machine's spec")
 
 	var result ContainerCreateResponse
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &result), "Should be able to parse JSON response")
@@ -92,23 +71,6 @@ func TestContainerHandler_Create_MissingImage(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code, "a create without an image must be refused with 400")
 	assert.Contains(t, rr.Body.String(), "VALIDATION_FAILED")
-}
-
-// TestContainerHandler_Create_MapsPod pins the pod mapping: the request's
-// pod field (name or ID, free string) reaches the spec's Pod field.
-func TestContainerHandler_Create_MapsPod(t *testing.T) {
-	spec := createSpec(t, `{"image": "nginx:latest", "pod": "my-pod"}`)
-
-	assert.Equal(t, "my-pod", spec.Pod, "the requested pod must reach the spec's Pod field")
-}
-
-// TestContainerHandler_Create_WithoutPodLeavesSpecUnset pins the default:
-// a request without a pod leaves the spec's Pod field empty, so the
-// container is created outside any pod as before.
-func TestContainerHandler_Create_WithoutPodLeavesSpecUnset(t *testing.T) {
-	spec := createSpec(t, `{"image": "nginx:latest"}`)
-
-	assert.Empty(t, spec.Pod, "a request without a pod must leave the spec's Pod field empty")
 }
 
 // TestContainerHandler_Create_MissingPodAnswers404 pins the documented
@@ -152,81 +114,6 @@ func TestContainerHandler_Create_MissingImageAnswers404(t *testing.T) {
 	assert.Equal(t, "no such image", got.Error.Message)
 }
 
-// createSpec serves a create request through the handler over the fake
-// engine and returns the spec the service built, requiring a 201 so a
-// failed create fails the test loudly.
-func createSpec(t *testing.T, body string) *specgen.SpecGenerator {
-	t.Helper()
-	var gotSpec *specgen.SpecGenerator
-	engine := &fakeContainerEngine{
-		createFn: func(spec *specgen.SpecGenerator) (*entities.ContainerCreateReport, error) {
-			gotSpec = spec
-			return &entities.ContainerCreateReport{Id: "container-123"}, nil
-		},
-	}
-
-	rr := createRequest(newTestHandler(engine).Create, body)
-
-	require.Equal(t, http.StatusCreated, rr.Code, "create should succeed: %s", rr.Body.String())
-	require.NotNil(t, gotSpec, "the engine must receive the built spec")
-	return gotSpec
-}
-
-// TestContainerHandler_Create_MapsPortBindings pins the portBindings
-// mapping: each binding reaches the spec's PortMappings with its host
-// and container port, and a binding without a protocol defaults to tcp.
-func TestContainerHandler_Create_MapsPortBindings(t *testing.T) {
-	spec := createSpec(t, `{
-		"image": "nginx:latest",
-		"portBindings": [
-			{"hostPort": 8080, "containerPort": 80, "protocol": "udp"},
-			{"hostPort": 9090, "containerPort": 90}
-		]
-	}`)
-
-	assert.Equal(t, []netTypes.PortMapping{
-		{HostPort: 8080, ContainerPort: 80, Protocol: "udp"},
-		{HostPort: 9090, ContainerPort: 90, Protocol: "tcp"},
-	}, spec.PortMappings, "port bindings must reach the spec's port mappings, protocol defaulting to tcp")
-}
-
-// TestContainerHandler_Create_MapsMounts pins the mounts mapping: each
-// bind mount reaches the spec's Mounts as a bind mount with rbind
-// propagation and the requested access mode (rw when omitted).
-func TestContainerHandler_Create_MapsMounts(t *testing.T) {
-	spec := createSpec(t, `{
-		"image": "nginx:latest",
-		"mounts": [
-			{"source": "/host/nginx.conf", "destination": "/etc/nginx/nginx.conf", "mode": "ro"},
-			{"source": "/host/html", "destination": "/usr/share/nginx/html"}
-		]
-	}`)
-
-	assert.Equal(t, []runtimespec.Mount{
-		{Type: "bind", Source: "/host/nginx.conf", Destination: "/etc/nginx/nginx.conf", Options: []string{"rbind", "ro"}},
-		{Type: "bind", Source: "/host/html", Destination: "/usr/share/nginx/html", Options: []string{"rbind", "rw"}},
-	}, spec.Mounts, "mounts must reach the spec as bind mounts with rbind and the requested mode, defaulting to rw")
-}
-
-// TestContainerHandler_Create_MapsMountFlags pins the bind-mount flag
-// mapping: selinuxPrivate, chownUser, and selinuxShared reach the spec
-// mount's options as Z, U, and z, riding alongside the rbind propagation
-// and the requested access mode.
-func TestContainerHandler_Create_MapsMountFlags(t *testing.T) {
-	spec := createSpec(t, `{
-		"image": "nginx:latest",
-		"mounts": [
-			{"source": "/host/ssl", "destination": "/etc/ssl", "selinuxPrivate": true, "chownUser": true},
-			{"source": "/host/html", "destination": "/usr/share/nginx/html", "mode": "ro", "selinuxShared": true}
-		]
-	}`)
-
-	assert.Equal(t, []runtimespec.Mount{
-		{Type: "bind", Source: "/host/ssl", Destination: "/etc/ssl", Options: []string{"rbind", "rw", "Z", "U"}},
-		{Type: "bind", Source: "/host/html", Destination: "/usr/share/nginx/html", Options: []string{"rbind", "ro", "z"}},
-	}, spec.Mounts, "the mount flags must reach the spec's mount options as z/Z/U alongside rbind and the mode")
-}
-
 // TestContainerHandler_Create_MountFlagsMutuallyExclusive pins the z+Z
 // guard: a mount carrying both selinuxShared and selinuxPrivate is
 // refused with 400 VALIDATION_FAILED before the machine is asked (the
@@ -241,51 +128,6 @@ func TestContainerHandler_Create_MountFlagsMutuallyExclusive(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code, "a mount with both selinuxShared and selinuxPrivate must be refused with 400")
 	assert.Contains(t, rr.Body.String(), "VALIDATION_FAILED")
-}
-
-// TestContainerHandler_Create_MapsRestartPolicy pins the restartPolicy
-// mapping straight through to the spec.
-func TestContainerHandler_Create_MapsRestartPolicy(t *testing.T) {
-	spec := createSpec(t, `{"image": "nginx:latest", "restartPolicy": "unless-stopped"}`)
-
-	assert.Equal(t, "unless-stopped", spec.RestartPolicy, "the request restart policy must reach the spec")
-}
-
-// TestContainerHandler_Create_MapsRemove pins the remove mapping: the
-// request's remove flag reaches the spec's Remove pointer.
-func TestContainerHandler_Create_MapsRemove(t *testing.T) {
-	spec := createSpec(t, `{"image": "nginx:latest", "remove": true}`)
-
-	require.NotNil(t, spec.Remove, "the request remove flag must reach the spec's Remove pointer")
-	assert.True(t, *spec.Remove)
-}
-
-// TestContainerHandler_Create_MapsPrivileged pins the privileged mapping:
-// a privileged request reaches the spec's Privileged pointer as true.
-func TestContainerHandler_Create_MapsPrivileged(t *testing.T) {
-	spec := createSpec(t, `{"image": "nginx:latest", "privileged": true}`)
-
-	require.NotNil(t, spec.Privileged, "a privileged request must reach the spec's Privileged pointer")
-	assert.True(t, *spec.Privileged, "the spec must be privileged when the request asks for it")
-}
-
-// TestContainerHandler_Create_WithoutPrivilegedStaysUnprivileged pins the
-// default: a request without privileged leaves the spec's Privileged
-// pointer unset, so the container is created unprivileged as before.
-func TestContainerHandler_Create_WithoutPrivilegedStaysUnprivileged(t *testing.T) {
-	spec := createSpec(t, `{"image": "nginx:latest"}`)
-
-	assert.Nil(t, spec.Privileged, "a request without privileged must leave the spec unprivileged")
-	assert.False(t, spec.IsPrivileged(), "the spec must not be privileged when the request omits the flag")
-}
-
-// TestContainerHandler_Create_MapsCapAdd pins the capAdd mapping: the
-// requested capability names reach the spec's CapAdd verbatim — no
-// validation or rewriting happens on Podland's side.
-func TestContainerHandler_Create_MapsCapAdd(t *testing.T) {
-	spec := createSpec(t, `{"image": "nginx:latest", "capAdd": ["NET_ADMIN", "SYS_TIME"]}`)
-
-	assert.Equal(t, []string{"NET_ADMIN", "SYS_TIME"}, spec.CapAdd, "the requested capabilities must reach the spec verbatim")
 }
 
 // TestContainerHandler_Create_UnknownCapabilitySurfacesError pins that an
@@ -310,100 +152,6 @@ func TestContainerHandler_Create_UnknownCapabilitySurfacesError(t *testing.T) {
 	var got appErrors.ErrorResponse
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &got))
 	assert.Equal(t, "INTERNAL_ERROR", got.Error.Code, "the refusal must surface through the error envelope")
-}
-
-// TestContainerHandler_Create_MapsUser pins the user mapping straight
-// through to the spec.
-func TestContainerHandler_Create_MapsUser(t *testing.T) {
-	spec := createSpec(t, `{"image": "nginx:latest", "user": "1000:1000"}`)
-
-	assert.Equal(t, "1000:1000", spec.User, "the request user must reach the spec")
-}
-
-// TestContainerHandler_Create_MapsTimezone pins the timezone mapping
-// straight through to the spec.
-func TestContainerHandler_Create_MapsTimezone(t *testing.T) {
-	spec := createSpec(t, `{"image": "nginx:latest", "timezone": "Europe/Berlin"}`)
-
-	assert.Equal(t, "Europe/Berlin", spec.Timezone, "the request timezone must reach the spec")
-}
-
-// TestContainerHandler_Create_MapsNetworks pins the networks mapping:
-// each requested network becomes one entry in the spec's Networks map
-// with empty per-network options.
-func TestContainerHandler_Create_MapsNetworks(t *testing.T) {
-	spec := createSpec(t, `{"image": "nginx:latest", "networks": ["backend", "app-net"]}`)
-
-	assert.Equal(t, map[string]netTypes.PerNetworkOptions{
-		"backend": {},
-		"app-net": {},
-	}, spec.Networks, "each requested network must become one entry in the spec's network map")
-}
-
-// TestContainerHandler_Create_MapsVolumes pins the volumes mapping:
-// each named volume reaches the spec's Volumes with its name,
-// destination, and access mode as the mount option (rw when omitted).
-func TestContainerHandler_Create_MapsVolumes(t *testing.T) {
-	spec := createSpec(t, `{
-		"image": "nginx:latest",
-		"volumes": [
-			{"name": "web-data", "destination": "/usr/share/nginx/html", "mode": "ro"},
-			{"name": "web-cache", "destination": "/var/cache/nginx"}
-		]
-	}`)
-
-	require.Len(t, spec.Volumes, 2, "each requested volume must reach the spec's volumes")
-	assert.Equal(t, &specgen.NamedVolume{
-		Name:    "web-data",
-		Dest:    "/usr/share/nginx/html",
-		Options: []string{"ro"},
-	}, spec.Volumes[0])
-	assert.Equal(t, &specgen.NamedVolume{
-		Name:    "web-cache",
-		Dest:    "/var/cache/nginx",
-		Options: []string{"rw"},
-	}, spec.Volumes[1], "a volume without a mode maps with the rw default as its option")
-}
-
-// TestContainerHandler_Create_MapsSecrets pins the secrets mapping: the
-// secret's source and target reach the spec's Secrets, with the target
-// defaulting to /run/secrets/<source> when the request omits it.
-func TestContainerHandler_Create_MapsSecrets(t *testing.T) {
-	spec := createSpec(t, `{
-		"image": "nginx:latest",
-		"secrets": [
-			{"source": "db-password"},
-			{"source": "api-key", "target": "/etc/secrets/api-key"}
-		]
-	}`)
-
-	assert.Equal(t, []specgen.Secret{
-		{Source: "db-password", Target: "/run/secrets/db-password"},
-		{Source: "api-key", Target: "/etc/secrets/api-key"},
-	}, spec.Secrets, "secrets must reach the spec with the target defaulting to /run/secrets/<source>")
-}
-
-// TestContainerHandler_Create_MapsDevices pins the devices mapping: each
-// device reaches the spec's Devices with its host path, and a device
-// whose container path differs from its host path also gets a bind
-// mount at the container path.
-func TestContainerHandler_Create_MapsDevices(t *testing.T) {
-	spec := createSpec(t, `{
-		"image": "nginx:latest",
-		"devices": [
-			{"hostPath": "/dev/dri", "containerPath": "/dev/dri"},
-			{"hostPath": "/dev/video0", "containerPath": "/dev/video"}
-		]
-	}`)
-
-	assert.Equal(t, []runtimespec.LinuxDevice{
-		{Path: "/dev/dri"},
-		{Path: "/dev/video0"},
-	}, spec.Devices, "each device must reach the spec's device list with its host path")
-
-	assert.Equal(t, []runtimespec.Mount{
-		{Type: "bind", Source: "/dev/video0", Destination: "/dev/video", Options: []string{"rbind"}},
-	}, spec.Mounts, "a device whose container path differs from its host path must also get a bind mount")
 }
 
 // TestContainerHandler_Create_Validation pins the validation guards on

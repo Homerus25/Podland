@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { errorJson, errorResponse } from "@/test/errors";
+import { errorJson } from "@/test/errors";
 import { imageFixture, machineFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -128,36 +128,5 @@ describe("ImageList delete", () => {
 		expect(deleteRequests.count).toBe(2);
 		expect(forceRequested).toBe(true);
 		expect(await screen.findByTestId("images-empty")).toBeInTheDocument();
-	});
-
-	it("renders non-in-use delete errors through the shared error display inside the modal", async () => {
-		resetCounters();
-		server.use(
-			http.get("*/api/machines/m-1/images", () =>
-				HttpResponse.json(imagesFixture),
-			),
-			http.delete("*/api/machines/m-1/images/*", () =>
-				errorResponse(
-					400,
-					"IMAGE_REMOVE_FAILED",
-					"Image removal failed on the host",
-					"req-12",
-				),
-			),
-		);
-		await renderImageList();
-
-		await userEvent.click(
-			screen.getAllByRole("button", { name: /delete docker\.io/i })[0],
-		);
-		await userEvent.click(screen.getByTestId("confirm-delete-button"));
-
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("IMAGE_REMOVE_FAILED")).toBeInTheDocument();
-		expect(
-			screen.getByText("Image removal failed on the host"),
-		).toBeInTheDocument();
-		expect(screen.getByTestId("modal")).toBeInTheDocument();
-		expect(screen.queryByTestId("force-delete-button")).not.toBeInTheDocument();
 	});
 });

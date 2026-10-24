@@ -8,16 +8,15 @@ import (
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
 func TestContainerService_Delete_Succeeds(t *testing.T) {
 	var gotForce bool
 	engine := &fakeContainerEngine{
-		removeFn: func(id string, force bool) ([]*reports.RmReport, error) {
+		removeFn: func(id string, force bool) error {
 			gotForce = force
-			return []*reports.RmReport{{Id: id}}, nil
+			return nil
 		},
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
@@ -31,24 +30,9 @@ func TestContainerService_Delete_Succeeds(t *testing.T) {
 func TestContainerService_Delete_MapsNotFoundTo404(t *testing.T) {
 	notFound := &errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}
 
-	t.Run("transport-level refusal", func(t *testing.T) {
+	t.Run("remove refusal", func(t *testing.T) {
 		engine := &fakeContainerEngine{
-			removeFn: func(string, bool) ([]*reports.RmReport, error) {
-				return nil, notFound
-			},
-		}
-		service := NewContainerService(fakeEngineProvider{engine: engine})
-
-		err := service.Delete(context.Background(), "user", "machine", "container-123", false)
-
-		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
-	})
-
-	t.Run("per-report refusal", func(t *testing.T) {
-		engine := &fakeContainerEngine{
-			removeFn: func(string, bool) ([]*reports.RmReport, error) {
-				return []*reports.RmReport{{Err: notFound}}, nil
-			},
+			removeFn: func(string, bool) error { return notFound },
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
@@ -60,9 +44,7 @@ func TestContainerService_Delete_MapsNotFoundTo404(t *testing.T) {
 
 func TestContainerService_Delete_WrapsEngineFailure(t *testing.T) {
 	engine := &fakeContainerEngine{
-		removeFn: func(string, bool) ([]*reports.RmReport, error) {
-			return nil, assert.AnError
-		},
+		removeFn: func(string, bool) error { return assert.AnError },
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 

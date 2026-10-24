@@ -28,9 +28,7 @@ func runningInspect(string) ([]*entities.ContainerInspectReport, []error, error)
 func TestContainerService_Stop_ResolvesContainerName(t *testing.T) {
 	engine := &fakeContainerEngine{
 		inspectFn: runningInspect,
-		stopFn: func(string) ([]*entities.StopReport, error) {
-			return []*entities.StopReport{{Id: "container-123"}}, nil
-		},
+		stopFn:    func(string) error { return nil },
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
@@ -116,12 +114,10 @@ func TestContainerService_Stop_MapsNotFoundTo404(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
-	t.Run("transport-level refusal", func(t *testing.T) {
+	t.Run("stop refusal", func(t *testing.T) {
 		engine := &fakeContainerEngine{
 			inspectFn: runningInspect,
-			stopFn: func(string) ([]*entities.StopReport, error) {
-				return nil, notFound
-			},
+			stopFn:    func(string) error { return notFound },
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
@@ -130,70 +126,12 @@ func TestContainerService_Stop_MapsNotFoundTo404(t *testing.T) {
 		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 		assert.Nil(t, got)
 	})
-
-	t.Run("per-report refusal", func(t *testing.T) {
-		engine := &fakeContainerEngine{
-			inspectFn: runningInspect,
-			stopFn: func(string) ([]*entities.StopReport, error) {
-				return []*entities.StopReport{{Id: "container-123", Err: notFound}}, nil
-			},
-		}
-		service := NewContainerService(fakeEngineProvider{engine: engine})
-
-		got, err := service.Stop(context.Background(), "user", "machine", "container-123")
-
-		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
-		assert.Nil(t, got)
-	})
-}
-
-// TestContainerService_Stop_WrapsPerItemReportError pins that a
-// per-item report error is classified and wrapped — a failed stop must
-// not answer a success result.
-func TestContainerService_Stop_WrapsPerItemReportError(t *testing.T) {
-	engine := &fakeContainerEngine{
-		inspectFn: runningInspect,
-		stopFn: func(string) ([]*entities.StopReport, error) {
-			return []*entities.StopReport{{Id: "container-123", Err: assert.AnError}}, nil
-		},
-	}
-	service := NewContainerService(fakeEngineProvider{engine: engine})
-
-	got, err := service.Stop(context.Background(), "user", "machine", "container-123")
-
-	require.Error(t, err)
-	assert.Nil(t, got, "a failed stop must not answer a success result")
-	assert.NotErrorIs(t, err, appErrors.ErrContainerNotFound)
-	assert.Contains(t, err.Error(), "failed to stop container")
-}
-
-// TestContainerService_Stop_ZeroReportsIsWrappedAnomaly pins that
-// podman returning zero reports for a requested ID stays a wrapped
-// error — an anomaly, not a contract case. With the pre-action
-// inspect, it is reachable only in the race window between the
-// inspect and the stop call.
-func TestContainerService_Stop_ZeroReportsIsWrappedAnomaly(t *testing.T) {
-	engine := &fakeContainerEngine{
-		inspectFn: runningInspect,
-		stopFn: func(string) ([]*entities.StopReport, error) {
-			return nil, nil
-		},
-	}
-	service := NewContainerService(fakeEngineProvider{engine: engine})
-
-	got, err := service.Stop(context.Background(), "user", "machine", "container-123")
-
-	require.Error(t, err)
-	assert.Nil(t, got)
-	assert.Contains(t, err.Error(), "no stop report returned for container")
 }
 
 func TestContainerService_Stop_WrapsEngineFailure(t *testing.T) {
 	engine := &fakeContainerEngine{
 		inspectFn: runningInspect,
-		stopFn: func(string) ([]*entities.StopReport, error) {
-			return nil, assert.AnError
-		},
+		stopFn:    func(string) error { return assert.AnError },
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
@@ -201,5 +139,6 @@ func TestContainerService_Stop_WrapsEngineFailure(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, got)
+	assert.NotErrorIs(t, err, appErrors.ErrContainerNotFound)
 	assert.Contains(t, err.Error(), "failed to stop container")
 }

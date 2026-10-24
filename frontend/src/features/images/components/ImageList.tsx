@@ -8,13 +8,11 @@ import {
 } from "@features/images/hooks/useImages";
 import type { ImageSummary } from "@features/images/services/imagesApi";
 import { can } from "@features/machines/permissions";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { ConfirmDialog } from "@shared/components/MutationDialog";
+import { ForceConfirmDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
-import { getApiError } from "@shared/utils/api";
 import {
 	formatBytes,
 	formatRelativeDate,
@@ -23,20 +21,11 @@ import {
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const USED_BY_CONTAINERS_CODE = "IMAGE_USED_BY_CONTAINERS";
-
-function isUsedByContainers(error: unknown): boolean {
-	return getApiError(error).code === USED_BY_CONTAINERS_CODE;
-}
-
-// The delete adapter over ConfirmDialog. This is where both replacement
-// seams prove out: on the IMAGE_USED_BY_CONTAINERS error the footer's
-// confirm button swaps to the outline force button (renderConfirm), and the
-// in-use hint replaces the whole error region (renderError); any other
-// error renders through the shared ErrorDisplay inside the same seam. The
-// force flag keys off the current error code exactly as before: the first
-// confirm requests a plain delete, and only after the in-use rejection does
-// the force request carry force=true.
+// The delete adapter over the shared force-refusal preset: the module owns
+// the confirm-to-force ritual (the in-use hint, the footer swap, the force
+// flag keyed off the current error); this adapter keeps its domain only —
+// the IMAGE_USED_BY_CONTAINERS refusal code, the hint copy, the labels,
+// the testids, and the payload shape.
 function DeleteImageModal({
 	image,
 	onClose,
@@ -46,52 +35,23 @@ function DeleteImageModal({
 	onClose: () => void;
 	deleteImage: ReturnType<typeof useDeleteImage>;
 }) {
-	const inUse = isUsedByContainers(deleteImage.error);
-
 	return (
-		<ConfirmDialog
+		<ForceConfirmDialog
 			mutation={deleteImage}
 			title="Delete image"
-			confirm={() => ({ imageId: image.id, force: inUse })}
 			onClose={onClose}
+			refusalCode="IMAGE_USED_BY_CONTAINERS"
+			hint="One or more containers use this image, so it cannot be deleted normally. Force delete removes the image even though containers still use it; those containers may stop working."
+			hintTestId="image-in-use-warning"
+			confirmLabel="Delete image"
+			forceLabel="Force delete"
+			forceTestId="force-delete-button"
+			confirm={(force) => ({ imageId: image.id, force })}
 			body={
 				<Text>
 					Delete {displayTags(image)} ({shortImageId(image.id)}) from this
 					machine? This cannot be undone.
 				</Text>
-			}
-			renderError={(apiError) =>
-				apiError.code === USED_BY_CONTAINERS_CODE ? (
-					<Text mt={2} color="orange.500" data-testid="image-in-use-warning">
-						One or more containers use this image, so it cannot be deleted
-						normally. Force delete removes the image even though containers
-						still use it; those containers may stop working.
-					</Text>
-				) : (
-					<ErrorDisplay error={apiError} />
-				)
-			}
-			renderConfirm={({ error, isPending, onConfirm }) =>
-				isUsedByContainers(error) ? (
-					<Button
-						colorScheme="red"
-						variant="outline"
-						onClick={onConfirm}
-						isLoading={isPending}
-						data-testid="force-delete-button"
-					>
-						Force delete
-					</Button>
-				) : (
-					<Button
-						colorScheme="red"
-						onClick={onConfirm}
-						isLoading={isPending}
-						data-testid="confirm-delete-button"
-					>
-						Delete image
-					</Button>
-				)
 			}
 		/>
 	);

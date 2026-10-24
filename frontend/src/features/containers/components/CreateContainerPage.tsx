@@ -1,6 +1,5 @@
-import { AddIcon, DeleteIcon } from "@chakra-ui/icons";
+import { AddIcon } from "@chakra-ui/icons";
 import {
-	Box,
 	Button,
 	Checkbox,
 	Divider,
@@ -9,9 +8,7 @@ import {
 	FormLabel,
 	Heading,
 	HStack,
-	IconButton,
 	Input,
-	Progress,
 	Select,
 	Text,
 	useToast,
@@ -21,14 +18,14 @@ import {
 	useCreateContainer,
 	useStartContainer,
 } from "@features/containers/hooks/useContainers";
+import { usePullThenRetry } from "@features/containers/hooks/usePullThenRetry";
 import {
 	buildCreateContainerInput,
 	type CreateContainerFormValues,
-	type MountRow,
 } from "@features/containers/services/containersApi";
-import { usePullImage } from "@features/images/hooks/usePullImage";
-import { usePods } from "@features/pods/hooks/usePods";
+import { PullProgressDisplay } from "@features/images/components/PullProgressDisplay";
 import { useNetworks } from "@features/networks/hooks/useNetworks";
+import { usePods } from "@features/pods/hooks/usePods";
 import { useSecrets } from "@features/secrets/hooks/useSecrets";
 import { CreateVolumeDialog } from "@features/volumes/components/CreateVolumeDialog";
 import {
@@ -38,199 +35,18 @@ import {
 import { CheckboxList } from "@shared/components/CheckboxList";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { KeyValueEditor } from "@shared/components/KeyValueEditor";
+import {
+	FormSection,
+	MountFlags,
+	RowInput,
+	RowListEditor,
+	RowSelect,
+} from "@shared/components/RowEditor";
 import { machineTabPath } from "@shared/routes/detailRoute";
 import { getApiError } from "@shared/utils/api";
-import { formatBytes } from "@shared/utils/format";
-import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
-import {
-	type UseFormRegisterReturn,
-	type UseFormSetValue,
-	useFieldArray,
-	useForm,
-} from "react-hook-form";
+import { useState } from "react";
+import { useFieldArray, useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
-
-// Toggling a checkbox rewrites the watched selection: checked appends
-// the option's key, unchecked removes it.
-function toggleSelection(
-	selected: string[],
-	name: string,
-	checked: boolean,
-): string[] {
-	return checked
-		? [...selected, name]
-		: selected.filter((item) => item !== name);
-}
-
-// One labeled block inside the form; sections are separated by Dividers.
-function Section({ title, children }: { title: string; children: ReactNode }) {
-	return (
-		<Box>
-			<Heading as="h3" size="sm" mb={3}>
-				{title}
-			</Heading>
-			<VStack spacing={3} align="stretch">
-				{children}
-			</VStack>
-		</Box>
-	);
-}
-
-// The shared chrome of one field-array row: the row's controls in an
-// HStack with the remove button at the end.
-function FieldRow({
-	removeLabel,
-	removeTestId,
-	onRemove,
-	children,
-}: {
-	removeLabel: string;
-	removeTestId: string;
-	onRemove: () => void;
-	children: ReactNode;
-}) {
-	return (
-		<HStack spacing={2} align="flex-start">
-			{children}
-			<IconButton
-				aria-label={removeLabel}
-				icon={<DeleteIcon />}
-				size="sm"
-				variant="ghost"
-				onClick={onRemove}
-				data-testid={removeTestId}
-			/>
-		</HStack>
-	);
-}
-
-// The add button under a field-array row list.
-function AddRowButton({
-	label,
-	testId,
-	onAdd,
-}: {
-	label: string;
-	testId: string;
-	onAdd: () => void;
-}) {
-	return (
-		<Button
-			leftIcon={<AddIcon />}
-			size="sm"
-			variant="ghost"
-			onClick={onAdd}
-			data-testid={testId}
-		>
-			{label}
-		</Button>
-	);
-}
-
-// One text input inside a field-array row.
-function RowInput({
-	ariaLabel,
-	placeholder,
-	type,
-	mono,
-	registration,
-}: {
-	ariaLabel: string;
-	placeholder?: string;
-	type?: string;
-	mono?: boolean;
-	registration: UseFormRegisterReturn;
-}) {
-	return (
-		<Input
-			type={type}
-			fontFamily={mono ? "mono" : undefined}
-			placeholder={placeholder}
-			aria-label={ariaLabel}
-			{...registration}
-		/>
-	);
-}
-
-// One select inside a field-array row.
-function RowSelect({
-	ariaLabel,
-	options,
-	registration,
-}: {
-	ariaLabel: string;
-	options: { value: string; label: string }[];
-	registration: UseFormRegisterReturn;
-}) {
-	return (
-		<Select aria-label={ariaLabel} {...registration}>
-			{options.map((option) => (
-				<option key={option.value} value={option.value}>
-					{option.label}
-				</option>
-			))}
-		</Select>
-	);
-}
-
-// The z/Z/U flag checkboxes of one bind-mount row (spec 341, ticket
-// #348): z (SELinux shared relabel) and Z (SELinux private relabel) are
-// mutually exclusive — checking one unchecks the other — while U (chown
-// to the container's user) is independent. The checkboxes are
-// controlled by the watched row values; toggling rewrites them through
-// setValue, the same watch+setValue shape the option checkbox lists
-// use. Named-volume rows never render these: the flags are bind-mount
-// only.
-function MountFlags({
-	index,
-	row,
-	setValue,
-}: {
-	index: number;
-	row: MountRow | undefined;
-	setValue: UseFormSetValue<CreateContainerFormValues>;
-}) {
-	return (
-		<HStack spacing={3} pt={2}>
-			<Checkbox
-				isChecked={row?.selinuxShared ?? false}
-				onChange={(event) => {
-					const checked = event.target.checked;
-					setValue(`mounts.${index}.selinuxShared` as const, checked);
-					if (checked) {
-						setValue(`mounts.${index}.selinuxPrivate` as const, false);
-					}
-				}}
-				aria-label={`Bind mount ${index + 1} SELinux shared (z)`}
-			>
-				z
-			</Checkbox>
-			<Checkbox
-				isChecked={row?.selinuxPrivate ?? false}
-				onChange={(event) => {
-					const checked = event.target.checked;
-					setValue(`mounts.${index}.selinuxPrivate` as const, checked);
-					if (checked) {
-						setValue(`mounts.${index}.selinuxShared` as const, false);
-					}
-				}}
-				aria-label={`Bind mount ${index + 1} SELinux private (Z)`}
-			>
-				Z
-			</Checkbox>
-			<Checkbox
-				isChecked={row?.chownUser ?? false}
-				onChange={(event) =>
-					setValue(`mounts.${index}.chownUser` as const, event.target.checked)
-				}
-				aria-label={`Bind mount ${index + 1} chown to user (U)`}
-			>
-				U
-			</Checkbox>
-		</HStack>
-	);
-}
 
 // The create-container page (spec 341, ticket #344): the full-page
 // replacement for the former create dialog — 14 fields across 7 sections
@@ -247,7 +63,6 @@ export function CreateContainerPage() {
 	const { machineId } = useParams<{ machineId: string }>();
 	const navigate = useNavigate();
 	const createContainer = useCreateContainer(machineId!);
-	const pullImage = usePullImage(machineId!);
 	const startContainer = useStartContainer(machineId!);
 	const toast = useToast();
 	const createVolume = useCreateVolume(machineId!);
@@ -308,15 +123,6 @@ export function CreateContainerPage() {
 		: null;
 	const imageNotFound = createError?.code === "IMAGE_NOT_FOUND";
 
-	// The pull progress display mirrors PullImageForm's: status text
-	// plus a byte progress bar once the stream reports amounts.
-	const pullCurrent = pullImage.progress?.state?.current;
-	const pullTotal = pullImage.progress?.state?.total;
-	const pullPercent =
-		pullCurrent !== undefined && pullTotal !== undefined && pullTotal > 0
-			? Math.round((pullCurrent / pullTotal) * 100)
-			: undefined;
-
 	const environmentRows = useFieldArray({ control, name: "environment" });
 	const portRows = useFieldArray({ control, name: "portBindings" });
 	const mountRows = useFieldArray({ control, name: "mounts" });
@@ -364,31 +170,16 @@ export function CreateContainerPage() {
 		});
 	});
 
-	// The image-not-found pull flow (spec 341 ticket #349): the submit
-	// button — relabeled "Pull image & create container" once the create has
-	// failed with IMAGE_NOT_FOUND — pulls the missing image through the
-	// images pull stream; a pull that ends without an error re-submits
-	// the create automatically with the preserved form values, and a
-	// failed pull leaves its error inline. The form values are never
-	// touched either way.
-	// A ref, not state: the retry decision must not depend on render
-	// timing. submit() re-renders the page (the mutation's pending state),
-	// and a state guard would re-fire the effect mid-storm before its
-	// own reset lands — re-submitting in a loop. The ref flips
-	// synchronously, so the effect fires the retry exactly once.
-	const pullRequestedRef = useRef(false);
-
-	const startPull = () => {
-		pullRequestedRef.current = true;
-		pullImage.pull(getValues("image").trim());
-	};
-
-	useEffect(() => {
-		if (!pullRequestedRef.current || pullImage.isPulling) return;
-		pullRequestedRef.current = false;
-		if (pullImage.error) return;
-		submit();
-	}, [pullImage.isPulling, pullImage.error, submit]);
+	// The image-not-found pull flow (spec 341 ticket #349, deepened into
+	// a hook by spec #371 ticket #370): the submit button — relabeled
+	// "Pull image & create container" once the create has failed with
+	// IMAGE_NOT_FOUND — pulls the missing image through the images pull
+	// stream; a pull that ends without an error re-submits the create
+	// automatically with the preserved form values, and a failed pull
+	// leaves its error inline. The hook owns the pull-then-retry-once
+	// ritual; the page hands it the create re-submission and keeps only
+	// the form and the displays below.
+	const pull = usePullThenRetry(machineId!, submit);
 
 	return (
 		<VStack align="stretch" spacing={4}>
@@ -404,7 +195,7 @@ export function CreateContainerPage() {
 			</HStack>
 			<form onSubmit={submit} noValidate>
 				<VStack spacing={6} align="stretch">
-					<Section title="Basic">
+					<FormSection title="Basic">
 						<FormControl isInvalid={!!errors.image} isRequired>
 							<FormLabel htmlFor="container-image">Image</FormLabel>
 							<Input
@@ -492,11 +283,11 @@ export function CreateContainerPage() {
 								))}
 							</Select>
 						</FormControl>
-					</Section>
+					</FormSection>
 
 					<Divider />
 
-					<Section title="Environment">
+					<FormSection title="Environment">
 						<KeyValueEditor
 							name="environment"
 							rows={environmentRows}
@@ -517,49 +308,48 @@ export function CreateContainerPage() {
 							}
 							keyPlaceholder="KEY"
 						/>
-					</Section>
+					</FormSection>
 
 					<Divider />
 
-					<Section title="Ports">
-						{portRows.fields.map((field, index) => (
-							<FieldRow
-								key={field.id}
-								removeLabel={`Remove port binding ${index + 1}`}
-								removeTestId={`remove-port-binding-${index}`}
-								onRemove={() => portRows.remove(index)}
-							>
-								<RowInput
-									type="number"
-									placeholder="Host port"
-									ariaLabel={`Host port ${index + 1}`}
-									registration={register(
-										`portBindings.${index}.hostPort` as const,
-									)}
-								/>
-								<RowInput
-									type="number"
-									placeholder="Container port"
-									ariaLabel={`Container port ${index + 1}`}
-									registration={register(
-										`portBindings.${index}.containerPort` as const,
-									)}
-								/>
-								<RowSelect
-									ariaLabel={`Protocol ${index + 1}`}
-									options={[
-										{ value: "tcp", label: "tcp" },
-										{ value: "udp", label: "udp" },
-									]}
-									registration={register(
-										`portBindings.${index}.protocol` as const,
-									)}
-								/>
-							</FieldRow>
-						))}
-						<AddRowButton
-							label="Add port binding"
-							testId="add-port-binding"
+					<FormSection title="Ports">
+						<RowListEditor
+							rows={portRows}
+							noun="port-binding"
+							addLabel="Add port binding"
+							removeAriaLabel={(rowNumber) =>
+								`Remove port binding ${rowNumber}`
+							}
+							renderRow={(index) => (
+								<>
+									<RowInput
+										type="number"
+										placeholder="Host port"
+										ariaLabel={`Host port ${index + 1}`}
+										registration={register(
+											`portBindings.${index}.hostPort` as const,
+										)}
+									/>
+									<RowInput
+										type="number"
+										placeholder="Container port"
+										ariaLabel={`Container port ${index + 1}`}
+										registration={register(
+											`portBindings.${index}.containerPort` as const,
+										)}
+									/>
+									<RowSelect
+										ariaLabel={`Protocol ${index + 1}`}
+										options={[
+											{ value: "tcp", label: "tcp" },
+											{ value: "udp", label: "udp" },
+										]}
+										registration={register(
+											`portBindings.${index}.protocol` as const,
+										)}
+									/>
+								</>
+							)}
 							onAdd={() =>
 								portRows.append({
 									hostPort: "",
@@ -568,53 +358,51 @@ export function CreateContainerPage() {
 								})
 							}
 						/>
-					</Section>
+					</FormSection>
 
 					<Divider />
 
-					<Section title="Storage">
+					<FormSection title="Storage">
 						<Text fontWeight="bold" fontSize="sm">
 							Bind mounts
 						</Text>
-						{mountRows.fields.map((field, index) => (
-							<FieldRow
-								key={field.id}
-								removeLabel={`Remove bind mount ${index + 1}`}
-								removeTestId={`remove-bind-mount-${index}`}
-								onRemove={() => mountRows.remove(index)}
-							>
-								<RowInput
-									mono
-									placeholder="Source"
-									ariaLabel={`Mount source ${index + 1}`}
-									registration={register(`mounts.${index}.source` as const)}
-								/>
-								<RowInput
-									mono
-									placeholder="Destination"
-									ariaLabel={`Mount destination ${index + 1}`}
-									registration={register(
-										`mounts.${index}.destination` as const,
-									)}
-								/>
-								<RowSelect
-									ariaLabel={`Mount mode ${index + 1}`}
-									options={[
-										{ value: "rw", label: "rw" },
-										{ value: "ro", label: "ro" },
-									]}
-									registration={register(`mounts.${index}.mode` as const)}
-								/>
-								<MountFlags
-									index={index}
-									row={mountValues?.[index]}
-									setValue={setValue}
-								/>
-							</FieldRow>
-						))}
-						<AddRowButton
-							label="Add bind mount"
-							testId="add-bind-mount"
+						<RowListEditor
+							rows={mountRows}
+							noun="bind-mount"
+							addLabel="Add bind mount"
+							removeAriaLabel={(rowNumber) => `Remove bind mount ${rowNumber}`}
+							renderRow={(index) => (
+								<>
+									<RowInput
+										mono
+										placeholder="Source"
+										ariaLabel={`Mount source ${index + 1}`}
+										registration={register(`mounts.${index}.source` as const)}
+									/>
+									<RowInput
+										mono
+										placeholder="Destination"
+										ariaLabel={`Mount destination ${index + 1}`}
+										registration={register(
+											`mounts.${index}.destination` as const,
+										)}
+									/>
+									<RowSelect
+										ariaLabel={`Mount mode ${index + 1}`}
+										options={[
+											{ value: "rw", label: "rw" },
+											{ value: "ro", label: "ro" },
+										]}
+										registration={register(`mounts.${index}.mode` as const)}
+									/>
+									<MountFlags
+										name="mounts"
+										index={index}
+										row={mountValues?.[index]}
+										setValue={setValue}
+									/>
+								</>
+							)}
 							onAdd={() =>
 								mountRows.append({
 									source: "",
@@ -629,73 +417,72 @@ export function CreateContainerPage() {
 						<Text fontWeight="bold" fontSize="sm" mt={3}>
 							Named volumes
 						</Text>
-						{volumeRows.fields.map((field, index) => (
-							<FieldRow
-								key={field.id}
-								removeLabel={`Remove named volume ${index + 1}`}
-								removeTestId={`remove-named-volume-${index}`}
-								onRemove={() => volumeRows.remove(index)}
-							>
-								<RowSelect
-									ariaLabel={`Volume name ${index + 1}`}
-									options={[
-										{ value: "", label: "Select a volume" },
-										...(volumes ?? []).map((volume) => ({
-											value: volume.name,
-											label: volume.name,
-										})),
-									]}
-									registration={register(`volumes.${index}.name` as const)}
-								/>
-								<RowInput
-									mono
-									placeholder="Destination"
-									ariaLabel={`Volume destination ${index + 1}`}
-									registration={register(
-										`volumes.${index}.destination` as const,
-									)}
-								/>
-								<RowSelect
-									ariaLabel={`Volume mode ${index + 1}`}
-									options={[
-										{ value: "rw", label: "rw" },
-										{ value: "ro", label: "ro" },
-									]}
-									registration={register(`volumes.${index}.mode` as const)}
-								/>
-							</FieldRow>
-						))}
-						<HStack spacing={2}>
-							<AddRowButton
-								label="Add volume"
-								testId="add-named-volume"
-								onAdd={() =>
-									volumeRows.append({
-										name: "",
-										destination: "",
-										mode: "rw",
-									})
-								}
-							/>
-							{/* Inline volume create (spec 341, ticket #347):
-							the volume the form needs can be created without
-							leaving it; the dialog is the existing
-							create-volume one. */}
-							<Button
-								leftIcon={<AddIcon />}
-								size="sm"
-								variant="outline"
-								onClick={() => setIsCreateVolumeOpen(true)}
-								data-testid="create-volume-inline"
-							>
-								Create volume
-							</Button>
-						</HStack>
-					</Section>
+						<RowListEditor
+							rows={volumeRows}
+							noun="named-volume"
+							addLabel="Add volume"
+							removeAriaLabel={(rowNumber) =>
+								`Remove named volume ${rowNumber}`
+							}
+							renderRow={(index) => (
+								<>
+									<RowSelect
+										ariaLabel={`Volume name ${index + 1}`}
+										options={[
+											{ value: "", label: "Select a volume" },
+											...(volumes ?? []).map((volume) => ({
+												value: volume.name,
+												label: volume.name,
+											})),
+										]}
+										registration={register(`volumes.${index}.name` as const)}
+									/>
+									<RowInput
+										mono
+										placeholder="Destination"
+										ariaLabel={`Volume destination ${index + 1}`}
+										registration={register(
+											`volumes.${index}.destination` as const,
+										)}
+									/>
+									<RowSelect
+										ariaLabel={`Volume mode ${index + 1}`}
+										options={[
+											{ value: "rw", label: "rw" },
+											{ value: "ro", label: "ro" },
+										]}
+										registration={register(`volumes.${index}.mode` as const)}
+									/>
+								</>
+							)}
+							onAdd={() =>
+								volumeRows.append({
+									name: "",
+									destination: "",
+									mode: "rw",
+								})
+							}
+							// Inline volume create (spec 341, ticket #347):
+							// the volume the form needs can be created without
+							// leaving it; the dialog is the existing
+							// create-volume one.
+							addArea={
+								<Button
+									leftIcon={<AddIcon />}
+									size="sm"
+									variant="outline"
+									onClick={() => setIsCreateVolumeOpen(true)}
+									data-testid="create-volume-inline"
+								>
+									Create volume
+								</Button>
+							}
+						/>
+					</FormSection>
 
 					<Divider />
 
-					<Section title="Network">
+					<FormSection title="Network">
 						{selectedPod ? (
 							<Text
 								fontSize="sm"
@@ -713,95 +500,79 @@ export function CreateContainerPage() {
 							}))}
 							selected={selectedNetworks}
 							isDisabled={!!selectedPod}
-							onToggle={(name, checked) =>
-								setValue(
-									"networks",
-									toggleSelection(selectedNetworks, name, checked),
-								)
-							}
+							onSelect={(nextSelection) => setValue("networks", nextSelection)}
 						/>
-					</Section>
+					</FormSection>
 
 					<Divider />
 
-					<Section title="Secrets">
+					<FormSection title="Secrets">
 						<CheckboxList
 							options={(secrets ?? []).map((secret) => ({
 								key: secret.id,
 								label: secret.name,
 							}))}
 							selected={selectedSecrets}
-							onToggle={(name, checked) =>
-								setValue(
-									"secrets",
-									toggleSelection(selectedSecrets, name, checked),
-								)
-							}
+							onSelect={(nextSelection) => setValue("secrets", nextSelection)}
 						/>
-					</Section>
+					</FormSection>
 
 					<Divider />
 
-					<Section title="Devices">
-						{deviceRows.fields.map((field, index) => (
-							<FieldRow
-								key={field.id}
-								removeLabel={`Remove device ${index + 1}`}
-								removeTestId={`remove-device-${index}`}
-								onRemove={() => deviceRows.remove(index)}
-							>
-								<RowInput
-									mono
-									placeholder="Host path"
-									ariaLabel={`Device host path ${index + 1}`}
-									registration={register(`devices.${index}.hostPath` as const)}
-								/>
-								<RowInput
-									mono
-									placeholder="Container path"
-									ariaLabel={`Device container path ${index + 1}`}
-									registration={register(
-										`devices.${index}.containerPath` as const,
-									)}
-								/>
-							</FieldRow>
-						))}
-						<AddRowButton
-							label="Add device"
-							testId="add-device"
+					<FormSection title="Devices">
+						<RowListEditor
+							rows={deviceRows}
+							noun="device"
+							addLabel="Add device"
+							removeAriaLabel={(rowNumber) => `Remove device ${rowNumber}`}
+							renderRow={(index) => (
+								<>
+									<RowInput
+										mono
+										placeholder="Host path"
+										ariaLabel={`Device host path ${index + 1}`}
+										registration={register(
+											`devices.${index}.hostPath` as const,
+										)}
+									/>
+									<RowInput
+										mono
+										placeholder="Container path"
+										ariaLabel={`Device container path ${index + 1}`}
+										registration={register(
+											`devices.${index}.containerPath` as const,
+										)}
+									/>
+								</>
+							)}
 							onAdd={() =>
 								deviceRows.append({ hostPath: "", containerPath: "" })
 							}
 						/>
-					</Section>
+					</FormSection>
 
 					<Divider />
 
-					<Section title="Security">
+					<FormSection title="Security">
 						<FormControl>
 							<Checkbox {...register("privileged")}>Privileged</Checkbox>
 						</FormControl>
-						{capAddRows.fields.map((field, index) => (
-							<FieldRow
-								key={field.id}
-								removeLabel={`Remove capability ${index + 1}`}
-								removeTestId={`remove-capability-${index}`}
-								onRemove={() => capAddRows.remove(index)}
-							>
+						<RowListEditor
+							rows={capAddRows}
+							noun="capability"
+							addLabel="Add capability"
+							removeAriaLabel={(rowNumber) => `Remove capability ${rowNumber}`}
+							renderRow={(index) => (
 								<RowInput
 									mono
 									placeholder="NET_ADMIN"
 									ariaLabel={`Capability ${index + 1}`}
 									registration={register(`capAdd.${index}.capability` as const)}
 								/>
-							</FieldRow>
-						))}
-						<AddRowButton
-							label="Add capability"
-							testId="add-capability"
+							)}
 							onAdd={() => capAddRows.append({ capability: "" })}
 						/>
-					</Section>
+					</FormSection>
 
 					{createError ? (
 						<VStack
@@ -810,24 +581,18 @@ export function CreateContainerPage() {
 							data-testid="container-form-error"
 						>
 							<ErrorDisplay error={createError} />
-							{imageNotFound && pullImage.isPulling ? (
-								<Box data-testid="container-pull-progress">
-									<Text fontSize="sm">
-										{pullImage.progress?.state?.status ?? "Starting pull…"}
-									</Text>
-									{pullPercent !== undefined ? (
-										<>
-											<Progress value={pullPercent} size="sm" />
-											<Text fontSize="sm" color="gray.500">
-												{`${formatBytes(pullCurrent ?? 0)} / ${formatBytes(pullTotal ?? 0)}`}
-											</Text>
-										</>
-									) : null}
-								</Box>
+							{imageNotFound && pull.isPulling ? (
+								// The shared pull-progress presentation (spec
+								// #371, ticket #364) under the page's own
+								// test id.
+								<PullProgressDisplay
+									progress={pull.progress}
+									data-testid="container-pull-progress"
+								/>
 							) : null}
-							{imageNotFound && pullImage.error ? (
+							{imageNotFound && pull.error ? (
 								<ErrorDisplay
-									error={pullImage.error}
+									error={pull.error}
 									data-testid="container-pull-error"
 								/>
 							) : null}
@@ -852,9 +617,13 @@ export function CreateContainerPage() {
 					<Button
 						type={imageNotFound ? "button" : "submit"}
 						colorScheme="blue"
-						isLoading={createContainer.isPending || pullImage.isPulling}
-						isDisabled={!isValid || isSubmitting || pullImage.isPulling}
-						onClick={imageNotFound ? startPull : undefined}
+						isLoading={createContainer.isPending || pull.isPulling}
+						isDisabled={!isValid || isSubmitting || pull.isPulling}
+						onClick={
+							imageNotFound
+								? () => pull.startPull(getValues("image").trim())
+								: undefined
+						}
 						data-testid="container-form-submit"
 						alignSelf="flex-start"
 					>
