@@ -65,6 +65,11 @@ async function openCreateModal() {
 	return user;
 }
 
+// The full-form flow drives a long userEvent chain; under full-suite
+// parallel load it outgrows vitest's default 5s test timeout, so the
+// file sets its own.
+const TEST_TIMEOUT = 20_000;
+
 describe("VolumeList create", () => {
 	beforeEach(resetCounters);
 
@@ -89,31 +94,35 @@ describe("VolumeList create", () => {
 		).toBeInTheDocument();
 	});
 
-	it("submits name, labels, driver and options", async () => {
-		installHandlers();
-		const user = await openCreateModal();
+	it(
+		"submits name, labels, driver and options",
+		async () => {
+			installHandlers();
+			const user = await openCreateModal();
 
-		await user.type(screen.getByLabelText(/^name/i), "  app-data  ");
-		await user.click(screen.getByTestId("add-label"));
-		await user.type(screen.getByLabelText("label key 1"), "team");
-		await user.type(screen.getByLabelText("label value 1"), "platform");
+			await user.type(screen.getByLabelText(/^name/i), "  app-data  ");
+			await user.click(screen.getByTestId("add-label"));
+			await user.type(screen.getByLabelText("label key 1"), "team");
+			await user.type(screen.getByLabelText("label value 1"), "platform");
 
-		await user.click(screen.getByTestId("volume-advanced-toggle"));
-		await user.type(screen.getByLabelText("Driver"), "local");
-		await user.click(screen.getByTestId("add-option"));
-		await user.type(screen.getByLabelText("option key 1"), "type");
-		await user.type(screen.getByLabelText("option value 1"), "tmpfs");
+			await user.click(screen.getByTestId("volume-advanced-toggle"));
+			await user.type(screen.getByLabelText("Driver"), "local");
+			await user.click(screen.getByTestId("add-option"));
+			await user.type(screen.getByLabelText("option key 1"), "type");
+			await user.type(screen.getByLabelText("option value 1"), "tmpfs");
 
-		await user.click(screen.getByTestId("volume-form-submit"));
+			await user.click(screen.getByTestId("volume-form-submit"));
 
-		await waitFor(() => expect(createRequests.count).toBe(1));
-		expect(createRequests.body).toEqual({
-			name: "app-data",
-			labels: { team: "platform" },
-			driver: "local",
-			options: { type: "tmpfs" },
-		});
-	});
+			await waitFor(() => expect(createRequests.count).toBe(1));
+			expect(createRequests.body).toEqual({
+				name: "app-data",
+				labels: { team: "platform" },
+				driver: "local",
+				options: { type: "tmpfs" },
+			});
+		},
+		TEST_TIMEOUT,
+	);
 
 	it("renders the labels and options rows through the shared key/value editor", async () => {
 		installHandlers();

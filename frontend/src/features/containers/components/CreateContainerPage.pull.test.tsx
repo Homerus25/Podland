@@ -62,35 +62,44 @@ function createFailsThenSucceedsHandler() {
 	});
 }
 
+// The tests boot the full create-container page and drive userEvent
+// chains through it; under full-suite parallel load the heaviest outgrows
+// vitest's default 5s test timeout, so the file sets its own.
+const TEST_TIMEOUT = 20_000;
+
 describe("CreateContainerPage image-not-found pull flow", () => {
-	it("turns the submit into Pull image & create container on IMAGE_NOT_FOUND, values preserved", async () => {
-		setupCreatePage(
-			createHandler(
-				404,
-				errorJson("IMAGE_NOT_FOUND", "image not found", "req-1"),
-			),
-		);
-		const user = await openCreatePage();
+	it(
+		"turns the submit into Pull image & create container on IMAGE_NOT_FOUND, values preserved",
+		async () => {
+			setupCreatePage(
+				createHandler(
+					404,
+					errorJson("IMAGE_NOT_FOUND", "image not found", "req-1"),
+				),
+			);
+			const user = await openCreatePage();
 
-		await typeImage(user, "docker.io/library/nope:latest");
-		await user.type(screen.getByLabelText(/name/i), "cache");
-		await submitForm(user);
+			await typeImage(user, "docker.io/library/nope:latest");
+			await user.type(screen.getByLabelText(/name/i), "cache");
+			await submitForm(user);
 
-		// The create failure surfaces in the error region; the separate
-		// pull button is gone and the submit button carries the pull.
-		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("image not found")).toBeInTheDocument();
-		expect(screen.queryByTestId("pull-image-button")).not.toBeInTheDocument();
-		expect(screen.getByTestId("container-form-submit")).toHaveTextContent(
-			"Pull image & create container",
-		);
+			// The create failure surfaces in the error region; the separate
+			// pull button is gone and the submit button carries the pull.
+			expect(await screen.findByRole("alert")).toBeInTheDocument();
+			expect(screen.getByText("image not found")).toBeInTheDocument();
+			expect(screen.queryByTestId("pull-image-button")).not.toBeInTheDocument();
+			expect(screen.getByTestId("container-form-submit")).toHaveTextContent(
+				"Pull image & create container",
+			);
 
-		// The form values are untouched.
-		expect(
-			screen.getByDisplayValue("docker.io/library/nope:latest"),
-		).toBeInTheDocument();
-		expect(screen.getByDisplayValue("cache")).toBeInTheDocument();
-	});
+			// The form values are untouched.
+			expect(
+				screen.getByDisplayValue("docker.io/library/nope:latest"),
+			).toBeInTheDocument();
+			expect(screen.getByDisplayValue("cache")).toBeInTheDocument();
+		},
+		TEST_TIMEOUT,
+	);
 
 	it("streams pull progress inline when Pull image & create is clicked", async () => {
 		setupCreatePage(imageNotFoundCreate());

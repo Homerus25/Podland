@@ -137,6 +137,12 @@ function moveStreamHandler(events: Record<string, unknown>[], live = false) {
 	);
 }
 
+// The live transport spaces its chunks with real timers so the narration
+// renders per event; under full-suite parallel load those delays inflate
+// past testing-library's default 1s waitFor budget, so the live-stream
+// test's finds state their own.
+const FIND_TIMEOUT = 5000;
+
 // The shared wiring every dialog test needs: the source list, the machines
 // directory (the target picker's source), the preview, and the transfer.
 function useMoveHandlers() {
@@ -717,7 +723,9 @@ describe("QuadletList move/copy", () => {
 
 		// The transfer rode the stream endpoint with the migration flag — the
 		// plain request's stop/force vocabulary still rides along in move mode.
-		await waitFor(() => expect(moveRequests.count).toBe(1));
+		await waitFor(() => expect(moveRequests.count).toBe(1), {
+			timeout: FIND_TIMEOUT,
+		});
 		expect(moveRequests.body).toEqual({
 			targetMachineId: "m-2",
 			mode: "move",
@@ -730,23 +738,38 @@ describe("QuadletList move/copy", () => {
 		// runs; the terminal event's report then takes the body over instead
 		// of closing, the source list refetching behind the dialog.
 		expect(
-			await screen.findByTestId("move-migration-volume-pgdata"),
+			await screen.findByTestId(
+				"move-migration-volume-pgdata",
+				{},
+				{ timeout: FIND_TIMEOUT },
+			),
 		).toBeInTheDocument();
 		expect(
-			await screen.findByTestId("move-migration-volume-ghost"),
+			await screen.findByTestId(
+				"move-migration-volume-ghost",
+				{},
+				{ timeout: FIND_TIMEOUT },
+			),
 		).toBeInTheDocument();
 		expect(
-			await screen.findByTestId("move-migration-success"),
+			await screen.findByTestId(
+				"move-migration-success",
+				{},
+				{ timeout: FIND_TIMEOUT },
+			),
 		).toBeInTheDocument();
 		expect(
 			screen.queryByTestId("move-migration-progress"),
 		).not.toBeInTheDocument();
-		await waitFor(() => expect(quadletFetches).toBeGreaterThan(before));
+		await waitFor(() => expect(quadletFetches).toBeGreaterThan(before), {
+			timeout: FIND_TIMEOUT,
+		});
 		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
 
 		await user.click(screen.getByTestId("close-move-report-button"));
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
+		await waitFor(
+			() => expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
+			{ timeout: FIND_TIMEOUT },
 		);
 	});
 
