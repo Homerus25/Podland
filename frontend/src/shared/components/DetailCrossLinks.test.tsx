@@ -148,21 +148,16 @@ describe("detail page cross-links", () => {
 			`/machines/m-1/images/${encodeURIComponent(containerDetail.imageId!)}`,
 		);
 
-		// The back button returns to the machine detail page, on the image
-		// page's own tab (the per-resource back target).
+		// The back button is history-aware: the image detail page was
+		// reached by a cross-link, so Back rides the history stack and
+		// returns to the referring container detail page.
 		await user.click(screen.getByTestId("detail-back-button"));
-		expect(await screen.findByTestId("machine-endpoint")).toBeInTheDocument();
-		expect(screen.getByTestId("location")).toHaveTextContent(
-			"/machines/m-1?tab=images",
-		);
-
-		// Back on the Containers tab, the row opens the container detail
-		// page again.
-		await user.click(screen.getByRole("tab", { name: "Containers" }));
-		await user.click(await screen.findByTestId("container-row"));
 		expect(
 			await screen.findByTestId("container-detail-name"),
 		).toHaveTextContent("web");
+		expect(screen.getByTestId("location")).toHaveTextContent(
+			"/machines/m-1/containers/c-1",
+		);
 
 		// The secret name links to the secret's detail page, addressed by
 		// the secret's name.

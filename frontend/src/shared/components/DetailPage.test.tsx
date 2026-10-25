@@ -6,7 +6,7 @@ import {
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ReactElement, useState } from "react";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { axiosError } from "@/test/errors";
 import { rawInspectFixture } from "@/test/factories";
@@ -42,16 +42,30 @@ function defaultProps(
 	};
 }
 
-// The layout reads machineId from the route (the back button targets
-// /machines/:machineId?tab=<resource>), so every render goes through a
-// matching route inside the harness's MemoryRouter.
-function renderDetailPage(ui: ReactElement) {
+// The layout reads machineId from the route (the deep-link branch's back
+// button targets /machines/:machineId?tab=<resource>), so every render goes
+// through a matching route inside the harness's MemoryRouter. The initial
+// entries seed the history stack: one entry is a deep link (the session's
+// initial entry), two entries simulate in-app navigation to the detail page.
+function renderDetailPage(
+	ui: ReactElement,
+	initialEntries: string[] = ["/machines/m-1/containers/c-1"],
+) {
 	return renderWithQuery(
 		<Routes>
 			<Route path="/machines/:machineId/containers/:containerId" element={ui} />
+			<Route path="/machines/:machineId/images/:imageId" element={ui} />
+			<Route path="*" element={<LocationProbe />} />
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/containers/c-1"] } },
+		{ router: { initialEntries } },
 	);
+}
+
+// The back button navigates, so the suite observes the router through the
+// public interface: a probe reading the current pathname.
+function LocationProbe() {
+	const location = useLocation();
+	return <div data-testid="location-probe">{location.pathname}</div>;
 }
 
 // The reveal toggle is page-owned state: this harness wires it the way a
@@ -107,13 +121,37 @@ function LazyInspectDouble({ onFetch }: { onFetch: () => void }) {
 }
 
 describe("DetailPage", () => {
-	it("renders the header with the title and a back button to the machine's resource tab", () => {
+	it("links to the machine's resource tab when the detail page is the session's initial entry (deep link)", () => {
 		renderDetailPage(<DetailPage {...defaultProps()} />);
 
 		expect(screen.getByTestId("detail-page-title")).toHaveTextContent("web");
 		expect(screen.getByTestId("detail-back-button")).toHaveAttribute(
 			"href",
 			"/machines/m-1?tab=containers",
+		);
+	});
+
+	it("returns to the referring page via history back when the detail page was reached by in-app navigation", async () => {
+		// The detail page was reached by in-app navigation (here: from the
+		// machine page; the cross-link detail→detail case is pinned in
+		// DetailCrossLinks.test.tsx), so Back rides the history stack and
+		// the referring page returns, exactly like the browser's back
+		// button.
+		const user = userEvent.setup();
+		renderDetailPage(<DetailPage {...defaultProps({ backTo: "images" })} />, [
+			"/machines/m-1",
+			"/machines/m-1/images/i-1",
+		]);
+
+		const back = screen.getByTestId("detail-back-button");
+		// The history branch is a click handler, not a link — the accepted
+		// trade-off: no middle-click/open-in-new-tab in this branch.
+		expect(back).not.toHaveAttribute("href");
+
+		await user.click(back);
+
+		expect(await screen.findByTestId("location-probe")).toHaveTextContent(
+			"/machines/m-1",
 		);
 	});
 
