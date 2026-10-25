@@ -291,6 +291,55 @@ describe("CreateContainerPage", () => {
 			screen.getByLabelText("Bind mount 1 chown to user (U)"),
 		).not.toBeChecked();
 	});
+
+	// The Resources section (issue #377), mirroring the create-pod
+	// dialog's resource limits: the fields render, an unparseable value
+	// blocks the submit with the field error, and the payload carries
+	// cpus as a number and memory as the trimmed string.
+	it("blocks the submit while a resource limit is unparseable and explains why", async () => {
+		setupCreatePage();
+		const user = await openCreatePage();
+		await typeImage(user);
+		expect(screen.getByTestId("container-form-submit")).toBeEnabled();
+
+		const memory = screen.getByLabelText("Memory");
+		await user.type(memory, "abc");
+		expect(
+			screen.getByText("Use podman units syntax, e.g. 512m or 1g"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("container-form-submit")).toBeDisabled();
+
+		// The CPUs error blocks the submit on its own, not only alongside
+		// the memory error.
+		await user.clear(memory);
+		expect(screen.getByTestId("container-form-submit")).toBeEnabled();
+		const cpus = screen.getByLabelText("CPUs");
+		await user.type(cpus, "0");
+		expect(
+			screen.getByText("CPU limit must be a positive number"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("container-form-submit")).toBeDisabled();
+
+		await user.clear(cpus);
+		await user.type(memory, "512m");
+		expect(screen.getByTestId("container-form-submit")).toBeEnabled();
+	});
+
+	it("submits cpus as a number and memory as the trimmed string", async () => {
+		setupCreatePage();
+		const user = await openCreatePage();
+		await typeImage(user);
+		await user.type(screen.getByLabelText("CPUs"), "1.5");
+		await user.type(screen.getByLabelText("Memory"), " 512m ");
+
+		await submitForm(user);
+
+		expect(createRequests.body).toEqual({
+			image: "docker.io/library/redis:7",
+			cpus: 1.5,
+			memory: "512m",
+		});
+	});
 });
 
 // Run-after-create pins (spec 341, ticket #346): the checkbox defaults to

@@ -116,8 +116,8 @@ Create a new container on a machine.
   "remove": boolean (optional, default: false, remove the container when it exits),
   "user": "string (optional, UID or username)",
   "timezone": "string (optional, IANA name e.g. 'Europe/Berlin')",
-  "memory": "string (optional, e.g., '512m')",
-  "cpus": number (optional)
+  "memory": "string (podman units syntax, e.g. \"512m\", \"1g\", optional)",
+  "cpus": "number (CPU limit in cores, optional)"
 }
 ```
 
@@ -135,8 +135,12 @@ differs from its `hostPath` is additionally bind-mounted at the
 container path. `privileged` runs the container in privileged mode;
 `capAdd` grants the listed Linux capabilities, with each name passed to
 podman verbatim (an unknown capability name is refused by podman and
-surfaces as an error, not a silent ignore). `memory` and `cpus` are
-accepted but not yet applied. `pod` names (or IDs) an existing pod the
+surfaces as an error, not a silent ignore). `cpus` maps onto the
+container spec's CPU limit (quota = cpus × 100000, period 100000);
+`memory` parses through podman's units parser into a byte limit, and an
+unparseable `memory` value is refused with 400 `VALIDATION_FAILED` (a
+message naming the field and the expected syntax, e.g. "512m", "1g").
+`pod` names (or IDs) an existing pod the
 new container joins; when set, the value is passed to podman verbatim
 and the pod owns the container's networking (a `networks` list alongside
 a `pod` is podman's refusal to answer). A create whose requested pod
@@ -159,7 +163,7 @@ podman's own not-found text as the disambiguator.
 ```
 
 **Response (Error):**
-- 400: `VALIDATION_FAILED`, `INVALID_REQUEST`
+- 400: `VALIDATION_FAILED` (missing image; a mount with both `selinuxShared` and `selinuxPrivate`; unparseable `memory`), `INVALID_REQUEST`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
 - 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`, `POD_NOT_FOUND` (a create that requested a pod which does not exist)

@@ -31,6 +31,8 @@ const baseValues: CreateContainerFormValues = {
 	devices: [],
 	privileged: false,
 	capAdd: [],
+	cpus: "",
+	memory: "",
 };
 
 const values = (
@@ -398,6 +400,40 @@ describe("buildCreateContainerInput", () => {
 		).toEqual({ image: "docker.io/library/redis:7" });
 	});
 
+	it("parses cpus to a float and trims memory, mirroring the pod builder", () => {
+		const input = buildCreateContainerInput(
+			values({ cpus: " 1.5 ", memory: "  512m  " }),
+		);
+
+		expect(input.cpus).toBe(1.5);
+		expect(input.memory).toBe("512m");
+	});
+
+	it("omits both limits when the fields are empty", () => {
+		expect(buildCreateContainerInput(values({ cpus: "", memory: "" }))).toEqual(
+			{
+				image: "docker.io/library/redis:7",
+			},
+		);
+		expect(
+			buildCreateContainerInput(values({ cpus: "  ", memory: " " })),
+		).toEqual({
+			image: "docker.io/library/redis:7",
+		});
+	});
+
+	it("drops an unparseable cpus value and keeps a memory-only limit", () => {
+		// The field's register validation keeps an unparseable cpus from
+		// reaching the builder; the drop mirrors the pod builder's
+		// tolerance for a value that slips through anyway.
+		const input = buildCreateContainerInput(
+			values({ cpus: "abc", memory: "1g" }),
+		);
+
+		expect(input.cpus).toBeUndefined();
+		expect(input.memory).toBe("1g");
+	});
+
 	it("sends the chosen pod and omits it while No pod stays selected", () => {
 		expect(buildCreateContainerInput(values({ pod: " web-pod " })).pod).toBe(
 			"web-pod",
@@ -449,6 +485,8 @@ describe("buildCreateContainerInput", () => {
 				],
 				privileged: true,
 				capAdd: [{ capability: "NET_ADMIN" }],
+				cpus: "2",
+				memory: "1g",
 			}),
 			secrets,
 		);
@@ -475,6 +513,8 @@ describe("buildCreateContainerInput", () => {
 			],
 			privileged: true,
 			capAdd: ["NET_ADMIN"],
+			cpus: 2,
+			memory: "1g",
 		});
 	});
 });

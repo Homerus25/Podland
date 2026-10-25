@@ -62,6 +62,8 @@ describe("CreateContainerPage integration", () => {
 						containerPath: "/dev/dri/renderD128",
 					},
 				],
+				cpus: 1.5,
+				memory: "512m",
 			});
 		},
 		TEST_TIMEOUT,
@@ -134,6 +136,8 @@ describe("CreateContainerPage integration", () => {
 						containerPath: "/dev/dri/renderD128",
 					},
 				],
+				cpus: 1.5,
+				memory: "512m",
 			});
 
 			// The error envelope renders in the page's error region and the
@@ -178,6 +182,8 @@ describe("CreateContainerPage integration", () => {
 			expect(screen.getAllByDisplayValue("/dev/dri/renderD128")).toHaveLength(
 				2,
 			);
+			expect(screen.getByDisplayValue("1.5")).toBeInTheDocument();
+			expect(screen.getByDisplayValue("512m")).toBeInTheDocument();
 		},
 		TEST_TIMEOUT,
 	);

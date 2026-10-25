@@ -303,4 +303,7 @@ export async function populateAllFields(
 		screen.getByLabelText("Device container path 1"),
 		"/dev/dri/renderD128",
 	);
+	// Resources (issue #377)
+	await user.type(screen.getByLabelText("CPUs"), "1.5");
+	await user.type(screen.getByLabelText("Memory"), "512m");
 }

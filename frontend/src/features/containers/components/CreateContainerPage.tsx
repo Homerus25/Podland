@@ -5,6 +5,7 @@ import {
 	Divider,
 	FormControl,
 	FormErrorMessage,
+	FormHelperText,
 	FormLabel,
 	Heading,
 	HStack,
@@ -44,6 +45,7 @@ import {
 } from "@shared/components/RowEditor";
 import { machineTabPath } from "@shared/routes/detailRoute";
 import { getApiError } from "@shared/utils/api";
+import { MEMORY_UNITS_PATTERN } from "@shared/utils/memoryUnits";
 import { useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
@@ -109,6 +111,8 @@ export function CreateContainerPage() {
 			devices: [],
 			privileged: false,
 			capAdd: [],
+			cpus: "",
+			memory: "",
 		},
 		// onChange so the submit's disabled state tracks validity as
 		// the user types, not only after a failed submit attempt.
@@ -572,6 +576,56 @@ export function CreateContainerPage() {
 							)}
 							onAdd={() => capAddRows.append({ capability: "" })}
 						/>
+					</FormSection>
+
+					<Divider />
+
+					{/* The Resources section (issue #377), mirroring the
+						create-pod dialog's resource limits: cpus is a
+						positive-number check, memory the shared units
+						pattern — the backend's units parser stays the
+						validator, the client-side checks only keep obvious
+						typos from a round trip. */}
+					<FormSection title="Resources">
+						<HStack spacing={4} align="flex-start">
+							<FormControl isInvalid={!!errors.cpus}>
+								<FormLabel htmlFor="container-cpus">CPUs</FormLabel>
+								<Input
+									id="container-cpus"
+									type="number"
+									step="0.1"
+									min="0"
+									placeholder="1.5"
+									{...register("cpus", {
+										validate: (value) =>
+											value === "" || Number.parseFloat(value) > 0
+												? true
+												: "CPU limit must be a positive number",
+									})}
+								/>
+								<FormHelperText>CPU limit in cores.</FormHelperText>
+								<FormErrorMessage>{errors.cpus?.message}</FormErrorMessage>
+							</FormControl>
+							<FormControl isInvalid={!!errors.memory}>
+								<FormLabel htmlFor="container-memory">Memory</FormLabel>
+								<Input
+									id="container-memory"
+									fontFamily="mono"
+									placeholder="512m"
+									{...register("memory", {
+										validate: (value) =>
+											value.trim() === "" ||
+											MEMORY_UNITS_PATTERN.test(value.trim())
+												? true
+												: "Use podman units syntax, e.g. 512m or 1g",
+									})}
+								/>
+								<FormHelperText>
+									Podman units syntax, e.g. 512m or 1g.
+								</FormHelperText>
+								<FormErrorMessage>{errors.memory?.message}</FormErrorMessage>
+							</FormControl>
+						</HStack>
 					</FormSection>
 
 					{createError ? (

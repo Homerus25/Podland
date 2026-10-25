@@ -1,21 +1,26 @@
 package containers
 
 import (
+	"fmt"
 	"maps"
 
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	units "github.com/docker/go-units"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	netTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/specgen"
+	podmanUtil "go.podman.io/podman/v6/pkg/util"
 )
 
 // buildCreateSpec is the pure create builder (the per-domain create
 // builder settlement, backend-conventions): request in, populated
-// specgen out, no error — every wire-documented guard is decode-level,
-// owned by web.Decode and the request's struct tags, so the builder
-// carries no error vocabulary of its own. The service's WithEngine
-// closure stays a thin lease: the engine call plus the not-found
-// classification.
-func buildCreateSpec(request ContainerCreateRequest) *specgen.SpecGenerator {
+// specgen out, plus the memory-parse error — the builder's only error
+// branch (podman's units parser; an unparseable value answers the
+// documented 400 VALIDATION_FAILED). Every other wire-documented guard
+// is decode-level, owned by web.Decode and the request's struct tags.
+// The service's WithEngine closure stays a thin lease: the engine call
+// plus the not-found classification.
+func buildCreateSpec(request ContainerCreateRequest) (*specgen.SpecGenerator, error) {
 	// Create a basic spec generator with the image
 	spec := specgen.NewSpecGenerator(request.Image, false)
 
@@ -152,9 +157,27 @@ func buildCreateSpec(request ContainerCreateRequest) *specgen.SpecGenerator {
 		spec.CapAdd = request.CapAdd
 	}
 
-	// Memory and cpus stay unmapped (out of scope).
+	// Resource limits: cpus maps onto the spec's CPU limit (quota =
+	// cpus x 100000, period 100000, podman's own cores conversion);
+	// memory parses through podman's units parser into a byte limit.
+	// A request without limits leaves the spec's resource limits unset.
+	if request.CPUs != 0 || request.Memory != "" {
+		limits := &runtimespec.LinuxResources{}
+		if request.CPUs != 0 {
+			period, quota := podmanUtil.CoresToPeriodAndQuota(request.CPUs)
+			limits.CPU = &runtimespec.LinuxCPU{Period: &period, Quota: &quota}
+		}
+		if request.Memory != "" {
+			memoryBytes, err := units.RAMInBytes(request.Memory)
+			if err != nil {
+				return nil, appErrors.ErrValidationFailed.WithMessage(fmt.Sprintf("memory: %q is not a valid size (e.g. \"512m\", \"1g\")", request.Memory))
+			}
+			limits.Memory = &runtimespec.LinuxMemory{Limit: &memoryBytes}
+		}
+		spec.ResourceLimits = limits
+	}
 
-	return spec
+	return spec, nil
 }
 
 // bindMount builds one bind mount for the spec's Mounts: the rbind

@@ -30,13 +30,8 @@ import {
 	RowListEditor,
 	RowSelect,
 } from "@shared/components/RowEditor";
+import { MEMORY_UNITS_PATTERN } from "@shared/utils/memoryUnits";
 import { useFieldArray, useForm } from "react-hook-form";
-
-// Podman's units parser accepts a byte count with an optional unit
-// suffix; the client-side check mirrors it loosely — the backend's units
-// parser stays the validator, this only keeps obvious typos from a round
-// trip (user story 11).
-const MEMORY_PATTERN = /^\d+(\.\d+)?\s*(b|k|m|g|t|kb|mb|gb|tb)?$/i;
 
 interface CreatePodDialogProps {
 	mutation: MutationSlice<CreatePodInput>;
@@ -294,7 +289,7 @@ export function CreatePodDialog({
 											{...register("memory", {
 												validate: (value) =>
 													value.trim() === "" ||
-													MEMORY_PATTERN.test(value.trim())
+													MEMORY_UNITS_PATTERN.test(value.trim())
 														? true
 														: "Use podman units syntax, e.g. 512m or 1g",
 											})}

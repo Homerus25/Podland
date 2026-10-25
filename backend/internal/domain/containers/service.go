@@ -46,14 +46,18 @@ func (s *ContainerService) List(ctx context.Context, userID, machineID string, o
 // request → specgen mapping lives in the pure builder (buildCreateSpec,
 // create_spec.go — the per-domain create builder settlement,
 // backend-conventions); the spec is built before the lease is acquired,
-// so this closure is a thin lease: the engine call
-// plus the not-found classification. The service returns podman's
+// so a request-local validation failure (the unparseable memory) never
+// costs an engine lease, and this closure is a thin lease: the engine
+// call plus the not-found classification. The service returns podman's
 // create report; the handler maps the response DTO.
 func (s *ContainerService) Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*entities.ContainerCreateReport, error) {
-	spec := buildCreateSpec(request)
+	spec, err := buildCreateSpec(request)
+	if err != nil {
+		return nil, err
+	}
 
 	var report *entities.ContainerCreateReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Create", func(e ContainerEngine) error {
+	err = s.engines.WithEngine(ctx, userID, machineID, "containers.Create", func(e ContainerEngine) error {
 		// Create the container using Podman API. A not-found answer is
 		// the missing-image terminal — unless the request asked for a
 		// pod, in which case the missing pod is the terminal: the doku

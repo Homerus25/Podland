@@ -3,6 +3,7 @@ package containers
 import (
 	"testing"
 
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	runtimespec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -12,12 +13,13 @@ import (
 
 // TestBuildCreateSpec pins the create request → specgen mapping as
 // direct builder table tests (the pure per-domain create builder
-// settlement, backend-conventions): request in, populated spec out, no
-// error — every wire-documented guard is decode-level, owned by
-// web.Decode and the request's struct tags, so the builder carries no
-// error vocabulary of its own. No handler, no fake engine, no HTTP
-// ride: each case builds the request, calls the builder, asserts the
-// spec.
+// settlement, backend-conventions): request in, populated spec out,
+// plus the memory-parse error — the builder's only error branch
+// (podman's units parser; an unparseable value answers the documented
+// 400 VALIDATION_FAILED). Every other wire-documented guard is
+// decode-level, owned by web.Decode and the request's struct tags.
+// No handler, no fake engine, no HTTP ride: each case builds the
+// request, calls the builder, asserts the spec.
 func TestBuildCreateSpec(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -211,11 +213,49 @@ func TestBuildCreateSpec(t *testing.T) {
 				}, spec.Mounts, "a device whose container path differs from its host path must also get a bind mount")
 			},
 		},
+		{
+			name:    "cpus maps onto the CPU limit (quota = cpus x 100000, period 100000)",
+			request: ContainerCreateRequest{Image: "nginx:latest", CPUs: 1.5},
+			check: func(t *testing.T, spec *specgen.SpecGenerator) {
+				require.NotNil(t, spec.ResourceLimits, "a cpus limit must produce resource limits")
+				require.NotNil(t, spec.ResourceLimits.CPU)
+				require.NotNil(t, spec.ResourceLimits.CPU.Period)
+				require.NotNil(t, spec.ResourceLimits.CPU.Quota)
+				assert.Equal(t, uint64(100000), *spec.ResourceLimits.CPU.Period)
+				assert.Equal(t, int64(150000), *spec.ResourceLimits.CPU.Quota)
+			},
+		},
+		{
+			name:    "memory parses through podman's units parser into a byte limit",
+			request: ContainerCreateRequest{Image: "nginx:latest", Memory: "512m"},
+			check: func(t *testing.T, spec *specgen.SpecGenerator) {
+				require.NotNil(t, spec.ResourceLimits, "a memory limit must produce resource limits")
+				require.NotNil(t, spec.ResourceLimits.Memory)
+				require.NotNil(t, spec.ResourceLimits.Memory.Limit)
+				assert.Equal(t, int64(512*1024*1024), *spec.ResourceLimits.Memory.Limit)
+			},
+		},
+		{
+			name:    "a request with both limits sets both",
+			request: ContainerCreateRequest{Image: "nginx:latest", CPUs: 2, Memory: "1g"},
+			check: func(t *testing.T, spec *specgen.SpecGenerator) {
+				require.NotNil(t, spec.ResourceLimits, "a request with both limits must produce resource limits")
+				require.NotNil(t, spec.ResourceLimits.CPU, "the CPU limit must be set")
+				require.NotNil(t, spec.ResourceLimits.CPU.Period)
+				require.NotNil(t, spec.ResourceLimits.CPU.Quota)
+				assert.Equal(t, uint64(100000), *spec.ResourceLimits.CPU.Period)
+				assert.Equal(t, int64(200000), *spec.ResourceLimits.CPU.Quota)
+				require.NotNil(t, spec.ResourceLimits.Memory, "the memory limit must be set")
+				require.NotNil(t, spec.ResourceLimits.Memory.Limit)
+				assert.Equal(t, int64(1024*1024*1024), *spec.ResourceLimits.Memory.Limit)
+			},
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			spec := buildCreateSpec(tc.request)
+			spec, err := buildCreateSpec(tc.request)
+			require.NoError(t, err)
 			require.NotNil(t, spec, "the builder must return a populated spec")
 			tc.check(t, spec)
 		})
@@ -225,16 +265,33 @@ func TestBuildCreateSpec(t *testing.T) {
 // TestBuildCreateSpec_DefaultsLeaveTheSpecUnset pins the defaults: a
 // request carrying only the required image leaves the spec's Pod field
 // empty (the container is created outside any pod), the Privileged
-// pointer unset (an unprivileged container), and the Remove pointer
-// unset.
+// pointer unset (an unprivileged container), the Remove pointer
+// unset, and the resource limits unset (no cpus or memory requested).
 func TestBuildCreateSpec_DefaultsLeaveTheSpecUnset(t *testing.T) {
-	spec := buildCreateSpec(ContainerCreateRequest{Image: "nginx:latest"})
+	spec, err := buildCreateSpec(ContainerCreateRequest{Image: "nginx:latest"})
 
+	require.NoError(t, err)
 	assert.Empty(t, spec.Pod, "a request without a pod must leave the spec's Pod field empty")
 	assert.Nil(t, spec.Privileged, "a request without privileged must leave the spec unprivileged")
 	assert.False(t, spec.IsPrivileged(), "the spec must not be privileged when the request omits the flag")
 	assert.Nil(t, spec.Remove, "a request without remove must leave the spec's Remove pointer unset")
 	assert.Empty(t, spec.CapAdd, "a request without capAdd must leave the spec's CapAdd empty")
+	assert.Nil(t, spec.ResourceLimits, "a request without limits must leave the spec's resource limits unset")
+}
+
+// TestBuildCreateSpec_UnparseableMemoryAnswersValidationFailed pins the
+// builder's only error branch: an unparseable memory value answers the
+// documented 400 VALIDATION_FAILED, with a message naming the field and
+// the expected syntax.
+func TestBuildCreateSpec_UnparseableMemoryAnswersValidationFailed(t *testing.T) {
+	spec, err := buildCreateSpec(ContainerCreateRequest{Image: "nginx:latest", Memory: "not-a-size"})
+
+	assert.Nil(t, spec, "an unparseable memory value must not produce a spec")
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr, "an unparseable memory value must answer an AppError")
+	assert.Equal(t, "VALIDATION_FAILED", appErr.Code)
+	assert.Contains(t, appErr.Message, "memory", "the message must name the field")
+	assert.Contains(t, appErr.Message, "512m", "the message must name the expected syntax")
 }
 
 // boolPtr is the test-local address-of helper for the request's pointer

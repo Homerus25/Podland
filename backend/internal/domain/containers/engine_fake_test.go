@@ -73,15 +73,21 @@ func (f *fakeContainerEngine) Logs(name string, opts entities.ContainerLogsOptio
 // fakeEngineProvider arms the provider seam: engine is handed to the
 // service closure; err simulates an acquisition failure (the 502 sentinel
 // crossing) and short-circuits the closure, exactly like the production
-// manager's warn-and-sentinel behaviour.
+// manager's warn-and-sentinel behaviour. opRecorder, when set, observes
+// every crossed op, so a test can pin that a path never acquired the
+// lease at all.
 type fakeEngineProvider struct {
-	engine ContainerEngine
-	err    error
+	engine     ContainerEngine
+	err        error
+	opRecorder func(op string)
 }
 
 func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e ContainerEngine) error) error {
 	if p.err != nil {
 		return p.err
+	}
+	if p.opRecorder != nil {
+		p.opRecorder(op)
 	}
 	return fn(p.engine)
 }

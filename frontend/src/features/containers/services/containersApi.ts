@@ -200,6 +200,14 @@ export interface CreateContainerInput {
 	// capAdd): capability names passed through verbatim — podman is the
 	// validator of the names.
 	capAdd?: string[];
+	// CPU limit in cores (backend ContainerCreateRequest cpus): mapped
+	// onto the spec's CPU limit (quota = cpus x 100000, period 100000).
+	cpus?: number;
+	// Memory limit in podman units syntax, e.g. "512m" (backend
+	// ContainerCreateRequest memory): parsed server-side through
+	// podman's units parser — an unparseable value answers 400
+	// VALIDATION_FAILED.
+	memory?: string;
 }
 
 // One row of the create-container form's environment field array
@@ -276,6 +284,11 @@ export interface CreateContainerFormValues {
 	// kernel access; capAdd rows grant individual capabilities.
 	privileged: boolean;
 	capAdd: CapAddRow[];
+	// The Resources section (issue #377): both limits travel as strings —
+	// the form values are text either way; the builder parses cpus and
+	// trims memory, mirroring the create-pod dialog's fields.
+	cpus: string;
+	memory: string;
 }
 
 // The backend takes the command as a string array; the form offers one text
@@ -362,7 +375,9 @@ function capAddToInput(rows: CapAddRow[]): string[] | undefined {
 // the form-to-payload mapping — trims, the command whitespace split,
 // empty-key env skipping, integer-parseable port pairs, complete
 // mount/volume/device rows, protocol/mode defaults, network pass-through,
-// and omit-empty semantics for every optional field. `secrets` resolves
+// and omit-empty semantics for every optional field — plus the resource
+// limits: cpus parsed to a float, memory trimmed, mirroring the
+// create-pod builder. `secrets` resolves
 // the form's secret ids to payload names; it is structurally typed and
 // undefined-tolerant because the dialog's option fetch may still be
 // pending at submit time. An id whose secret no longer exists in the
@@ -414,6 +429,12 @@ export function buildCreateContainerInput(
 	const user = values.user.trim();
 	const timezone = values.timezone.trim();
 	const pod = values.pod.trim();
+	// Both limits mirror the create-pod builder: cpus parses to a float
+	// (an unparseable value is dropped here — the field's register
+	// validation keeps it from reaching the builder), memory travels
+	// verbatim (trimmed) and podman's units parser is the validator.
+	const cpus = Number.parseFloat(values.cpus);
+	const memory = values.memory.trim();
 
 	return {
 		image: values.image.trim(),
@@ -436,6 +457,8 @@ export function buildCreateContainerInput(
 		...(devices ? { devices } : {}),
 		...(values.privileged ? { privileged: true } : {}),
 		...(capAdd ? { capAdd } : {}),
+		...(values.cpus.trim() !== "" && Number.isFinite(cpus) ? { cpus } : {}),
+		...(memory !== "" ? { memory } : {}),
 	};
 }
 
