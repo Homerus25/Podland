@@ -41,9 +41,9 @@ func NewSessionRepository(db *sql.DB) *SessionRepository {
 
 // Create inserts a new session row
 func (r *SessionRepository) Create(session *Session) error {
-	query := `INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`
+	query := `INSERT INTO sessions (id, user_id, token_hash, remembered, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`
 
-	_, err := r.db.Exec(query, session.ID, session.UserID, session.TokenHash, session.CreatedAt, session.ExpiresAt)
+	_, err := r.db.Exec(query, session.ID, session.UserID, session.TokenHash, session.Remembered, session.CreatedAt, session.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
@@ -53,10 +53,10 @@ func (r *SessionRepository) Create(session *Session) error {
 
 // GetByTokenHash retrieves a session by its token hash
 func (r *SessionRepository) GetByTokenHash(tokenHash string) (*Session, error) {
-	query := `SELECT id, user_id, token_hash, created_at, expires_at FROM sessions WHERE token_hash = ?`
+	query := `SELECT id, user_id, token_hash, remembered, created_at, expires_at FROM sessions WHERE token_hash = ?`
 
 	var session Session
-	err := r.db.QueryRow(query, tokenHash).Scan(&session.ID, &session.UserID, &session.TokenHash, &session.CreatedAt, &session.ExpiresAt)
+	err := r.db.QueryRow(query, tokenHash).Scan(&session.ID, &session.UserID, &session.TokenHash, &session.Remembered, &session.CreatedAt, &session.ExpiresAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -103,8 +103,8 @@ func (r *SessionRepository) Rotate(oldTokenHash string, newSession *Session) (bo
 		return false, nil
 	}
 
-	_, err = tx.Exec(`INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		newSession.ID, newSession.UserID, newSession.TokenHash, newSession.CreatedAt, newSession.ExpiresAt)
+	_, err = tx.Exec(`INSERT INTO sessions (id, user_id, token_hash, remembered, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		newSession.ID, newSession.UserID, newSession.TokenHash, newSession.Remembered, newSession.CreatedAt, newSession.ExpiresAt)
 	if err != nil {
 		return false, fmt.Errorf("failed to insert rotated session: %w", err)
 	}

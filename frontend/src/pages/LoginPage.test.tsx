@@ -1,3 +1,4 @@
+import { REMEMBER_DEVICE_STORAGE_KEY } from "@features/auth/components/LoginForm";
 import { api, setBearerToken } from "@shared/utils/api";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -9,6 +10,7 @@ import { server } from "@/test/server";
 
 afterEach(() => {
 	setBearerToken(null);
+	localStorage.removeItem(REMEMBER_DEVICE_STORAGE_KEY);
 });
 
 describe("LoginPage", () => {
@@ -115,5 +117,103 @@ describe("LoginPage", () => {
 
 		expect(await screen.findByText("Username is required")).toBeInTheDocument();
 		expect(screen.getByText("Password is required")).toBeInTheDocument();
+	});
+
+	it("renders the remember-device checkbox unchecked by default", async () => {
+		renderApp("/login");
+
+		const checkbox = await screen.findByRole("checkbox", {
+			name: /remember this device/i,
+		});
+
+		expect(checkbox).not.toBeChecked();
+	});
+
+	it("sends rememberDevice true and persists the choice when the box is checked", async () => {
+		let body: unknown;
+		server.use(
+			http.post("*/api/auth/login", async ({ request }) => {
+				body = await request.json();
+				return HttpResponse.json({
+					token: "test-access-token",
+					username: "alice",
+					role: "user",
+				});
+			}),
+		);
+		renderApp("/login");
+
+		await userEvent.click(
+			await screen.findByRole("checkbox", { name: /remember this device/i }),
+		);
+		await loginViaForm();
+
+		expect(body).toEqual({
+			username: "alice",
+			password: "wonderland",
+			rememberDevice: true,
+		});
+		expect(localStorage.getItem(REMEMBER_DEVICE_STORAGE_KEY)).toBe("true");
+	});
+
+	it("sends rememberDevice false and persists the choice when the box is unchecked", async () => {
+		let body: unknown;
+		server.use(
+			http.post("*/api/auth/login", async ({ request }) => {
+				body = await request.json();
+				return HttpResponse.json({
+					token: "test-access-token",
+					username: "alice",
+					role: "user",
+				});
+			}),
+		);
+		renderApp("/login");
+
+		await loginViaForm();
+
+		expect(body).toEqual({
+			username: "alice",
+			password: "wonderland",
+			rememberDevice: false,
+		});
+		expect(localStorage.getItem(REMEMBER_DEVICE_STORAGE_KEY)).toBe("false");
+	});
+
+	it("does not persist the remember-device choice when login fails", async () => {
+		localStorage.setItem(REMEMBER_DEVICE_STORAGE_KEY, "true");
+		server.use(
+			http.post("*/api/auth/login", () =>
+				errorResponse(
+					401,
+					"INVALID_CREDENTIALS",
+					"Invalid username or password",
+				),
+			),
+		);
+		renderApp("/login");
+
+		// The box starts checked from the stored choice; the user unchecks
+		// it, but the login fails — the stored preference must survive.
+		await userEvent.click(
+			await screen.findByRole("checkbox", { name: /remember this device/i }),
+		);
+		await loginViaForm();
+
+		expect(
+			await screen.findByText("Invalid username or password"),
+		).toBeInTheDocument();
+		expect(localStorage.getItem(REMEMBER_DEVICE_STORAGE_KEY)).toBe("true");
+	});
+
+	it("pre-fills the remember-device checkbox from the persisted choice", async () => {
+		localStorage.setItem(REMEMBER_DEVICE_STORAGE_KEY, "true");
+		renderApp("/login");
+
+		const checkbox = await screen.findByRole("checkbox", {
+			name: /remember this device/i,
+		});
+
+		expect(checkbox).toBeChecked();
 	});
 });

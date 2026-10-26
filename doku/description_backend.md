@@ -91,6 +91,7 @@ backend/
 | `JWT_EXPIRATION_MINUTES` | `60` | No | JWT token expiration in minutes |
 | `JWT_ISSUER` | `podland` | No | JWT issuer claim |
 | `SESSION_TTL_DAYS` | `30` | No | Days a login's refresh session stays redeemable |
+| `SESSION_REMEMBER_TTL_DAYS` | `90` | No | Days a "remember this device" login's refresh session stays redeemable (must be >= `SESSION_TTL_DAYS`) |
 | `SSH_IDLE_TIMEOUT_SECONDS` | `900` | No | SSH connection idle timeout (15 minutes) |
 | `MAX_CONCURRENT_MACHINES` | `100` | No | Maximum concurrent machine connections |
 | `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | No | Timeout for machine connection test during registration |

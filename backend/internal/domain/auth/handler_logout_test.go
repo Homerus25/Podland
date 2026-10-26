@@ -65,7 +65,7 @@ func TestAuthHandler_Logout_WithSessionCookieRevokesAndClears(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(mockRepo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, loginToken, _, err := service.Login("testuser", "test-password-123")
+	_, loginToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in to mint a refresh token")
 
 	handler := NewAuthHandler(service, mockRepo)
@@ -106,7 +106,7 @@ func TestAuthHandler_Logout_WithUnknownCookieStillSucceeds(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(mockRepo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, loginToken, _, err := service.Login("testuser", "test-password-123")
+	_, loginToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in to mint a refresh token")
 	require.NoError(t, service.Logout(loginToken), "First logout should revoke the session")
 

@@ -285,6 +285,91 @@ func sessionRowsForUser(t *testing.T, db *sql.DB, userID string) []string {
 	return hashes
 }
 
+// TestSessionRepository_RememberedFlagRoundTrip asserts the remembered
+// flag survives a write→read cycle: a remembered session reads back
+// remembered, a plain one reads back unremembered (issue 379 — the
+// flag is server-side truth on the session row).
+func TestSessionRepository_RememberedFlagRoundTrip(t *testing.T) {
+	db := newTestUserDB(t)
+	repo := NewSessionRepository(db)
+	users := NewUserRepository(db)
+
+	user := &User{ID: "session-user-remembered", Username: "rememberer", PasswordHash: "hash", CreatedAt: time.Now().UTC()}
+	require.NoError(t, users.Create(user), "Should create user")
+
+	future := time.Now().UTC().Add(24 * time.Hour)
+	remembered := newSession("session-remembered", user.ID, "remembered-hash", future)
+	remembered.Remembered = true
+	require.NoError(t, repo.Create(remembered), "Should create remembered session")
+	require.NoError(t, repo.Create(newSession("session-plain", user.ID, "plain-hash", future)), "Should create plain session")
+
+	storedRemembered, err := repo.GetByTokenHash("remembered-hash")
+	require.NoError(t, err, "Remembered lookup should not error")
+	require.NotNil(t, storedRemembered, "Remembered session should be findable")
+	assert.True(t, storedRemembered.Remembered, "Remembered session should read back remembered")
+
+	storedPlain, err := repo.GetByTokenHash("plain-hash")
+	require.NoError(t, err, "Plain lookup should not error")
+	require.NotNil(t, storedPlain, "Plain session should be findable")
+	assert.False(t, storedPlain.Remembered, "Plain session should read back unremembered")
+}
+
+// TestSessionRepository_RotatePreservesRememberedFlag asserts rotation
+// carries the remembered flag onto the replacement row, so a remembered
+// session stays remembered across token rotation (issue 379).
+func TestSessionRepository_RotatePreservesRememberedFlag(t *testing.T) {
+	db := newTestUserDB(t)
+	repo := NewSessionRepository(db)
+	users := NewUserRepository(db)
+
+	user := &User{ID: "session-user-rotflag", Username: "rotflag", PasswordHash: "hash", CreatedAt: time.Now().UTC()}
+	require.NoError(t, users.Create(user), "Should create user")
+
+	remembered := newSession("session-rot-old", user.ID, "rot-old-hash", time.Now().UTC().Add(24*time.Hour))
+	remembered.Remembered = true
+	require.NoError(t, repo.Create(remembered), "Should create remembered session")
+
+	replacement := newSession("session-rot-new", user.ID, "rot-new-hash", time.Now().UTC().Add(90*24*time.Hour))
+	replacement.Remembered = true
+	rotated, err := repo.Rotate("rot-old-hash", replacement)
+	require.NoError(t, err, "Rotate should not error")
+	assert.True(t, rotated, "Existing remembered session should rotate")
+
+	inserted, err := repo.GetByTokenHash("rot-new-hash")
+	require.NoError(t, err, "Lookup of rotated-in hash should not error")
+	require.NotNil(t, inserted, "Rotated-in hash should address a session")
+	assert.True(t, inserted.Remembered, "Rotation must carry the remembered flag onto the replacement row")
+}
+
+// TestMigrations_SessionsRememberedColumn asserts the remembered-column
+// migration rides the existing harness: the column exists after
+// migrations.Run, and rows predating the column default to unremembered.
+func TestMigrations_SessionsRememberedColumn(t *testing.T) {
+	db := newTestUserDB(t)
+
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name = 'remembered'").Scan(&count)
+	require.NoError(t, err, "Should inspect the sessions table's columns")
+	assert.Equal(t, 1, count, "sessions.remembered column should exist after migrations")
+
+	users := NewUserRepository(db)
+	user := &User{ID: "session-user-migrated", Username: "migrated", PasswordHash: "hash", CreatedAt: time.Now().UTC()}
+	require.NoError(t, users.Create(user), "Should create user")
+
+	// A row written the pre-migration way — no remembered column named —
+	// must land unremembered via the column's default.
+	_, err = db.Exec(
+		`INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
+		"session-legacy", user.ID, "legacy-hash", time.Now().UTC(), time.Now().UTC().Add(24*time.Hour))
+	require.NoError(t, err, "Legacy-style insert should succeed")
+
+	repo := NewSessionRepository(db)
+	legacy, err := repo.GetByTokenHash("legacy-hash")
+	require.NoError(t, err, "Legacy lookup should not error")
+	require.NotNil(t, legacy, "Legacy row should be findable")
+	assert.False(t, legacy.Remembered, "Rows predating the column must default to unremembered")
+}
+
 // TestMigrations_SessionsTableIdempotent asserts the migration runner
 // applies the sessions migration and that re-running all migrations on
 // an already-migrated database is a no-op (the runner records executed

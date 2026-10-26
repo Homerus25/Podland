@@ -51,19 +51,23 @@ type AuthService struct {
 	userRepo     models.UserRepositoryInterface
 	sessionRepo  models.SessionRepositoryInterface
 	sessionTTL   time.Duration
+	rememberTTL  time.Duration
 	firstUsers   FirstUserCreator
 	loginBudget  *failurebudget.Surface
 	changeBudget *failurebudget.Surface
 }
 
 // NewAuthService creates a new AuthService. sessionTTL is how long a
-// refresh session (and its cookie's server-side row) stays redeemable.
+// refresh session (and its cookie's server-side row) stays redeemable;
+// rememberTTL is the longer window a login that opted in via the
+// request's rememberDevice field stays redeemable (issue 379) — the
+// configuration guarantees it is at least sessionTTL.
 // firstUsers backs Setup; Login, Refresh, Logout, and ChangePassword
 // never touch it. The credential-failure budgets are optional
 // dependencies wired via WithLoginBudget / WithChangeBudget after
 // construction (issue 236): unwired, every check reports budget and
 // every failure records nothing.
-func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, sessionTTL time.Duration, firstUsers FirstUserCreator) (*AuthService, error) {
+func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, sessionTTL, rememberTTL time.Duration, firstUsers FirstUserCreator) (*AuthService, error) {
 	// Load private key
 	privateKey, err := loadPrivateKey(config.PrivateKeyPath)
 	if err != nil {
@@ -84,6 +88,7 @@ func NewAuthService(config JWTConfig, userRepo models.UserRepositoryInterface, s
 		userRepo:    userRepo,
 		sessionRepo: sessionRepo,
 		sessionTTL:  sessionTTL,
+		rememberTTL: rememberTTL,
 		firstUsers:  firstUsers,
 	}, nil
 }
@@ -110,8 +115,11 @@ func (s *AuthService) WithChangeBudget(budget *failurebudget.Surface) *AuthServi
 
 // Login verifies the given credentials against the user repository and,
 // on success, returns a fresh access token, a new opaque refresh token
-// (whose SHA-256 hash is persisted as a session row), and the
-// authenticated user.
+// (whose SHA-256 hash is persisted as a session row), the authenticated
+// user, and the Max-Age the refresh cookie should carry: the full
+// remembered TTL when rememberDevice opted the login in (the session
+// row is flagged remembered and lives on that TTL), 0 — a
+// browser-session cookie — otherwise (issue 379).
 //
 // Failure budget: failed verifications — wrong password and unknown
 // username alike — are counted against the username in the request
@@ -132,48 +140,53 @@ func (s *AuthService) WithChangeBudget(budget *failurebudget.Surface) *AuthServi
 //
 // Lazy cleanup: login also purges the user's expired session rows —
 // there is no background sweeper.
-func (s *AuthService) Login(username, password string) (accessToken string, refreshToken string, user *models.User, err error) {
+func (s *AuthService) Login(username, password string, rememberDevice bool) (accessToken string, refreshToken string, user *models.User, cookieMaxAge time.Duration, err error) {
 	if !s.loginBudget.Check(username) {
-		return "", "", nil, apperrors.ErrRateLimitExceeded
+		return "", "", nil, 0, apperrors.ErrRateLimitExceeded
 	}
 
 	user, err = s.userRepo.GetByUsername(username)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, 0, err
 	}
 	if user == nil {
 		s.loginBudget.Spend(username)
-		return "", "", nil, apperrors.ErrInvalidCredentials
+		return "", "", nil, 0, apperrors.ErrInvalidCredentials
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		s.loginBudget.Spend(username)
-		return "", "", nil, apperrors.ErrInvalidCredentials
+		return "", "", nil, 0, apperrors.ErrInvalidCredentials
 	}
 
 	accessToken, err = s.GenerateToken(user.ID)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, 0, err
 	}
 
 	if err := s.sessionRepo.DeleteExpiredForUser(user.ID); err != nil {
-		return "", "", nil, err
+		return "", "", nil, 0, err
 	}
 
-	refreshToken, err = s.mintSession(user.ID)
+	refreshToken, err = s.mintSession(user.ID, rememberDevice)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, 0, err
 	}
 
-	return accessToken, refreshToken, user, nil
+	cookieMaxAge = s.cookieMaxAgeFor(rememberDevice)
+
+	return accessToken, refreshToken, user, cookieMaxAge, nil
 }
 
 // Setup is the first-run bootstrap path: on an instance with no users,
 // it creates the first user — always an admin, via the shared
 // user-creation service's guarded path (FirstUserCreator) — and issues
 // the fresh login (access JWT + refresh session) the caller adopts on
-// the spot, exactly as at login. Session minting rides the same
-// GenerateToken + mintSession primitives ChangePassword uses.
+// the spot, exactly as at login. The minted session is always
+// unremembered (issue 379): the bootstrap stays simple, and the user
+// can log out and back in with the remember-device box checked.
+// Session minting rides the same GenerateToken + mintSession
+// primitives ChangePassword uses.
 //
 // Failure mapping: the creation path's validation failures (missing
 // fields, password too short) pass through unchanged, and a losing
@@ -192,7 +205,7 @@ func (s *AuthService) Setup(username, password string) (accessToken, refreshToke
 		return "", "", nil, err
 	}
 
-	refreshToken, err = s.mintSession(user.ID)
+	refreshToken, err = s.mintSession(user.ID, false)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -206,6 +219,11 @@ func (s *AuthService) Setup(username, password string) (accessToken, refreshToke
 // still exists; rotation atomically replaces that row with one holding a
 // fresh token and a renewed (sliding) expiry, so a token can be redeemed
 // exactly once — there is deliberately no non-rotating refresh path.
+// The replacement row inherits the session's remembered flag and slides
+// on that flag's TTL — the remembered TTL for a remembered session, the
+// session TTL otherwise — and the returned Max-Age is the refresh
+// cookie's: the full remembered TTL for a remembered session (so the
+// cookie slides in lockstep with the row), 0 otherwise (issue 379).
 //
 // Failure mapping: an unknown hash — never issued, revoked, already
 // rotated (replayed), or belonging to a since-deleted user — yields
@@ -214,53 +232,55 @@ func (s *AuthService) Setup(username, password string) (accessToken, refreshToke
 // rotation that loses to a concurrent refresh presenting the same token
 // also yields ErrRefreshInvalid: the winner already consumed the row.
 // Storage failures propagate unchanged (mapped to 500 by the handler).
-func (s *AuthService) Refresh(refreshToken string) (accessToken, newRefreshToken string, user *models.User, err error) {
+func (s *AuthService) Refresh(refreshToken string) (accessToken, newRefreshToken string, user *models.User, cookieMaxAge time.Duration, err error) {
 	tokenHash := HashRefreshToken(refreshToken)
 
 	session, err := s.sessionRepo.GetByTokenHash(tokenHash)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, 0, err
 	}
 	if session == nil {
-		return "", "", nil, apperrors.ErrRefreshInvalid
+		return "", "", nil, 0, apperrors.ErrRefreshInvalid
 	}
 
 	now := time.Now().UTC()
 	if !now.Before(session.ExpiresAt) {
 		if err := s.sessionRepo.DeleteByTokenHash(tokenHash); err != nil {
-			return "", "", nil, err
+			return "", "", nil, 0, err
 		}
-		return "", "", nil, apperrors.ErrSessionExpired
+		return "", "", nil, 0, apperrors.ErrSessionExpired
 	}
 
 	user, err = s.userRepo.GetByID(session.UserID)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, 0, err
 	}
 	if user == nil {
-		return "", "", nil, apperrors.ErrRefreshInvalid
+		return "", "", nil, 0, apperrors.ErrRefreshInvalid
 	}
 
 	newRefreshToken, newTokenHash, err := generateRefreshToken()
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, 0, err
 	}
 
 	accessToken, err = s.GenerateToken(session.UserID)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, 0, err
 	}
 
-	replacement := s.newSession(session.UserID, newTokenHash)
+	replacement := s.newSession(session.UserID, newTokenHash, session.Remembered)
 	rotated, err := s.sessionRepo.Rotate(tokenHash, replacement)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", nil, 0, err
 	}
 	if !rotated {
-		return "", "", nil, apperrors.ErrRefreshInvalid
+		return "", "", nil, 0, apperrors.ErrRefreshInvalid
 	}
 
-	return accessToken, newRefreshToken, user, nil
+	cookieMaxAge = s.cookieMaxAgeFor(session.Remembered)
+
+	return accessToken, newRefreshToken, user, cookieMaxAge, nil
 }
 
 // Logout revokes the refresh session addressed by the presented token:
@@ -278,9 +298,9 @@ func (s *AuthService) Logout(refreshToken string) error {
 // meet the length policy, and on success the hash is replaced and every
 // session of the user — the caller's other devices included — is
 // revoked. The returned fresh login (new access JWT + a brand-new
-// refresh token whose session is created after the revocation) keeps
-// the device making the change signed in; every other device must log
-// in again with the new password.
+// refresh token whose unremembered session is created after the
+// revocation) keeps the device making the change signed in; every
+// other device must log in again with the new password.
 //
 // Failure budget: wrong current-password attempts count against the
 // caller, on the change-password endpoint's own failurebudget.Surface
@@ -348,7 +368,7 @@ func (s *AuthService) ChangePassword(userID, currentPassword, newPassword string
 		return "", "", nil, err
 	}
 
-	refreshToken, err = s.mintSession(user.ID)
+	refreshToken, err = s.mintSession(user.ID, false)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -356,18 +376,42 @@ func (s *AuthService) ChangePassword(userID, currentPassword, newPassword string
 	return accessToken, refreshToken, user, nil
 }
 
-// newSession builds a fresh session row for the user with the session
-// TTL slid from now. UTC keeps CreatedAt/ExpiresAt comparable against
-// the UTC clock the repository's expiry purge uses, whatever the
-// server's zone.
-func (s *AuthService) newSession(userID, tokenHash string) *models.Session {
+// ttlFor returns the redeemability window the remembered flag selects —
+// the remembered TTL for a remembered session (issue 379), the session
+// TTL otherwise. It is the one owner of that fork: newSession sizes a
+// session row's expiry with it, and the refresh cookie's Max-Age
+// derives from it through cookieMaxAgeFor.
+func (s *AuthService) ttlFor(remembered bool) time.Duration {
+	if remembered {
+		return s.rememberTTL
+	}
+	return s.sessionTTL
+}
+
+// cookieMaxAgeFor returns the Max-Age the refresh cookie should carry
+// for a session with this remembered flag: the session's full TTL when
+// remembered, so the cookie slides in lockstep with the row, and 0 —
+// no Max-Age, a browser-session cookie — otherwise (issue 379).
+func (s *AuthService) cookieMaxAgeFor(remembered bool) time.Duration {
+	if !remembered {
+		return 0
+	}
+	return s.ttlFor(remembered)
+}
+
+// newSession builds a fresh session row for the user with the TTL the
+// remembered flag selects (ttlFor), slid from now. UTC keeps
+// CreatedAt/ExpiresAt comparable against the UTC clock the repository's
+// expiry purge uses, whatever the server's zone.
+func (s *AuthService) newSession(userID, tokenHash string, remembered bool) *models.Session {
 	now := time.Now().UTC()
 	return &models.Session{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		TokenHash: tokenHash,
-		CreatedAt: now,
-		ExpiresAt: now.Add(s.sessionTTL),
+		ID:         uuid.New().String(),
+		UserID:     userID,
+		TokenHash:  tokenHash,
+		Remembered: remembered,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(s.ttlFor(remembered)),
 	}
 }
 
@@ -376,12 +420,12 @@ func (s *AuthService) newSession(userID, tokenHash string) *models.Session {
 // never persisted) and persists its hash as the session row via Create.
 // Refresh is the Rotate variant of the same act and builds its
 // replacement through newSession instead.
-func (s *AuthService) mintSession(userID string) (string, error) {
+func (s *AuthService) mintSession(userID string, remembered bool) (string, error) {
 	refreshToken, tokenHash, err := generateRefreshToken()
 	if err != nil {
 		return "", err
 	}
-	if err := s.sessionRepo.Create(s.newSession(userID, tokenHash)); err != nil {
+	if err := s.sessionRepo.Create(s.newSession(userID, tokenHash, remembered)); err != nil {
 		return "", err
 	}
 	return refreshToken, nil

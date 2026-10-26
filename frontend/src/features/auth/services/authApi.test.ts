@@ -37,6 +37,30 @@ describe("authApi", () => {
 		expect(authorization).toBeNull();
 	});
 
+	// The remember-me opt-in rides the login body verbatim: true mints the
+	// persistent session, false keeps today's browser-session cookie.
+	it("sends rememberDevice in the login body when the caller opts in", async () => {
+		let body: unknown;
+		server.use(
+			http.post("*/api/auth/login", async ({ request }) => {
+				body = await request.json();
+				return HttpResponse.json({ token: "fresh-token", username: "ada" });
+			}),
+		);
+
+		await authApi.login({
+			username: "ada",
+			password: "secret",
+			rememberDevice: true,
+		});
+
+		expect(body).toEqual({
+			username: "ada",
+			password: "secret",
+			rememberDevice: true,
+		});
+	});
+
 	it("logs out without an Authorization header", async () => {
 		setBearerToken("stale-access-token");
 		let authorization: string | null = null;

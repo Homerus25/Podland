@@ -49,6 +49,7 @@ candidate number. API contracts live in `doku/`.
   - Login additionally sets an **httpOnly refresh cookie**: opaque 256-bit token, `Secure`, `SameSite=Strict`, scoped to `/api/auth`
   - Only the token's **SHA-256 hash** is persisted (sessions table, one row per login, multi-device)
   - TTL via `SESSION_TTL_DAYS` (default 30); login lazily purges the user's expired rows
+  - **Remembered sessions** (issue 379): a login opting in via the request's `rememberDevice` field flags the session row remembered; it lives on `SESSION_REMEMBER_TTL_DAYS` (default 90, sliding on refresh, flag preserved across rotation) and the refresh cookie carries a matching `Max-Age`. Without the flag, behavior is unchanged (browser-session cookie, `SESSION_TTL_DAYS`)
 - **Key Storage**: File-based (PEM files) with auto-generation on startup
 - **CORS**: Environment variables for allowed origins
 - **Sensitive data encryption**: `github.com/secure-systems-lab/go-securesystemslib`

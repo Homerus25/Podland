@@ -47,9 +47,13 @@ type JWTConfig struct {
 
 // SessionConfig holds refresh-session configuration. The TTL is the
 // window a refresh cookie stays redeemable; a new session is created
-// at every login with this expiry.
+// at every login with this expiry. RememberTTLDays is the window a
+// login that opted in via the request's rememberDevice field stays
+// redeemable (issue 379) — it must be at least TTLDays, so a
+// remembered session can never expire sooner than a plain one.
 type SessionConfig struct {
-	TTLDays int
+	TTLDays         int
+	RememberTTLDays int
 }
 
 // ConnectionConfig holds connection configuration
@@ -114,6 +118,7 @@ func Load() (*Config, error) {
 
 	// Sessions
 	cfg.Session.TTLDays = getEnvInt("SESSION_TTL_DAYS", 30)
+	cfg.Session.RememberTTLDays = getEnvInt("SESSION_REMEMBER_TTL_DAYS", 90)
 
 	// Connections
 	cfg.Connections.SSHIdleTimeoutSeconds = getEnvInt("SSH_IDLE_TIMEOUT_SECONDS", 900)
@@ -210,6 +215,12 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.Session.TTLDays <= 0 {
 		return fmt.Errorf("SESSION_TTL_DAYS must be a positive number of days")
+	}
+	if cfg.Session.RememberTTLDays <= 0 {
+		return fmt.Errorf("SESSION_REMEMBER_TTL_DAYS must be a positive number of days")
+	}
+	if cfg.Session.RememberTTLDays < cfg.Session.TTLDays {
+		return fmt.Errorf("SESSION_REMEMBER_TTL_DAYS must be greater than or equal to SESSION_TTL_DAYS")
 	}
 	if cfg.RateLimit.FailureBudget <= 0 {
 		return fmt.Errorf("RATE_LIMIT_AUTH_FAILURE_BUDGET must be a positive number of failures")

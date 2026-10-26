@@ -48,10 +48,15 @@ func (h *AuthHandler) WithChangeBudget(budget *failurebudget.Surface) *AuthHandl
 	return h
 }
 
-// LoginRequest represents a login request
+// LoginRequest represents a login request. RememberDevice is the
+// remember-me opt-in (issue 379): absent or false means today's
+// browser-session login exactly; true flags the session remembered —
+// it lives on the remembered TTL and the refresh cookie carries a
+// matching Max-Age.
 type LoginRequest struct {
-	Username string `json:"username" validate:"required"`
-	Password string `json:"password" validate:"required"`
+	Username       string `json:"username" validate:"required"`
+	Password       string `json:"password" validate:"required"`
+	RememberDevice bool   `json:"rememberDevice"`
 }
 
 // LoginResponse represents a login response. Role mirrors
@@ -71,11 +76,14 @@ const refreshTokenCookieName = "refresh_token"
 // newRefreshCookie builds the refresh cookie carrying the spec's four
 // attributes — httpOnly (out of JavaScript reach), Secure,
 // SameSite=Strict, and Path=/api/auth so the browser sends it only to
-// auth endpoints. The cookie login and refresh hand out and the one
-// logout clears with are built here, so their attributes can never
-// drift apart.
-func newRefreshCookie(value string) *http.Cookie {
-	return &http.Cookie{
+// auth endpoints. maxAge is the cookie's persistence contract (issue
+// 379): positive sets Max-Age, making the cookie outlive the browser
+// session for that long; 0 sets no Max-Age at all, leaving today's
+// browser-session cookie. The cookie login and refresh hand out and
+// the one logout clears with are built here, so their attributes can
+// never drift apart.
+func newRefreshCookie(value string, maxAge time.Duration) *http.Cookie {
+	cookie := &http.Cookie{
 		Name:     refreshTokenCookieName,
 		Value:    value,
 		Path:     "/api/auth",
@@ -83,12 +91,17 @@ func newRefreshCookie(value string) *http.Cookie {
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
 	}
+	if maxAge > 0 {
+		cookie.MaxAge = int(maxAge / time.Second)
+	}
+	return cookie
 }
 
 // setRefreshCookie writes the refresh token as the httpOnly cookie
-// login and refresh hand to the client.
-func setRefreshCookie(w http.ResponseWriter, refreshToken string) {
-	http.SetCookie(w, newRefreshCookie(refreshToken))
+// login and refresh hand to the client, with the Max-Age the service
+// computed for the session (0 = browser-session cookie).
+func setRefreshCookie(w http.ResponseWriter, refreshToken string, maxAge time.Duration) {
+	http.SetCookie(w, newRefreshCookie(refreshToken, maxAge))
 }
 
 // Login handles user login: it shapes the request and response, while
@@ -105,7 +118,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			return LoginResponse{}, appErr
 		}
 
-		token, refreshToken, user, err := h.service.Login(req.Username, req.Password)
+		token, refreshToken, user, cookieMaxAge, err := h.service.Login(req.Username, req.Password, req.RememberDevice)
 		if err != nil {
 			h.loginBudget.Advertise(w, req.Username, err)
 			return LoginResponse{}, err
@@ -114,8 +127,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		// The refresh token exists only inside this cookie: httpOnly keeps
 		// it out of JavaScript reach, the narrow path keeps it out of every
 		// non-auth request, and SameSite=Strict + Secure harden it against
-		// cross-site sending and plaintext transport.
-		setRefreshCookie(w, refreshToken)
+		// cross-site sending and plaintext transport. A remembered login's
+		// cookie additionally carries the remembered TTL as Max-Age, so it
+		// survives closing the browser for exactly as long as the session
+		// row does.
+		setRefreshCookie(w, refreshToken, cookieMaxAge)
 
 		return LoginResponse{Token: token, Username: user.Username, Role: user.Role}, nil
 	})
@@ -139,12 +155,12 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 			return RefreshResponse{}, apperrors.ErrRefreshInvalid
 		}
 
-		token, refreshToken, user, err := h.service.Refresh(cookie.Value)
+		token, refreshToken, user, cookieMaxAge, err := h.service.Refresh(cookie.Value)
 		if err != nil {
 			return RefreshResponse{}, err
 		}
 
-		setRefreshCookie(w, refreshToken)
+		setRefreshCookie(w, refreshToken, cookieMaxAge)
 
 		return RefreshResponse{Token: token, Username: user.Username, Role: user.Role}, nil
 	})
@@ -155,7 +171,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 // past, so the browser deletes it whether or not a session stood
 // behind it.
 func clearRefreshCookie(w http.ResponseWriter) {
-	cookie := newRefreshCookie("")
+	cookie := newRefreshCookie("", 0)
 	cookie.Expires = time.Unix(0, 0)
 	cookie.MaxAge = -1
 	http.SetCookie(w, cookie)
@@ -216,7 +232,7 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 			return ChangePasswordResponse{}, err
 		}
 
-		setRefreshCookie(w, refreshToken)
+		setRefreshCookie(w, refreshToken, 0)
 
 		return ChangePasswordResponse{Token: token, Username: user.Username, Role: user.Role}, nil
 	})
@@ -308,7 +324,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 			return SetupResponse{}, err
 		}
 
-		setRefreshCookie(w, refreshToken)
+		setRefreshCookie(w, refreshToken, 0)
 
 		return SetupResponse{Token: token, Username: user.Username, Role: user.Role}, nil
 	})

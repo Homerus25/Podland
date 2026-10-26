@@ -1,10 +1,8 @@
 package auth
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/failurebudget"
@@ -12,19 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// performLogin drives the Login handler the way the router would.
-func performLogin(t *testing.T, h *AuthHandler, username, password string) *http.Response {
-	t.Helper()
-
-	reqBody, err := json.Marshal(LoginRequest{Username: username, Password: password})
-	require.NoError(t, err, "Should marshal login body")
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(reqBody))
-	w := httptest.NewRecorder()
-	h.Login(w, req)
-	return w.Result()
-}
 
 // decodeErrorEnvelope decodes the structured error envelope.
 func decodeErrorEnvelope(t *testing.T, resp *http.Response) (code string) {
@@ -54,13 +39,13 @@ func TestAuthHandler_Login_FailureBudget429CarriesHeaders(t *testing.T) {
 	handler := NewAuthHandler(service, mockRepo).WithLoginBudget(loginSurface)
 
 	// In-budget failure: a plain 401, no rate-limit advertisement.
-	resp := performLogin(t, handler, "testuser", "wrong-password")
+	resp := performLogin(handler, map[string]any{"username": "testuser", "password": "wrong-password"})
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode, "The in-budget failure should stay a 401")
 	assert.Empty(t, resp.Header.Get("X-RateLimit-Limit"), "A plain 401 must not carry rate-limit headers")
 	require.NoError(t, resp.Body.Close(), "Should close the 401 body")
 
 	// The budget is spent: even the correct password is locked out.
-	resp = performLogin(t, handler, "testuser", "right-password")
+	resp = performLogin(handler, map[string]any{"username": "testuser", "password": "right-password"})
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusTooManyRequests, resp.StatusCode, "The locked-out login should answer 429")
 	assert.Equal(t, "RATE_LIMIT_EXCEEDED", decodeErrorEnvelope(t, resp), "The 429 should carry the rate-limit code")

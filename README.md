@@ -90,6 +90,7 @@ Vite bakes them into the frontend bundle (see `frontend/.env.example`).
 | `JWT_EXPIRATION_MINUTES` | `60` | Access-token lifetime in minutes |
 | `JWT_ISSUER` | `podland` | `iss` claim written into issued tokens |
 | `SESSION_TTL_DAYS` | `30` | Days a login's refresh session stays redeemable |
+| `SESSION_REMEMBER_TTL_DAYS` | `90` | Days a "remember this device" login's refresh session stays redeemable (must be >= `SESSION_TTL_DAYS`) |
 | `SSH_IDLE_TIMEOUT_SECONDS` | `900` | Idle timeout for SSH tunnels to managed machines |
 | `MAX_CONCURRENT_MACHINES` | `100` | Maximum number of concurrent machine connections |
 | `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | Timeout for the connection test when registering a machine |

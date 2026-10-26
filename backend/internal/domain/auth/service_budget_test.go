@@ -79,12 +79,12 @@ func TestAuthService_Login_FailureBudgetLocksUsernameAfterThreshold(t *testing.T
 	service, _, budget := newBudgetTestService(t, 3, "testuser", "right-password")
 
 	for i := range 3 {
-		_, _, _, err := service.Login("testuser", "wrong-password")
+		_, _, _, _, err := service.Login("testuser", "wrong-password", false)
 		require.ErrorIs(t, err, apperrors.ErrInvalidCredentials, "Failure %d within the budget should stay a 401", i+1)
 	}
 	require.Equal(t, 3, budget.spent["login:testuser"], "Exactly the three failures should have spent the budget")
 
-	_, _, _, err := service.Login("testuser", "right-password")
+	_, _, _, _, err := service.Login("testuser", "right-password", false)
 	require.ErrorIs(t, err, apperrors.ErrRateLimitExceeded,
 		"The login past the threshold should be locked out even with the correct password")
 	require.Equal(t, 3, budget.spent["login:testuser"], "A locked-out attempt must not spend further")
@@ -96,14 +96,14 @@ func TestAuthService_Login_FailureBudgetLocksUsernameAfterThreshold(t *testing.T
 func TestAuthService_Login_FailureBudgetCountsUnknownUsernames(t *testing.T) {
 	service, _, budget := newBudgetTestService(t, 1, "realuser", "right-password")
 
-	_, _, _, err := service.Login("ghost", "whatever")
+	_, _, _, _, err := service.Login("ghost", "whatever", false)
 	require.ErrorIs(t, err, apperrors.ErrInvalidCredentials, "The first unknown-username attempt should stay a 401")
 	require.Equal(t, 1, budget.spent["login:ghost"], "The unknown username's failure should be counted against it")
 
-	_, _, _, err = service.Login("ghost", "whatever")
+	_, _, _, _, err = service.Login("ghost", "whatever", false)
 	require.ErrorIs(t, err, apperrors.ErrRateLimitExceeded, "The same unknown name should be locked out at once")
 
-	token, _, _, err := service.Login("realuser", "right-password")
+	token, _, _, _, err := service.Login("realuser", "right-password", false)
 	require.NoError(t, err, "Another name's budget must be untouched by ghost's failures")
 	require.NotEmpty(t, token, "The real user should still log in")
 	require.Equal(t, 0, budget.spent["login:realuser"], "The real user's budget must be untouched")
@@ -117,17 +117,17 @@ func TestAuthService_Login_FailureBudgetCountsUnknownUsernames(t *testing.T) {
 func TestAuthService_Login_SuccessNeverSpendsBudget(t *testing.T) {
 	service, _, _ := newBudgetTestService(t, 2, "testuser", "right-password")
 
-	_, _, _, err := service.Login("testuser", "wrong-password")
+	_, _, _, _, err := service.Login("testuser", "wrong-password", false)
 	require.ErrorIs(t, err, apperrors.ErrInvalidCredentials, "The first failure should stay a 401")
 
-	_, _, _, err = service.Login("testuser", "right-password")
+	_, _, _, _, err = service.Login("testuser", "right-password", false)
 	require.NoError(t, err, "A success must never spend the budget")
 
-	_, _, _, err = service.Login("testuser", "wrong-password")
+	_, _, _, _, err = service.Login("testuser", "wrong-password", false)
 	require.ErrorIs(t, err, apperrors.ErrInvalidCredentials,
 		"The second failure should still be a 401 — the success spent nothing")
 
-	_, _, _, err = service.Login("testuser", "right-password")
+	_, _, _, _, err = service.Login("testuser", "right-password", false)
 	require.ErrorIs(t, err, apperrors.ErrRateLimitExceeded,
 		"Exactly the two failures should exhaust the budget, locking even the correct password")
 }
@@ -143,7 +143,7 @@ func TestAuthService_Login_StorageFailureNeverSpendsBudget(t *testing.T) {
 	service, err := NewTestAuthServiceWithFailureBudget(repo, sessionRepo, failurebudget.NewSurface("login", budget), nil)
 	require.NoError(t, err, "Should create auth service with failure budget")
 
-	_, _, _, err = service.Login("testuser", "right-password")
+	_, _, _, _, err = service.Login("testuser", "right-password", false)
 	require.ErrorIs(t, err, repoErr, "The repository failure should propagate as-is, not as an AppError")
 	require.Equal(t, 0, budget.spent["login:testuser"], "A storage failure must not spend the budget")
 }
@@ -155,16 +155,16 @@ func TestAuthService_Login_StorageFailureNeverSpendsBudget(t *testing.T) {
 func TestAuthService_Login_LockedUsernameDoesNotTouchRefresh(t *testing.T) {
 	service, _, _ := newBudgetTestService(t, 1, "testuser", "right-password")
 
-	_, refreshToken, _, err := service.Login("testuser", "right-password")
+	_, refreshToken, _, _, err := service.Login("testuser", "right-password", false)
 	require.NoError(t, err, "The pre-lockout login should mint the refresh session")
 
-	_, _, _, err = service.Login("testuser", "wrong-password")
+	_, _, _, _, err = service.Login("testuser", "wrong-password", false)
 	require.ErrorIs(t, err, apperrors.ErrInvalidCredentials, "The wrong-password attempt should spend the budget")
 
-	_, _, _, err = service.Login("testuser", "right-password")
+	_, _, _, _, err = service.Login("testuser", "right-password", false)
 	require.ErrorIs(t, err, apperrors.ErrRateLimitExceeded, "Fresh logins should now be locked out")
 
-	accessToken, newRefreshToken, user, err := service.Refresh(refreshToken)
+	accessToken, newRefreshToken, user, _, err := service.Refresh(refreshToken)
 	require.NoError(t, err, "The active refresh session must keep working while the username is login-locked")
 	require.NotEmpty(t, accessToken, "Refresh should return a fresh access token")
 	require.NotEmpty(t, newRefreshToken, "Refresh should rotate the refresh token")
@@ -190,7 +190,7 @@ func TestAuthService_ChangePassword_FailureBudgetCountsWrongCurrentPassword(t *t
 	service, sessionRepo, budget := newBudgetTestService(t, 2, "testuser", "old-password")
 
 	// Seed one live session the same way the password tests do.
-	_, _, _, err := service.Login("testuser", "old-password")
+	_, _, _, _, err := service.Login("testuser", "old-password", false)
 	require.NoError(t, err, "Should seed a session")
 
 	_, _, _, err = service.ChangePassword("user-testuser", "wrong-current", "new-pass-8")

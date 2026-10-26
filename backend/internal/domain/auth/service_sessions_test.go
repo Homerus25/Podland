@@ -30,7 +30,7 @@ func TestAuthService_Login_CreatesHashedSession(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, refreshToken, _, err := service.Login("testuser", "test-password-123")
+	_, refreshToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in with correct credentials")
 	require.NotEmpty(t, refreshToken, "Login should return a refresh token")
 
@@ -53,7 +53,7 @@ func TestAuthService_Login_RefreshTokenIs256BitBase64URL(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, refreshToken, _, err := service.Login("testuser", "test-password-123")
+	_, refreshToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in with correct credentials")
 
 	decoded, err := base64.RawURLEncoding.DecodeString(refreshToken)
@@ -71,7 +71,7 @@ func TestAuthService_Login_SessionExpiryUsesConfiguredTTL(t *testing.T) {
 	require.NoError(t, err, "Should create auth service without error")
 
 	before := time.Now()
-	_, _, _, err = service.Login("testuser", "test-password-123")
+	_, _, _, _, err = service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in with correct credentials")
 	after := time.Now()
 
@@ -93,9 +93,9 @@ func TestAuthService_Login_EveryLoginCreatesItsOwnSession(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, firstToken, _, err := service.Login("testuser", "test-password-123")
+	_, firstToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "First login should succeed")
-	_, secondToken, _, err := service.Login("testuser", "test-password-123")
+	_, secondToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Second login should succeed")
 
 	sessions := sessionRepo.SessionsForUser("user-testuser")
@@ -135,7 +135,7 @@ func TestAuthService_Login_PurgesExpiredSessions(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, _, _, err = service.Login("testuser", "test-password-123")
+	_, _, _, _, err = service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in with correct credentials")
 
 	gone, err := sessionRepo.GetByTokenHash("expired-hash")
@@ -155,7 +155,7 @@ func TestAuthService_Login_FailureCreatesNoSession(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, _, _, err = service.Login("testuser", "wrong-password")
+	_, _, _, _, err = service.Login("testuser", "wrong-password", false)
 	require.Error(t, err, "Wrong password should be rejected")
 
 	assert.Empty(t, sessionRepo.SessionsForUser("user-testuser"), "No session should be created for a rejected login")
@@ -171,7 +171,7 @@ func TestAuthService_Login_SessionRepoErrorPropagates(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	accessToken, refreshToken, _, err := service.Login("testuser", "test-password-123")
+	accessToken, refreshToken, _, _, err := service.Login("testuser", "test-password-123", false)
 
 	assert.ErrorIs(t, err, dbError, "Session creation failure should propagate unchanged")
 	assert.Empty(t, accessToken, "No access token should be issued when the session cannot be persisted")

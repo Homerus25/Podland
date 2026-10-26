@@ -134,6 +134,73 @@ func TestValidate_RejectsInvalidSessionTTLEnvValue(t *testing.T) {
 	require.NoError(t, cfg.Validate(), "Fallback config should validate")
 }
 
+// TestLoad_SessionRememberTTLDefaultsTo90Days asserts the remembered
+// session TTL defaults to 90 days when SESSION_REMEMBER_TTL_DAYS is
+// unset (issue 379: a remembered device stays signed in for a quarter
+// by default, three times the unremembered window).
+func TestLoad_SessionRememberTTLDefaultsTo90Days(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "test-key")
+	t.Setenv("SESSION_REMEMBER_TTL_DAYS", "")
+
+	cfg, err := Load()
+	require.NoError(t, err, "Load should succeed with no remembered TTL set")
+
+	assert.Equal(t, 90, cfg.Session.RememberTTLDays, "Remembered session TTL should default to 90 days")
+}
+
+// TestLoad_SessionRememberTTLOverride asserts SESSION_REMEMBER_TTL_DAYS
+// is honoured when set.
+func TestLoad_SessionRememberTTLOverride(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "test-key")
+	t.Setenv("SESSION_REMEMBER_TTL_DAYS", "180")
+
+	cfg, err := Load()
+	require.NoError(t, err, "Load should succeed with SESSION_REMEMBER_TTL_DAYS=180")
+
+	assert.Equal(t, 180, cfg.Session.RememberTTLDays, "Remembered session TTL should come from the environment")
+}
+
+// TestValidate_RejectsNonPositiveRememberTTL asserts a zero or negative
+// remembered TTL is rejected at startup — it would expire remembered
+// sessions instantly (issue 379). The base config is fully valid, so
+// the failure can only come from the remember TTL under test.
+func TestValidate_RejectsNonPositiveRememberTTL(t *testing.T) {
+	for _, days := range []int{0, -1} {
+		cfg := &Config{
+			Encryption: EncryptionConfig{Key: "k"},
+			Session:    SessionConfig{TTLDays: 30, RememberTTLDays: 90},
+			RateLimit:  RateLimitConfig{FailureBudget: 5, FailureWindowMinutes: 15},
+		}
+		require.NoError(t, cfg.Validate(), "Base config should validate")
+
+		cfg.Session.RememberTTLDays = days
+
+		err := cfg.Validate()
+
+		assert.Error(t, err, "Remembered TTL of %d day(s) should fail validation", days)
+	}
+}
+
+// TestValidate_RejectsRememberTTLBelowSessionTTL asserts a remembered
+// TTL shorter than the unremembered one is rejected at startup: a
+// remembered session that expires sooner than a plain one is a
+// configuration bug (issue 379). Equality is legal — tightening both
+// knobs to the same value must not brick startup.
+func TestValidate_RejectsRememberTTLBelowSessionTTL(t *testing.T) {
+	cfg := &Config{
+		Encryption: EncryptionConfig{Key: "k"},
+		Session:    SessionConfig{TTLDays: 30, RememberTTLDays: 29},
+		RateLimit:  RateLimitConfig{FailureBudget: 5, FailureWindowMinutes: 15},
+	}
+
+	err := cfg.Validate()
+
+	assert.Error(t, err, "Remembered TTL below SESSION_TTL_DAYS should fail validation")
+
+	cfg.Session.RememberTTLDays = 30
+	assert.NoError(t, cfg.Validate(), "Remembered TTL equal to SESSION_TTL_DAYS should validate")
+}
+
 // TestLoad_VolumeUploadMaxBytes pins the populate upload cap: default
 // 2 GiB, honored override, and fallback to the default on garbage.
 func TestLoad_VolumeUploadMaxBytes(t *testing.T) {

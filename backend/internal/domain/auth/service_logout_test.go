@@ -20,9 +20,9 @@ func TestAuthService_Logout_RevokesOnlyPresentedSession(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, deviceAToken, _, err := service.Login("testuser", "test-password-123")
+	_, deviceAToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in device A")
-	_, deviceBToken, _, err := service.Login("testuser", "test-password-123")
+	_, deviceBToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in device B")
 	require.Len(t, sessionRepo.SessionsForUser("user-testuser"), 2, "Two logins should leave two session rows")
 
@@ -47,7 +47,7 @@ func TestAuthService_Logout_UnknownTokenIsNoOp(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, loginToken, _, err := service.Login("testuser", "test-password-123")
+	_, loginToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in to mint a refresh token")
 	require.NoError(t, service.Logout(loginToken), "First logout should succeed")
 

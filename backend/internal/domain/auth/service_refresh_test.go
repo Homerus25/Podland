@@ -20,7 +20,7 @@ func TestAuthService_Refresh_UnknownTokenIsInvalid(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	accessToken, refreshToken, user, err := service.Refresh("no-such-token")
+	accessToken, refreshToken, user, _, err := service.Refresh("no-such-token")
 
 	assert.ErrorIs(t, err, apperrors.ErrRefreshInvalid, "Unknown token must be rejected as invalid")
 	assert.Empty(t, accessToken, "No access token should be issued for an unknown refresh token")
@@ -41,11 +41,11 @@ func TestAuthService_Refresh_ValidTokenRotatesSession(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, ttl)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, loginToken, _, err := service.Login("testuser", "test-password-123")
+	_, loginToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in to mint a refresh token")
 
 	before := time.Now()
-	accessToken, rotatedToken, user, err := service.Refresh(loginToken)
+	accessToken, rotatedToken, user, _, err := service.Refresh(loginToken)
 	require.NoError(t, err, "Valid refresh token should rotate")
 	after := time.Now()
 
@@ -83,15 +83,15 @@ func TestAuthService_Refresh_ReplayedTokenIsRejected(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, loginToken, _, err := service.Login("testuser", "test-password-123")
+	_, loginToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in to mint a refresh token")
 
-	_, firstRotation, user, err := service.Refresh(loginToken)
+	_, firstRotation, user, _, err := service.Refresh(loginToken)
 	require.NoError(t, err, "First refresh should succeed")
 	require.NotEmpty(t, firstRotation, "First refresh should rotate the token")
 	require.NotNil(t, user, "First refresh should return the session's user")
 
-	accessToken, replayToken, user, err := service.Refresh(loginToken)
+	accessToken, replayToken, user, _, err := service.Refresh(loginToken)
 
 	assert.ErrorIs(t, err, apperrors.ErrRefreshInvalid, "Replaying the consumed token must be rejected as invalid")
 	assert.NotErrorIs(t, err, apperrors.ErrSessionExpired, "A replay is a missing row, not an expired one")
@@ -118,7 +118,7 @@ func TestAuthService_Refresh_ExpiredSessionFailsAndIsDeleted(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	accessToken, refreshToken, user, err := service.Refresh("expired-refresh-token")
+	accessToken, refreshToken, user, _, err := service.Refresh("expired-refresh-token")
 
 	assert.ErrorIs(t, err, apperrors.ErrSessionExpired, "Expired session must report the session-expired error")
 	assert.Empty(t, accessToken, "No access token should be issued for an expired session")
@@ -154,14 +154,14 @@ func TestAuthService_Refresh_LostRotationRaceIsCleanInvalid(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	_, loginToken, _, err := service.Login("testuser", "test-password-123")
+	_, loginToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in to mint a refresh token")
 
 	raceRepo := &losingRaceSessionRepo{SessionRepositoryInterface: sessionRepo}
 	raceService, err := NewTestAuthServiceWithSessionRepo(repo, raceRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create racing auth service without error")
 
-	accessToken, refreshToken, user, err := raceService.Refresh(loginToken)
+	accessToken, refreshToken, user, _, err := raceService.Refresh(loginToken)
 
 	assert.ErrorIs(t, err, apperrors.ErrRefreshInvalid, "Losing the rotation race must surface as invalid")
 	assert.Empty(t, accessToken, "No access token should be issued when the race is lost")
@@ -188,7 +188,7 @@ func TestAuthService_Refresh_OrphanedSessionIsInvalid(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	accessToken, refreshToken, user, err := service.Refresh("orphaned-cookie-token")
+	accessToken, refreshToken, user, _, err := service.Refresh("orphaned-cookie-token")
 
 	assert.ErrorIs(t, err, apperrors.ErrRefreshInvalid, "An orphaned session must be rejected as invalid")
 	assert.Empty(t, accessToken, "No access token should be issued for an orphaned session")

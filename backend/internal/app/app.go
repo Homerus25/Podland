@@ -133,7 +133,7 @@ func New(cfg *config.Config) (*App, error) {
 		PublicKeyPath:  cfg.JWT.PublicKeyPath,
 		Expiration:     time.Duration(cfg.JWT.ExpirationMinutes) * time.Minute,
 		Issuer:         cfg.JWT.Issuer,
-	}, userRepo, sessionRepo, time.Duration(cfg.Session.TTLDays)*24*time.Hour, userService)
+	}, userRepo, sessionRepo, time.Duration(cfg.Session.TTLDays)*24*time.Hour, time.Duration(cfg.Session.RememberTTLDays)*24*time.Hour, userService)
 	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("app: failed to initialize auth: %w", err)

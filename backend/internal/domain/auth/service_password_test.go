@@ -25,7 +25,7 @@ func seedPasswordChangeUser(t *testing.T, username, currentPassword string) (*te
 	require.NoError(t, err, "Should create auth service without error")
 
 	for range 2 {
-		_, _, _, err := service.Login(username, currentPassword)
+		_, _, _, _, err := service.Login(username, currentPassword, false)
 		require.NoError(t, err, "Should log in to seed a session")
 	}
 	require.Len(t, sessionRepo.SessionsForUser("user-"+username), 2, "Two seeded logins should leave two sessions")
@@ -75,6 +75,30 @@ func TestAuthService_ChangePassword_Success(t *testing.T) {
 	// The hash swap took effect: old password dies, new one works.
 	assert.False(t, passwordMatches(t, repo, userID, "old-password-123"), "Old password must no longer authenticate")
 	assert.True(t, passwordMatches(t, repo, userID, "new-pass-8"), "New password must authenticate")
+}
+
+// TestAuthService_ChangePassword_RevokesRememberedSessionsToo asserts
+// the revocation is unconditional (issue 379): a remembered session —
+// the long-lived, persistent-cookie kind — dies with the password
+// change like every other one, so a compromised password cannot be
+// ridden by remembered devices. The fresh login the change mints is
+// unremembered, exactly as today.
+func TestAuthService_ChangePassword_RevokesRememberedSessionsToo(t *testing.T) {
+	_, sessionRepo, service, userID := seedPasswordChangeUser(t, "testuser", "old-password-123")
+
+	_, rememberedToken, _, _, err := service.Login("testuser", "old-password-123", true)
+	require.NoError(t, err, "Remembered login should succeed")
+
+	_, _, _, err = service.ChangePassword(userID, "old-password-123", "new-pass-8")
+	require.NoError(t, err, "Password change should succeed")
+
+	remembered, err := sessionRepo.GetByTokenHash(sha256Hex(rememberedToken))
+	require.NoError(t, err, "Remembered-session lookup should not error")
+	assert.Nil(t, remembered, "The remembered session must be revoked with every other one")
+
+	sessions := sessionRepo.SessionsForUser(userID)
+	require.Len(t, sessions, 1, "The change should leave exactly one live session (the fresh login)")
+	assert.False(t, sessions[0].Remembered, "The fresh login the change mints must be unremembered")
 }
 
 // TestAuthService_ChangePassword_WrongCurrentPassword asserts the

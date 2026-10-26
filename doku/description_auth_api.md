@@ -21,13 +21,17 @@ Content-Type: application/json
 
 {
   "username": "string",
-  "password": "string"
+  "password": "string",
+  "rememberDevice": false
 }
 ```
 
+**Fields:**
+- `rememberDevice` (optional, default `false`): the remember-me opt-in. `true` makes the login persistent — the session row is flagged remembered and lives on the remembered TTL (`SESSION_REMEMBER_TTL_DAYS`, default 90 days, sliding on every refresh), and the refresh cookie carries a matching `Max-Age` so it survives closing the browser. Absent or `false` keeps today's behavior exactly: a browser-session refresh cookie and the `SESSION_TTL_DAYS` session TTL.
+
 **Response (Success - 200):**
 - Returns the JWT access token, the authenticated user's username, and the user's role in the response body
-- Additionally sets the httpOnly refresh cookie (see POST /api/auth/refresh)
+- Additionally sets the httpOnly refresh cookie (see POST /api/auth/refresh). With `rememberDevice: true` the cookie carries `Max-Age` equal to the full remembered TTL; otherwise it has no `Max-Age` (a browser-session cookie)
 ```json
 {
   "token": "string (jwt)",
@@ -64,7 +68,12 @@ Renews an access JWT from the httpOnly refresh cookie set by login (or a
 previous refresh). No Authorization header; the cookie is the credential.
 Rotation is the only refresh path: every successful call replaces the
 session row behind the cookie with a fresh token (and renewed, sliding
-expiry) and sets the rotated cookie.
+expiry) and sets the rotated cookie. A remembered session (created by a
+`rememberDevice: true` login) keeps its remembered flag across the
+rotation, renews on the remembered TTL, and the rotated cookie re-sets
+its `Max-Age` to the full remembered TTL — the cookie slides in lockstep
+with the session row. An unremembered session keeps today's behavior:
+the `SESSION_TTL_DAYS` sliding renewal and a cookie with no `Max-Age`.
 
 **Request:**
 - No body; sends the `refresh_token` httpOnly cookie (Path=/api/auth)
@@ -124,7 +133,7 @@ Content-Type: application/json
 ```
 
 **Response (Success - 200):**
-- Same body as login; sets a fresh refresh cookie (Path=/api/auth)
+- Same body as login; sets a fresh refresh cookie (Path=/api/auth). The session is always unremembered — no `Max-Age`, exactly as a login without the `rememberDevice` flag; the bootstrap stays simple, and the user can log out and back in with the box checked
 ```json
 {
   "token": "string (jwt)",
@@ -223,12 +232,14 @@ Self-service password change for the authenticated caller. Requires
 Authorization: Bearer header with a valid token. The current password
 proves the caller's authority; the new one must be at least 8
 characters. On success the stored hash is replaced and **every** session
-of the user is revoked — the caller receives a fresh login (new access
-JWT in the body plus a new refresh cookie) so the device making the
-change stays signed in; every other device is signed out and must log
-in again with the new password. It lives under `/api/auth` because the
-fresh refresh cookie shares the login/refresh cookie scope
-(Path=/api/auth).
+of the user is revoked — remembered ones included, so a compromised
+password cannot be ridden by remembered devices — and the caller
+receives a fresh login (new access JWT in the body plus a new refresh
+cookie) so the device making the change stays signed in; every other
+device is signed out and must log in again with the new password. The
+fresh session is unremembered (no cookie `Max-Age`). It lives under
+`/api/auth` because the fresh refresh cookie shares the login/refresh
+cookie scope (Path=/api/auth).
 
 **Request:**
 ```json

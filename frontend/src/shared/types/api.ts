@@ -18,6 +18,10 @@ export interface User {
 export interface LoginCredentials {
 	username: string;
 	password: string;
+	// The remember-me opt-in of POST /api/auth/login
+	// (doku/description_auth_api.md): true mints a persistent refresh
+	// session; absent or false keeps today's browser-session cookie.
+	rememberDevice?: boolean;
 }
 
 // Body of POST /api/auth/login and POST /api/auth/refresh (the refresh

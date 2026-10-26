@@ -56,11 +56,22 @@ func NewTestAuthServiceWithUserRepo(userRepo models.UserRepositoryInterface) (*A
 // NewTestAuthServiceWithSessionRepo creates a test auth service with
 // explicit session dependencies, so session-focused tests can inject a
 // pre-seeded session repository, session-repository errors, or a
-// non-default TTL. The first-user creator is a loud stub: no auth-level
-// test exercises Setup (the first-run contract is pinned at the app
-// wiring seam over the real users service), and this helper cannot wire
-// that service without an import cycle.
+// non-default TTL. The remembered TTL defaults to the configuration
+// default (90 days, issue 379); remembered-session tests that need to
+// tell the two TTLs apart use NewTestAuthServiceWithRememberTTL. The
+// first-user creator is a loud stub: no auth-level test exercises Setup
+// (the first-run contract is pinned at the app wiring seam over the real
+// users service), and this helper cannot wire that service without an
+// import cycle.
 func NewTestAuthServiceWithSessionRepo(userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, sessionTTL time.Duration) (*AuthService, error) {
+	return NewTestAuthServiceWithRememberTTL(userRepo, sessionRepo, sessionTTL, 90*24*time.Hour)
+}
+
+// NewTestAuthServiceWithRememberTTL is NewTestAuthServiceWithSessionRepo
+// with the remembered-session TTL supplied by the test, so
+// remembered-session tests can pin the two TTLs to distinct values and
+// assert which one a given session landed on (issue 379).
+func NewTestAuthServiceWithRememberTTL(userRepo models.UserRepositoryInterface, sessionRepo models.SessionRepositoryInterface, sessionTTL, rememberTTL time.Duration) (*AuthService, error) {
 	// Create temporary files for test keys
 	privateKeyPEM := testutils.GenerateValidPEMKey()
 	// Generate a proper public key from the private key
@@ -94,7 +105,7 @@ func NewTestAuthServiceWithSessionRepo(userRepo models.UserRepositoryInterface, 
 		Issuer:         "test-issuer",
 	}
 
-	return NewAuthService(config, userRepo, sessionRepo, sessionTTL, unimplementedFirstUsers{})
+	return NewAuthService(config, userRepo, sessionRepo, sessionTTL, rememberTTL, unimplementedFirstUsers{})
 }
 
 // NewTestAuthServiceWithFailureBudget is NewTestAuthServiceWithSessionRepo
