@@ -4,6 +4,8 @@ import type {
 	ContainerSummary,
 } from "@features/containers/services/containersApi";
 import type {
+	ImageCopyPreview,
+	ImageCopyResult,
 	ImageDetail,
 	ImageSummary,
 } from "@features/images/services/imagesApi";
@@ -477,6 +479,83 @@ export function volumeMoveResultFixture(
 		...overrides,
 	};
 }
+
+// --- issue 376: image copy fixtures ---------------------------------------
+// Image copy preview (GET .../images/{imageId}/copy-preview, issue 375):
+// default shape is a target that does not hold the image; tests override
+// `present` per scenario.
+export function imageCopyPreviewFixture(
+	overrides: Partial<ImageCopyPreview> = {},
+): ImageCopyPreview {
+	return {
+		present: false,
+		...overrides,
+	};
+}
+
+// Image transfer envelope (POST .../images/{imageId}/copy, issue 375): the
+// terminal complete event's result. Default shape is a completed copy of
+// the fixture image from m-1 to m-2 with its tag as the loaded name.
+export function imageCopyResultFixture(
+	overrides: Partial<ImageCopyResult> = {},
+): ImageCopyResult {
+	return {
+		id: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		status: "copied",
+		sourceMachineId: "m-1",
+		targetMachineId: "m-2",
+		bytes: 2097152,
+		names: ["docker.io/library/nginx:1.27"],
+		...overrides,
+	};
+}
+// Image copy stream events (the NDJSON transport, issue 375): the
+// progress event, the terminal complete event, and the terminal error
+// event — the backend's ImageCopyEvent vocabulary. The generic NDJSON
+// test builder types pull-stream events, so these travel as raw
+// framed-line payloads, not typed DTOs.
+export type ImageCopyStreamEvent = Record<string, unknown> & {
+	type: string;
+	operationId: string;
+};
+
+export function imageCopyEventFixture(
+	overrides: Record<string, unknown> = {},
+): ImageCopyStreamEvent {
+	return {
+		operationId: "op-1",
+		type: "image",
+		machineId: "m-1",
+		image:
+			"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		phase: "start",
+		...overrides,
+	};
+}
+
+export function imageCopyCompleteEventFixture(
+	result: ImageCopyResult,
+): ImageCopyStreamEvent {
+	return {
+		operationId: "op-1",
+		type: "complete",
+		machineId: "m-1",
+		result,
+	};
+}
+
+export function imageCopyErrorEventFixture(
+	code: string,
+	message: string,
+): ImageCopyStreamEvent {
+	return {
+		operationId: "op-1",
+		type: "error",
+		machineId: "m-1",
+		error: { code, message },
+	};
+}
+// --- end issue 376 ---------------------------------------------------------
 
 export function userFixture(overrides: Partial<UserSummary> = {}): UserSummary {
 	return {

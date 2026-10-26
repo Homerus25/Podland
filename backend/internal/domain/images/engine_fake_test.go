@@ -2,6 +2,7 @@ package images
 
 import (
 	"context"
+	"io"
 
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
@@ -16,6 +17,8 @@ type fakeImageEngine struct {
 	pullFn    func(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error)
 	pruneFn   func() ([]*reports.PruneReport, error)
 	inspectFn func(id string) ([]*entities.ImageInspectReport, []error, error)
+	exportFn  func(ref string, w io.Writer) error
+	loadFn    func(r io.Reader) ([]string, error)
 }
 
 func (f *fakeImageEngine) List(opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
@@ -53,6 +56,20 @@ func (f *fakeImageEngine) Inspect(id string) ([]*entities.ImageInspectReport, []
 	return f.inspectFn(id)
 }
 
+func (f *fakeImageEngine) Export(ref string, w io.Writer) error {
+	if f.exportFn == nil {
+		panic("unexpected ImageEngine.Export call")
+	}
+	return f.exportFn(ref, w)
+}
+
+func (f *fakeImageEngine) Load(r io.Reader) ([]string, error) {
+	if f.loadFn == nil {
+		panic("unexpected ImageEngine.Load call")
+	}
+	return f.loadFn(r)
+}
+
 // fakeEngineProvider arms the provider seam: engine is handed to the
 // service closure; err simulates an acquisition failure (the 502 sentinel
 // crossing) and short-circuits the closure, exactly like the production
@@ -60,11 +77,33 @@ func (f *fakeImageEngine) Inspect(id string) ([]*entities.ImageInspectReport, []
 type fakeEngineProvider struct {
 	engine ImageEngine
 	err    error
+	// engines serves per-machine engines keyed by machine ID — the shape
+	// the cross-machine copy exercises. When non-nil it takes precedence
+	// over engine; a lookup miss panics, so a closure crossing an
+	// unexpected machine fails the test loudly.
+	engines map[string]ImageEngine
+	// engineErrs serves per-machine acquisition failures keyed by
+	// machine ID — the shape a target-lease failure (one machine
+	// reachable, the other not) exercises. Checked before the engines
+	// lookup.
+	engineErrs map[string]error
 }
 
 func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e ImageEngine) error) error {
 	if p.err != nil {
 		return p.err
+	}
+	if p.engineErrs != nil {
+		if err, ok := p.engineErrs[machineID]; ok {
+			return err
+		}
+	}
+	if p.engines != nil {
+		e, ok := p.engines[machineID]
+		if !ok {
+			panic("unexpected WithEngine machine: " + machineID)
+		}
+		return fn(e)
 	}
 	return fn(p.engine)
 }

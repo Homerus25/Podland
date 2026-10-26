@@ -155,3 +155,71 @@ func (h *ImageHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 		return h.service.Inspect(ctx, userID, machineID, imageID)
 	})
 }
+
+// CopyPreview answers the copy dialog's one fact (issue 375,
+// doku/description_images_api.md): whether the target machine already
+// holds the image by ID. Route-level RequireMachineAccess (app.go) gates
+// the subtree at read; the target machine's read access is enforced
+// inside the service against the access store.
+func (h *ImageHandler) CopyPreview(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ImageCopyPreviewResponse, error) {
+		imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		targetMachineID, guard := web.QueryString(r, "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		return h.service.CopyPreview(ctx, userID, machineID, imageID, targetMachineID)
+	})
+}
+
+// Copy handles the cross-machine copy of an image (issue 375,
+// doku/description_images_api.md). The route sits at the subtree's write
+// gate for the SOURCE machine; the target machine's write-level access
+// is enforced inside the service against the access store.
+//
+// Transport: ALWAYS NDJSON — no plain/stream fork — through the
+// streaming kit's progress seam (HandleProgress), the volumes move's
+// arrangement. The archive stream can run minutes on real images, so
+// the caller gets progress events and one terminal event (complete
+// envelope or mapped error); the kit's 10-minute write deadline covers
+// the stream's routine excess over the global 30-second write timeout.
+// Errors answered BEFORE the stream begins (bad param, bad body) keep
+// the plain envelope.
+func (h *ImageHandler) Copy(w http.ResponseWriter, r *http.Request) {
+	imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
+	if guard != nil {
+		errors.RespondWithError(w, guard, contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	// Decode answers its 400s before the stream begins; the streaming
+	// kit's progress seam takes over from there (the volumes move's
+	// arrangement).
+	var request ImageCopyRequest
+	if appErr := web.Decode(r, &request); appErr != nil {
+		errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
+		return
+	}
+
+	streaming.HandleProgress(w, r, "Copy image across machines", []slog.Attr{slog.String("imageId", imageID)}, streaming.ProgressConfig[ImageCopyEvent, *ImageCopyResponse]{
+		Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(ImageCopyEvent)) (*ImageCopyResponse, error) {
+			return h.service.Copy(ctx, op.UserID, op.MachineID, imageID, request.TargetMachineID, func(event ImageCopyEvent) {
+				event.OperationID = op.OperationID
+				event.MachineID = op.MachineID
+				onProgress(event)
+			})
+		},
+		CompleteEvent: func(op streaming.OperationContext, response *ImageCopyResponse) any {
+			return NewImageCopyCompleteEvent(op.OperationID, op.MachineID, *response)
+		},
+		ErrorDefault: errors.ErrConnectionFailed,
+		ErrorEvent: func(op streaming.OperationContext, code, message string, _ bool) any {
+			return NewImageCopyErrorEvent(op.OperationID, op.MachineID, code, message)
+		},
+	})
+}

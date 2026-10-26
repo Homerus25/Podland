@@ -218,3 +218,23 @@ func TestLoad_VolumeUploadMaxBytes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(2<<30), cfg.Volumes.MaxUploadBytes, "garbage values must fall back to the default")
 }
+
+// TestLoad_ImageTransferMaxBytes pins the cross-machine image copy's
+// transfer bound: default 10 GiB (the kit's DefaultMaxImageTransferBytes
+// — images are routinely larger than the volume transfer's 2 GiB),
+// honored override, and fallback to the default on garbage.
+func TestLoad_ImageTransferMaxBytes(t *testing.T) {
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, int64(10<<30), cfg.Images.MaxTransferBytes, "default bound must be 10 GiB")
+
+	t.Setenv("IMAGE_TRANSFER_MAX_BYTES", "1024")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1024), cfg.Images.MaxTransferBytes, "env override must be honored")
+
+	t.Setenv("IMAGE_TRANSFER_MAX_BYTES", "not-a-number")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.Equal(t, int64(10<<30), cfg.Images.MaxTransferBytes, "garbage values must fall back to the default")
+}

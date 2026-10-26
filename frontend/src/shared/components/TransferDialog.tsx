@@ -37,7 +37,9 @@ export interface TransferPreviewSlice {
 
 // The skeleton's state, owned by useTransferState and handed to the
 // component whole: the writable targets, the selected one (defaulting to
-// the first), its display name, and the mode.
+// the first), its display name, and the mode. A pinned (copy-only)
+// surface never reads mode/setMode; the shared shape keeps them for the
+// mode-choosing surfaces.
 export interface TransferState {
 	targets: Machine[];
 	targetId: string;
@@ -108,6 +110,7 @@ export function TransferDialog({
 	machine,
 	transfer,
 	preview,
+	pinnedMode,
 	noun,
 	itemName,
 	noTargetsMessage,
@@ -126,6 +129,12 @@ export function TransferDialog({
 	machine: Machine;
 	transfer: TransferState;
 	preview: TransferPreviewSlice;
+	// A copy-only surface (the image copy, issue 376) pins the mode:
+	// "copy" is the only pinnable mode — no surface pins a move. The
+	// radio hides and the confirm and title speak Copy vocabulary only.
+	// The three mode-choosing surfaces pass nothing and render
+	// byte-identically.
+	pinnedMode?: "copy";
 	// The singular resource noun; the mode radio, confirm button, collision,
 	// and referencing copy derive from it.
 	noun: string;
@@ -164,6 +173,9 @@ export function TransferDialog({
 }) {
 	const { targets, targetId, targetName, selectTarget, mode, setMode } =
 		transfer;
+	// A pinned surface never reads the state's mode: the radio is gone, so
+	// the confirm and title speak the pinned vocabulary only.
+	const effectiveMode = pinnedMode ?? mode;
 
 	useEffect(() => {
 		if (!reset) return;
@@ -183,7 +195,7 @@ export function TransferDialog({
 		<Modal
 			isOpen
 			onClose={onClose}
-			title={`Move or copy ${itemName}`}
+			title={pinnedMode ? `Copy ${itemName}` : `Move or copy ${itemName}`}
 			footer={
 				report ? (
 					<Button onClick={onClose} data-testid="close-move-report-button">
@@ -195,13 +207,13 @@ export function TransferDialog({
 							Cancel
 						</Button>
 						<Button
-							colorScheme={mode === "move" ? "red" : "blue"}
+							colorScheme={effectiveMode === "move" ? "red" : "blue"}
 							onClick={onConfirm}
 							isDisabled={confirmButtonDisabled}
 							isLoading={isPending}
 							data-testid="confirm-move-button"
 						>
-							{mode === "move" ? `Move ${noun}` : `Copy ${noun}`}
+							{effectiveMode === "move" ? `Move ${noun}` : `Copy ${noun}`}
 						</Button>
 					</>
 				)
@@ -237,23 +249,25 @@ export function TransferDialog({
 							</Text>
 						)}
 					</FormControl>
-					<FormControl>
-						<FormLabel>Mode</FormLabel>
-						<RadioGroup
-							value={mode}
-							onChange={(next) => setMode(next as TransferMode)}
-							data-testid="move-mode-radio"
-						>
-							<HStack spacing={4}>
-								<Radio value="move" data-testid="move-mode-move">
-									Move (remove from this machine)
-								</Radio>
-								<Radio value="copy" data-testid="move-mode-copy">
-									Copy (keep this machine&apos;s {noun})
-								</Radio>
-							</HStack>
-						</RadioGroup>
-					</FormControl>
+					{pinnedMode ? null : (
+						<FormControl>
+							<FormLabel>Mode</FormLabel>
+							<RadioGroup
+								value={mode}
+								onChange={(next) => setMode(next as TransferMode)}
+								data-testid="move-mode-radio"
+							>
+								<HStack spacing={4}>
+									<Radio value="move" data-testid="move-mode-move">
+										Move (remove from this machine)
+									</Radio>
+									<Radio value="copy" data-testid="move-mode-copy">
+										Copy (keep this machine&apos;s {noun})
+									</Radio>
+								</HStack>
+							</RadioGroup>
+						</FormControl>
+					)}
 					{preview.isPending ? (
 						<Text color="gray.500" data-testid="move-preview-pending">
 							Checking the target machine…
@@ -289,7 +303,7 @@ export function TransferDialog({
 									</HStack>
 								))}
 							</VStack>
-							{mode === "move" ? (
+							{effectiveMode === "move" ? (
 								<Text mt={2} color="orange.500">
 									After a move these references dangle — the {noun} they name is
 									gone from this machine.

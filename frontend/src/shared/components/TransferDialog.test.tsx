@@ -146,6 +146,16 @@ describe("TransferDialog skeleton", () => {
 		);
 	});
 
+	it("hides the mode radio and pins the confirm to Copy when the mode is pinned", () => {
+		renderHarness({ pinnedMode: "copy" });
+
+		expect(screen.queryByTestId("move-mode-radio")).not.toBeInTheDocument();
+		expect(screen.getByTestId("confirm-move-button")).toHaveTextContent(
+			"Copy gadget",
+		);
+		expect(screen.getByTestId("modal")).toHaveTextContent("Copy g-1");
+	});
+
 	it("sends confirm once clicked, and nothing on cancel", async () => {
 		const props = renderHarness();
 		const user = userEvent.setup();

@@ -1,0 +1,342 @@
+import { CopyImageDialog } from "@features/images/components/CopyImageDialog";
+import { ImageList } from "@features/images/components/ImageList";
+import { useImages } from "@features/images/hooks/useImages";
+import type { ImageCopyPreview } from "@features/images/services/imagesApi";
+import type { Machine } from "@shared/types/api";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
+import { useLocation } from "react-router-dom";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+	imageCopyCompleteEventFixture,
+	imageCopyErrorEventFixture,
+	imageCopyEventFixture,
+	imageCopyPreviewFixture,
+	imageCopyResultFixture,
+	imageFixture,
+	machineFixture,
+} from "@/test/factories";
+import { renderWithQuery } from "@/test/render";
+import { server } from "@/test/server";
+import { liveNdjsonResponse, ndjsonResponse } from "@/test/stream";
+
+// The image copy surface's domain assertions (issue 376), mirroring the
+// volumes move suite: the row button and its navigation stop, the
+// already-present fact as information, the copy-only body, the live
+// progress and stay-open report, the both-machines refetch, and the
+// too-large hint. The skeleton behavior (the hidden radio, the Copy
+// confirm) is pinned once in the TransferDialog preset's suite.
+
+const image = imageFixture();
+const encodedImageId = encodeURIComponent(image.id);
+
+const source = machineFixture();
+const staging = machineFixture({ id: "m-2", name: "staging-01" });
+const backup = machineFixture({ id: "m-4", name: "backup-01" });
+const readOnly = machineFixture({
+	id: "m-3",
+	name: "laptop-01",
+	permission: "read",
+	isOwner: false,
+});
+
+let copyRequests: { count: number; body: Record<string, unknown> } = {
+	count: 0,
+	body: {},
+};
+let previewTargets: string[] = [];
+let sourceImageFetches = 0;
+let targetImageFetches = 0;
+
+function resetCounters() {
+	copyRequests = { count: 0, body: {} };
+	previewTargets = [];
+	sourceImageFetches = 0;
+	targetImageFetches = 0;
+}
+
+function imagesHandler(machineId: "m-1" | "m-2") {
+	return http.get(`*/api/machines/${machineId}/images`, () => {
+		if (machineId === "m-1") sourceImageFetches++;
+		else targetImageFetches++;
+		return HttpResponse.json(machineId === "m-1" ? [image] : []);
+	});
+}
+
+function machinesHandler(machines: Machine[]) {
+	return http.get("*/api/machines", () => HttpResponse.json(machines));
+}
+
+function previewHandler(overrides: Partial<ImageCopyPreview> = {}) {
+	return http.get(
+		`*/api/machines/m-1/images/${encodedImageId}/copy-preview`,
+		({ request }) => {
+			previewTargets.push(
+				new URL(request.url).searchParams.get("targetMachineId") ?? "",
+			);
+			return HttpResponse.json(imageCopyPreviewFixture(overrides));
+		},
+	);
+}
+
+// The copy endpoint always answers NDJSON: progress events, then one
+// terminal event. The events travel as raw framed lines built by the
+// shared image-copy event fixtures — they are the image copy domain's
+// own event vocabulary, not the shared stream kit's.
+function copyStreamHandler(events: Record<string, unknown>[], live = false) {
+	const chunks = events.map((event) => `${JSON.stringify(event)}\n`);
+	return http.post(
+		`*/api/machines/m-1/images/${encodedImageId}/copy`,
+		async ({ request }) => {
+			copyRequests.count++;
+			copyRequests.body = (await request.json()) as Record<string, unknown>;
+			return live ? liveNdjsonResponse(chunks, 50) : ndjsonResponse([], chunks);
+		},
+	);
+}
+
+// The row click navigates, so the navigation test observes the location
+// through the public interface: a probe reading the router's pathname.
+function LocationProbe() {
+	const location = useLocation();
+	return <div data-testid="location">{location.pathname}</div>;
+}
+
+// The target machine's image list is not rendered by the source list; the
+// probe mounts its query so the both-machines refetch is observable
+// through MSW.
+function TargetImagesProbe() {
+	useImages("m-2");
+	return null;
+}
+
+async function openCopyDialog(
+	previewOverrides: Partial<ImageCopyPreview> = {},
+) {
+	server.use(
+		imagesHandler("m-1"),
+		imagesHandler("m-2"),
+		machinesHandler([source, staging, readOnly, backup]),
+		previewHandler(previewOverrides),
+		copyStreamHandler([
+			imageCopyCompleteEventFixture(imageCopyResultFixture()),
+		]),
+	);
+	renderWithQuery(
+		<>
+			<LocationProbe />
+			<ImageList machine={source} />
+			<TargetImagesProbe />
+		</>,
+		{ chakra: true, router: { initialEntries: ["/machines/m-1"] } },
+	);
+	const user = userEvent.setup();
+	await user.click(
+		await screen.findByRole("button", {
+			name: "Copy docker.io/library/nginx:1.27 to another machine",
+		}),
+	);
+	expect(await screen.findByTestId("modal")).toBeInTheDocument();
+	return user;
+}
+
+// Ready-to-confirm state: the preview resolved (the default fixture says
+// the target does not hold the image), so confirm unlocks once it arrives.
+async function openCopyDialogReadyToConfirm(
+	previewOverrides: Partial<ImageCopyPreview> = {},
+) {
+	const user = await openCopyDialog(previewOverrides);
+	await waitFor(() =>
+		expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
+	);
+	return user;
+}
+
+describe("ImageList copy to machine", () => {
+	beforeEach(resetCounters);
+
+	it("hides the Copy to machine action below the manage-images capability", async () => {
+		server.use(imagesHandler("m-1"));
+		renderWithQuery(
+			<ImageList
+				machine={machineFixture({ permission: "read", isOwner: false })}
+			/>,
+			{ chakra: true, router: true },
+		);
+
+		expect(await screen.findByTestId("image-row")).toBeInTheDocument();
+		expect(
+			screen.queryByRole("button", {
+				name: "Copy docker.io/library/nginx:1.27 to another machine",
+			}),
+		).not.toBeInTheDocument();
+	});
+
+	it("opens the copy dialog from the row without firing the row's navigation", async () => {
+		await openCopyDialog();
+
+		expect(screen.getByTestId("modal")).toBeInTheDocument();
+		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+	});
+
+	it("offers one dialog listing only manageable machines, source excluded", async () => {
+		await openCopyDialog();
+
+		const select = screen.getByTestId("move-target-select");
+		const names = within(select)
+			.getAllByRole("option")
+			.map((option) => option.textContent);
+		expect(names).toEqual(["staging-01", "backup-01"]);
+		expect(names).not.toContain("prod-web-01");
+		expect(names).not.toContain("laptop-01");
+	});
+
+	it("renders the preview's already-present fact as information, never a block", async () => {
+		await openCopyDialogReadyToConfirm({ present: true });
+
+		const present = screen.getByTestId("copy-already-present");
+		expect(present).toHaveTextContent("staging-01");
+		expect(present).toHaveTextContent("already holds this image");
+		expect(screen.getByTestId("confirm-move-button")).toBeEnabled();
+		expect(copyRequests.count).toBe(0);
+	});
+
+	it("refetches the preview when the target changes", async () => {
+		const user = await openCopyDialogReadyToConfirm();
+
+		await user.selectOptions(screen.getByTestId("move-target-select"), "m-4");
+
+		await waitFor(() => expect(previewTargets).toEqual(["m-2", "m-4"]));
+	});
+
+	it("sends the copy body — the target only, no mode, no force", async () => {
+		const user = await openCopyDialogReadyToConfirm();
+
+		await user.click(screen.getByTestId("confirm-move-button"));
+
+		await waitFor(() => expect(copyRequests.count).toBe(1));
+		expect(copyRequests.body).toEqual({ targetMachineId: "m-2" });
+	});
+
+	it("streams with live progress, narrates the stay-open report, and refetches both machines' image lists", async () => {
+		server.use(
+			imagesHandler("m-1"),
+			imagesHandler("m-2"),
+			machinesHandler([source, staging, readOnly, backup]),
+			previewHandler(),
+			copyStreamHandler(
+				[
+					imageCopyEventFixture({ phase: "start" }),
+					imageCopyEventFixture({ phase: "bytes", bytes: 1048576 }),
+					imageCopyEventFixture({ phase: "done", bytes: 2097152 }),
+					imageCopyCompleteEventFixture(imageCopyResultFixture()),
+				],
+				true,
+			),
+		);
+		renderWithQuery(
+			<>
+				<LocationProbe />
+				<ImageList machine={source} />
+				<TargetImagesProbe />
+			</>,
+			{ chakra: true, router: { initialEntries: ["/machines/m-1"] } },
+		);
+		const user = userEvent.setup();
+		await user.click(
+			await screen.findByRole("button", {
+				name: "Copy docker.io/library/nginx:1.27 to another machine",
+			}),
+		);
+		await waitFor(() =>
+			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
+		);
+		const beforeSource = sourceImageFetches;
+		const beforeTarget = targetImageFetches;
+
+		await user.click(screen.getByTestId("confirm-move-button"));
+
+		await waitFor(() => expect(copyRequests.count).toBe(1));
+		expect(copyRequests.body).toEqual({ targetMachineId: "m-2" });
+
+		// Progress rendered while the stream ran, then the terminal report
+		// narrated in place instead of closing — the byte count is the
+		// answer's point.
+		expect(await screen.findByTestId("move-progress")).toBeInTheDocument();
+		const report = await screen.findByTestId("move-success-report");
+		expect(report).toHaveTextContent("Copied");
+		expect(report).toHaveTextContent("docker.io/library/nginx:1.27");
+		expect(report).toHaveTextContent("staging-01");
+		expect(report).toHaveTextContent("2.1 MB");
+		const names = within(report).getByTestId("copy-loaded-names");
+		expect(names).toHaveTextContent("docker.io/library/nginx:1.27");
+		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
+
+		// The transfer touched two machines: both image lists refetch from
+		// the server's answer, not from closure assumptions.
+		await waitFor(() => {
+			expect(sourceImageFetches).toBeGreaterThan(beforeSource);
+			expect(targetImageFetches).toBeGreaterThan(beforeTarget);
+		});
+
+		await user.click(screen.getByTestId("close-move-report-button"));
+		await waitFor(() =>
+			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
+		);
+	});
+
+	it("narrates the too-large refusal as a hint in the error region", async () => {
+		const user = await openCopyDialogReadyToConfirm();
+		server.use(
+			copyStreamHandler([
+				imageCopyErrorEventFixture(
+					"IMAGE_TRANSFER_TOO_LARGE",
+					"Image docker.io/library/nginx:1.27 exceeds the transfer bound",
+				),
+			]),
+		);
+
+		await user.click(screen.getByTestId("confirm-move-button"));
+
+		expect(
+			await screen.findByText("IMAGE_TRANSFER_TOO_LARGE"),
+		).toBeInTheDocument();
+		const hint = screen.getByTestId("copy-too-large-hint");
+		expect(hint).toHaveTextContent("transfer bound");
+		expect(screen.getByTestId("modal")).toBeInTheDocument();
+	});
+});
+
+// The dialog adapter renders through the list above; this direct render
+// pins the report's loaded-names block against a load that reported no
+// names (the backend answers [], never null).
+describe("CopyImageDialog report", () => {
+	beforeEach(resetCounters);
+
+	it("narrates a completed copy without a loaded-names block when the load reported none", async () => {
+		server.use(
+			machinesHandler([source, staging, readOnly, backup]),
+			previewHandler(),
+			copyStreamHandler([
+				imageCopyCompleteEventFixture(imageCopyResultFixture({ names: [] })),
+			]),
+		);
+		renderWithQuery(
+			<CopyImageDialog machine={source} image={image} onClose={() => {}} />,
+			{ chakra: true, router: true },
+		);
+		const user = userEvent.setup();
+		await waitFor(() =>
+			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
+		);
+
+		await user.click(screen.getByTestId("confirm-move-button"));
+
+		const report = await screen.findByTestId("move-success-report");
+		expect(report).toHaveTextContent("Copied");
+		expect(
+			within(report).queryByTestId("copy-loaded-names"),
+		).not.toBeInTheDocument();
+	});
+});

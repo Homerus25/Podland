@@ -1,4 +1,5 @@
 import { Box, Button, Td, Text, Tr } from "@chakra-ui/react";
+import { CopyImageDialog } from "@features/images/components/CopyImageDialog";
 import { displayTags } from "@features/images/components/imageDisplayTags";
 import { PullImageForm } from "@features/images/components/PullImageForm";
 import {
@@ -91,6 +92,7 @@ export function ImageList({ machine }: { machine: Machine }) {
 	const deleteImage = useDeleteImage(machineId);
 	const pruneImages = usePruneImages(machineId);
 	const [pendingDelete, setPendingDelete] = useState<ImageSummary | null>(null);
+	const [pendingCopy, setPendingCopy] = useState<ImageSummary | null>(null);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const canManage = can(machine, "manage-images");
 	const navigate = useNavigate();
@@ -126,6 +128,21 @@ export function ImageList({ machine }: { machine: Machine }) {
 						<Td isNumeric>{formatBytes(image.size)}</Td>
 						<Td>{formatRelativeDate(image.createdAt)}</Td>
 						<Td>
+							{canManage ? (
+								<Button
+									size="xs"
+									colorScheme="blue"
+									variant="outline"
+									aria-label={`Copy ${displayTags(image)} to another machine`}
+									onClick={(event) => {
+										event.stopPropagation();
+										setPendingCopy(image);
+									}}
+									data-testid="copy-image-button"
+								>
+									Copy to machine
+								</Button>
+							) : null}
 							<Button
 								size="xs"
 								colorScheme="red"
@@ -171,6 +188,13 @@ export function ImageList({ machine }: { machine: Machine }) {
 					image={pendingDelete}
 					onClose={() => setPendingDelete(null)}
 					deleteImage={deleteImage}
+				/>
+			) : null}
+			{pendingCopy ? (
+				<CopyImageDialog
+					machine={machine}
+					image={pendingCopy}
+					onClose={() => setPendingCopy(null)}
 				/>
 			) : null}
 		</>

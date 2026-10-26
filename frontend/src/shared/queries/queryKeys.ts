@@ -178,6 +178,21 @@ export function imageInspectQueryKey(machineId: string, imageId: string) {
 	return [...imagesQueryKey(machineId), imageId, "inspect"] as const;
 }
 
+// The image copy preview is an image sub-resource keyed by the chosen
+// target, so changing the target refetches. Never an invalidation target
+// of its own: images-prefix invalidation (a copy's success) covers it.
+export function imageCopyPreviewQueryKey(
+	machineId: string,
+	imageId: string,
+	targetMachineId: string,
+) {
+	return [
+		...imageQueryKey(machineId, imageId),
+		"copy-preview",
+		targetMachineId,
+	] as const;
+}
+
 // The raw inspect report is a secret sub-resource keyed by the secret, so
 // every dialog open resolves to its own entry. Never an invalidation target
 // of its own: secrets-prefix invalidation covers it.

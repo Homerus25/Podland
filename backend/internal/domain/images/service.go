@@ -7,6 +7,7 @@ import (
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/inspect"
+	"github.com/Homerus25/podland/backend/internal/permission"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -18,6 +19,19 @@ import (
 // service itself owns only domain mapping and progress conversion.
 type ImageService struct {
 	engines ImageEngineProvider
+	// accessRepo resolves the caller's permission level for the
+	// cross-machine copy (issue 375): route middleware only sees the
+	// route's machine, so the target machine's access is checked here,
+	// against the store, before any podman call. Wired via
+	// WithAccessRepo.
+	accessRepo permission.PermissionGetter
+	// maxImageTransferBytes bounds the cross-machine copy's archive
+	// stream (issue 375, §19), enforced by the transfer kit's counting
+	// reader. Wired via WithMaxImageTransferBytes from the
+	// IMAGE_TRANSFER_MAX_BYTES config value; zero falls back to the
+	// transfer kit's DefaultMaxImageTransferBytes (the kit owns the
+	// default per §19).
+	maxImageTransferBytes int64
 }
 
 // NewImageService creates a new ImageService with the given engine provider.

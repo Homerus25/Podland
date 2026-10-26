@@ -241,7 +241,9 @@ closest sibling that already exists. Rulings so far:
 - **Cross-machine transfer core** — `internal/transfer` is the one kit
   behind every cross-machine copy/move (architecture-decisions §19):
   `CopyVolumeData` (export→import splice, byte bound, progress),
-  `ProbeVolumeEmpty` (bounded tar probe), `TransferSecrets`
+  `CopyImageData` (the image export→load splice over the same shared
+  core, its own 10 GiB bound default), `ProbeVolumeEmpty` (bounded tar
+  probe), `TransferSecrets`
   (reveal/create with same-name skips), the quadlet reference
   resolution (`transfer/quadlet.go`, issue 242: the `Volume=`/`Secret=`
   line parse and the source→name rules, one seam for the quadlet move's
@@ -254,12 +256,13 @@ closest sibling that already exists. Rulings so far:
   the kit's suite, the domains pin their projections). The quadlet
   move's volume-data phase
   (`internal/domain/quadlets/move_volume_data.go`), the
-  volumes copy/move (`internal/domain/volumes/move.go`), and the
-  secrets copy/move (`internal/domain/secrets/move.go`) are its three
+  volumes copy/move (`internal/domain/volumes/move.go`), the
+  secrets copy/move (`internal/domain/secrets/move.go`), and the
+  images copy (`internal/domain/images/copy.go`) are its four
   compositions; handlers, DTOs, and preview projections stay per-domain,
   and each domain maps the kit's errors onto its own wire codes. Settled
   2026-10-05 (issue 238; secrets composition issue 239; reference seam
-  issue 242).
+  issue 242; images composition issue 375).
 - **Prune endpoints** — volumes prune is the reference pattern:
   `internal/domain/volumes/service.go` (`Prune`), `handler.go`
   (`Prune`), `dto.go` (`FromPodmanPruneReports`), and
@@ -286,7 +289,8 @@ closest sibling that already exists. Rulings so far:
   gate (admin on the SOURCE machine, fired in preflight when
   `transferSecrets` is set — issue 215; a secret's value leaving a
   machine is a reveal), and the cross-machine transfer gates of the
-  volumes and secrets copy/move (issues 238/239: the target machine's
+  volumes and secrets copy/move (issues 238/239) and the images copy
+  (issue 375: the target machine's
   level — read for a preview, write for a transfer — enforced
   in-service, since route middleware only sees the route's machine;
   the secrets transfer additionally re-gates the source at admin,

@@ -99,3 +99,53 @@ export async function inspectImage(
 export function pullStreamUrl(machineId: string): string {
 	return machineApiUrl(machineId, "images", "pull");
 }
+
+// Response of GET /api/machines/{id}/images/{imageId}/copy-preview
+// (backend images dto.go ImageCopyPreviewResponse, issue 375): the copy
+// dialog's one fact. present: the target machine already holds the image
+// by ID. Information, never a block — the load is idempotent
+// (content-addressed), so confirming stays possible either way.
+export interface ImageCopyPreview {
+	present: boolean;
+}
+
+export async function getImageCopyPreview(
+	machineId: string,
+	imageId: string,
+	targetMachineId: string,
+): Promise<ImageCopyPreview> {
+	const response = await api.get<ImageCopyPreview>(
+		machineApiPath(machineId, "images", imageId, "copy-preview"),
+		{ params: { targetMachineId } },
+	);
+	return response.data;
+}
+
+// Body of the image copy endpoint (backend images dto.go
+// ImageCopyRequest, issue 375). Copy-only: no mode, no force — the source
+// image is never touched.
+export interface ImageCopyInput {
+	targetMachineId: string;
+}
+
+// Response of POST /api/machines/{id}/images/{imageId}/copy (backend
+// images dto.go ImageCopyResponse, issue 375), carried by the NDJSON
+// stream's terminal complete event. status is always "copied" — there is
+// no move mode. bytes is the archive that crossed the export→load splice;
+// names are the image names the target's load reported (the tags the load
+// applied), [] when it reported none.
+export interface ImageCopyResult {
+	id: string;
+	status: "copied";
+	sourceMachineId: string;
+	targetMachineId: string;
+	bytes: number;
+	names: string[];
+}
+
+// Full stream URL for POST .../images/{imageId}/copy: the endpoint always
+// answers NDJSON progress events with one terminal event. The transfer
+// body travels in the request, so no query is appended.
+export function imageCopyStreamUrl(machineId: string, imageId: string): string {
+	return machineApiUrl(machineId, "images", imageId, "copy");
+}

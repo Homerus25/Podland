@@ -2,8 +2,10 @@ package images
 
 import (
 	"context"
+	"io"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
+	bindingsImages "go.podman.io/podman/v6/pkg/bindings/images"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
@@ -25,6 +27,15 @@ type ImageEngine interface {
 	// Inspect reports podman's per-item failures through the error slice,
 	// not an error return — the service classifies them.
 	Inspect(id string) ([]*entities.ImageInspectReport, []error, error)
+	// Export streams the image's archive into w by image reference —
+	// the source width of the cross-machine copy (issue 375, §19).
+	Export(ref string, w io.Writer) error
+	// Load consumes an image archive from r and answers the names the
+	// load applied — the target width of the cross-machine copy
+	// (issue 375, §19). Idempotent by construction: images are
+	// content-addressed, so loading onto a target that already holds
+	// the image skips present layers and re-applies tags.
+	Load(r io.Reader) ([]string, error)
 }
 
 // ImageEngineProvider is the images domain's slice of the connection seam:
@@ -81,4 +92,25 @@ func (e *podmanImageEngine) Prune() ([]*reports.PruneReport, error) {
 
 func (e *podmanImageEngine) Inspect(id string) ([]*entities.ImageInspectReport, []error, error) {
 	return e.tunnelEngine().Inspect(e.ctx, []string{id}, entities.InspectOptions{})
+}
+
+// Export streams the image's archive into w through podman's bindings
+// export (the volumes adapter's arrangement: the bindings call is the
+// one production shape that streams to a writer; the tunnel engine's
+// export wants a file path).
+func (e *podmanImageEngine) Export(ref string, w io.Writer) error {
+	return bindingsImages.Export(e.ctx, []string{ref}, w, nil)
+}
+
+// Load consumes the archive through podman's bindings load and answers
+// the names the load applied.
+func (e *podmanImageEngine) Load(r io.Reader) ([]string, error) {
+	report, err := bindingsImages.Load(e.ctx, r)
+	if err != nil {
+		return nil, err
+	}
+	if report == nil {
+		return nil, nil
+	}
+	return report.Names, nil
 }

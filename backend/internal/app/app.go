@@ -167,7 +167,9 @@ func New(cfg *config.Config) (*App, error) {
 	// so machine deletion can invalidate the machine's pooled SSH clients.
 	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService, sshExecService)
 	containerService := containers.NewContainerService(containers.NewContainerEngineProvider(connectionManager))
-	imageService := images.NewImageService(images.NewImageEngineProvider(connectionManager))
+	imageService := images.NewImageService(images.NewImageEngineProvider(connectionManager)).
+		WithAccessRepo(accessRepo).
+		WithMaxImageTransferBytes(cfg.Images.MaxTransferBytes)
 	// The quadlets domain is two modules (architecture review 2026-10-19,
 	// candidate C2): the lean QuadletService (CRUD, lifecycle, logs,
 	// generate, import, auto-update) and the QuadletTransferService
@@ -337,6 +339,20 @@ func New(cfg *config.Config) (*App, error) {
 						r.Get("/{imageId}", imageHandler.Get)
 						r.With(requireWrite).Delete("/{imageId}", imageHandler.Delete)
 						r.Get("/{imageId}/inspect", imageHandler.Inspect)
+						// Copy preview stays read-level: it mutates
+						// nothing on the source, and the target
+						// machine's read access is enforced inside
+						// the service against the access store
+						// (issue 375).
+						r.Get("/{imageId}/copy-preview", imageHandler.CopyPreview)
+						// The copy mutates remote state (it loads
+						// on the target machine), so it gates at
+						// write level on the source; the target
+						// machine's write access is enforced
+						// inside the service against the access
+						// store — route middleware only sees the
+						// route's machine (issue 375).
+						r.With(requireWrite).Post("/{imageId}/copy", imageHandler.Copy)
 					})
 
 					// Quadlets

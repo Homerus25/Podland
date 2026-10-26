@@ -221,12 +221,20 @@ copy/move composes it instead of re-deriving it:
   back to the constant; a non-zero wired value — negative included —
   passes through untouched), so the uploads cap and the transfer
   bound cannot drift apart.
-- **Three compositions, one kit**: the quadlet move's volume-data phase
+- **Four compositions, one kit**: the quadlet move's volume-data phase
   (`quadlets/move_volume_data.go`), the volumes domain's copy/move
-  (`volumes/move.go`), and the secrets domain's copy/move
-  (`secrets/move.go`) are the three callers; handlers, DTOs,
-  and preview logic stay per-domain. The volume copy/move endpoint
-  always answers NDJSON (no plain/stream fork): the target access
+  (`volumes/move.go`), the secrets domain's copy/move
+  (`secrets/move.go`), and the images domain's copy (`images/copy.go`,
+  issue 375: `transfer.CopyImageData` splices the source's image export
+  into the target's image load over the same shared core — the pipe,
+  counting reader, and cancellation ritual — with its own
+  environment-configured bound, default 10 GiB via
+  `transfer.DefaultMaxImageTransferBytes` and
+  `transfer.ImageBoundOrDefault`, because images are routinely larger
+  than the volume transfer's 2 GiB) are the four callers; handlers,
+  DTOs, and preview logic stay per-domain. The volume copy/move and
+  image copy endpoints
+  always answer NDJSON (no plain/stream fork): the target access
   gate fires inside the operation, so a 403 rides the terminal error
   event. The secret copy/move endpoint answers the plain JSON
   envelope instead — secret values are small, the NDJSON transport

@@ -163,6 +163,17 @@ var (
 	ErrImagePullFailed       = NewAppError("IMAGE_PULL_FAILED", "Failed to pull image", http.StatusInternalServerError)
 	ErrImageUsedByContainers = NewAppError("IMAGE_USED_BY_CONTAINERS", "Image is used by one or more containers", http.StatusBadRequest)
 	ErrOperationCancelled    = NewAppError("OPERATION_CANCELLED", "Operation was cancelled by the client", http.StatusGatewayTimeout)
+	// ErrImageTransferTooLarge is 413: a cross-machine image copy's
+	// archive crossed the transfer bound (issue 375, the kit's bound
+	// ritual with the images' own 10 GiB default). The bound is
+	// environment-configured (IMAGE_TRANSFER_MAX_BYTES).
+	ErrImageTransferTooLarge = NewAppError("IMAGE_TRANSFER_TOO_LARGE", "Image exceeds the maximum transfer size", http.StatusRequestEntityTooLarge)
+	// ErrImageTransferFailed is the cross-machine image copy's engine
+	// answer (issue 375): the export/load stream or a podman engine
+	// failed mid-transfer. Callers carry the image reference and cause
+	// via WithMessage; the plain envelope rewrites 5xx messages, so the
+	// named detail rides the NDJSON terminal error event.
+	ErrImageTransferFailed = NewAppError("IMAGE_TRANSFER_FAILED", "Image transfer failed", http.StatusInternalServerError)
 )
 
 // Quadlets

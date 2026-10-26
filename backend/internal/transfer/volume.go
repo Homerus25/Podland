@@ -63,10 +63,11 @@ var errProbeNotEmpty = errors.New("volume probe: content entry found")
 
 // CopyVolumeData streams one volume's content from the source machine
 // into the target (§19): podman's export on the source spliced through
-// an in-process pipe into podman's import on the target. The counting
-// reader between them owns the transfer bound — the always-on backstop
-// for engines that report no inspect sizes — and reports the bytes
-// actually streamed through onBytes at most once per
+// an in-process pipe into podman's import on the target — the shared
+// splice core below, the same ritual the image splice composes. The
+// counting reader between them owns the transfer bound — the always-on
+// backstop for engines that report no inspect sizes — and reports the
+// bytes actually streamed through onBytes at most once per
 // BytesReportIncrement. A cancelled context (client disconnect) closes
 // the pipe so the export goroutine ends promptly.
 //
@@ -76,6 +77,25 @@ var errProbeNotEmpty = errors.New("volume probe: content entry found")
 // cancelled context wins over the import's own failure, so a disconnect
 // reports cancellation, not a spurious engine error.
 func CopyVolumeData(ctx context.Context, src VolumeDataSource, tgt VolumeDataTarget, name string, limit int64, onBytes func(count int64)) (int64, error) {
+	return splice(ctx,
+		func(w io.Writer) error { return src.VolumeExport(name, w) },
+		func(r io.Reader) error { return tgt.VolumeImport(name, r) },
+		limit, onBytes)
+}
+
+// splice is the kit's one export→import core (§19): every composition —
+// the volume splice and the image splice — pipes the source's export
+// goroutine into the target's import through the in-process pipe, with
+// the counting reader between them owning the byte bound and the
+// progress cadence. A cancelled context (client disconnect) closes the
+// pipe so the export goroutine ends promptly.
+//
+// It returns the bytes streamed. Failures come back unwrapped for the
+// caller to map, except: ErrBoundExceeded (wrapped or bare) when the
+// bound tripped, and ctx.Err() when the stream was cancelled — a
+// cancelled context wins over the import's own failure, so a disconnect
+// reports cancellation, not a spurious engine error.
+func splice(ctx context.Context, export func(w io.Writer) error, importFn func(r io.Reader) error, limit int64, onBytes func(count int64)) (int64, error) {
 	pr, pw := io.Pipe()
 	counted := &countingReader{
 		r:          pr,
@@ -92,10 +112,10 @@ func CopyVolumeData(ctx context.Context, src VolumeDataSource, tgt VolumeDataTar
 	go func() {
 		// CloseWithError(nil) is Close: the import sees a clean EOF
 		// exactly when the export completed.
-		pw.CloseWithError(src.VolumeExport(name, pw))
+		pw.CloseWithError(export(pw))
 	}()
 
-	importErr := tgt.VolumeImport(name, counted)
+	importErr := importFn(counted)
 	if importErr == nil {
 		return counted.count, nil
 	}

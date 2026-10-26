@@ -23,6 +23,7 @@ type Config struct {
 	Log            LogConfig
 	Encryption     EncryptionConfig
 	Volumes        VolumeConfig
+	Images         ImageConfig
 }
 
 // VolumeConfig holds volume configuration
@@ -30,6 +31,16 @@ type VolumeConfig struct {
 	// MaxUploadBytes bounds populate uploads; parts are streamed to
 	// disk and the cap is enforced while streaming (413 past it).
 	MaxUploadBytes int64
+}
+
+// ImageConfig holds image configuration
+type ImageConfig struct {
+	// MaxTransferBytes bounds the cross-machine image copy's archive
+	// stream (issue 375, §19), enforced by the transfer kit's counting
+	// reader. The default is the transfer kit's
+	// DefaultMaxImageTransferBytes — 10 GiB, larger than the volume
+	// transfer's 2 GiB because images are routinely bigger.
+	MaxTransferBytes int64
 }
 
 // DatabaseConfig holds database configuration
@@ -151,6 +162,13 @@ func Load() (*Config, error) {
 	// the same bound the cross-machine copy/move falls back to — so
 	// the uploads cap and the transfer bound share one 2 GiB policy.
 	cfg.Volumes.MaxUploadBytes = getEnvInt64("VOLUME_UPLOAD_MAX_BYTES", transfer.DefaultMaxVolumeUploadBytes)
+
+	// Images
+	// The default is the transfer kit's DefaultMaxImageTransferBytes —
+	// the same bound the cross-machine image copy falls back to — so
+	// the config default and the transfer bound share one 10 GiB
+	// policy (the kit owns the default per §19).
+	cfg.Images.MaxTransferBytes = getEnvInt64("IMAGE_TRANSFER_MAX_BYTES", transfer.DefaultMaxImageTransferBytes)
 
 	return cfg, nil
 }
