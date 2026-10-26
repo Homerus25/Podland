@@ -347,6 +347,35 @@ Stop a running container.
 
 ---
 
+### POST /api/machines/{id}/containers/{containerId}/restart
+
+Restart a running container. The endpoint accepts no timeout or force
+parameters — podman's default timeout applies. A container that is not
+running answers the same `CONTAINER_NOT_RUNNING` terminal as stop; use
+the start endpoint for a stopped container.
+
+**Authentication:** Required
+
+**Response (Success - 200):**
+```json
+{
+  "id": "string",
+  "name": "string",
+  "state": "running",
+  "timestamp": "ISO8601 timestamp"
+}
+```
+
+**Response (Error):**
+- 400: `CONTAINER_NOT_RUNNING`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
 ### DELETE /api/machines/{id}/containers/{containerId}
 
 Remove a container.

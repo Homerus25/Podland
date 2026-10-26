@@ -5,6 +5,7 @@ import {
 	getContainer,
 	inspectContainer,
 	listContainers,
+	restartContainer,
 	startContainer,
 	stopContainer,
 } from "@features/containers/services/containersApi";
@@ -72,6 +73,14 @@ export function useStopContainer(machineId: string) {
 		machineId,
 		"containers",
 		(containerId: string) => stopContainer(machineId, containerId),
+	);
+}
+
+export function useRestartContainer(machineId: string) {
+	return useListInvalidatingMutation(
+		machineId,
+		"containers",
+		(containerId: string) => restartContainer(machineId, containerId),
 	);
 }
 

@@ -24,6 +24,9 @@ type ContainerEngine interface {
 	Start(id string) error
 	// Stop stops the container and answers one error, like Start.
 	Stop(id string) error
+	// Restart restarts the container (podman's default timeout applies,
+	// no force) and answers one error, like Start.
+	Restart(id string) error
 	// Remove removes the container (force also removes a running one)
 	// and answers one error, like Start.
 	Remove(id string, force bool) error
@@ -118,6 +121,15 @@ func stopReportErr(report *entities.StopReport) error {
 	return report.Err
 }
 
+// restartReportErr reads one restart report's per-container error like
+// startReportErr.
+func restartReportErr(report *entities.RestartReport) error {
+	if report == nil {
+		return nil
+	}
+	return report.Err
+}
+
 // removeReportErr reads one remove report's per-container error like
 // startReportErr.
 func removeReportErr(report *reports.RmReport) error {
@@ -138,6 +150,12 @@ func (e *podmanContainerEngine) Start(id string) error {
 func (e *podmanContainerEngine) Stop(id string) error {
 	reports, err := e.tunnelEngine().ContainerStop(e.ctx, []string{id}, entities.StopOptions{})
 	return narrowReports(reports, err, stopReportErr)
+}
+
+// Restart narrows podman's report-slice restart like Start above.
+func (e *podmanContainerEngine) Restart(id string) error {
+	reports, err := e.tunnelEngine().ContainerRestart(e.ctx, []string{id}, entities.RestartOptions{})
+	return narrowReports(reports, err, restartReportErr)
 }
 
 // Remove narrows podman's report-slice remove like Start above.

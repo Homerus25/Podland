@@ -319,6 +319,7 @@ func New(cfg *config.Config) (*App, error) {
 							r.Get("/", containerHandler.Get)
 							r.With(requireWrite).Post("/start", containerHandler.Start)
 							r.With(requireWrite).Post("/stop", containerHandler.Stop)
+							r.With(requireWrite).Post("/restart", containerHandler.Restart)
 							r.With(requireWrite).Delete("/", containerHandler.Delete)
 							r.Get("/logs", containerHandler.Logs)
 							r.Get("/inspect", containerHandler.Inspect)

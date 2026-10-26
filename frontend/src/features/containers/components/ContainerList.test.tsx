@@ -55,6 +55,9 @@ describe("ContainerList permission gating", () => {
 			screen.queryByTestId("stop-container-button"),
 		).not.toBeInTheDocument();
 		expect(
+			screen.queryByTestId("restart-container-button"),
+		).not.toBeInTheDocument();
+		expect(
 			screen.queryByRole("button", { name: /delete/i }),
 		).not.toBeInTheDocument();
 		expect(

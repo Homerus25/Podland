@@ -660,6 +660,20 @@ type ContainerStopResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// ContainerRestartResponse represents the response after restarting a
+// container. It mirrors the start/stop response shape — the containers
+// domain's own precedent, not the pods action shape.
+type ContainerRestartResponse struct {
+	// Container ID
+	ID string `json:"id"`
+	// Container name
+	Name string `json:"name"`
+	// Container state after restart
+	State string `json:"state"`
+	// Operation timestamp
+	Timestamp string `json:"timestamp"`
+}
+
 // ContainerStartResult is the service-layer outcome of a start: the
 // container's identity only. The response DTO's state and timestamp are
 // stamped by the handler's mapping, not by the service.
@@ -674,6 +688,17 @@ type ContainerStartResult struct {
 // container's identity only. The response DTO's state and timestamp are
 // stamped by the handler's mapping, not by the service.
 type ContainerStopResult struct {
+	// Container ID
+	ID string
+	// Container name (inspect-resolved, leading slash trimmed)
+	Name string
+}
+
+// ContainerRestartResult is the service-layer outcome of a restart: the
+// container's identity only, like the stop result. The response DTO's
+// state and timestamp are stamped by the handler's mapping, not by the
+// service.
+type ContainerRestartResult struct {
 	// Container ID
 	ID string
 	// Container name (inspect-resolved, leading slash trimmed)
@@ -700,6 +725,18 @@ func FromContainerStopResult(result ContainerStopResult) ContainerStopResponse {
 		ID:        result.ID,
 		Name:      result.Name,
 		State:     "stopped",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// FromContainerRestartResult maps the service's restart result to the
+// response DTO, stamping the post-restart state and the operation
+// timestamp at mapping time.
+func FromContainerRestartResult(result ContainerRestartResult) ContainerRestartResponse {
+	return ContainerRestartResponse{
+		ID:        result.ID,
+		Name:      result.Name,
+		State:     "running",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 }

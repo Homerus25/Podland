@@ -193,10 +193,48 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 	return result, err
 }
 
+// Restart restarts a running container by ID on the specified machine.
+// Like Stop it inspects first — one inspect serves existence, state, and
+// name — and answers the documented wrong-state terminal before any
+// restart call: a stopped container is Start's caller, not this one, so
+// the precondition is state-based like Stop's. No timeout or force
+// parameters travel: podman's default timeout applies (the quadlets
+// restart's no-force precedent, issue 205). The engine folds podman's
+// report slice into one error; a missing container answers
+// ErrContainerNotFound, anything else is wrapped, never answered as a
+// restarted success; the handler maps the result to the response DTO.
+func (s *ContainerService) Restart(ctx context.Context, userID, machineID, containerID string) (*ContainerRestartResult, error) {
+	var result *ContainerRestartResult
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Restart", func(e ContainerEngine) error {
+		report, err := inspectContainer(e, containerID)
+		if err != nil {
+			return err
+		}
+
+		if !containerRunning(report) {
+			return appErrors.ErrContainerNotRunning
+		}
+
+		if err := e.Restart(containerID); err != nil {
+			if podmanerr.IsNotFound(err) {
+				return appErrors.ErrContainerNotFound
+			}
+			return fmt.Errorf("failed to restart container: %w", err)
+		}
+
+		result = &ContainerRestartResult{
+			ID:   containerID,
+			Name: containerName(report, containerID),
+		}
+		return nil
+	})
+	return result, err
+}
+
 // inspectContainer resolves one container's inspect report through the
 // shared single-report ritual, classifying podman's not-found shapes
-// into ErrContainerNotFound. It is the pre-action read for Start and
-// Stop: one inspect serves existence, state, and name.
+// into ErrContainerNotFound. It is the pre-action read for Start, Stop,
+// and Restart: one inspect serves existence, state, and name.
 func inspectContainer(e ContainerEngine, containerID string) (*entities.ContainerInspectReport, error) {
 	reports, inspectErrs, err := e.Inspect(containerID)
 	return inspect.Resolve(reports, inspectErrs, err, appErrors.ErrContainerNotFound, "container", containerID)

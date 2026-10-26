@@ -3,6 +3,7 @@ import { containerDisplayName } from "@features/containers/components/containerD
 import {
 	useContainers,
 	useDeleteContainer,
+	useRestartContainer,
 	useStartContainer,
 	useStopContainer,
 } from "@features/containers/hooks/useContainers";
@@ -52,8 +53,10 @@ function DeleteContainerModal({
 	);
 }
 
-// Each row owns its lifecycle mutation instances, so pending state and
-// errors are scoped to the affected container and other rows stay usable.
+// Each row owns its lifecycle mutation instances (start/stop and
+// restart), so pending state and errors are scoped to the affected
+// container and other rows stay usable. Restart is additive: it renders
+// beside the Start/Stop toggle, only for running rows (issue #384).
 // The row itself is clickable: it navigates to the container's detail page
 // (spec 301), and every action button stops propagation so a button click
 // never also fires the row action.
@@ -77,21 +80,26 @@ function ContainerRow({
 	const navigate = useNavigate();
 	const startContainer = useStartContainer(machineId);
 	const stopContainer = useStopContainer(machineId);
+	const restartContainer = useRestartContainer(machineId);
 	const name = containerDisplayName(container);
-	const action =
-		container.state === "running"
-			? {
-					lifecycle: stopContainer,
-					testId: "stop-container-button",
-					label: "Stop",
-					colorScheme: undefined,
-				}
-			: {
-					lifecycle: startContainer,
-					testId: "start-container-button",
-					label: "Start",
-					colorScheme: "green" as const,
-				};
+	const isRunning = container.state === "running";
+	const action = isRunning
+		? {
+				lifecycle: stopContainer,
+				testId: "stop-container-button",
+				label: "Stop",
+				colorScheme: undefined,
+			}
+		: {
+				lifecycle: startContainer,
+				testId: "start-container-button",
+				label: "Start",
+				colorScheme: "green" as const,
+			};
+	// A failed lifecycle action or restart shows the row-level error like
+	// Stop does. Each button resets its sibling mutation on click, so a
+	// stale error from the other action never masks the fresh one.
+	const rowError = action.lifecycle.error ?? restartContainer.error;
 
 	return (
 		<>
@@ -116,12 +124,29 @@ function ContainerRow({
 								colorScheme={action.colorScheme}
 								onClick={(event) => {
 									event.stopPropagation();
+									restartContainer.reset();
 									action.lifecycle.mutate(container.id);
 								}}
 								isLoading={action.lifecycle.isPending}
 								data-testid={action.testId}
 							>
 								{action.label}
+							</Button>
+						) : null}
+						{canManage && isRunning ? (
+							<Button
+								size="xs"
+								variant="outline"
+								aria-label={`Restart ${name}`}
+								onClick={(event) => {
+									event.stopPropagation();
+									action.lifecycle.reset();
+									restartContainer.mutate(container.id);
+								}}
+								isLoading={restartContainer.isPending}
+								data-testid="restart-container-button"
+							>
+								Restart
 							</Button>
 						) : null}
 						{canManageNetworks ? (
@@ -167,10 +192,10 @@ function ContainerRow({
 					</Td>
 				) : null}
 			</Tr>
-			{action.lifecycle.error ? (
+			{rowError ? (
 				<Tr>
 					<Td colSpan={canManage ? 5 : 4}>
-						<ErrorDisplay error={getApiError(action.lifecycle.error)} />
+						<ErrorDisplay error={getApiError(rowError)} />
 					</Td>
 				</Tr>
 			) : null}
@@ -178,10 +203,11 @@ function ContainerRow({
 	);
 }
 
-// The Containers tab body. Create, start, stop, and delete are write-gated
-// backend routes, so below manage level the module swaps the whole toolbar
-// for the canonical read hint and the rows drop their start/stop/delete
-// affordances; logs reads at read level, so the row keeps its logs button.
+// The Containers tab body. Create, start, stop, restart, and delete are
+// write-gated backend routes, so below manage level the module swaps the
+// whole toolbar for the canonical read hint and the rows drop their
+// start/stop/restart/delete affordances; logs reads at read level, so
+// the row keeps its logs button.
 // Connect-to-network is gated on the separate manage-networks capability
 // (issue 256): the row button hides below it while Logs stays visible. The
 // toolbar/triad/table machinery and the derived testids are ResourceList's;

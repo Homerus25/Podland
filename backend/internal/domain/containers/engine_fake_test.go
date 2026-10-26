@@ -17,6 +17,7 @@ type fakeContainerEngine struct {
 	inspectFn func(id string) ([]*entities.ContainerInspectReport, []error, error)
 	startFn   func(id string) error
 	stopFn    func(id string) error
+	restartFn func(id string) error
 	removeFn  func(id string, force bool) error
 	logsFn    func(name string, opts entities.ContainerLogsOptions) error
 }
@@ -54,6 +55,13 @@ func (f *fakeContainerEngine) Stop(id string) error {
 		panic("unexpected ContainerEngine.Stop call")
 	}
 	return f.stopFn(id)
+}
+
+func (f *fakeContainerEngine) Restart(id string) error {
+	if f.restartFn == nil {
+		panic("unexpected ContainerEngine.Restart call")
+	}
+	return f.restartFn(id)
 }
 
 func (f *fakeContainerEngine) Remove(id string, force bool) error {

@@ -1,6 +1,6 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
@@ -20,7 +20,7 @@ function containersHandler(containers: ContainerSummary[]) {
 }
 
 function lifecycleHandler(
-	action: "start" | "stop",
+	action: "start" | "stop" | "restart",
 	containerId: string,
 	delayMs = 0,
 ) {
@@ -53,6 +53,97 @@ describe("ContainerList lifecycle", () => {
 		await screen.findByText("runner");
 		expect(screen.getByTestId("stop-container-button")).toBeInTheDocument();
 		expect(screen.getByTestId("start-container-button")).toBeInTheDocument();
+	});
+
+	it("shows Restart beside Stop for a running container and hides it for an exited one", async () => {
+		server.use(
+			containersHandler([
+				containerFixture({ id: "c-run", names: ["/runner"], state: "running" }),
+				containerFixture({ id: "c-stop", names: ["/sleepy"], state: "exited" }),
+			]),
+		);
+		renderContainerList();
+
+		const rows = await screen.findAllByTestId("container-row");
+		expect(
+			within(rows[0]).getByTestId("restart-container-button"),
+		).toBeInTheDocument();
+		expect(
+			within(rows[1]).queryByTestId("restart-container-button"),
+		).not.toBeInTheDocument();
+	});
+
+	it("posts to the restart endpoint for that container on Restart click", async () => {
+		const requests: { method: string; pathname: string }[] = [];
+		server.use(
+			containersHandler([containerFixture({ id: "c-3", names: ["/runner"] })]),
+			http.post("*/api/machines/m-1/containers/c-3/restart", ({ request }) => {
+				requests.push({
+					method: request.method,
+					pathname: new URL(request.url).pathname,
+				});
+				return HttpResponse.json({ id: "c-3" });
+			}),
+		);
+		renderContainerList();
+
+		await userEvent.click(
+			await screen.findByTestId("restart-container-button"),
+		);
+
+		await waitFor(() => expect(requests).toHaveLength(1));
+		expect(requests[0]).toEqual({
+			method: "POST",
+			pathname: "/api/machines/m-1/containers/c-3/restart",
+		});
+	});
+
+	it("marks only the clicked row's restart as pending while the operation runs", async () => {
+		server.use(
+			containersHandler([
+				containerFixture({ id: "c-1", names: ["/runner"], state: "running" }),
+				containerFixture({ id: "c-2", names: ["/other"], state: "running" }),
+			]),
+			lifecycleHandler("restart", "c-1", 100),
+			lifecycleHandler("restart", "c-2", 0),
+		);
+		const user = userEvent.setup();
+		renderContainerList();
+
+		const buttons = await screen.findAllByTestId("restart-container-button");
+		expect(buttons).toHaveLength(2);
+		await user.click(buttons[0]);
+
+		await waitFor(() => {
+			expect(buttons[0]).toBeDisabled();
+			expect(buttons[0]).toHaveAttribute("data-loading");
+		});
+		expect(buttons[1]).toBeEnabled();
+		expect(buttons[1]).not.toHaveAttribute("data-loading");
+	});
+
+	it("shows the row-level error envelope when the restart fails", async () => {
+		server.use(
+			containersHandler([containerFixture({ id: "c-1", names: ["/runner"] })]),
+			http.post("*/api/machines/m-1/containers/c-1/restart", () =>
+				errorResponse(
+					400,
+					"CONTAINER_NOT_RUNNING",
+					"Container is not running",
+					"req-13",
+				),
+			),
+		);
+		const user = userEvent.setup();
+		renderContainerList();
+
+		const button = await screen.findByTestId("restart-container-button");
+		await user.click(button);
+
+		expect(await screen.findByRole("alert")).toBeInTheDocument();
+		expect(screen.getByText("CONTAINER_NOT_RUNNING")).toBeInTheDocument();
+		expect(screen.getByText("Container is not running")).toBeInTheDocument();
+		await waitFor(() => expect(button).toBeEnabled());
 	});
 
 	it("posts to the start endpoint for that container on Start click", async () => {
@@ -125,6 +216,34 @@ describe("ContainerList lifecycle", () => {
 		});
 		expect(buttons[1]).toBeEnabled();
 		expect(buttons[1]).not.toHaveAttribute("data-loading");
+	});
+
+	it("invalidates the containers query on restart success so the list refetches", async () => {
+		const listRequests: string[] = [];
+		server.use(
+			http.get("*/api/machines/m-1/containers", () => {
+				listRequests.push("list");
+				return HttpResponse.json({
+					containers: [
+						containerFixture({ id: "c-1", names: ["/runner"], state: "running" }),
+					],
+					total: 1,
+					timestamp: "2026-08-26T00:00:00Z",
+				});
+			}),
+			http.post("*/api/machines/m-1/containers/c-1/restart", () =>
+				HttpResponse.json({ id: "c-1" }),
+			),
+		);
+		renderContainerList();
+
+		await screen.findByTestId("restart-container-button");
+		const before = listRequests.length;
+		await userEvent.click(screen.getByTestId("restart-container-button"));
+
+		// A restarted container stays running, so the refetch shows in the
+		// request count rather than a visible state flip.
+		await waitFor(() => expect(listRequests.length).toBeGreaterThan(before));
 	});
 
 	it("invalidates the containers query on success so the new state renders", async () => {

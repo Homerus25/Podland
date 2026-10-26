@@ -502,6 +502,19 @@ export async function stopContainer(
 	await api.post(machineApiPath(machineId, "containers", containerId, "stop"));
 }
 
+// POST /api/machines/{id}/containers/{containerId}/restart
+// (backend/internal/domain/containers/handler.go ContainerHandler.Restart).
+// The endpoint takes no timeout or force parameters — podman's default
+// timeout applies.
+export async function restartContainer(
+	machineId: string,
+	containerId: string,
+): Promise<void> {
+	await api.post(
+		machineApiPath(machineId, "containers", containerId, "restart"),
+	);
+}
+
 // DELETE /api/machines/{id}/containers/{containerId} -> 204
 // (backend/internal/domain/containers/handler.go ContainerHandler.Delete).
 // The force query param exists on the endpoint but is out of scope for now.

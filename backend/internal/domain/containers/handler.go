@@ -160,6 +160,26 @@ func (h *ContainerHandler) Stop(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Restart handles restarting a running container. The service returns
+// the container's identity; the response DTO's state and timestamp are
+// stamped here, at mapping time. The endpoint accepts no timeout or
+// force parameters — podman's default timeout applies.
+func (h *ContainerHandler) Restart(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerRestartResponse, error) {
+		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		result, err := h.service.Restart(ctx, userID, machineID, containerID)
+		if err != nil {
+			return nil, err
+		}
+		response := FromContainerRestartResult(*result)
+		return &response, nil
+	})
+}
+
 // Delete handles deleting a container
 func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
