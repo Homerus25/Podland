@@ -27,6 +27,16 @@ func (w *statusRecorder) Flush() {
 	}
 }
 
+// Unwrap exposes the underlying writer so http.ResponseController reaches
+// it: the streaming kit extends every stream's write deadline through
+// SetWriteDeadline (internal/streaming/progress.go), and without this
+// bridge the extension fails with ErrNotSupported — leaving the server's
+// 30-second WriteTimeout (cmd/server/main.go) in force, which kills any
+// stream that runs longer (quadlet auto-update, image pulls, ...).
+func (w *statusRecorder) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // RequestLogging logs one line per request (method, path, status,
 // duration, requestID) once the response has finished. It replaces the
 // per-handler slog.InfoContext call that used to open every endpoint:
