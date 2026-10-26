@@ -8,6 +8,7 @@ import { renderApp } from "@/test/auth";
 import { errorResponse } from "@/test/errors";
 import { userFixture } from "@/test/factories";
 import { server } from "@/test/server";
+import { mockViewport } from "@/test/viewport";
 
 const adminSession: User = { username: "alice", role: "admin" };
 const userSession: User = { username: "alice", role: "user" };
@@ -106,7 +107,17 @@ async function openRowDialog(username: string, buttonTestId: string) {
 }
 
 describe("admin gating", () => {
+	// The nav entry lives in the desktop sidebar; jsdom's default
+	// viewport mock is mobile-sized, so these renders pin the desktop
+	// breakpoint the shell switches on.
+	const originalMatchMedia = window.matchMedia;
+
+	afterEach(() => {
+		window.matchMedia = originalMatchMedia;
+	});
+
 	it("shows the Users nav entry to an admin", async () => {
+		mockViewport(true);
 		renderUsersApp("/");
 
 		expect(
@@ -116,6 +127,7 @@ describe("admin gating", () => {
 	});
 
 	it("hides the Users nav entry from a non-admin", async () => {
+		mockViewport(true);
 		renderUsersApp("/", userSession);
 
 		expect(
