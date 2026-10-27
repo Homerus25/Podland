@@ -261,7 +261,13 @@ export function CreatePodDialog({
 							<Divider />
 
 							<FormSection title="Resource limits">
-								<HStack spacing={4} align="flex-start">
+								{/* The two limit fields stack at base (spec 393): side
+								    by side they cannot fit a 360px dialog. */}
+								<HStack
+									spacing={4}
+									align="flex-start"
+									flexDirection={{ base: "column", md: "row" }}
+								>
 									<FormControl isInvalid={!!errors.cpus}>
 										<FormLabel htmlFor="pod-cpus">CPUs</FormLabel>
 										<Input

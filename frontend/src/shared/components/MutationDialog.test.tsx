@@ -15,6 +15,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { axiosError } from "@/test/errors";
 import { renderWithQuery } from "@/test/render";
+import { cssRulesFor } from "@/test/responsiveCss";
 
 // The module drives the mutation result the caller hands it, never
 // react-query itself: the stub below is the whole interface under test.
@@ -121,6 +122,54 @@ describe("MutationDialog lifecycle", () => {
 		view.unmount();
 
 		expect(mutation.reset).toHaveBeenCalledTimes(2);
+	});
+});
+
+// jsdom cannot prove a real 360px layout, so the mobile pins read the
+// emotion rules the shell's responsive props compile to (cssRulesFor,
+// the spec 393 testing decision). Every dialog preset renders through
+// the one Modal shell, so the pins cover the whole dialog kit.
+function shellRulesOf(element: HTMLElement): string {
+	return cssRulesFor(element).join("\n");
+}
+
+describe("Modal shell mobile sizing", () => {
+	function renderShell() {
+		renderWithQuery(
+			<MutationDialog
+				mutation={makeMutation()}
+				title="Delete gadget"
+				onClose={vi.fn()}
+				body={stubBody()}
+			/>,
+			{ chakra: true },
+		);
+		return screen.getByTestId("modal");
+	}
+
+	it("renders near-full-width at base and restores the desktop width at md", () => {
+		const rules = shellRulesOf(renderShell());
+
+		expect(rules).toMatch(/max-width:\s*calc\(100vw - 2rem\)/);
+		// md restores the default md size token — the exact rule the
+		// default size emits, so desktop rendering is byte-identical.
+		expect(rules).toMatch(
+			/\(min-width: 48em\)\s*\{[\s\S]*max-width:\s*var\(--chakra-sizes-md\)/,
+		);
+	});
+
+	it("scrolls internally: capped content height, auto-overflowing body, fixed page container", () => {
+		const modal = renderShell();
+
+		expect(shellRulesOf(modal)).toMatch(/max-height:\s*calc\(100% - 7\.5rem\)/);
+		const body = modal.querySelector<HTMLElement>(".chakra-modal__body");
+		expect(body).not.toBeNull();
+		expect(shellRulesOf(body as HTMLElement)).toMatch(/overflow:\s*auto/);
+		const container = modal.parentElement;
+		expect(container).not.toBeNull();
+		expect(shellRulesOf(container as HTMLElement)).toMatch(
+			/overflow:\s*hidden/,
+		);
 	});
 });
 

@@ -89,7 +89,13 @@ export function ShareMachineSection({
 							justify="space-between"
 							data-testid={`grant-row-${grant.userId}`}
 						>
-							<HStack spacing={4}>
+							{/* The grant facts stack at base (spec 393): username,
+							    badge, and granted-at cannot sit side by side at 360px. */}
+							<HStack
+								spacing={4}
+								flexDirection={{ base: "column", md: "row" }}
+								align={{ base: "flex-start", md: "center" }}
+							>
 								<Text fontFamily="mono">
 									{usernameById.get(grant.userId) ?? grant.userId}
 								</Text>
@@ -121,9 +127,13 @@ export function ShareMachineSection({
 			{revokeAccess.error ? (
 				<ErrorDisplay error={getApiError(revokeAccess.error)} />
 			) : null}
+			{/* The grant form stacks to one column at base (spec 393); the
+			    fields stretch so the picker and select keep their width. */}
 			<HStack
 				spacing={4}
 				as="form"
+				flexDirection={{ base: "column", md: "row" }}
+				align={{ base: "stretch", md: "center" }}
 				onSubmit={(event) => {
 					event.preventDefault();
 					submitGrant();

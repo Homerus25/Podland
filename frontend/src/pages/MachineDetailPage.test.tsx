@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
 import { errorResponse } from "@/test/errors";
 import { containerFixture, machineFixture } from "@/test/factories";
+import { breakpointRules } from "@/test/responsiveCss";
 import { server } from "@/test/server";
 
 function machineHandler(machine: Machine) {
@@ -692,5 +693,51 @@ describe("deep-linked tab via ?tab=", () => {
 			"aria-selected",
 			"true",
 		);
+	});
+});
+
+// jsdom cannot prove real 360px layout (spec 393's testing decision),
+// so the small-viewport behavior is pinned through the responsive
+// props Chakra compiles into the element's emotion CSS — see
+// breakpointRules over cssRulesFor. Chakra's lg breakpoint (992px) is
+// the spec's "desktop unchanged" line.
+describe("small-viewport layout (spec 393)", () => {
+	it("scrolls the tab strip horizontally below the breakpoint and restores the desktop strip at lg", async () => {
+		server.use(machineHandler(machineFixture()), emptyContainersHandler);
+		renderMachineDetailPage();
+		await screen.findByText("prod-web-01");
+
+		const { base, lg } = breakpointRules(screen.getByRole("tablist"));
+		// Base: the eight-tab strip scrolls sideways instead of
+		// overflowing the viewport.
+		expect(base).toContain("overflow-x:auto");
+		expect(base).toContain("overflow-y:hidden");
+		// lg and up: the strip renders as on desktop today.
+		expect(lg).toContain("overflow-x:visible");
+		expect(lg).toContain("overflow-y:visible");
+	});
+
+	it("wraps the machine header rows at base and keeps them inline at lg", async () => {
+		server.use(machineHandler(machineFixture()), emptyContainersHandler);
+		renderMachineDetailPage();
+		await screen.findByText("prod-web-01");
+
+		const nameRow = breakpointRules(
+			screen.getByTestId("machine-permission").parentElement!,
+		);
+		expect(nameRow.base).toContain("flex-wrap:wrap");
+		expect(nameRow.lg).toContain("flex-wrap:nowrap");
+
+		const endpointRow = breakpointRules(
+			screen.getByTestId("machine-endpoint").parentElement!,
+		);
+		expect(endpointRow.base).toContain("flex-wrap:wrap");
+		expect(endpointRow.lg).toContain("flex-wrap:nowrap");
+
+		// The mono endpoint is a single unbreakable token; at base it
+		// may break mid-token instead of clipping.
+		const endpoint = breakpointRules(screen.getByTestId("machine-endpoint"));
+		expect(endpoint.base).toContain("overflow-wrap:anywhere");
+		expect(endpoint.lg).toContain("overflow-wrap:normal");
 	});
 });

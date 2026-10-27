@@ -63,12 +63,21 @@ export function MachineDetailPage() {
 
 	return (
 		<VStack spacing={4} align="stretch">
-			<HStack justify="space-between">
+			{/* Small viewports (spec 393): the header rows wrap at base
+				instead of clipping, and the mono endpoint — a single
+				unbreakable token — may break mid-token. lg and up render
+				as before. */}
+			<HStack justify="space-between" flexWrap={{ base: "wrap", lg: "nowrap" }}>
 				<Heading size="lg">{machine.name}</Heading>
 				<PermissionBadge permission={machine.permission} />
 			</HStack>
-			<HStack spacing={4}>
-				<Text fontFamily="mono" color="gray.500" data-testid="machine-endpoint">
+			<HStack spacing={4} flexWrap={{ base: "wrap", lg: "nowrap" }}>
+				<Text
+					fontFamily="mono"
+					color="gray.500"
+					overflowWrap={{ base: "anywhere", lg: "normal" }}
+					data-testid="machine-endpoint"
+				>
 					{machine.hostname}:{machine.port}
 				</Text>
 				<Text fontFamily="mono" color="gray.500" data-testid="machine-ssh-user">
@@ -84,7 +93,14 @@ export function MachineDetailPage() {
 			syncing the URL on manual tab switches is out of scope), so a
 			deep-linked tab's panel is the one that mounts on arrival. */}
 			<Tabs isLazy defaultIndex={initialTabIndex(searchParams.get("tab"))}>
-				<TabList>
+				{/* Small viewports (spec 393): below lg the strip scrolls
+					sideways instead of overflowing the page; at lg and up
+					the overflow resets to the CSS default, so the desktop
+					strip renders as before. */}
+				<TabList
+					overflowX={{ base: "auto", lg: "visible" }}
+					overflowY={{ base: "hidden", lg: "visible" }}
+				>
 					<Tab>Containers</Tab>
 					<Tab>Volumes</Tab>
 					<Tab>Images</Tab>

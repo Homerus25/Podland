@@ -72,7 +72,12 @@ export function LogsPage() {
 	return (
 		<VStack align="stretch" spacing={4}>
 			<HStack justify="space-between">
-				<Heading size="lg">Logs — {name}</Heading>
+				{/* A long container/quadlet name is the one overflow risk on
+				 * this page; the clamp engages only when it overflows, so
+				 * desktop headings that fit are unchanged (spec #393). */}
+				<Heading size="lg" noOfLines={1} minW={0}>
+					Logs — {name}
+				</Heading>
 				<HStack spacing={2}>
 					<Button
 						variant="outline"

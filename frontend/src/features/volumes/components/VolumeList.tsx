@@ -415,7 +415,7 @@ export function VolumeList({ machine }: { machine: Machine }) {
 				error={error}
 				items={volumes}
 				columns={[
-					{ label: "Name", sortBy: (v) => v.name },
+					{ label: "Name", isName: true, sortBy: (v) => v.name },
 					{
 						label: "Type",
 						sortBy: (v) => (v.anonymous ? "Anonymous" : "Named"),

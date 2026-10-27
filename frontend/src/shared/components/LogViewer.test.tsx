@@ -283,4 +283,27 @@ describe("LogViewer", () => {
 		expect(await screen.findByRole("alert")).toBeInTheDocument();
 		expect(screen.getByText("MACHINE_UNREACHABLE")).toBeInTheDocument();
 	});
+
+	// jsdom proves no real 360px layout; these pin the style props that
+	// produce it (spec #393's testing decision). The visual fit is a manual
+	// browser check at 360px portrait.
+	it("wraps the controls row so it compresses on narrow viewports", async () => {
+		const source = fakeSource();
+		renderViewer(source);
+		await screen.findAllByTestId("log-viewer-line");
+
+		expect(screen.getByTestId("log-viewer-controls")).toHaveStyle(
+			"flex-wrap: wrap",
+		);
+	});
+
+	it("keeps long unbroken tokens inside the log area's own scroll", async () => {
+		const source = fakeSource();
+		renderViewer(source);
+		await screen.findAllByTestId("log-viewer-line");
+
+		const scrollArea = screen.getByTestId("log-viewer-scroll");
+		expect(scrollArea).toHaveStyle("overflow-y: auto");
+		expect(scrollArea).toHaveStyle("overflow-wrap: anywhere");
+	});
 });

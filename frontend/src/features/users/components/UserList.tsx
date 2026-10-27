@@ -261,7 +261,7 @@ export function UserList() {
 				error={error}
 				items={users}
 				columns={[
-					{ label: "Username", sortBy: (u) => u.username },
+					{ label: "Username", isName: true, sortBy: (u) => u.username },
 					{ label: "Role", sortBy: (u) => u.role ?? "—" },
 					{ label: "Created", sortBy: (u) => u.createdAt ?? "—" },
 					{},

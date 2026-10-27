@@ -134,7 +134,16 @@ export function LogViewer({
 	return (
 		<VStack align="stretch" spacing={2} data-testid="log-viewer">
 			{error ? <ErrorDisplay error={error} /> : null}
-			<Box display="flex" gap={4} alignItems="center">
+			{/* Wrapping lets the tail selector and follow toggle stack instead
+			 * of overflowing on narrow viewports (spec #393); it never engages
+			 * when the row already fits. */}
+			<Box
+				display="flex"
+				gap={4}
+				alignItems="center"
+				flexWrap="wrap"
+				data-testid="log-viewer-controls"
+			>
 				<Text fontSize="sm">Tail</Text>
 				<Select
 					size="sm"
@@ -164,6 +173,10 @@ export function LogViewer({
 				p={2}
 				maxHeight={maxHeight}
 				overflowY="auto"
+				// pre-wrap breaks at whitespace only; without overflow-wrap
+				// a long unbroken token (a container id) would push the page
+				// wide instead of wrapping inside this box (spec #393).
+				overflowWrap="anywhere"
 				whiteSpace="pre-wrap"
 				data-testid="log-viewer-scroll"
 			>

@@ -203,7 +203,7 @@ export function PodList({ machine }: { machine: Machine }) {
 				error={error}
 				items={pods}
 				columns={[
-					{ label: "Name", sortBy: (pod) => pod.name },
+					{ label: "Name", isName: true, sortBy: (pod) => pod.name },
 					{ label: "State", sortBy: (pod) => pod.state },
 					{
 						label: "Containers",

@@ -101,7 +101,16 @@ export function DetailPage({
 						Back
 					</Button>
 				)}
-				<Heading size="lg" data-testid="detail-page-title">
+				{/* The title clamps to one line (spec 393): a long resource
+				    name is the page's one overflow risk, and the clamp
+				    engages only when the name overflows — desktop titles
+				    that fit are unchanged (the LogsPage precedent). */}
+				<Heading
+					size="lg"
+					noOfLines={1}
+					minW={0}
+					data-testid="detail-page-title"
+				>
 					{title}
 				</Heading>
 			</HStack>

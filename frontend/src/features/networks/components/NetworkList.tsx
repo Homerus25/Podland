@@ -70,7 +70,7 @@ export function NetworkList({ machine }: { machine: Machine }) {
 				error={error}
 				items={networks}
 				columns={[
-					{ label: "Name", sortBy: (n) => n.name },
+					{ label: "Name", isName: true, sortBy: (n) => n.name },
 					{ label: "Driver", sortBy: (n) => n.driver },
 					{ label: "Subnets", sortBy: (n) => n.subnets.join(", ") },
 					{ label: "Created", sortBy: (n) => n.createdAt },

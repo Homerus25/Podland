@@ -257,7 +257,13 @@ export function TransferDialog({
 								onChange={(next) => setMode(next as TransferMode)}
 								data-testid="move-mode-radio"
 							>
-								<HStack spacing={4}>
+								{/* The two mode radios stack at base (spec 393): their
+								    labels are too wide to sit side by side at 360px. */}
+								<HStack
+									spacing={4}
+									flexDirection={{ base: "column", md: "row" }}
+									align={{ base: "flex-start", md: "center" }}
+								>
 									<Radio value="move" data-testid="move-mode-move">
 										Move (remove from this machine)
 									</Radio>

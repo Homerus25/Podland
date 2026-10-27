@@ -132,7 +132,7 @@ export function SecretList({ machine }: { machine: Machine }) {
 				error={error}
 				items={secrets}
 				columns={[
-					{ label: "Name", sortBy: (s) => s.name },
+					{ label: "Name", isName: true, sortBy: (s) => s.name },
 					{ label: "Driver", sortBy: (s) => s.driver },
 					{ label: "Created", sortBy: (s) => s.createdAt },
 					...(canManage ? [{}] : []),

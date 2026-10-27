@@ -114,7 +114,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 				error={error}
 				items={quadlets}
 				columns={[
-					{ label: "Name", sortBy: (q) => q.name },
+					{ label: "Name", isName: true, sortBy: (q) => q.name },
 					{ label: "Resource", sortBy: (q) => q.resource },
 					{ label: "State", sortBy: (q) => q.state },
 					{},

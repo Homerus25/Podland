@@ -2,7 +2,10 @@ import { Button, Td, Tr } from "@chakra-ui/react";
 import { ResourceList } from "@shared/components/ResourceList";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Fragment } from "react";
 import { describe, expect, it } from "vitest";
+import { renderWithQuery } from "@/test/render";
+import { breakpointRules } from "@/test/responsiveCss";
 
 type Gadget = { id: string; name: string };
 
@@ -243,5 +246,210 @@ describe("ResourceList sorting", () => {
 		expect(screen.getByTestId("sort-gadget-0")).toHaveTextContent("Name");
 		expect(screen.getByTestId("sort-gadget-1")).toHaveTextContent("Size");
 		expect(screen.queryByTestId("sort-gadget-2")).not.toBeInTheDocument();
+	});
+});
+
+// The mobile pinning contract (spec 393): a list marks its name column with
+// `isName`, and below the `lg` breakpoint the owner pins that column left
+// and the trailing label-less action column right inside the table
+// container's horizontal scroll. jsdom cannot prove real 360px layout —
+// these tests pin the base styles that produce it; the `lg` overrides ride
+// the same responsive props, and the visual fit is a manual browser check.
+// Rendered through the harness with the app theme: responsive prop objects
+// only resolve under a ChakraProvider.
+describe("ResourceList mobile pinning", () => {
+	// The lg half of the responsive props — the "desktop unchanged" line —
+	// is pinned through the compiled emotion rules (breakpointRules over
+	// cssRulesFor); Chakra's lg breakpoint (992px) matches the spec's
+	// device ceiling.
+
+	function renderPinnedRow(gadget: Gadget) {
+		return (
+			<Tr key={gadget.id} data-testid="gadget-row">
+				<Td data-testid="gadget-name-cell">{gadget.name}</Td>
+				<Td data-testid="gadget-size-cell">{gadget.id}</Td>
+				<Td data-testid="gadget-actions-cell" />
+			</Tr>
+		);
+	}
+
+	function renderPinnedList(
+		overrides: Partial<Parameters<typeof ResourceList<Gadget>>[0]> = {},
+	) {
+		return renderWithQuery(
+			<ResourceList
+				resource="gadget"
+				isPending={false}
+				error={undefined}
+				items={gadgets}
+				columns={[
+					{
+						label: "Name",
+						isName: true,
+						sortBy: (gadget: Gadget) => gadget.name,
+					},
+					{ label: "Size" },
+					{},
+				]}
+				renderRow={renderPinnedRow}
+				{...overrides}
+			/>,
+			{ chakra: true },
+		);
+	}
+
+	it("pins the marked name column left and the trailing action column right at base", () => {
+		renderPinnedList();
+
+		const table = screen.getByTestId("gadgets-table");
+		const [nameHeader, sizeHeader, actionsHeader] =
+			within(table).getAllByRole("columnheader");
+		expect(nameHeader).toHaveStyle("position: sticky");
+		expect(nameHeader).toHaveStyle("left: 0px");
+		expect(actionsHeader).toHaveStyle("position: sticky");
+		expect(actionsHeader).toHaveStyle("right: 0px");
+		expect(sizeHeader).not.toHaveStyle("position: sticky");
+
+		const row = screen.getAllByTestId("gadget-row")[0];
+		const [nameCell, sizeCell, actionsCell] = within(row).getAllByRole("cell");
+		expect(nameCell).toHaveStyle("position: sticky");
+		expect(nameCell).toHaveStyle("left: 0px");
+		expect(actionsCell).toHaveStyle("position: sticky");
+		expect(actionsCell).toHaveStyle("right: 0px");
+		expect(sizeCell).not.toHaveStyle("position: sticky");
+		// The pins are opaque — the page surface color — so the middle
+		// columns scroll beneath them instead of showing through.
+		expect(nameCell).toHaveStyle(
+			"background-color: var(--chakra-colors-gray-50)",
+		);
+		expect(actionsCell).toHaveStyle(
+			"background-color: var(--chakra-colors-gray-50)",
+		);
+	});
+
+	it("returns the pins to desktop rendering at lg", () => {
+		renderPinnedList();
+
+		const table = screen.getByTestId("gadgets-table");
+		const [nameHeader, sizeHeader, actionsHeader] =
+			within(table).getAllByRole("columnheader");
+		const row = screen.getAllByTestId("gadget-row")[0];
+		const [nameCell, , actionsCell] = within(row).getAllByRole("cell");
+
+		for (const pinned of [nameHeader, actionsHeader, nameCell, actionsCell]) {
+			const { base, lg } = breakpointRules(pinned);
+			expect(base).toContain("position:sticky");
+			// lg and up: static, transparent, unshadowed — today's rendering.
+			expect(lg).toContain("position:static");
+			expect(lg).toContain("background-color:var(--chakra-colors-transparent)");
+		}
+		const middle = breakpointRules(sizeHeader);
+		expect(middle.base).not.toContain("position:sticky");
+		expect(middle.lg).not.toContain("position:static");
+	});
+
+	it("reaches cells inside a fragment row and never pins a spanning error cell", () => {
+		renderPinnedList({
+			renderRow: (gadget: Gadget) => (
+				<Fragment key={gadget.id}>
+					<Tr data-testid="gadget-row">
+						<Td data-testid="gadget-name-cell">{gadget.name}</Td>
+						<Td>{gadget.id}</Td>
+						<Td />
+					</Tr>
+					<Tr data-testid="gadget-error-row">
+						<Td colSpan={3} data-testid="gadget-error-cell">
+							boom
+						</Td>
+					</Tr>
+				</Fragment>
+			),
+		});
+
+		const row = screen.getAllByTestId("gadget-row")[0];
+		const [nameCell, , actionsCell] = within(row).getAllByRole("cell");
+		expect(nameCell).toHaveStyle("position: sticky");
+		expect(actionsCell).toHaveStyle("position: sticky");
+
+		const errorCell = screen.getAllByTestId("gadget-error-cell")[0];
+		expect(errorCell).not.toHaveStyle("position: sticky");
+		expect(errorCell).not.toHaveStyle("left: 0px");
+	});
+
+	it("leaves every header and cell unpinned without the name marker", () => {
+		renderPinnedList({
+			columns: [
+				{ label: "Name", sortBy: (gadget: Gadget) => gadget.name },
+				{},
+				{},
+			],
+		});
+
+		const table = screen.getByTestId("gadgets-table");
+		for (const header of within(table).getAllByRole("columnheader")) {
+			expect(header).not.toHaveStyle("position: sticky");
+		}
+		const row = screen.getAllByTestId("gadget-row")[0];
+		for (const cell of within(row).getAllByRole("cell")) {
+			expect(cell).not.toHaveStyle("position: sticky");
+			expect(cell).not.toHaveStyle(
+				"background-color: var(--chakra-colors-gray-50)",
+			);
+		}
+	});
+
+	it("pins no right column when the last column is labeled", () => {
+		renderPinnedList({
+			columns: [
+				{
+					label: "Name",
+					isName: true,
+					sortBy: (gadget: Gadget) => gadget.name,
+				},
+				{ label: "Created" },
+			],
+			renderRow: (gadget: Gadget) => (
+				<Tr key={gadget.id} data-testid="gadget-row">
+					<Td data-testid="gadget-name-cell">{gadget.name}</Td>
+					<Td data-testid="gadget-created-cell">yesterday</Td>
+				</Tr>
+			),
+		});
+
+		const nameCell = screen.getAllByTestId("gadget-name-cell")[0];
+		const createdCell = screen.getAllByTestId("gadget-created-cell")[0];
+		expect(nameCell).toHaveStyle("position: sticky");
+		expect(nameCell).toHaveStyle("left: 0px");
+		expect(createdCell).not.toHaveStyle("position: sticky");
+		expect(createdCell).not.toHaveStyle("right: 0px");
+	});
+
+	it("wraps the toolbar wrapper at base instead of overflowing", () => {
+		renderPinnedList({
+			toolbar: (
+				<Button size="sm" data-testid="gadgets-toolbar-action">
+					Do a thing
+				</Button>
+			),
+		});
+
+		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
+		const { base, lg } = breakpointRules(screen.getByTestId("gadgets-toolbar"));
+		expect(base).toContain("flex-wrap:wrap");
+		expect(lg).toContain("flex-wrap:nowrap");
+	});
+
+	it("keeps the sort contract on a pinned list", async () => {
+		const user = userEvent.setup();
+		renderPinnedList();
+
+		const rowNames = () =>
+			screen
+				.getAllByTestId("gadget-name-cell")
+				.map((cell) => cell.textContent ?? "");
+
+		expect(rowNames()).toEqual(["spinner", "doodad"]);
+		await user.click(screen.getByTestId("sort-gadget-0"));
+		expect(rowNames()).toEqual(["doodad", "spinner"]);
 	});
 });

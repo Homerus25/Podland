@@ -215,6 +215,28 @@ describe("DetailPage", () => {
 		).not.toBeInTheDocument();
 	});
 
+	// jsdom proves no real 360px layout; this pins the style props that
+	// produce it (spec #393's testing decision, the LogsPage precedent):
+	// an unbounded resource name in the title heading is the one overflow
+	// risk on the page. The clamp engages only when the name overflows, so
+	// desktop titles that fit are unchanged.
+	it("clamps the title heading to one line so a long name cannot force page-level horizontal scroll", () => {
+		renderDetailPage(
+			<DetailPage
+				{...defaultProps({
+					title: "registry.example.com/some-team/a-very-long-image-name:latest",
+				})}
+			/>,
+		);
+
+		const heading = screen.getByTestId("detail-page-title");
+		expect(heading).toHaveStyle("overflow: hidden");
+		expect(heading).toHaveStyle("min-width: 0px");
+		expect(
+			window.getComputedStyle(heading).getPropertyValue("--chakra-line-clamp"),
+		).toBe("1");
+	});
+
 	it("keeps the inspect JSON hidden by default and toggles it on reveal", async () => {
 		const user = userEvent.setup();
 		renderDetailPage(<StatefulDetailPage {...defaultProps()} />);

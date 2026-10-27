@@ -266,7 +266,11 @@ export function ContainerList({ machine }: { machine: Machine }) {
 				error={error}
 				items={containers}
 				columns={[
-					{ label: "Name", sortBy: (c) => containerDisplayName(c) },
+					{
+						label: "Name",
+						isName: true,
+						sortBy: (c) => containerDisplayName(c),
+					},
 					{ label: "Image", sortBy: (c) => c.image },
 					{ label: "State", sortBy: (c) => c.state },
 					{},

@@ -105,7 +105,7 @@ export function ImageList({ machine }: { machine: Machine }) {
 				error={error}
 				items={images}
 				columns={[
-					{ label: "Tag", sortBy: (img) => displayTags(img) },
+					{ label: "Tag", isName: true, sortBy: (img) => displayTags(img) },
 					{ label: "Image ID", sortBy: (img) => shortImageId(img.id) },
 					{ label: "Size", isNumeric: true, sortBy: (img) => img.size },
 					{ label: "Created", sortBy: (img) => img.createdAt },
