@@ -17,6 +17,15 @@ concurrency:
 
 jobs:
   build:
+    # Skip work-in-progress pull requests. Forgejo marks those by a WIP title
+    # prefix (and a draft flag); pushes to master and manual dispatches always run.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (!github.event.pull_request.draft &&
+       !startsWith(github.event.pull_request.title, 'WIP') &&
+       !startsWith(github.event.pull_request.title, 'wip') &&
+       !startsWith(github.event.pull_request.title, '[WIP]') &&
+       !startsWith(github.event.pull_request.title, '[wip]'))
     runs-on: build
     env:
       IMAGE: rack.home:9250/homerus/podland
