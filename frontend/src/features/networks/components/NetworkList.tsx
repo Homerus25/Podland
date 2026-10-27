@@ -5,8 +5,10 @@ import { CreateNetworkDialog } from "@features/networks/components/CreateNetwork
 import {
 	useCreateNetwork,
 	useNetworks,
+	usePruneNetworks,
 } from "@features/networks/hooks/useNetworks";
 import type { NetworkSummary } from "@features/networks/services/networksApi";
+import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
@@ -14,10 +16,33 @@ import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-// The Networks tab body. Create and connect are write-gated backend routes
-// (issue 255), so the adapter takes the machine and gates on
-// manage-networks: below write level ResourceList swaps the toolbar for the
-// canonical read hint and the rows drop their connect button. The
+// The prune adapter over PruneReportDialog, the twin of the containers
+// one: the module owns the machinery, this adapter hands over the noun
+// and the two entry accessors that make a network entry a report row.
+// Podman's network prune report keys entries by name and carries no
+// size, so the reclaimed column renders an em dash like the pods one.
+function PruneNetworksModal({
+	onClose,
+	pruneNetworks,
+}: {
+	onClose: () => void;
+	pruneNetworks: ReturnType<typeof usePruneNetworks>;
+}) {
+	return (
+		<PruneReportDialog
+			mutation={pruneNetworks}
+			resource="network"
+			entryKey={(entry) => entry.name}
+			renderLabel={(entry) => entry.name}
+			onClose={onClose}
+		/>
+	);
+}
+
+// The Networks tab body. Create, connect, and prune are write-gated
+// backend routes (issue 255), so the adapter takes the machine and gates
+// on manage-networks: below write level ResourceList swaps the toolbar
+// for the canonical read hint and the rows drop their connect button. The
 // toolbar/triad/table machinery and the derived testids are ResourceList's;
 // this adapter owns only the columns, the row, and the create dialog. The
 // row's connect button opens the one connect dialog (issue 274) with the
@@ -29,8 +54,10 @@ export function NetworkList({ machine }: { machine: Machine }) {
 	const navigate = useNavigate();
 	const { data: networks, isPending, error } = useNetworks(machineId);
 	const createNetwork = useCreateNetwork(machineId);
+	const pruneNetworks = usePruneNetworks(machineId);
 	const canManage = can(machine, "manage-networks");
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
+	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [pendingConnect, setPendingConnect] = useState<NetworkSummary | null>(
 		null,
 	);
@@ -80,14 +107,25 @@ export function NetworkList({ machine }: { machine: Machine }) {
 					</Tr>
 				)}
 				toolbar={
-					<Button
-						size="sm"
-						colorScheme="blue"
-						onClick={() => setIsCreateOpen(true)}
-						data-testid="create-network-button"
-					>
-						Create network
-					</Button>
+					<>
+						<Button
+							size="sm"
+							colorScheme="blue"
+							onClick={() => setIsCreateOpen(true)}
+							data-testid="create-network-button"
+						>
+							Create network
+						</Button>
+						<Button
+							size="sm"
+							colorScheme="red"
+							variant="outline"
+							onClick={() => setIsPruneOpen(true)}
+							data-testid="prune-networks-button"
+						>
+							Prune
+						</Button>
+					</>
 				}
 				canManage={canManage}
 			/>
@@ -96,6 +134,12 @@ export function NetworkList({ machine }: { machine: Machine }) {
 					machineId={machineId}
 					mutation={createNetwork}
 					onClose={() => setIsCreateOpen(false)}
+				/>
+			) : null}
+			{isPruneOpen ? (
+				<PruneNetworksModal
+					onClose={() => setIsPruneOpen(false)}
+					pruneNetworks={pruneNetworks}
 				/>
 			) : null}
 			{pendingConnect ? (

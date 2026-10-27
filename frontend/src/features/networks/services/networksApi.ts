@@ -102,6 +102,28 @@ export async function createNetwork(
 	return response.data;
 }
 
+// One entry of the prune response
+// (backend/internal/domain/networks/dto.go NetworkPruneResponse): the
+// removed network's name, or the per-network error when podman could not
+// remove it. Podman's network prune report carries no size, so there is
+// no size field.
+export interface NetworkPruneReport {
+	name: string;
+	error?: string;
+}
+
+// POST /api/machines/{id}/networks/prune -> 200 with the per-network
+// report, one entry per removed network, [] when nothing was removed.
+// Networks in use by a container are untouched.
+export async function pruneNetworks(
+	machineId: string,
+): Promise<NetworkPruneReport[]> {
+	const response = await api.post<NetworkPruneReport[]>(
+		machineApiPath(machineId, "networks", "prune"),
+	);
+	return response.data;
+}
+
 // POST /api/machines/{id}/networks/{networkName}/connect -> 200, empty body
 // (backend/internal/domain/networks handler Connect).
 export async function connectContainer(

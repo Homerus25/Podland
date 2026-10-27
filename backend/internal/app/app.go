@@ -315,6 +315,12 @@ func New(cfg *config.Config) (*App, error) {
 					r.Route("/containers", func(r chi.Router) {
 						r.Get("/", containerHandler.List)
 						r.With(requireWrite).Post("/", containerHandler.Create)
+						// Bulk deletion, so write-level like the
+						// volume prune. The literal route is
+						// registered ahead of the /{containerId}
+						// subtree so a container named "prune"
+						// cannot swallow it.
+						r.With(requireWrite).Post("/prune", containerHandler.Prune)
 						r.Route("/{containerId}", func(r chi.Router) {
 							r.Get("/", containerHandler.Get)
 							r.With(requireWrite).Post("/start", containerHandler.Start)
@@ -452,11 +458,15 @@ func New(cfg *config.Config) (*App, error) {
 					})
 
 					// Networks — the list and the detail endpoint
-					// stay at the subtree's read level; create and
-					// connect mutate remote state, so they gate at
-					// write (issue 252).
+					// stay at the subtree's read level; create,
+					// connect, and prune mutate remote state, so
+					// they gate at write (issue 252; prune spec
+					// #385). The prune route is literal so it
+					// is not shadowed by the {networkName}
+					// subtree.
 					r.Route("/networks", func(r chi.Router) {
 						r.Get("/", networkHandler.List)
+						r.With(requireWrite).Post("/prune", networkHandler.Prune)
 						r.Get("/{networkName}", networkHandler.Get)
 						r.Get("/{networkName}/inspect", networkHandler.Inspect)
 						r.With(requireWrite).Post("/", networkHandler.Create)

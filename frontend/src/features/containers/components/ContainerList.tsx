@@ -3,6 +3,7 @@ import { containerDisplayName } from "@features/containers/components/containerD
 import {
 	useContainers,
 	useDeleteContainer,
+	usePruneContainers,
 	useRestartContainer,
 	useStartContainer,
 	useStopContainer,
@@ -12,6 +13,7 @@ import { can } from "@features/machines/permissions";
 import { ConnectDialog } from "@features/networks/components/ConnectDialog";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
+import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { useOpenLogs } from "@shared/logs/logRoute";
@@ -49,6 +51,29 @@ function DeleteContainerModal({
 					cannot be undone.
 				</Text>
 			}
+		/>
+	);
+}
+
+// The prune adapter over PruneReportDialog, the twin of the volumes one:
+// the module owns the machinery, this adapter hands over the noun and the
+// two entry accessors that make a container entry a report row. Podman's
+// container prune report carries no name, so rows are keyed by ID like the
+// pods one.
+function PruneContainersModal({
+	onClose,
+	pruneContainers,
+}: {
+	onClose: () => void;
+	pruneContainers: ReturnType<typeof usePruneContainers>;
+}) {
+	return (
+		<PruneReportDialog
+			mutation={pruneContainers}
+			resource="container"
+			entryKey={(entry) => entry.id}
+			renderLabel={(entry) => entry.id}
+			onClose={onClose}
 		/>
 	);
 }
@@ -203,7 +228,8 @@ function ContainerRow({
 	);
 }
 
-// The Containers tab body. Create, start, stop, restart, and delete are
+// The Containers tab body. Create, start, stop, restart, delete, and
+// prune are
 // write-gated backend routes, so below manage level the module swaps the
 // whole toolbar for the canonical read hint and the rows drop their
 // start/stop/restart/delete affordances; logs reads at read level, so
@@ -219,6 +245,7 @@ export function ContainerList({ machine }: { machine: Machine }) {
 	const machineId = machine.id;
 	const { data: containers, isPending, error } = useContainers(machineId);
 	const deleteContainer = useDeleteContainer(machineId);
+	const pruneContainers = usePruneContainers(machineId);
 	const canManage = can(machine, "manage-containers");
 	const canManageNetworks = can(machine, "manage-networks");
 	const navigate = useNavigate();
@@ -228,6 +255,7 @@ export function ContainerList({ machine }: { machine: Machine }) {
 	const [pendingConnect, setPendingConnect] = useState<ContainerSummary | null>(
 		null,
 	);
+	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const openLogs = useOpenLogs(machineId, "container");
 
 	return (
@@ -262,14 +290,25 @@ export function ContainerList({ machine }: { machine: Machine }) {
 					/>
 				)}
 				toolbar={
-					<Button
-						size="sm"
-						colorScheme="blue"
-						onClick={() => navigate(containerCreatePath(machineId))}
-						data-testid="create-container-button"
-					>
-						Create container
-					</Button>
+					<>
+						<Button
+							size="sm"
+							colorScheme="blue"
+							onClick={() => navigate(containerCreatePath(machineId))}
+							data-testid="create-container-button"
+						>
+							Create container
+						</Button>
+						<Button
+							size="sm"
+							colorScheme="red"
+							variant="outline"
+							onClick={() => setIsPruneOpen(true)}
+							data-testid="prune-containers-button"
+						>
+							Prune
+						</Button>
+					</>
 				}
 				canManage={canManage}
 			/>
@@ -278,6 +317,12 @@ export function ContainerList({ machine }: { machine: Machine }) {
 					container={pendingDelete}
 					deleteContainer={deleteContainer}
 					onClose={() => setPendingDelete(null)}
+				/>
+			) : null}
+			{isPruneOpen ? (
+				<PruneContainersModal
+					onClose={() => setIsPruneOpen(false)}
+					pruneContainers={pruneContainers}
 				/>
 			) : null}
 			{pendingConnect ? (

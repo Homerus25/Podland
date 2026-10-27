@@ -172,6 +172,34 @@ podman's own not-found text as the disambiguator.
 
 ---
 
+### POST /api/machines/{id}/containers/prune
+
+Remove all stopped containers on the machine in one call. Running
+containers are untouched.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Response (Success - 200):**
+```json
+[
+  { "id": "string", "size": integer, "error": "string (optional, per-container removal failure)" }
+]
+```
+
+Notes:
+- Empty result is `[]`, never `null`.
+
+**Response (Error):**
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row or read-level grantee)
+- 404: `MACHINE_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
 ### GET /api/machines/{id}/containers/{containerId}
 
 Get details of a specific container.

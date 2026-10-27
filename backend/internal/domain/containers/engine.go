@@ -33,6 +33,9 @@ type ContainerEngine interface {
 	// Logs writes the container's logs into the writers carried by opts
 	// (follow or one-shot is the caller's choice via opts).
 	Logs(name string, opts entities.ContainerLogsOptions) error
+	// Prune removes every stopped container (podman's own selection,
+	// no filters) and answers podman's per-container prune reports.
+	Prune() ([]*reports.PruneReport, error)
 }
 
 // ContainerEngineProvider is the containers domain's slice of the
@@ -166,4 +169,10 @@ func (e *podmanContainerEngine) Remove(id string, force bool) error {
 
 func (e *podmanContainerEngine) Logs(name string, opts entities.ContainerLogsOptions) error {
 	return e.tunnelEngine().ContainerLogs(e.ctx, []string{name}, opts)
+}
+
+// Prune removes every stopped container like the volumes prune adapter:
+// podman's own selection, no filters, per-container reports back.
+func (e *podmanContainerEngine) Prune() ([]*reports.PruneReport, error) {
+	return e.tunnelEngine().ContainerPrune(e.ctx, entities.ContainerPruneOptions{})
 }

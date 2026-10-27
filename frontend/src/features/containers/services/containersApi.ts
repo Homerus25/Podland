@@ -525,6 +525,28 @@ export async function deleteContainer(
 	await api.delete(machineApiPath(machineId, "containers", containerId));
 }
 
+// One entry of POST /api/machines/{id}/containers/prune -> 200 (backend
+// containers dto.go ContainerPruneResponse): a removed container's ID and
+// reclaimed size, plus podman's per-container error when removal failed.
+// Podman's container prune report carries no name, so the entry is
+// ID-keyed like the pods prune report.
+export interface ContainerPruneReport {
+	id: string;
+	size: number;
+	error?: string;
+}
+
+// Prunes every stopped container on the machine. Running containers are
+// never touched.
+export async function pruneContainers(
+	machineId: string,
+): Promise<ContainerPruneReport[]> {
+	const response = await api.post<ContainerPruneReport[]>(
+		machineApiPath(machineId, "containers", "prune"),
+	);
+	return response.data;
+}
+
 // GET /api/machines/{id}/containers/{containerId}/inspect -> 200 with the
 // raw podman inspect report as the top-level body. The report is deliberately
 // untyped on the client: no DTO is invented for it.

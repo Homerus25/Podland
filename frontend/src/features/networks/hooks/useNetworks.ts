@@ -8,6 +8,7 @@ import {
 	getNetwork,
 	inspectNetwork,
 	listNetworks,
+	pruneNetworks,
 } from "@features/networks/services/networksApi";
 import type { MachineResource } from "@shared/queries/queryKeys";
 import {
@@ -73,6 +74,15 @@ export function useCreateNetwork(machineId: string) {
 		machineId,
 		NETWORK_MUTATION_INVALIDATIONS,
 		(input: CreateNetworkInput) => createNetwork(machineId, input),
+	);
+}
+
+// A prune removes only unused networks — no container is attached to a
+// removed network, so the containers list is untouched and only the
+// networks list refetches on success.
+export function usePruneNetworks(machineId: string) {
+	return useListInvalidatingMutation(machineId, "networks", () =>
+		pruneNetworks(machineId),
 	);
 }
 

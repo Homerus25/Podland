@@ -171,7 +171,7 @@ export function ImageList({ machine }: { machine: Machine }) {
 						onClick={() => setIsPruneOpen(true)}
 						data-testid="prune-images-button"
 					>
-						Delete unused images
+						Prune
 					</Button>,
 				]}
 				canManage={canManage}

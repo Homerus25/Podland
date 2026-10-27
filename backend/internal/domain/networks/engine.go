@@ -26,6 +26,8 @@ type NetworkEngine interface {
 	// Inspect returns podman's raw inspect reports for the named
 	// network, plus the tunnel's per-item errors.
 	Inspect(name string) ([]entities.NetworkInspectReport, []error, error)
+	// Prune removes every unused network (podman's own selection).
+	Prune() ([]*entities.NetworkPruneReport, error)
 }
 
 // NetworkEngineProvider is the networks domain's slice of the connection
@@ -79,4 +81,8 @@ func (e *podmanNetworkEngine) Connect(networkName, containerID string) error {
 
 func (e *podmanNetworkEngine) Inspect(name string) ([]entities.NetworkInspectReport, []error, error) {
 	return e.tunnelEngine().NetworkInspect(e.ctx, []string{name}, entities.InspectOptions{})
+}
+
+func (e *podmanNetworkEngine) Prune() ([]*entities.NetworkPruneReport, error) {
+	return e.tunnelEngine().NetworkPrune(e.ctx, entities.NetworkPruneOptions{})
 }

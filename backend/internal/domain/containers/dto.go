@@ -10,6 +10,7 @@ import (
 	netTypes "go.podman.io/common/libnetwork/types"
 	libpoddefine "go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	define "go.podman.io/podman/v6/pkg/ps/define"
 )
 
@@ -747,6 +748,38 @@ type ContainerLogsResponse struct {
 	ID string `json:"id"`
 	// Container logs content (multiline string)
 	Logs string `json:"logs"`
+}
+
+// ContainerPruneResponse is one entry in the prune API response: the
+// removed container's ID and the reclaimed size (bytes), plus any
+// per-container error podman reported while removing it.
+type ContainerPruneResponse struct {
+	// ID of the removed container
+	ID string `json:"id"`
+	// Reclaimed size in bytes, when podman reports it
+	Size uint64 `json:"size"`
+	// Per-container error podman reported, if the removal failed
+	Error string `json:"error,omitempty"`
+}
+
+// FromPodmanContainerPruneReports converts podman's prune reports to the
+// API array. An empty prune maps to an empty array, never nil.
+func FromPodmanContainerPruneReports(reports []*reports.PruneReport) []ContainerPruneResponse {
+	out := make([]ContainerPruneResponse, 0, len(reports))
+	for _, report := range reports {
+		if report == nil {
+			continue
+		}
+		entry := ContainerPruneResponse{
+			ID:   report.Id,
+			Size: report.Size,
+		}
+		if report.Err != nil {
+			entry.Error = report.Err.Error()
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // Helper function to check if container is exited

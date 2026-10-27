@@ -2,7 +2,7 @@
 
 Part of the [API contract](description_api.md). See the main document for base URL, common headers, and the error response format.
 
-Networks live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. Listing and the per-network detail endpoint are available at `read` level; creating a network and connecting a container to one mutate remote state and gate at `write` level. Disconnect, delete, and prune remain follow-up issues.
+Networks live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. Listing and the per-network detail endpoint are available at `read` level; creating a network, connecting a container to one, and pruning unused networks mutate remote state and gate at `write` level. Disconnect and delete remain follow-up issues.
 
 ---
 
@@ -72,6 +72,32 @@ Create a network on the machine. The body carries the network's `name` (required
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
 - 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND` (attach listed an unknown container)
 - 409: `NETWORK_ALREADY_EXISTS` (duplicate name), `NETWORK_ATTACH_FAILED` (attach failure; the message names the failing container and the network stays created)
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+### POST /api/machines/{id}/networks/prune
+
+Remove all unused networks on the machine in one call (podman's own selection). Networks in use by a container are untouched.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Response (Success - 200):**
+```json
+[
+  { "name": "string", "error": "string (optional, per-network removal failure)" }
+]
+```
+
+Notes:
+- One entry per removed network: its name and any per-network error podman reported. Podman's network prune report carries no size, so there is no size field.
+- Empty result is `[]`, never `null`.
+
+**Response (Error):**
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row or read-level grantee)
+- 404: `MACHINE_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 

@@ -74,6 +74,21 @@ func (h *NetworkHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Prune handles removing all unused networks on a machine. Route-level
+// RequireMachinePermission(write) (app.go) gates it at write; podman
+// leaves in-use networks alone. Returns 200 with one report entry per
+// removed network (name, any per-network error; podman's network
+// prune report carries no size).
+func (h *NetworkHandler) Prune(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]NetworkPruneResponse, error) {
+		prunes, err := h.service.Prune(ctx, userID, machineID)
+		if err != nil {
+			return nil, err
+		}
+		return FromPodmanPruneReports(prunes), nil
+	})
+}
+
 // Get handles returning one network's detail DTO on a machine. Route-level
 // RequireMachineAccess (app.go) gates the subtree at read; the endpoint
 // envelope owns extraction, error mapping, and encoding. The DTO is

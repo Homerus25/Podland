@@ -11,6 +11,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
 // ContainerService provides business logic for containers. Every
@@ -271,6 +272,23 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 
 		return nil
 	})
+}
+
+// Prune removes every stopped container on the machine in one call and
+// returns podman's per-container reports. Running containers are
+// untouched — podman's own semantics, which is the blast-radius
+// mitigation for this endpoint.
+func (s *ContainerService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
+	var prunes []*reports.PruneReport
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Prune", func(e ContainerEngine) error {
+		p, err := e.Prune()
+		if err != nil {
+			return fmt.Errorf("failed to prune containers: %w", err)
+		}
+		prunes = p
+		return nil
+	})
+	return prunes, err
 }
 
 // GetLogs retrieves logs for a specific container on the specified

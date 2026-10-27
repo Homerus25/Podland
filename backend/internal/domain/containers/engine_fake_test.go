@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"go.podman.io/podman/v6/pkg/domain/entities"
+	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	"go.podman.io/podman/v6/pkg/specgen"
 )
 
@@ -20,6 +21,7 @@ type fakeContainerEngine struct {
 	restartFn func(id string) error
 	removeFn  func(id string, force bool) error
 	logsFn    func(name string, opts entities.ContainerLogsOptions) error
+	pruneFn   func() ([]*reports.PruneReport, error)
 }
 
 func (f *fakeContainerEngine) List(opts entities.ContainerListOptions) ([]entities.ListContainer, error) {
@@ -76,6 +78,13 @@ func (f *fakeContainerEngine) Logs(name string, opts entities.ContainerLogsOptio
 		panic("unexpected ContainerEngine.Logs call")
 	}
 	return f.logsFn(name, opts)
+}
+
+func (f *fakeContainerEngine) Prune() ([]*reports.PruneReport, error) {
+	if f.pruneFn == nil {
+		panic("unexpected ContainerEngine.Prune call")
+	}
+	return f.pruneFn()
 }
 
 // fakeEngineProvider arms the provider seam: engine is handed to the

@@ -136,6 +136,23 @@ func (s *NetworkService) Inspect(ctx context.Context, userID, machineID, network
 	return report, err
 }
 
+// Prune removes every unused network on the machine in one call
+// (podman's own selection) and returns podman's per-network reports.
+// Networks in use by a container are untouched — podman's own
+// semantics, which is the blast-radius mitigation for this endpoint.
+func (s *NetworkService) Prune(ctx context.Context, userID, machineID string) ([]*entities.NetworkPruneReport, error) {
+	var prunes []*entities.NetworkPruneReport
+	err := s.engines.WithEngine(ctx, userID, machineID, "networks.Prune", func(e NetworkEngine) error {
+		p, err := e.Prune()
+		if err != nil {
+			return fmt.Errorf("failed to prune networks: %w", err)
+		}
+		prunes = p
+		return nil
+	})
+	return prunes, err
+}
+
 // inspectNetwork resolves one network's inspect report through the
 // shared single-report ritual, classifying podman's not-found shapes
 // into ErrNetworkNotFound.

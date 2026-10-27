@@ -243,7 +243,7 @@ export function PodList({ machine }: { machine: Machine }) {
 							onClick={() => setIsPruneOpen(true)}
 							data-testid="prune-pods-button"
 						>
-							Prune unused
+							Prune
 						</Button>
 					</>
 				}

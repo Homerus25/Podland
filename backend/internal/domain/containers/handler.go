@@ -194,6 +194,20 @@ func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Prune handles removing all stopped containers on a machine. Route-level
+// RequireMachinePermission(write) (app.go) gates it at write; podman
+// leaves running containers alone. Returns 200 with one report entry per
+// removed container (ID, reclaimed size, any per-container error).
+func (h *ContainerHandler) Prune(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]ContainerPruneResponse, error) {
+		prunes, err := h.service.Prune(ctx, userID, machineID)
+		if err != nil {
+			return nil, err
+		}
+		return FromPodmanContainerPruneReports(prunes), nil
+	})
+}
+
 // Logs handles retrieving logs for a container. The query is parsed once:
 // only a clean follow request crosses the streaming envelope, while query
 // errors ride the JSON envelope even when follow=true was requested, so

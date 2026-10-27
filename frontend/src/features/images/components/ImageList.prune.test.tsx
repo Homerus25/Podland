@@ -81,6 +81,17 @@ describe("ImageList prune", () => {
 		expect(pruneRequests.count).toBe(0);
 	});
 
+	it('labels the toolbar prune button "Prune", matching the other tabs', async () => {
+		installHandlers();
+		renderImageList();
+
+		await screen.findByText("docker.io/library/nginx:1.27");
+
+		expect(screen.getByTestId("prune-images-button")).toHaveTextContent(
+			/^Prune$/,
+		);
+	});
+
 	it("opens a danger confirmation and sends no prune request before confirming", async () => {
 		installHandlers();
 		await openPruneModal();

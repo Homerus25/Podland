@@ -123,3 +123,34 @@ func FromNetworkInspectReport(report *entities.NetworkInspectReport) NetworkDeta
 		Containers: containers,
 	}
 }
+
+// NetworkPruneResponse is one entry in the prune API response: the
+// removed network's name, plus any per-network error podman reported
+// while removing it. Podman's network prune report carries no size, so
+// there is no size field.
+type NetworkPruneResponse struct {
+	// Name of the removed network
+	Name string `json:"name"`
+	// Per-network error podman reported, if the removal failed
+	Error string `json:"error,omitempty"`
+}
+
+// FromPodmanPruneReports converts podman's prune reports to the API
+// array. Nil reports are skipped; pruning with nothing to remove
+// yields an empty array, not nil.
+func FromPodmanPruneReports(reports []*entities.NetworkPruneReport) []NetworkPruneResponse {
+	out := make([]NetworkPruneResponse, 0, len(reports))
+	for _, report := range reports {
+		if report == nil {
+			continue
+		}
+		entry := NetworkPruneResponse{
+			Name: report.Name,
+		}
+		if report.Error != nil {
+			entry.Error = report.Error.Error()
+		}
+		out = append(out, entry)
+	}
+	return out
+}

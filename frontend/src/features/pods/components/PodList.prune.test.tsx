@@ -49,6 +49,9 @@ describe("PodList prune", () => {
 		const user = userEvent.setup();
 
 		await screen.findByTestId("pod-row");
+		expect(screen.getByTestId("prune-pods-button")).toHaveTextContent(
+			/^Prune$/,
+		);
 		await user.click(screen.getByTestId("prune-pods-button"));
 		// The confirm is open; nothing sent yet.
 		expect(pruneRequests).toHaveLength(0);

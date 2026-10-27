@@ -5,6 +5,7 @@ import {
 	getContainer,
 	inspectContainer,
 	listContainers,
+	pruneContainers,
 	restartContainer,
 	startContainer,
 	stopContainer,
@@ -89,6 +90,14 @@ export function useDeleteContainer(machineId: string) {
 		machineId,
 		"containers",
 		(containerId: string) => deleteContainer(machineId, containerId),
+	);
+}
+
+// A prune changes the machine's container set, so the list refetches on
+// success and the report shows the server's post-prune state.
+export function usePruneContainers(machineId: string) {
+	return useListInvalidatingMutation(machineId, "containers", () =>
+		pruneContainers(machineId),
 	);
 }
 
