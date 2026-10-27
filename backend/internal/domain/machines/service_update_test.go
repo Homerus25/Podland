@@ -3,9 +3,11 @@ package machines
 import (
 	"context"
 	stderrors "errors"
+	"net/http"
 	"testing"
 	"time"
 
+	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
@@ -120,8 +122,14 @@ func TestMachineService_Update(t *testing.T) {
 			SSHPrivateKey: testutils.GenerateInvalidPEMKey(),
 		})
 
-		require.ErrorIs(t, err, errors.ErrInvalidSSHKey)
+		require.Error(t, err)
 		assert.Nil(t, machine)
+		var appErr *errors.AppError
+		require.ErrorAs(t, err, &appErr)
+		assert.Equal(t, "INVALID_SSH_KEY", appErr.Code)
+		assert.Equal(t, http.StatusBadRequest, appErr.Status)
+		assert.Contains(t, appErr.Message, "PRIVATE KEY",
+			"the update path shares the enriched PEM-format message (issue 399)")
 		persisted, err := machineRepo.GetByID("machine-1")
 		require.NoError(t, err)
 		assert.Equal(t, "old-fingerprint", persisted.SSHKeyFingerprint, "rejected key must not touch stored credentials")
@@ -239,8 +247,14 @@ func TestMachineService_Update_ConnectionProbe(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Nil(t, machine)
-		assert.Equal(t, errors.ErrConnectionTestFailed, err,
-			"probe failure must map to ErrConnectionTestFailed (400 CONNECTION_FAILED)")
+		var appErr *errors.AppError
+		require.ErrorAs(t, err, &appErr)
+		assert.Equal(t, "CONNECTION_FAILED", appErr.Code,
+			"probe failure keeps the CONNECTION_FAILED code")
+		assert.Equal(t, http.StatusBadRequest, appErr.Status)
+		assert.Equal(t, "Failed to connect to machine during registration: dial tcp: connection refused",
+			appErr.Message,
+			"update shares the registration probe path, so the enriched message rides for free (issue 399)")
 
 		// Nothing persisted: the repository write never happened, and the
 		// stored credentials (written only after a passing probe) are
@@ -259,8 +273,9 @@ func TestMachineService_Update_ConnectionProbe(t *testing.T) {
 		assert.Equal(t, "old-encrypted", string(persisted.SSHKeyEncrypted))
 	})
 
-	t.Run("probe deadline answers CONNECTION_TEST_TIMEOUT and persists nothing", func(t *testing.T) {
-		connManager := testutils.NewMockConnectionManagerWithTestError(context.DeadlineExceeded)
+	t.Run("probe timeout answers CONNECTION_TEST_TIMEOUT naming the bound and persists nothing", func(t *testing.T) {
+		connManager := testutils.NewMockConnectionManagerWithTestError(
+			&connections.TestTimeoutError{Bound: 10 * time.Second})
 		service, machineRepo, _ := newUpdateTestServiceWithConn(connManager, "owner-1", models.PermissionAdmin)
 
 		machine, err := service.Update(ctx, "owner-1", "machine-1", &CreateMachineRequest{
@@ -269,8 +284,13 @@ func TestMachineService_Update_ConnectionProbe(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Nil(t, machine)
-		assert.Equal(t, errors.ErrConnectionTestTimeout, err,
-			"probe timeout must map to ErrConnectionTestTimeout (400), distinct from CONNECTION_FAILED")
+		var appErr *errors.AppError
+		require.ErrorAs(t, err, &appErr)
+		assert.Equal(t, "CONNECTION_TEST_TIMEOUT", appErr.Code,
+			"probe timeout must stay distinct from CONNECTION_FAILED")
+		assert.Equal(t, http.StatusBadRequest, appErr.Status)
+		assert.Equal(t, "Connection test timed out after 10s", appErr.Message,
+			"the message must state the timeout bound the probe exceeded (issue 399)")
 
 		assert.Empty(t, machineRepo.UpdateCalls(),
 			"a timed-out probe must persist nothing — no repository write at all")

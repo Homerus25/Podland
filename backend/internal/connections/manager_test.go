@@ -10,6 +10,7 @@ import (
 	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/slogtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/bindings"
@@ -137,10 +138,7 @@ func TestWithConnection_PropagatesFnErrorUntouched(t *testing.T) {
 
 func TestWithConnection_DialFailureLogsCauseAndReturns502(t *testing.T) {
 	dialErr := errors.New("ssh: connection refused")
-	capture := &captureHandler{}
-	previous := slog.Default()
-	slog.SetDefault(slog.New(capture))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	capture := slogtest.CaptureDefault(t)
 
 	dial := newCountingDial()
 	dial.failMachine("machine-1", dialErr)
@@ -157,7 +155,7 @@ func TestWithConnection_DialFailureLogsCauseAndReturns502(t *testing.T) {
 	assert.Equal(t, appErrors.ErrConnectionFailed, err, "callers receive the sentinel itself — they never map it")
 	assert.False(t, fnRan, "fn must not run without a live connection")
 
-	warns := capture.warnAttrs(t)
+	warns := capture.Attrs(t, slog.LevelWarn)
 	require.Len(t, warns, 1, "exactly one warn line with op+machineID+userID+cause")
 	assert.Equal(t, "containers.list", warns[0]["op"])
 	assert.Equal(t, "machine-1", warns[0]["machineID"])
@@ -306,47 +304,4 @@ func TestStop_JoinsCleanupGoroutineAndIsIdempotent(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() { mgr.Stop() }, "Stop must be safe to call any number of times (App.Close contract)")
-}
-
-// --- slog capture for the 502 cause-log ownership ---
-
-type captureHandler struct {
-	mu      sync.Mutex
-	records []slog.Record
-}
-
-func (h *captureHandler) Enabled(context.Context, slog.Level) bool { return true }
-
-func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.records = append(h.records, r.Clone())
-	return nil
-}
-
-func (h *captureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
-
-func (h *captureHandler) WithGroup(string) slog.Handler { return h }
-
-func (h *captureHandler) warnAttrs(t *testing.T) []map[string]string {
-	t.Helper()
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	var out []map[string]string
-	for _, r := range h.records {
-		if r.Level != slog.LevelWarn {
-			continue
-		}
-		attrs := map[string]string{}
-		r.Attrs(func(a slog.Attr) bool {
-			if err, ok := a.Value.Any().(error); ok {
-				attrs[a.Key] = err.Error()
-				return true
-			}
-			attrs[a.Key] = a.Value.String()
-			return true
-		})
-		out = append(out, attrs)
-	}
-	return out
 }

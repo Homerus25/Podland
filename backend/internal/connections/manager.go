@@ -278,6 +278,23 @@ func pingPodman(ctx context.Context) error {
 	return nil
 }
 
+// TestTimeoutError is the typed probe-timeout signal TestConnection returns
+// when the registration probe exceeds the configured testTimeout. It
+// carries the actual bound so the registration flow can name it in its 400
+// message ("Connection test timed out after 10s", issue 399) — a typed
+// error rather than the bare context deadline, which carries no bound.
+// Detected via errors.As. ProbeMachine (the status endpoint) keeps the
+// bare context.DeadlineExceeded: its callers never surface probe detail.
+type TestTimeoutError struct {
+	// Bound is the configured probe deadline the call exceeded
+	// (MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS).
+	Bound time.Duration
+}
+
+func (e *TestTimeoutError) Error() string {
+	return fmt.Sprintf("connection test timed out after %s", e.Bound)
+}
+
 // TestConnection probes an SSH/podman connection for a not-yet-persisted
 // machine, bounding the probe by the configured testTimeout
 // (MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS). It is the registration-time
@@ -299,10 +316,10 @@ func pingPodman(ctx context.Context) error {
 //
 // Return contract for the caller (MachineService.Create):
 //   - nil: the target is reachable over SSH AND the podman socket pinged.
-//   - context.DeadlineExceeded: the probe exceeded testTimeout. The
-//     service maps this to ErrConnectionTestTimeout (400) — detected
-//     via errors.Is, so the timeout crosses the package boundary without
-//     a shared sentinel.
+//   - *TestTimeoutError: the probe exceeded testTimeout. The service maps
+//     this to ErrConnectionTestTimeout (400) with the carried bound in
+//     the message — detected via errors.As, so the timeout and its bound
+//     cross the package boundary without a shared sentinel.
 //   - any other error: a real dial/ping failure (bad host/creds/socket).
 //     The service maps this to ErrConnectionTestFailed (400).
 func (m *ConnectionManager) TestConnection(
@@ -326,10 +343,10 @@ func (m *ConnectionManager) TestConnection(
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-timer.C:
-		// Return the standard deadline error so callers can detect the
-		// probe timeout via errors.Is(err, context.DeadlineExceeded)
+		// Return the typed timeout error carrying the configured bound so
+		// callers can name the bound (issue 399) — detected via errors.As,
 		// without importing a connections-package sentinel.
-		return context.DeadlineExceeded
+		return &TestTimeoutError{Bound: m.testTimeout}
 	case err := <-done:
 		return err
 	}

@@ -190,8 +190,15 @@ func TestConnectionManager_TestConnection_BoundedByTestTimeout(t *testing.T) {
 	err := mgr.TestConnection(context.Background(), "127.0.0.1", port, "root", identity, "/run/podman/podman.sock")
 	realDialMu.Unlock()
 
-	assert.ErrorIs(t, err, context.DeadlineExceeded,
-		"a silent host must surface the manager's deadline (→ registration 400 timeout), not hang")
+	// The timeout crosses as the typed TestTimeoutError carrying the
+	// configured bound (issue 399): the registration flow names the
+	// bound in its 400 message, so the bare context deadline — which
+	// carries no bound — no longer crosses the package boundary.
+	var timeoutErr *TestTimeoutError
+	require.ErrorAs(t, err, &timeoutErr,
+		"a silent host must surface the typed probe timeout (→ registration 400 timeout), not hang")
+	assert.Equal(t, 50*time.Millisecond, timeoutErr.Bound,
+		"the typed timeout must carry the configured bound it exceeded")
 }
 
 func TestConnectionManager_TestConnection_FastDialFailureIsNotATimeout(t *testing.T) {
@@ -208,6 +215,7 @@ func TestConnectionManager_TestConnection_FastDialFailureIsNotATimeout(t *testin
 	realDialMu.Unlock()
 
 	require.Error(t, err)
-	assert.NotErrorIs(t, err, context.DeadlineExceeded,
-		"connection refused is a real probe failure (→ registration 400), not the deadline")
+	var timeoutErr *TestTimeoutError
+	assert.NotErrorAs(t, err, &timeoutErr,
+		"connection refused is a real probe failure (→ registration 400), not the probe timeout")
 }

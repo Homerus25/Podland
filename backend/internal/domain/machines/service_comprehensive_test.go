@@ -127,6 +127,8 @@ func TestMachineService_Create(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, machine)
 		assert.Contains(t, err.Error(), "Missing required fields")
+		assert.Contains(t, err.Error(), "name",
+			"the message must list the missing field names (issue 399)")
 
 		// Test missing hostname
 		req = &CreateMachineRequest{
@@ -138,6 +140,8 @@ func TestMachineService_Create(t *testing.T) {
 		machine, err = service.Create(ctx, userID, req)
 		assert.Error(t, err)
 		assert.Nil(t, machine)
+		assert.Contains(t, err.Error(), "hostname",
+			"the message must list the missing field names (issue 399)")
 
 		// Test missing SSH username
 		req = &CreateMachineRequest{
@@ -149,6 +153,8 @@ func TestMachineService_Create(t *testing.T) {
 		machine, err = service.Create(ctx, userID, req)
 		assert.Error(t, err)
 		assert.Nil(t, machine)
+		assert.Contains(t, err.Error(), "sshUsername",
+			"the message must list the missing field names (issue 399)")
 
 		// Test missing SSH private key
 		req = &CreateMachineRequest{
@@ -161,6 +167,8 @@ func TestMachineService_Create(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, machine)
 		assert.Contains(t, err.Error(), "Missing required fields")
+		assert.Contains(t, err.Error(), "sshPrivateKey",
+			"the message must list the missing field names (issue 399)")
 	})
 
 	t.Run("machine creation with invalid SSH key", func(t *testing.T) {
@@ -183,6 +191,8 @@ func TestMachineService_Create(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, machine)
 		assert.Contains(t, err.Error(), "Invalid SSH private key format")
+		assert.Contains(t, err.Error(), "PRIVATE KEY",
+			"the message must describe the expected PEM marker format (issue 399)")
 	})
 
 	t.Run("machine creation with duplicate name", func(t *testing.T) {
@@ -216,7 +226,9 @@ func TestMachineService_Create(t *testing.T) {
 		machine, err := service.Create(ctx, userID, req)
 		assert.Error(t, err)
 		assert.Nil(t, machine)
-		assert.Contains(t, err.Error(), "Machine with this name already exists")
+		assert.Contains(t, err.Error(), "Machine with name")
+		assert.Contains(t, err.Error(), `"test-machine"`,
+			"the message must name the taken machine name (issue 399)")
 	})
 
 	t.Run("machine creation with encryption error", func(t *testing.T) {

@@ -3,14 +3,35 @@ package machines
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"net/http"
+	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
+	"github.com/Homerus25/podland/backend/internal/connections"
+	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/Homerus25/podland/backend/internal/slogtest"
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// requireAppError asserts the error is an AppError with the given code and
+// HTTP status, returning it so the caller can pin the message — the
+// enriched messages are WithMessage copies, so sentinel pointer equality
+// no longer holds (issue 399).
+func requireAppError(t *testing.T, err error, code string, status int) *appErrors.AppError {
+	t.Helper()
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr, "the service must answer an AppError")
+	assert.Equal(t, code, appErr.Code, "error code on the wire must stay stable")
+	assert.Equal(t, status, appErr.Status, "the HTTP status belongs to the code")
+	return appErr
+}
 
 // TestMachineService_Create_ConnectionTest covers the synchronous
 // connection probe added to MachineService.Create by issue 080-05
@@ -38,8 +59,8 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 		}
 	}
 
-	// --- AC: probe failure -> 400 CONNECTION_FAILED, machine NOT persisted -
-	t.Run("connection test failure returns ErrConnectionTestFailed and does not persist", func(t *testing.T) {
+	// --- AC: probe failure -> 400 CONNECTION_FAILED naming the cause ---
+	t.Run("connection test failure answers 400 CONNECTION_FAILED carrying the underlying error", func(t *testing.T) {
 		mockMachineRepo := testutils.NewMockMachineRepository()
 		mockAccessRepo := testutils.NewMockMachineAccessRepository()
 		// Any non-nil error stands in for "SSH/podman dial failed"
@@ -52,12 +73,15 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 
 		machine, err := service.Create(ctx, userID, newReq())
 
-		// The registration must surface a 400 CONNECTION_FAILED — the
-		// exact sentinel the handler type-asserts to pick up its Status.
+		// The registration must surface a 400 CONNECTION_FAILED whose
+		// message names the registration step and carries the underlying
+		// dial/ping error (issue 399) — the caller is the owner probing
+		// their own credentials, so the detail is safe to return.
 		require.Error(t, err)
 		assert.Nil(t, machine, "no machine should be returned when the probe fails")
-		assert.Equal(t, appErrors.ErrConnectionTestFailed, err,
-			"probe failure must map to ErrConnectionTestFailed (400 CONNECTION_FAILED)")
+		appErr := requireAppError(t, err, "CONNECTION_FAILED", http.StatusBadRequest)
+		assert.Equal(t, "Failed to connect to machine during registration: dial tcp: connection refused",
+			appErr.Message, "the message must name the step and the underlying error")
 
 		// "Not persisted" is observable through the repository's public
 		// API: no machine row for this owner, and no access grant.
@@ -69,17 +93,20 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 		assert.Nil(t, access, "owner access must NOT be granted when the probe fails")
 	})
 
-	// --- AC: probe timeout -> 400 CONNECTION_TEST_TIMEOUT -------------
+	// --- AC: probe timeout -> 400 CONNECTION_TEST_TIMEOUT naming the bound
+	// ---
 	//
-	// The connection manager signals a probe timeout by returning
-	// context.DeadlineExceeded (see ConnectionManager.TestConnection).
-	// Create must surface this as ErrConnectionTestTimeout — distinct
-	// from CONNECTION_FAILED so a client can tell "unreachable" from
-	// "slow" — and still must not persist the machine.
-	t.Run("connection test timeout returns ErrConnectionTestTimeout and does not persist", func(t *testing.T) {
+	// The connection manager signals a probe timeout with its typed
+	// TestTimeoutError carrying the configured bound (see
+	// ConnectionManager.TestConnection). Create must surface this as
+	// ErrConnectionTestTimeout — distinct from CONNECTION_FAILED so a
+	// client can tell "unreachable" from "slow" — with the actual bound
+	// in the message, and still must not persist the machine.
+	t.Run("connection test timeout answers 400 CONNECTION_TEST_TIMEOUT naming the exceeded bound", func(t *testing.T) {
 		mockMachineRepo := testutils.NewMockMachineRepository()
 		mockAccessRepo := testutils.NewMockMachineAccessRepository()
-		mockConnManager := testutils.NewMockConnectionManagerWithTestError(context.DeadlineExceeded)
+		mockConnManager := testutils.NewMockConnectionManagerWithTestError(
+			&connections.TestTimeoutError{Bound: 10 * time.Second})
 		mockEncryption := testutils.NewMockEncryptionService()
 
 		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
@@ -88,11 +115,35 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Nil(t, machine)
-		assert.Equal(t, appErrors.ErrConnectionTestTimeout, err,
-			"probe timeout must map to ErrConnectionTestTimeout (400)")
+		appErr := requireAppError(t, err, "CONNECTION_TEST_TIMEOUT", http.StatusBadRequest)
+		assert.Equal(t, "Connection test timed out after 10s", appErr.Message,
+			"the message must state the timeout bound the probe exceeded")
 		machines, err := mockMachineRepo.ListAccessible(userID)
 		require.NoError(t, err)
 		assert.Empty(t, machines, "machine must NOT be persisted when the probe times out")
+	})
+
+	// --- Edge: the caller's own context deadline has no bound to name --
+	//
+	// TestConnection returns the caller's ctx.Err() when the request
+	// context expires first (client disconnect / server deadline). That
+	// is still a probe that did not finish, so it maps to the plain
+	// timeout sentinel — without a configured bound there is nothing to
+	// name in the message.
+	t.Run("caller context deadline maps to the plain timeout sentinel", func(t *testing.T) {
+		mockMachineRepo := testutils.NewMockMachineRepository()
+		mockAccessRepo := testutils.NewMockMachineAccessRepository()
+		mockConnManager := testutils.NewMockConnectionManagerWithTestError(context.DeadlineExceeded)
+		mockEncryption := testutils.NewMockEncryptionService()
+
+		service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager, mockEncryption, newFakeSSHInvalidator())
+
+		_, err := service.Create(ctx, userID, newReq())
+
+		require.Error(t, err)
+		appErr := requireAppError(t, err, "CONNECTION_TEST_TIMEOUT", http.StatusBadRequest)
+		assert.Equal(t, appErrors.ErrConnectionTestTimeout.Message, appErr.Message,
+			"a caller-side deadline carries no configured bound: the plain sentinel message stays")
 	})
 
 	// --- AC: probe receives the defaulted port and socket ------------
@@ -191,7 +242,9 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 
 		require.Error(t, err)
 		assert.Nil(t, machine)
-		assert.Equal(t, appErrors.ErrMachineAlreadyExists, err)
+		appErr := requireAppError(t, err, "MACHINE_ALREADY_EXISTS", http.StatusBadRequest)
+		assert.Equal(t, `Machine with name "test-machine" already exists`, appErr.Message,
+			"the message must name the taken machine name")
 		assert.Empty(t, mockConnManager.TestConnectionCalls(),
 			"the probe must NOT run when the name is a duplicate — name uniqueness precedes the probe")
 	})
@@ -224,4 +277,62 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 		assert.False(t, encryptCalled,
 			"the SSH key must NOT be encrypted when the probe fails — the probe precedes encryption")
 	})
+}
+
+// TestProbeDetailCap pins the CONNECTION_FAILED detail cap: short causes
+// pass through, long causes are cut with a marker, and the cut lands on a
+// rune boundary so a multi-byte cause cannot leave invalid UTF-8 in the
+// 4xx message.
+func TestProbeDetailCap(t *testing.T) {
+	t.Run("short cause passes through untouched", func(t *testing.T) {
+		assert.Equal(t, "dial tcp: connection refused", probeDetail(errors.New("dial tcp: connection refused")))
+	})
+
+	t.Run("long cause is capped with a truncation marker", func(t *testing.T) {
+		detail := probeDetail(errors.New(strings.Repeat("a", maxProbeDetailLen+50)))
+		assert.Len(t, detail, maxProbeDetailLen+len(" (truncated)"))
+		assert.True(t, strings.HasSuffix(detail, " (truncated)"))
+	})
+
+	t.Run("the cap never splits a multi-byte rune", func(t *testing.T) {
+		// A cause of 3-byte runes whose byte length straddles the cap.
+		stride := strings.Repeat("é", maxProbeDetailLen/3+10)
+		detail := probeDetail(errors.New(stride))
+		assert.True(t, utf8.ValidString(detail), "the capped message must stay valid UTF-8")
+	})
+}
+
+// TestMachineService_Create_ProbeFailureLogged covers the server-side log
+// for a failed registration probe (issue 399): the underlying dial/ping
+// error — discarded by the 400 mapping — must be logged with the
+// requestID so an unreachable target is diagnosable from the server logs.
+func TestMachineService_Create_ProbeFailureLogged(t *testing.T) {
+	capture := slogtest.CaptureDefault(t)
+
+	probeErr := errors.New("ssh: handshake failed: ssh: unable to authenticate")
+	mockMachineRepo := testutils.NewMockMachineRepository()
+	mockAccessRepo := testutils.NewMockMachineAccessRepository()
+	mockConnManager := testutils.NewMockConnectionManagerWithTestError(probeErr)
+	service := NewMachineService(mockMachineRepo, mockAccessRepo, mockConnManager,
+		testutils.NewMockEncryptionService(), newFakeSSHInvalidator())
+
+	ctx := contextutils.SetRequestID(context.Background(), "req-probe-log-1")
+	_, err := service.Create(ctx, "test-user-123", &CreateMachineRequest{
+		Name:             "test-machine",
+		Hostname:         "example.com",
+		Port:             22,
+		SSHUsername:      "root",
+		SSHPrivateKey:    testutils.GenerateValidPEMKey(),
+		PodmanSocketPath: "/run/podman/podman.sock",
+	})
+	require.Error(t, err, "the probe failure must still answer a 400")
+
+	logs := capture.Attrs(t, slog.LevelError)
+	require.Len(t, logs, 1, "exactly one error log line for the failed probe")
+	assert.Contains(t, logs[0]["error"], probeErr.Error(),
+		"the underlying probe error must be logged")
+	assert.Equal(t, "req-probe-log-1", logs[0]["requestID"],
+		"the log line must carry the requestID")
+	assert.Equal(t, "example.com", logs[0]["hostname"],
+		"the log line must name the probed target")
 }

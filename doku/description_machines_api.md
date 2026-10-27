@@ -53,6 +53,16 @@ Register a new remote machine.
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 500: `INTERNAL_ERROR`
 
+**Error messages (registration steps name themselves):** the 4xx messages name the failed registration step and the reason; the error codes stay stable. Clients may render the message verbatim.
+
+- `VALIDATION_FAILED` lists the missing field names: `"Missing required fields: name, hostname"`
+- `INVALID_SSH_KEY` describes the expected format: a PEM block, i.e. a `-----BEGIN OPENSSH PRIVATE KEY-----` (or RSA/EC/DSA/ED25519) header line paired with its matching `-----END ... PRIVATE KEY-----` footer line
+- `CONNECTION_FAILED` carries the underlying SSH/podman error, length-capped: `"Failed to connect to machine during registration: ssh: handshake failed: ssh: unable to authenticate"`
+- `CONNECTION_TEST_TIMEOUT` states the exceeded bound: `"Connection test timed out after 10s"` (the configured `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS`)
+- `MACHINE_ALREADY_EXISTS` names the taken machine name: `"Machine with name \"my-box\" already exists"`
+
+The probe detail is safe to return here because the caller is the owner submitting their own credentials against the target they described. This is deliberately different from `GET /api/machines/{id}/status`, which never returns SSH-level detail because machines can be shared with read-only users. A failed registration probe is also logged server-side with the underlying error and the request ID. 5xx failures (database persist, access grant, key encryption) keep the generic internal-error message — no step naming that leaks internals.
+
 ---
 
 ### GET /api/machines
@@ -177,7 +187,7 @@ Update an existing machine's connection details.
 
 Only the owner may update a machine; any other user with an access row (read or write) receives 403 `ACCESS_DENIED`.
 
-**Note:** If `sshPrivateKey` is provided, the backend will test the new connection before persisting: the probe targets the resulting merged connection configuration (request fields override stored ones), a failure answers 400 `CONNECTION_FAILED`, and a probe timeout answers 400 `CONNECTION_TEST_TIMEOUT`. Updates that do not change the key skip the probe.
+**Note:** If `sshPrivateKey` is provided, the backend will test the new connection before persisting: the probe targets the resulting merged connection configuration (request fields override stored ones), a failure answers 400 `CONNECTION_FAILED`, and a probe timeout answers 400 `CONNECTION_TEST_TIMEOUT`. Updates that do not change the key skip the probe. The update path shares the registration probe, so its 4xx messages carry the same step-and-reason wording as POST /api/machines (the underlying error on `CONNECTION_FAILED`, the exceeded bound on `CONNECTION_TEST_TIMEOUT`, the PEM format description on `INVALID_SSH_KEY`).
 
 **Response (Success - 200):**
 - The machine fields of GET /api/machines/{id} without the per-caller `permission` and `isOwner` fields (only the list and detail GET responses carry the enrichment)

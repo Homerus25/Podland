@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
@@ -131,15 +132,34 @@ func ToMachineListResponse(machines []models.AccessibleMachine, callerID string)
 // the machine is persisted, so a bad host / bad credentials / wrong
 // socket path is rejected at registration (400 CONNECTION_FAILED) instead
 // of silently saving an unreachable machine that only fails at first use.
+// Every 4xx answer names the failed step and the reason (issue 399):
+// the message is enriched via WithMessage while the error codes stay
+// stable — the frontend renders 4xx envelope messages verbatim.
 func (s *MachineService) Create(ctx context.Context, userID string, req *CreateMachineRequest) (*models.Machine, error) {
-	// Validate required fields
-	if req.Name == "" || req.Hostname == "" || req.SSHUsername == "" || req.SSHPrivateKey == "" {
-		return nil, errors.ErrMissingRequiredFields
+	// Validate required fields. The message lists the missing field
+	// names so the user can tell which inputs are empty.
+	var missing []string
+	if req.Name == "" {
+		missing = append(missing, "name")
+	}
+	if req.Hostname == "" {
+		missing = append(missing, "hostname")
+	}
+	if req.SSHUsername == "" {
+		missing = append(missing, "sshUsername")
+	}
+	if req.SSHPrivateKey == "" {
+		missing = append(missing, "sshPrivateKey")
+	}
+	if len(missing) > 0 {
+		return nil, errors.ErrMissingRequiredFields.WithMessage(
+			fmt.Sprintf("Missing required fields: %s", strings.Join(missing, ", ")))
 	}
 
-	// Validate SSH private key format (basic PEM check)
+	// Validate SSH private key format (basic PEM check). The message
+	// says what valid input looks like: a PEM block's marker pair.
 	if !IsValidPEM(req.SSHPrivateKey) {
-		return nil, errors.ErrInvalidSSHKey
+		return nil, errors.ErrInvalidSSHKey.WithMessage(invalidSSHKeyMessage)
 	}
 
 	// Check name uniqueness for user
@@ -148,7 +168,8 @@ func (s *MachineService) Create(ctx context.Context, userID string, req *CreateM
 		return nil, fmt.Errorf("failed to check machine name uniqueness: %w", err)
 	}
 	if nameExists {
-		return nil, errors.ErrMachineAlreadyExists
+		return nil, errors.ErrMachineAlreadyExists.WithMessage(
+			fmt.Sprintf("Machine with name %q already exists", req.Name))
 	}
 
 	// Apply defaults BEFORE the probe so the connection test dials the
@@ -206,6 +227,31 @@ func (s *MachineService) Create(ctx context.Context, userID string, req *CreateM
 	}
 
 	return machine, nil
+}
+
+// invalidSSHKeyMessage describes the PEM marker pair a private key must
+// carry (issue 399): the 400 INVALID_SSH_KEY message says what valid input
+// looks like instead of only rejecting.
+const invalidSSHKeyMessage = `Invalid SSH private key format: expected a PEM block — a "-----BEGIN OPENSSH PRIVATE KEY-----" (or RSA/EC/DSA/ED25519) header line paired with its matching "-----END ... PRIVATE KEY-----" footer line`
+
+// maxProbeDetailLen caps the underlying probe error text carried in the
+// registration CONNECTION_FAILED message (issue 399): SSH/podman errors
+// are short in practice, but a pathological cause must not flood the form.
+const maxProbeDetailLen = 300
+
+// probeDetail renders the underlying probe error for the registration
+// message, length-capped. The cap cuts on a rune boundary so a multi-byte
+// cause cannot leave invalid UTF-8 in the message.
+func probeDetail(err error) string {
+	detail := err.Error()
+	if len(detail) <= maxProbeDetailLen {
+		return detail
+	}
+	cut := maxProbeDetailLen
+	for cut > 0 && !utf8.ValidString(detail[:cut]) {
+		cut--
+	}
+	return detail[:cut] + " (truncated)"
 }
 
 // IsValidPEM performs a basic check for PEM format
@@ -335,7 +381,7 @@ func (s *MachineService) Update(ctx context.Context, userID, machineID string, r
 	}
 
 	if req.SSHPrivateKey != "" && !IsValidPEM(req.SSHPrivateKey) {
-		return nil, errors.ErrInvalidSSHKey
+		return nil, errors.ErrInvalidSSHKey.WithMessage(invalidSSHKeyMessage)
 	}
 
 	if req.Name != "" {
@@ -385,16 +431,39 @@ func (s *MachineService) Update(ctx context.Context, userID, machineID string, r
 // plaintext key, before encryption, and callers persist only after this
 // returns nil — so a failed probe leaves nothing behind. The probe is
 // bounded by MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS inside the connection
-// manager: a deadline (the probe's own timeout, or the caller's context
-// expiring) maps to CONNECTION_TEST_TIMEOUT; any other failure (bad host /
-// credentials / socket) maps to CONNECTION_FAILED. Both are 400 — the
-// target the client described is not usable.
+// manager: the manager's typed TestTimeoutError (carrying the configured
+// bound) maps to CONNECTION_TEST_TIMEOUT naming that bound; the caller's
+// own context deadline maps to the plain timeout sentinel (no configured
+// bound to name); any other failure (bad host / credentials / socket) maps
+// to CONNECTION_FAILED carrying the underlying error, length-capped.
+// Both are 400 — the target the client described is not usable.
+//
+// The probe detail is safe to return here because the caller is the owner
+// submitting their own credentials against the target they described —
+// deliberately different from the status endpoint, which never returns
+// SSH-level detail because machines can be shared (issue 399 keeps that
+// ruling unextended). The failure is also logged server-side with the
+// requestID: the 400 mapping discards the underlying error, so the log
+// line is where the full cause lives.
 func (s *MachineService) verifyKey(ctx context.Context, machine *models.Machine, plaintextKey string) error {
 	if err := s.conn.TestConnection(ctx, machine.Hostname, machine.Port, machine.SSHUsername, plaintextKey, machine.PodmanSocketPath); err != nil {
+		slog.ErrorContext(ctx, "machine connection probe failed",
+			"error", err,
+			"hostname", machine.Hostname,
+			"port", machine.Port,
+			"machineName", machine.Name,
+			"requestID", contextutils.GetRequestID(ctx))
+
+		var timeoutErr *connections.TestTimeoutError
+		if stderrors.As(err, &timeoutErr) {
+			return errors.ErrConnectionTestTimeout.WithMessage(
+				fmt.Sprintf("Connection test timed out after %s", timeoutErr.Bound))
+		}
 		if stderrors.Is(err, context.DeadlineExceeded) {
 			return errors.ErrConnectionTestTimeout
 		}
-		return errors.ErrConnectionTestFailed
+		return errors.ErrConnectionTestFailed.WithMessage(
+			fmt.Sprintf("Failed to connect to machine during registration: %s", probeDetail(err)))
 	}
 
 	encryptedKey, fingerprint, err := s.encryption.EncryptSSHKey(plaintextKey)

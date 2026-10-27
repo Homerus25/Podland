@@ -5,12 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/slogtest"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,31 +145,12 @@ func TestHandleProgressErrorEventReceivesOperationContext(t *testing.T) {
 	assert.JSONEq(t, `{"code":"CONNECTION_FAILED"}`, lines[0])
 }
 
-// captureSlog is a slog.Handler that records every record it handles.
-type captureSlog struct {
-	mu      sync.Mutex
-	records []slog.Record
-}
-
-func (h *captureSlog) Enabled(context.Context, slog.Level) bool { return true }
-func (h *captureSlog) Handle(_ context.Context, r slog.Record) error {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.records = append(h.records, r.Clone())
-	return nil
-}
-func (h *captureSlog) WithAttrs([]slog.Attr) slog.Handler { return h }
-func (h *captureSlog) WithGroup(string) slog.Handler      { return h }
-
 // TestHandleProgressLogsOperationLine pins the kit-assembled operation slog
 // line: the handler's operation name and attrs over the kit's
 // requestID/machineID/operationID base, with the operation ID matching the
 // one handed to the domain callbacks.
 func TestHandleProgressLogsOperationLine(t *testing.T) {
-	capture := &captureSlog{}
-	previous := slog.Default()
-	slog.SetDefault(slog.New(capture))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	capture := slogtest.CaptureDefault(t)
 
 	// The deadline recorder answers SetWriteDeadline, so the ritual's only
 	// slog line is the operation line under test.
@@ -188,8 +169,9 @@ func TestHandleProgressLogsOperationLine(t *testing.T) {
 			ErrorEvent:    func(op OperationContext, code, message string, cancelled bool) any { return code },
 		}))
 
-	require.Len(t, capture.records, 1, "exactly one operation slog line")
-	record := capture.records[0]
+	records := capture.Records()
+	require.Len(t, records, 1, "exactly one operation slog line")
+	record := records[0]
 	assert.Equal(t, "test-op", record.Message)
 	assert.Equal(t, slog.LevelInfo, record.Level)
 
