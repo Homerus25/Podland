@@ -1,4 +1,4 @@
-import { Box, Button, Td, Text, Tr } from "@chakra-ui/react";
+import { Box, Button, Td, Text, Tr, useToast } from "@chakra-ui/react";
 import { CopyImageDialog } from "@features/images/components/CopyImageDialog";
 import { displayTags } from "@features/images/components/imageDisplayTags";
 import { PullImageForm } from "@features/images/components/PullImageForm";
@@ -7,13 +7,18 @@ import {
 	useImages,
 	usePruneImages,
 } from "@features/images/hooks/useImages";
-import type { ImageSummary } from "@features/images/services/imagesApi";
+import {
+	type ImageSummary,
+	imageExportUrl,
+} from "@features/images/services/imagesApi";
 import { can } from "@features/machines/permissions";
 import { ForceConfirmDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
+import { getApiError } from "@shared/utils/api";
+import { downloadFile } from "@shared/utils/download";
 import {
 	formatBytes,
 	formatRelativeDate,
@@ -94,8 +99,33 @@ export function ImageList({ machine }: { machine: Machine }) {
 	const [pendingDelete, setPendingDelete] = useState<ImageSummary | null>(null);
 	const [pendingCopy, setPendingCopy] = useState<ImageSummary | null>(null);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
+	const [downloadingId, setDownloadingId] = useState<string | null>(null);
 	const canManage = can(machine, "manage-images");
 	const navigate = useNavigate();
+	const toast = useToast();
+
+	// The archive download is read-level (the volume Export button's
+	// ruling): the button renders for every grantee, with a per-row busy
+	// state while its download streams. No filename is passed — the
+	// server names the archive in its Content-Disposition and the shared
+	// download helper saves under that name.
+	const handleDownload = async (image: ImageSummary) => {
+		setDownloadingId(image.id);
+		try {
+			await downloadFile(imageExportUrl(machineId, image.id));
+		} catch (error) {
+			// The delete modal's naming composite: tags alone render
+			// "<none>" for an untagged image, so the short ID names it.
+			toast({
+				title: `Failed to download image: ${displayTags(image)} (${shortImageId(image.id)})`,
+				description: getApiError(error).message,
+				status: "error",
+				isClosable: true,
+			});
+		} finally {
+			setDownloadingId(null);
+		}
+	};
 
 	return (
 		<>
@@ -128,6 +158,18 @@ export function ImageList({ machine }: { machine: Machine }) {
 						<Td isNumeric>{formatBytes(image.size)}</Td>
 						<Td>{formatRelativeDate(image.createdAt)}</Td>
 						<Td>
+							<Button
+								size="xs"
+								variant="outline"
+								aria-label={`Download ${displayTags(image)}`}
+								isLoading={downloadingId === image.id}
+								onClick={(event) => {
+									event.stopPropagation();
+									handleDownload(image);
+								}}
+							>
+								Download
+							</Button>
 							{canManage ? (
 								<Button
 									size="xs"

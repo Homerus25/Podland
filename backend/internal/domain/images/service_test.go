@@ -1,8 +1,10 @@
 package images
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"testing"
 
@@ -264,4 +266,40 @@ func TestImageService_ParsePlatform(t *testing.T) {
 		assert.Equal(t, "amd64", arch)
 		assert.Equal(t, "10.0.17763.1234", variant)
 	})
+}
+
+func TestImageService_Export_GatesOnExistence(t *testing.T) {
+	engine := &fakeImageEngine{
+		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
+			return nil, []error{&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such image"}}, nil
+		},
+		// exportFn stays unarmed: it must never be reached for a
+		// missing image.
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
+	var sink bytes.Buffer
+
+	err := service.Export(context.Background(), "user", "machine", "sha256:abc123", &sink)
+
+	require.ErrorIs(t, err, appErrors.ErrImageNotFound)
+	assert.Zero(t, sink.Len(), "no byte may be written for a missing image")
+}
+
+func TestImageService_Export_StreamsEngineBytesUnchanged(t *testing.T) {
+	engine := &fakeImageEngine{
+		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
+			return []*entities.ImageInspectReport{{}}, nil, nil
+		},
+		exportFn: func(_ string, w io.Writer) error {
+			_, err := w.Write([]byte("tar-bytes"))
+			return err
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
+	var sink bytes.Buffer
+
+	err := service.Export(context.Background(), "user", "machine", "sha256:abc123", &sink)
+
+	require.NoError(t, err)
+	assert.Equal(t, "tar-bytes", sink.String())
 }

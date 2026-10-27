@@ -149,3 +149,12 @@ export interface ImageCopyResult {
 export function imageCopyStreamUrl(machineId: string, imageId: string): string {
 	return machineApiUrl(machineId, "images", imageId, "copy");
 }
+
+// Full URL for GET .../images/{imageId}/export (issue 401): the image's
+// tar archive download, consumed by the fetch-based shared download
+// helper. No filename is passed along — the server names the archive in
+// its Content-Disposition (the short image ID with a .tar suffix), and
+// the helper saves under the server-provided name.
+export function imageExportUrl(machineId: string, imageId: string): string {
+	return machineApiUrl(machineId, "images", imageId, "export");
+}

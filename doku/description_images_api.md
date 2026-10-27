@@ -242,6 +242,41 @@ The raw podman image inspect report, e.g.:
 
 ---
 
+### GET /api/machines/{id}/images/{imageId}/export
+
+Download an image as a tar archive (issue 401): the machine's podman
+streams the image's docker-archive straight into the response — no
+server-side buffering, no size cap (the transfer bound exists to protect
+the cross-machine copy's in-process pipe; the browser consumes this
+stream directly, and cancellation rides the request context).
+
+**Authentication:** Required
+
+**Access:** Any user with a machine-access row for `{id}` (read level):
+a download mutates nothing, exactly like the volume export.
+
+**Response (Success - 200):**
+- `Content-Type: application/x-tar`
+- `Content-Disposition: attachment; filename="<shortId>.tar"` — the
+  image ID with any `sha256:` prefix stripped, truncated to 12 hex
+  characters (the ID is the wire's image reference; a tag-based filename
+  would need extra resolution and fails for untagged images)
+- Body: the image's tar archive (docker-archive format)
+
+The image's existence is resolved before the stream begins, so an
+unknown ID answers the standard error envelope below — no partial-file
+download.
+
+**Response (Error):**
+- 400: `MISSING_IMAGE_ID`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row)
+- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
 ### GET /api/machines/{id}/images/{imageId}/copy-preview
 
 Preview an image copy to another machine (issue 375): the one fact the

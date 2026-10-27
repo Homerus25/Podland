@@ -346,6 +346,11 @@ func New(cfg *config.Config) (*App, error) {
 						r.Get("/{imageId}", imageHandler.Get)
 						r.With(requireWrite).Delete("/{imageId}", imageHandler.Delete)
 						r.Get("/{imageId}/inspect", imageHandler.Inspect)
+						// The archive download mutates nothing, so
+						// it stays read-level like the volume
+						// export (issue 401): users who can read
+						// a machine's state can read its data.
+						r.Get("/{imageId}/export", imageHandler.Export)
 						// Copy preview stays read-level: it mutates
 						// nothing on the source, and the target
 						// machine's read access is enforced inside

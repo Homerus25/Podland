@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
@@ -16,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Homerus25/podland/backend/internal/models"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -401,4 +404,78 @@ func sweepRunScopedImages(runID string) {
 		// cleanup is the primary path; this is the backstop.
 		_, _ = podmanConnRun("rmi", ref)
 	}
+}
+
+// Test_Integration_Images_Export is the image export vertical slice
+// (issue 401) against GET /api/machines/{id}/images/{imageId}/export.
+// It pulls the suite's fixture image when absent (restoring the shared
+// machine's prior state on cleanup), exports it through the API as a
+// read-level user, and untars the response body to verify the
+// docker-archive shape. Access control rides the same slice: no-access
+// users get 403, unknown image IDs get the 404 envelope before any byte
+// is written.
+//
+//	GET /api/machines/{id}/images/{imageId}/export → 200, x-tar
+func Test_Integration_Images_Export(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+	registerImagesSweep()
+
+	machineID := suite.MachineID
+
+	// Fixture: busybox, the suite's fixture image, ensured over the same
+	// podman connection the backend uses (scaffolding, not the SUT) —
+	// the containers slice's idempotent ensure helper, which deliberately
+	// leaves the fixture in place.
+	ensureBusyboxImage(t)
+
+	out, err := podmanConnRun("inspect", "busybox:latest", "--format", "{{.Id}}")
+	require.NoError(t, err, "fixture image inspect must succeed: %s", strings.TrimSpace(out))
+	imageID := strings.TrimSpace(out)
+	require.True(t, strings.HasPrefix(imageID, "sha256:"),
+		"podman inspect must answer a full image ID, got %q", imageID)
+
+	// --- AC: a read-level grantee can download; the tar headers name
+	// the short image ID; the body is the image's docker-archive tar ---
+	t.Run("ReadLevelUserCanExport", func(t *testing.T) {
+		client := levelUserClient(t, models.PermissionRead)
+		resp, err := client.Get(suite.ServerURL + "/api/machines/" + machineID + "/images/" + imageID + "/export")
+		require.NoError(t, err, "read-level export must connect")
+		defer resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode,
+			"read-level users can export (the volume export's ruling)")
+
+		assert.Equal(t, "application/x-tar", resp.Header.Get("Content-Type"))
+		assert.Regexp(t, `^attachment; filename="[0-9a-f]{12}\.tar"$`,
+			resp.Header.Get("Content-Disposition"),
+			"the filename must name the short image ID with a .tar suffix")
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err, "read exported archive body")
+		tr := tar.NewReader(bytes.NewReader(body))
+		foundManifest := false
+		for {
+			hdr, err := tr.Next()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err, "iterating exported tar must not fail")
+			if hdr.Name == "manifest.json" {
+				foundManifest = true
+			}
+		}
+		assert.True(t, foundManifest,
+			"the exported archive must be a docker-image tar carrying manifest.json")
+	})
+
+	t.Run("NoAccessUserGets403", func(t *testing.T) {
+		expectAPIError(t, noAccessUserClient(t), http.MethodGet,
+			suite.ServerURL+"/api/machines/"+machineID+"/images/"+imageID+"/export",
+			"", http.StatusForbidden, "ACCESS_DENIED")
+	})
+
+	t.Run("UnknownImageGets404", func(t *testing.T) {
+		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
+			suite.ServerURL+"/api/machines/"+machineID+"/images/sha256:"+suite.RunID+"-no-such-image/export",
+			"", http.StatusNotFound, "IMAGE_NOT_FOUND")
+	})
 }

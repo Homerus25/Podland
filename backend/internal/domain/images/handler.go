@@ -3,8 +3,10 @@ package images
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
@@ -154,6 +156,56 @@ func (h *ImageHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 
 		return h.service.Inspect(ctx, userID, machineID, imageID)
 	})
+}
+
+// Export handles streaming an image's tar archive as a download (issue
+// 401, the volume export's images twin). Read-level permission suffices
+// (subtree RequireMachineAccess): a download mutates nothing. It crosses
+// the endpoint envelope's binary twin (web.HandleStream): identity
+// guards, AppError mapping, and the 500 fallback live there; the closure
+// is the tar headers plus the streaming service call. Headers are set
+// before the service streams, so the download starts with the right
+// Content-Type/Disposition; the service resolves existence first, so a
+// 404 happens before any byte is written and the error envelope stays
+// intact — the envelope's error write replaces the tar Content-Type.
+// Mid-stream failures can't retroactively change the status — the
+// connection just truncates. The filename names the short image ID (any
+// sha256: prefix stripped, truncated to 12 hex characters) with a .tar
+// suffix: the ID is the wire's image reference (the copy's established
+// vocabulary), and a tag-based filename would need extra resolution and
+// fails for untagged images. A pre-stream failure (the service's 404
+// gate) drops the attachment disposition before the envelope writes the
+// error, so a browser never offers the error JSON as a .tar download;
+// after the first streamed byte the header is already flushed and the
+// drop is a no-op.
+func (h *ImageHandler) Export(w http.ResponseWriter, r *http.Request) {
+	web.HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+		imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
+		if guard != nil {
+			return guard
+		}
+
+		w.Header().Set("Content-Type", "application/x-tar")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", shortImageID(imageID)+".tar"))
+
+		if err := h.service.Export(ctx, userID, machineID, imageID, w); err != nil {
+			w.Header().Del("Content-Disposition")
+			return err
+		}
+		return nil
+	})
+}
+
+// shortImageID derives the download filename's ID part: any sha256:
+// prefix stripped, truncated to 12 hex characters. A shorter reference
+// (never a real image ID, but the param is caller-chosen) passes through
+// unchanged rather than panicking before the service's 404 gate.
+func shortImageID(id string) string {
+	digest := strings.TrimPrefix(id, "sha256:")
+	if len(digest) > 12 {
+		digest = digest[:12]
+	}
+	return digest
 }
 
 // CopyPreview answers the copy dialog's one fact (issue 375,
