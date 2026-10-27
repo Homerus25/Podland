@@ -201,11 +201,11 @@ func (s *ImageService) CopyPreview(ctx context.Context, userID, machineID, image
 	}
 
 	// Target lease: the already-present fact, read by image ID through
-	// the same inspect ritual — a not-found there is the fact (absent),
-	// not an error.
+	// the engine's exists check — a not-found there is the fact
+	// (absent), not an error.
 	var present bool
 	err = s.engines.WithEngine(ctx, userID, targetMachineID, "images.CopyPreviewTarget", func(e ImageEngine) error {
-		present, err = imagePresent(e, imageID)
+		present, err = e.Exists(imageID)
 		return err
 	})
 	if err != nil {
@@ -311,11 +311,11 @@ func (s *ImageService) Copy(ctx context.Context, userID, machineID, imageID, tar
 }
 
 // imageExists answers whether the image exists on the machine through
-// the image engine seam.
+// the engine's exists seam.
 func (s *ImageService) imageExists(ctx context.Context, userID, machineID, imageID string) (bool, error) {
 	exists := false
 	err := s.engines.WithEngine(ctx, userID, machineID, "images.ImageExists", func(e ImageEngine) error {
-		present, err := imagePresent(e, imageID)
+		present, err := e.Exists(imageID)
 		if err != nil {
 			return err
 		}
@@ -323,19 +323,6 @@ func (s *ImageService) imageExists(ctx context.Context, userID, machineID, image
 		return nil
 	})
 	return exists, err
-}
-
-// imagePresent answers whether the machine holds the image by ID through
-// the shared single-report inspect ritual: the domain's not-found
-// sentinel is the fact (absent), not an error.
-func imagePresent(e ImageEngine, id string) (bool, error) {
-	if _, err := inspectImage(e, id); err != nil {
-		if errors.Is(err, appErrors.ErrImageNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
 }
 
 // No adapter widens the images engine to the transfer kit's widths: the

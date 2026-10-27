@@ -270,8 +270,8 @@ func TestImageService_ParsePlatform(t *testing.T) {
 
 func TestImageService_Export_GatesOnExistence(t *testing.T) {
 	engine := &fakeImageEngine{
-		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
-			return nil, []error{&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such image"}}, nil
+		existsFn: func(string) (bool, error) {
+			return false, nil
 		},
 		// exportFn stays unarmed: it must never be reached for a
 		// missing image.
@@ -287,8 +287,8 @@ func TestImageService_Export_GatesOnExistence(t *testing.T) {
 
 func TestImageService_Export_StreamsEngineBytesUnchanged(t *testing.T) {
 	engine := &fakeImageEngine{
-		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
-			return []*entities.ImageInspectReport{{}}, nil, nil
+		existsFn: func(string) (bool, error) {
+			return true, nil
 		},
 		exportFn: func(_ string, w io.Writer) error {
 			_, err := w.Write([]byte("tar-bytes"))

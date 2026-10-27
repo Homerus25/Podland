@@ -170,18 +170,23 @@ func (s *ImageService) PullWithProgress(ctx context.Context, userID, machineID, 
 }
 
 // Export streams the image's tar archive into w (issue 401, the volume
-// export's images twin). The image's existence is resolved first, so a
-// missing ID fails with the clean 404 before any byte is written —
-// callers can still send error responses when this returns an AppError.
-// Bytes flow straight from the remote podman into w with no server-side
-// buffering and no size bound: the transfer bound exists to protect the
-// copy's in-process pipe (§19), and here the browser consumes the stream
-// directly — cancellation rides the request context.
+// export's images twin). The image's existence is resolved first through
+// podman's exists endpoint, so a missing ID fails with the clean 404
+// before any byte is written — callers can still send error responses
+// when this returns an AppError. Bytes flow straight from the remote
+// podman into w with no server-side buffering and no size bound: the
+// transfer bound exists to protect the copy's in-process pipe (§19), and
+// here the browser consumes the stream directly — cancellation rides the
+// request context.
 func (s *ImageService) Export(ctx context.Context, userID, machineID, imageID string, w io.Writer) error {
 	return s.engines.WithEngine(ctx, userID, machineID, "images.Export", func(e ImageEngine) error {
 		// Existence gate: fail before writing anything to w.
-		if _, err := inspectImage(e, imageID); err != nil {
+		exists, err := e.Exists(imageID)
+		if err != nil {
 			return err
+		}
+		if !exists {
+			return appErrors.ErrImageNotFound
 		}
 
 		return e.Export(imageID, w)

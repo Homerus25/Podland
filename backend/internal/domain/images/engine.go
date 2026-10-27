@@ -27,6 +27,12 @@ type ImageEngine interface {
 	// Inspect reports podman's per-item failures through the error slice,
 	// not an error return — the service classifies them.
 	Inspect(id string) ([]*entities.ImageInspectReport, []error, error)
+	// Exists answers whether the machine holds the image by ID or name
+	// through podman's dedicated exists endpoint — the existence ritual's
+	// width (the export's 404 gate, issue 401, and the copy's source and
+	// target presence checks, issue 375), cheaper than an inspect whose
+	// report is then discarded.
+	Exists(id string) (bool, error)
 	// Export streams the image's archive into w by image reference —
 	// the source width of the cross-machine copy (issue 375, §19).
 	Export(ref string, w io.Writer) error
@@ -92,6 +98,16 @@ func (e *podmanImageEngine) Prune() ([]*reports.PruneReport, error) {
 
 func (e *podmanImageEngine) Inspect(id string) ([]*entities.ImageInspectReport, []error, error) {
 	return e.tunnelEngine().Inspect(e.ctx, []string{id}, entities.InspectOptions{})
+}
+
+// Exists answers through podman's dedicated exists endpoint: a missing
+// image is the fact (false), not an error.
+func (e *podmanImageEngine) Exists(id string) (bool, error) {
+	report, err := e.tunnelEngine().Exists(e.ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return report.Value, nil
 }
 
 // Export streams the image's archive into w through podman's bindings

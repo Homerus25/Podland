@@ -8,8 +8,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
-	"go.podman.io/podman/v6/pkg/domain/entities"
-	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
 // exportRequest serves GET
@@ -25,11 +23,11 @@ func exportRequest(export http.HandlerFunc, machineID, imageID string) *httptest
 }
 
 // exportEngine arms the fake engine for an export of an existing image:
-// inspect answers one report, export streams the given bytes.
+// the exists check answers true, export streams the given bytes.
 func exportEngine() *fakeImageEngine {
 	return &fakeImageEngine{
-		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
-			return []*entities.ImageInspectReport{{}}, nil, nil
+		existsFn: func(string) (bool, error) {
+			return true, nil
 		},
 		exportFn: func(_ string, w io.Writer) error {
 			_, err := w.Write([]byte("tar-bytes"))
@@ -77,8 +75,8 @@ func TestImageHandler_Export_Success(t *testing.T) {
 // of a partial download is written.
 func TestImageHandler_Export_NotFound(t *testing.T) {
 	engine := &fakeImageEngine{
-		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
-			return nil, []error{&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such image"}}, nil
+		existsFn: func(string) (bool, error) {
+			return false, nil
 		},
 		// exportFn stays unarmed: it must never be reached for a
 		// missing image.

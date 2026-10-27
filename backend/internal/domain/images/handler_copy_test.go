@@ -14,8 +14,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.podman.io/podman/v6/pkg/domain/entities"
-	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
 // copyErrorEnvelope mirrors the {"requestId","error":{code,message}}
@@ -52,8 +50,8 @@ func TestImageHandler_CopyPreview_ReturnsPreview(t *testing.T) {
 
 func TestImageHandler_CopyPreview_PresentTargetAnswersTrue(t *testing.T) {
 	target := copyTargetFixture()
-	target.inspectFn = func(string) ([]*entities.ImageInspectReport, []error, error) {
-		return []*entities.ImageInspectReport{{}}, nil, nil
+	target.existsFn = func(string) (bool, error) {
+		return true, nil
 	}
 
 	w := testutils.Perform(newCopyTestHandler(copySourceFixture(), target).CopyPreview, testutils.Request{
@@ -99,10 +97,10 @@ func TestImageHandler_CopyPreview_MissingTargetMachineIDIs400(t *testing.T) {
 func TestImageHandler_CopyPreview_TargetAccessDeniedIs403(t *testing.T) {
 	// The handler drives the real service, so the 403 comes from the
 	// service's target gate: the access store answers with no row and
-	// the source engine's inspect is armed to panic, proving the source
-	// lease was never crossed (no false preview).
+	// the source engine's exists check is armed to panic, proving the
+	// source lease was never crossed (no false preview).
 	source := &fakeImageEngine{
-		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
+		existsFn: func(string) (bool, error) {
 			panic("source engine must not be reached when the target gate refuses")
 		},
 	}
@@ -127,8 +125,8 @@ func TestImageHandler_CopyPreview_TargetAccessDeniedIs403(t *testing.T) {
 
 func TestImageHandler_CopyPreview_MissingSourceImageIs404(t *testing.T) {
 	source := &fakeImageEngine{
-		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
-			return nil, []error{&errorhandling.ErrorModel{ResponseCode: 404, Message: "no such image"}}, nil
+		existsFn: func(string) (bool, error) {
+			return false, nil
 		},
 	}
 
@@ -273,7 +271,7 @@ func TestImageHandler_Copy_TargetAccessDeniedIsTerminalErrorEvent(t *testing.T) 
 	// Read on the target is below the write the copy needs; the source
 	// engine panics on any call: the gate refuses before any podman work.
 	source := &fakeImageEngine{
-		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
+		existsFn: func(string) (bool, error) {
 			panic("source engine must not be reached when the target gate refuses")
 		},
 	}
@@ -293,8 +291,8 @@ func TestImageHandler_Copy_TargetAccessDeniedIsTerminalErrorEvent(t *testing.T) 
 
 func TestImageHandler_Copy_MissingSourceImageIsTerminalErrorEvent(t *testing.T) {
 	source := &fakeImageEngine{
-		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
-			return nil, []error{&errorhandling.ErrorModel{ResponseCode: 404, Message: "no such image"}}, nil
+		existsFn: func(string) (bool, error) {
+			return false, nil
 		},
 	}
 	handler := newCopyTestHandler(source, copyTargetFixture())

@@ -17,6 +17,7 @@ type fakeImageEngine struct {
 	pullFn    func(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error)
 	pruneFn   func() ([]*reports.PruneReport, error)
 	inspectFn func(id string) ([]*entities.ImageInspectReport, []error, error)
+	existsFn  func(id string) (bool, error)
 	exportFn  func(ref string, w io.Writer) error
 	loadFn    func(r io.Reader) ([]string, error)
 }
@@ -54,6 +55,13 @@ func (f *fakeImageEngine) Inspect(id string) ([]*entities.ImageInspectReport, []
 		panic("unexpected ImageEngine.Inspect call")
 	}
 	return f.inspectFn(id)
+}
+
+func (f *fakeImageEngine) Exists(id string) (bool, error) {
+	if f.existsFn == nil {
+		panic("unexpected ImageEngine.Exists call")
+	}
+	return f.existsFn(id)
 }
 
 func (f *fakeImageEngine) Export(ref string, w io.Writer) error {
