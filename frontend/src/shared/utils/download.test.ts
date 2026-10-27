@@ -1,5 +1,9 @@
 import { setBearerToken } from "@shared/utils/api";
-import { downloadFile } from "@shared/utils/download";
+import {
+	downloadFile,
+	downloadText,
+	sanitizeFilename,
+} from "@shared/utils/download";
 import { HttpResponse, http } from "msw";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { errorResponse } from "@/test/errors";
@@ -36,6 +40,33 @@ function stubAnchor() {
 afterEach(() => {
 	vi.restoreAllMocks();
 	setBearerToken(null);
+});
+
+describe("downloadText", () => {
+	it("saves the given text as a blob under the given filename and revokes the object url", async () => {
+		const anchor = stubAnchor();
+
+		await downloadText("line one\nline two\n", "my-container-logs.txt");
+
+		expect(anchor.download).toBe("my-container-logs.txt");
+		expect(anchor.href).toBe("blob:mock");
+		expect(anchor.click).toHaveBeenCalledTimes(1);
+		expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock");
+	});
+});
+
+describe("sanitizeFilename", () => {
+	it("keeps a plain name untouched", () => {
+		expect(sanitizeFilename("my-container")).toBe("my-container");
+	});
+
+	it("replaces path separators, reserved punctuation, and whitespace with dashes", () => {
+		expect(sanitizeFilename("acme/web: app")).toBe("acme-web--app");
+	});
+
+	it("trims leading and trailing separators", () => {
+		expect(sanitizeFilename("  name\t")).toBe("name");
+	});
 });
 
 describe("downloadFile", () => {

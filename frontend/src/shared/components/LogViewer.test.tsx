@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 function fakeSource(overrides: Partial<LogSource> = {}): LogSource {
 	return {
 		fetchTail: vi.fn().mockResolvedValue(["line-1", "line-2"]),
+		fetchAll: vi.fn().mockResolvedValue("line-1\nline-2\n"),
 		follow: vi.fn(),
 		...overrides,
 	};

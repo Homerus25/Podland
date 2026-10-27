@@ -1,9 +1,8 @@
 import { Box, Select, Switch, Text, VStack } from "@chakra-ui/react";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import type { LogSource } from "@shared/streaming/logSource";
+import { type LogSource, toApiError } from "@shared/streaming/logSource";
 import { type LogEvent, parseLogErrorEvent } from "@shared/streaming/logStream";
 import type { ApiError } from "@shared/types/api";
-import { genericError } from "@shared/utils/api";
 import { useEffect, useRef, useState } from "react";
 
 const TAIL_OPTIONS = [50, 100, 200, 500];
@@ -11,21 +10,6 @@ const DEFAULT_TAIL = 100;
 
 function formatEvent(event: LogEvent): string {
 	return `${event.timestamp} ${event.level} ${event.message}`;
-}
-
-// Sources reject with ApiError-shaped objects (the stream helper does, and
-// sources convert axios errors); anything else collapses to the generic one.
-function toApiError(error: unknown): ApiError {
-	if (typeof error === "object" && error !== null) {
-		const candidate = error as { code?: unknown; message?: unknown };
-		if (
-			typeof candidate.code === "string" &&
-			typeof candidate.message === "string"
-		) {
-			return { code: candidate.code, message: candidate.message };
-		}
-	}
-	return { ...genericError };
 }
 
 // Generic streaming log viewer: initial tail fetch, follow toggle driving a

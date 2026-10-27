@@ -3,7 +3,25 @@ import {
 	followLogStream,
 	type LogEvent,
 } from "@shared/streaming/logStream";
-import { api, getApiError } from "@shared/utils/api";
+import type { ApiError } from "@shared/types/api";
+import { api, genericError, getApiError } from "@shared/utils/api";
+
+// Narrows a LogSource rejection to an ApiError. Sources reject with
+// ApiError-shaped objects (the buffered fetches wrap through getApiError,
+// the stream helper builds envelopes), so this passes a well-formed code
+// and message through; anything else collapses to the generic one.
+export function toApiError(error: unknown): ApiError {
+	if (typeof error === "object" && error !== null) {
+		const candidate = error as { code?: unknown; message?: unknown };
+		if (
+			typeof candidate.code === "string" &&
+			typeof candidate.message === "string"
+		) {
+			return { code: candidate.code, message: candidate.message };
+		}
+	}
+	return { ...genericError };
+}
 
 // How a log viewer obtains its lines. The same contract serves any backend
 // log endpoint (container and quadlet logs today): the caller wires the two
@@ -11,6 +29,11 @@ import { api, getApiError } from "@shared/utils/api";
 export interface LogSource {
 	// Fetches the last `tail` lines without following.
 	fetchTail: (tail: number) => Promise<string[]>;
+	// Fetches the target's entire log history as raw text (the buffered
+	// endpoint without a tail param — the backend default is all lines).
+	// A one-shot snapshot for downloads; it never touches the viewer's
+	// tail view or an active follow stream.
+	fetchAll: () => Promise<string>;
 	// Opens the live stream; calls onEvent per streamed log event and resolves
 	// when the stream ends. Must honor the AbortSignal so toggling follow off,
 	// closing the viewer, or unmounting tears down the connection.
@@ -34,6 +57,14 @@ export function createLogSource(path: string, url: string): LogSource {
 					params: { tail },
 				});
 				return response.data.logs.split("\n").filter((line) => line !== "");
+			} catch (error) {
+				throw getApiError(error);
+			}
+		},
+		fetchAll: async () => {
+			try {
+				const response = await api.get<BufferedLogs>(path);
+				return response.data.logs;
 			} catch (error) {
 				throw getApiError(error);
 			}

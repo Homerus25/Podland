@@ -63,6 +63,28 @@ describe("createLogSource", () => {
 		expect(messages).toEqual(["live line"]);
 	});
 
+	it("fetches the entire log history without a tail param and returns the raw text", async () => {
+		const request = { tail: null as string | null };
+		server.use(
+			http.get(
+				"*/api/machines/m-1/containers/c-1/logs",
+				({ request: sent }) => {
+					request.tail = new URL(sent.url).searchParams.get("tail");
+					return HttpResponse.json({
+						id: "c-1",
+						logs: "first line\nsecond line\n",
+					});
+				},
+			),
+		);
+
+		const source = createLogSource(logsPath, logsUrl);
+		const text = await source.fetchAll();
+
+		expect(request.tail).toBeNull();
+		expect(text).toBe("first line\nsecond line\n");
+	});
+
 	it("wraps a failing buffered fetch in the ApiError envelope", async () => {
 		server.use(
 			http.get("*/api/machines/m-1/containers/c-1/logs", () =>
