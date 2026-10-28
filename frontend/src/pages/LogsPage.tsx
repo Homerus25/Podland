@@ -1,5 +1,6 @@
 import { Button, Heading, HStack, useToast, VStack } from "@chakra-ui/react";
 import { containerLogs } from "@features/containers/services/containersApi";
+import { podLogs } from "@features/pods/services/podsApi";
 import { quadletLogs } from "@features/quadlets/services/quadletsApi";
 import { LogViewer } from "@shared/components/LogViewer";
 import {
@@ -22,9 +23,10 @@ const LOG_SOURCES: Record<
 > = {
 	container: containerLogs,
 	quadlet: quadletLogs,
+	pod: podLogs,
 };
 
-// Full-page log viewer for a container or quadlet. The list buttons navigate
+// Full-page log viewer for a container, quadlet, or pod. The list buttons navigate
 // here instead of opening a small modal, so logs get the whole viewport.
 // A friendly display name travels via navigation state when available.
 export function LogsPage() {

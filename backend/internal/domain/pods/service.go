@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/inspect"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/removal"
+	"github.com/Homerus25/podland/backend/internal/streaming"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
@@ -138,6 +140,16 @@ func (s *PodService) Restart(ctx context.Context, userID, machineID, podID strin
 	return s.action(ctx, userID, machineID, "pods.Restart", "restart", podID, PodEngine.Restart)
 }
 
+// Start starts the pod's containers.
+func (s *PodService) Start(ctx context.Context, userID, machineID, podID string) error {
+	return s.action(ctx, userID, machineID, "pods.Start", "start", podID, PodEngine.Start)
+}
+
+// Stop stops the pod's containers.
+func (s *PodService) Stop(ctx context.Context, userID, machineID, podID string) error {
+	return s.action(ctx, userID, machineID, "pods.Stop", "stop", podID, PodEngine.Stop)
+}
+
 // action runs one lifecycle action against the pod: podman's answer is
 // classified into the domain's error vocabulary (mapActionError), and an
 // unclassified failure is wrapped.
@@ -184,6 +196,50 @@ func (s *PodService) Prune(ctx context.Context, userID, machineID string) ([]*en
 		return nil
 	})
 	return prunes, err
+}
+
+// GetLogs retrieves the pod's aggregated logs on the specified machine.
+// The buffered ritual (options build, writer pair, combine, not-found
+// and cancellation mapping) belongs to the kit's FetchLogs; the service
+// keeps validation, engine acquisition, and dispatch.
+func (s *PodService) GetLogs(ctx context.Context, userID, machineID, podID string, since time.Time, tail int64) (*PodLogsResponse, error) {
+	var response *PodLogsResponse
+	err := s.engines.WithEngine(ctx, userID, machineID, "pods.GetLogs", func(e PodEngine) error {
+		logs, err := streaming.FetchLogs(ctx, streaming.FetchLogsOp{
+			Target:   podID,
+			Since:    since,
+			Tail:     tail,
+			NotFound: appErrors.ErrPodNotFound,
+			Logs:     e.Logs,
+		})
+		if err != nil {
+			return err
+		}
+
+		response = &PodLogsResponse{
+			ID:   podID,
+			Logs: logs,
+		}
+		return nil
+	})
+	return response, err
+}
+
+// GetLogsWithStream retrieves the pod's aggregated logs with streaming
+// callback. The follow ritual (options build, writer pair, not-found and
+// cancellation mapping) belongs to the kit's FollowLogs; the service
+// keeps validation, engine acquisition, and target dispatch.
+func (s *PodService) GetLogsWithStream(ctx context.Context, userID, machineID, podID string, since time.Time, tail int64, logCallback func(event streaming.LogEvent)) error {
+	return s.engines.WithEngine(ctx, userID, machineID, "pods.GetLogsWithStream", func(e PodEngine) error {
+		return streaming.FollowLogs(ctx, streaming.FollowLogsOp{
+			Target:   podID,
+			Since:    since,
+			Tail:     tail,
+			NotFound: appErrors.ErrPodNotFound,
+			Logs:     e.Logs,
+			OnEvent:  logCallback,
+		})
+	})
 }
 
 // mapActionError classifies podman's lifecycle answers into the pods

@@ -70,6 +70,40 @@ export async function createQuadlet(
 	return response.data;
 }
 
+// --- Generate quadlet from an existing resource (spec #402 ticket #406) ---
+
+// Body of POST /api/machines/{id}/quadlets/{quadletId}/generate
+// (backend/internal/domain/quadlets/dto.go QuadletGenerateRequest). The
+// path's {quadletId} segment is ignored by the handler — the real target
+// rides the body — so the resourceId fills the segment.
+export interface GenerateQuadletInput {
+	resourceId: string;
+	resourceType: "container" | "pod";
+}
+
+// Response of POST .../quadlets/{quadletId}/generate -> 200 (backend
+// QuadletGenerateResponse): the generated quadlet file, not installed —
+// state is always "unknown", path and unit empty. Saving it to the
+// machine is a separate create request.
+export interface GeneratedQuadlet {
+	id: string;
+	name: string;
+	resource: QuadletResource;
+	state: string;
+	content: string;
+}
+
+export async function generateQuadlet(
+	machineId: string,
+	input: GenerateQuadletInput,
+): Promise<GeneratedQuadlet> {
+	const response = await api.post<GeneratedQuadlet>(
+		machineApiPath(machineId, "quadlets", input.resourceId, "generate"),
+		input,
+	);
+	return response.data;
+}
+
 // Response of GET /api/machines/{id}/quadlets/{quadletId} and of a successful
 // update (backend/internal/domain/quadlets/dto.go QuadletGetResponse).
 export interface QuadletDetail {

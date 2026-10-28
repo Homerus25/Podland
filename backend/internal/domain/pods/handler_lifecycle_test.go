@@ -49,7 +49,8 @@ func TestPodHandler_Pause_Success(t *testing.T) {
 }
 
 // TestPodHandler_ActionStates pins each action's stamped post-action
-// state: unpause and restart answer running, kill answers exited.
+// state: start, unpause and restart answer running, stop answers
+// stopped, kill answers exited.
 func TestPodHandler_ActionStates(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -57,6 +58,18 @@ func TestPodHandler_ActionStates(t *testing.T) {
 		arm       func(e *fakePodEngine)
 		wantState string
 	}{
+		{
+			name:      "start",
+			handler:   func(h *PodHandler) http.HandlerFunc { return h.Start },
+			arm:       func(e *fakePodEngine) { e.startFn = func(string) error { return nil } },
+			wantState: "running",
+		},
+		{
+			name:      "stop",
+			handler:   func(h *PodHandler) http.HandlerFunc { return h.Stop },
+			arm:       func(e *fakePodEngine) { e.stopFn = func(string) error { return nil } },
+			wantState: "stopped",
+		},
 		{
 			name:      "unpause",
 			handler:   func(h *PodHandler) http.HandlerFunc { return h.Unpause },

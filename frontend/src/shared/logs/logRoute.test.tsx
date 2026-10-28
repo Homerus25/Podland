@@ -37,7 +37,7 @@ describe("isLogKind", () => {
 	it("accepts exactly the LogKind members", () => {
 		expect(isLogKind("container")).toBe(true);
 		expect(isLogKind("quadlet")).toBe(true);
-		expect(isLogKind("pod")).toBe(false);
+		expect(isLogKind("pod")).toBe(true);
 		expect(isLogKind(undefined)).toBe(false);
 	});
 });

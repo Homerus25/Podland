@@ -71,6 +71,23 @@ func buildCreateSpec(request PodCreateRequest) (*specgen.PodSpecGenerator, error
 		})
 	}
 
+	// Port mappings publish on the pod's infra container; the protocol
+	// defaults to tcp when the request omits it, mirroring containers.
+	if len(request.PortMappings) > 0 {
+		spec.PortMappings = make([]netTypes.PortMapping, 0, len(request.PortMappings))
+		for _, mapping := range request.PortMappings {
+			protocol := mapping.Protocol
+			if protocol == "" {
+				protocol = "tcp"
+			}
+			spec.PortMappings = append(spec.PortMappings, netTypes.PortMapping{
+				HostPort:      uint16(mapping.HostPort),
+				ContainerPort: uint16(mapping.ContainerPort),
+				Protocol:      protocol,
+			})
+		}
+	}
+
 	// Resource limits: cpus maps onto the spec's CPU limit (quota =
 	// cpus x 100000, period 100000, podman's own cores conversion);
 	// memory parses through podman's units parser into a byte limit.

@@ -284,4 +284,36 @@ describe("QuadletList lifecycle", () => {
 		expect(within(modal).getByText("QUADLET_NOT_FOUND")).toBeInTheDocument();
 		expect(within(modal).getByText("Quadlet not found")).toBeInTheDocument();
 	});
+
+	// Spec #402 ticket #406 acceptance: a .pod entry renders with its kind
+	// label and its lifecycle answers through the same row machinery —
+	// the resource field changes no code path, so this is the verification
+	// the ticket asks for, not a new behavior.
+	it("serves a .pod quadlet: the pod kind label renders and Start posts to its endpoint", async () => {
+		server.use(
+			quadletsHandler(() => [
+				quadletFixture({
+					id: "app-pod",
+					name: "app-pod",
+					path: "/etc/containers/systemd/app-pod.pod",
+					unit: "app-pod.service",
+					resource: "pod",
+					state: "stopped",
+				}),
+			]),
+			captureLifecycle("start"),
+		);
+		renderQuadletList();
+
+		const row = await screen.findByTestId("quadlet-row");
+		// The kind label is the raw resource string — no mapping exists.
+		expect(row).toHaveTextContent("app-pod");
+		expect(row).toHaveTextContent("pod");
+		await userEvent.click(screen.getByTestId("start-quadlet-button"));
+
+		await waitFor(() => expect(lifecycleRequests).toHaveLength(1));
+		expect(lifecycleRequests[0].pathname).toBe(
+			"/api/machines/m-1/quadlets/app-pod/start",
+		);
+	});
 });

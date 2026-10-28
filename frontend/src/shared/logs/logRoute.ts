@@ -7,10 +7,10 @@ import { useNavigate } from "react-router-dom";
 // that kit owns the log-endpoint ritual, this one the route contract. A new
 // log-bearing kind is one LogKind member plus one LOG_SOURCES entry in the
 // logs page; the route and path edits the old literal copies needed are gone.
-export type LogKind = "container" | "quadlet";
+export type LogKind = "container" | "quadlet" | "pod";
 
 export function isLogKind(value: string | undefined): value is LogKind {
-	return value === "container" || value === "quadlet";
+	return value === "container" || value === "quadlet" || value === "pod";
 }
 
 // The route shape, owned once: the app router mounts it and every feature

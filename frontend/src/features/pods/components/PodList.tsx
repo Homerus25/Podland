@@ -12,11 +12,14 @@ import type {
 	PodPruneEntry,
 	PodSummary,
 } from "@features/pods/services/podsApi";
+import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ForceConfirmDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
+import { useOpenLogs } from "@shared/logs/logRoute";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Machine } from "@shared/types/api";
+import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -79,20 +82,28 @@ function PrunePodsModal({
 // errors stay scoped to the affected pod and other rows stay usable. The
 // row itself is clickable: it navigates to the pod's detail page, and every
 // action button stops propagation so a button click never also fires the
-// row action. Pause/Unpause is one button whose label follows the pod's
-// state; kill and restart take no parameters (podman's defaults).
+// row action. Start/Stop is one toggle whose label follows the pod's
+// state, mirroring the container lifecycle buttons; Pause/Unpause is one
+// button whose label follows the pod's state; kill and restart take no
+// parameters (podman's defaults). The lifecycle affordances are
+// write-gated, but logs reads at read level, so the row keeps its logs
+// button below the manage capability.
 function PodRow({
 	machineId,
 	pod,
 	canManage,
 	onRemove,
+	onShowLogs,
 }: {
 	machineId: string;
 	pod: PodSummary;
 	canManage: boolean;
 	onRemove: (pod: PodSummary) => void;
+	onShowLogs: (pod: PodSummary) => void;
 }) {
 	const navigate = useNavigate();
+	const start = usePodAction(machineId, "start");
+	const stop = usePodAction(machineId, "stop");
 	const pause = usePodAction(machineId, "pause");
 	const unpause = usePodAction(machineId, "unpause");
 	const kill = usePodAction(machineId, "kill");
@@ -100,81 +111,141 @@ function PodRow({
 	// Podman's pod status is capitalized ("Paused"); compare case-insensitively.
 	const paused = pod.state.toLowerCase() === "paused";
 	const pauseAction = paused ? unpause : pause;
+	// Podman's pod status is capitalized ("Running"); compare
+	// case-insensitively, like the pause toggle above.
+	const isRunning = pod.state.toLowerCase() === "running";
+	const action = isRunning
+		? {
+				lifecycle: stop,
+				testId: "stop-pod-button",
+				label: "Stop",
+				colorScheme: undefined,
+			}
+		: {
+				lifecycle: start,
+				testId: "start-pod-button",
+				label: "Start",
+				colorScheme: "green" as const,
+			};
+	// The toggle's sibling mutation resets on each click, so a stale error
+	// from the other action never masks the fresh one; a failed start or
+	// stop shows the row-level error like the containers surface does.
+	const sibling = isRunning ? start : stop;
+	const rowError = action.lifecycle.error;
 
 	return (
-		<Tr
-			data-testid="pod-row"
-			cursor="pointer"
-			onClick={() => navigate(detailPath(machineId, "pods", pod.id))}
-		>
-			<Td fontFamily="mono">{pod.name}</Td>
-			<Td>
-				<Text data-testid={`pod-state-${pod.id}`}>{pod.state}</Text>
-			</Td>
-			<Td isNumeric>{pod.containerCount}</Td>
-			<Td fontFamily="mono" color="gray.500">
-				{(pod.networks ?? []).join(", ")}
-			</Td>
-			<Td>{formatRelativeDate(pod.createdAt)}</Td>
-			{canManage ? (
+		<>
+			<Tr
+				data-testid="pod-row"
+				cursor="pointer"
+				onClick={() => navigate(detailPath(machineId, "pods", pod.id))}
+			>
+				<Td fontFamily="mono">{pod.name}</Td>
+				<Td>
+					<Text data-testid={`pod-state-${pod.id}`}>{pod.state}</Text>
+				</Td>
+				<Td isNumeric>{pod.containerCount}</Td>
+				<Td fontFamily="mono" color="gray.500">
+					{(pod.networks ?? []).join(", ")}
+				</Td>
+				<Td>{formatRelativeDate(pod.createdAt)}</Td>
 				<Td>
 					<HStack spacing={2}>
+						{canManage ? (
+							<>
+								<Button
+									size="xs"
+									variant="outline"
+									colorScheme={action.colorScheme}
+									aria-label={`${action.label} ${pod.name}`}
+									isLoading={action.lifecycle.isPending}
+									onClick={(event) => {
+										event.stopPropagation();
+										sibling.reset();
+										action.lifecycle.mutate(pod.id);
+									}}
+									data-testid={action.testId}
+								>
+									{action.label}
+								</Button>
+								<Button
+									size="xs"
+									variant="outline"
+									aria-label={`${paused ? "Unpause" : "Pause"} ${pod.name}`}
+									isLoading={pauseAction.isPending}
+									onClick={(event) => {
+										event.stopPropagation();
+										pauseAction.mutate(pod.id);
+									}}
+									data-testid={
+										paused ? "unpause-pod-button" : "pause-pod-button"
+									}
+								>
+									{paused ? "Unpause" : "Pause"}
+								</Button>
+								<Button
+									size="xs"
+									variant="outline"
+									aria-label={`Kill ${pod.name}`}
+									isLoading={kill.isPending}
+									onClick={(event) => {
+										event.stopPropagation();
+										kill.mutate(pod.id);
+									}}
+									data-testid="kill-pod-button"
+								>
+									Kill
+								</Button>
+								<Button
+									size="xs"
+									variant="outline"
+									aria-label={`Restart ${pod.name}`}
+									isLoading={restart.isPending}
+									onClick={(event) => {
+										event.stopPropagation();
+										restart.mutate(pod.id);
+									}}
+									data-testid="restart-pod-button"
+								>
+									Restart
+								</Button>
+								<Button
+									size="xs"
+									colorScheme="red"
+									variant="outline"
+									aria-label={`Remove ${pod.name}`}
+									onClick={(event) => {
+										event.stopPropagation();
+										onRemove(pod);
+									}}
+									data-testid="remove-pod-button"
+								>
+									Remove
+								</Button>
+							</>
+						) : null}
 						<Button
 							size="xs"
 							variant="outline"
-							aria-label={`${paused ? "Unpause" : "Pause"} ${pod.name}`}
-							isLoading={pauseAction.isPending}
+							aria-label={`Logs ${pod.name}`}
 							onClick={(event) => {
 								event.stopPropagation();
-								pauseAction.mutate(pod.id);
+								onShowLogs(pod);
 							}}
-							data-testid={paused ? "unpause-pod-button" : "pause-pod-button"}
 						>
-							{paused ? "Unpause" : "Pause"}
-						</Button>
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Kill ${pod.name}`}
-							isLoading={kill.isPending}
-							onClick={(event) => {
-								event.stopPropagation();
-								kill.mutate(pod.id);
-							}}
-							data-testid="kill-pod-button"
-						>
-							Kill
-						</Button>
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Restart ${pod.name}`}
-							isLoading={restart.isPending}
-							onClick={(event) => {
-								event.stopPropagation();
-								restart.mutate(pod.id);
-							}}
-							data-testid="restart-pod-button"
-						>
-							Restart
-						</Button>
-						<Button
-							size="xs"
-							colorScheme="red"
-							variant="outline"
-							aria-label={`Remove ${pod.name}`}
-							onClick={(event) => {
-								event.stopPropagation();
-								onRemove(pod);
-							}}
-							data-testid="remove-pod-button"
-						>
-							Remove
+							Logs
 						</Button>
 					</HStack>
 				</Td>
+			</Tr>
+			{rowError ? (
+				<Tr>
+					<Td colSpan={6}>
+						<ErrorDisplay error={getApiError(rowError)} />
+					</Td>
+				</Tr>
 			) : null}
-		</Tr>
+		</>
 	);
 }
 
@@ -194,6 +265,7 @@ export function PodList({ machine }: { machine: Machine }) {
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [pendingRemove, setPendingRemove] = useState<PodSummary | null>(null);
 	const canManage = can(machine, "manage-pods");
+	const openLogs = useOpenLogs(machineId, "pod");
 
 	return (
 		<>
@@ -215,7 +287,7 @@ export function PodList({ machine }: { machine: Machine }) {
 						sortBy: (pod) => (pod.networks ?? []).join(", "),
 					},
 					{ label: "Created", sortBy: (pod) => pod.createdAt },
-					...(canManage ? [{}] : []),
+					{},
 				]}
 				renderRow={(pod) => (
 					<PodRow
@@ -224,6 +296,7 @@ export function PodList({ machine }: { machine: Machine }) {
 						pod={pod}
 						canManage={canManage}
 						onRemove={setPendingRemove}
+						onShowLogs={(pod) => openLogs({ targetId: pod.id, name: pod.name })}
 					/>
 				)}
 				toolbar={

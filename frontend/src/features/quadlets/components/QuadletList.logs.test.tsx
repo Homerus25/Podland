@@ -55,4 +55,44 @@ describe("QuadletList logs", () => {
 			expect(path).toBe("/api/machines/m-1/quadlets/web/logs");
 		}
 	});
+
+	// Spec #402 ticket #406 acceptance: a .pod entry's logs button wires to
+	// the same quadlet logs endpoint — the resource field changes no code
+	// path, so this is the verification the ticket asks for.
+	it("wires a .pod quadlet row's logs button to the quadlet logs endpoint", async () => {
+		const requestedPaths: string[] = [];
+		server.use(
+			http.get("*/api/machines/m-1/quadlets", () =>
+				HttpResponse.json([
+					quadletFixture({
+						id: "app-pod",
+						name: "app-pod",
+						path: "/etc/containers/systemd/app-pod.pod",
+						unit: "app-pod.service",
+						resource: "pod",
+					}),
+				]),
+			),
+			http.get("*/api/machines/m-1/quadlets/app-pod/logs", ({ request }) => {
+				requestedPaths.push(new URL(request.url).pathname);
+				return HttpResponse.json({
+					id: "app-pod",
+					logs: "pod-line-1\npod-line-2",
+				});
+			}),
+		);
+		renderQuadletList();
+
+		await screen.findByText("app-pod");
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: /logs.*app-pod/i }));
+
+		expect(
+			screen.getByRole("heading", { name: "Logs — app-pod" }),
+		).toBeInTheDocument();
+		expect(await screen.findAllByTestId("log-viewer-line")).toHaveLength(2);
+		for (const path of requestedPaths) {
+			expect(path).toBe("/api/machines/m-1/quadlets/app-pod/logs");
+		}
+	});
 });

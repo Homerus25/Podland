@@ -478,12 +478,13 @@ func New(cfg *config.Config) (*App, error) {
 						r.With(requireWrite).Post("/{networkName}/connect", networkHandler.Connect)
 					})
 
-					// Pods — the list, detail, and raw inspect
-					// endpoints stay at the subtree's read level;
-					// create, prune, lifecycle actions, and remove
-					// mutate remote state, so they gate at write
-					// (spec #353). The prune route is literal so it
-					// is not shadowed by the {podId} subtree.
+					// Pods — the list, detail, raw inspect, and
+					// logs endpoints stay at the subtree's read
+					// level; create, prune, lifecycle actions,
+					// and remove mutate remote state, so they
+					// gate at write (spec #353). The prune route
+					// is literal so it is not shadowed by the
+					// {podId} subtree.
 					r.Route("/pods", func(r chi.Router) {
 						r.Get("/", podHandler.List)
 						r.With(requireWrite).Post("/", podHandler.Create)
@@ -491,10 +492,13 @@ func New(cfg *config.Config) (*App, error) {
 						r.Route("/{podId}", func(r chi.Router) {
 							r.Get("/", podHandler.Get)
 							r.Get("/inspect", podHandler.Inspect)
+							r.Get("/logs", podHandler.Logs)
 							r.With(requireWrite).Post("/pause", podHandler.Pause)
 							r.With(requireWrite).Post("/unpause", podHandler.Unpause)
 							r.With(requireWrite).Post("/kill", podHandler.Kill)
 							r.With(requireWrite).Post("/restart", podHandler.Restart)
+							r.With(requireWrite).Post("/start", podHandler.Start)
+							r.With(requireWrite).Post("/stop", podHandler.Stop)
 							r.With(requireWrite).Delete("/", podHandler.Remove)
 						})
 					})

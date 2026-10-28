@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { Route, Routes, useParams } from "react-router-dom";
 import { describe, expect, it } from "vitest";
+import { errorResponse } from "@/test/errors";
 import { machineFixture, podFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -27,11 +28,13 @@ function renderPodList(permission: "read" | "write" | "admin" = "admin") {
 	});
 }
 
-// The lifecycle wiring suite (spec 352 ticket #355): the pause/unpause
-// label follows the pod's state, each action's request hits its endpoint,
-// and a successful action refetches the pods list through MSW. The
-// dialog-module invariants (pending wiring, error region) are pinned once
-// in the shared suites; this suite keeps domain assertions only.
+// The lifecycle wiring suite (spec 352 ticket #355, start/stop per spec
+// 402 ticket #407): the pause/unpause and start/stop labels follow the
+// pod's state, each action's request hits its endpoint, a successful
+// action refetches the pods list through MSW, and a failure surfaces the
+// API's error envelope at the row. The dialog-module invariants (pending
+// wiring, error region) are pinned once in the shared suites; this suite
+// keeps domain assertions only.
 describe("PodList lifecycle actions", () => {
 	it("labels the state action Pause on a running pod and Unpause on a paused pod", async () => {
 		mockPods([
@@ -118,6 +121,79 @@ describe("PodList lifecycle actions", () => {
 		});
 		expect(killRequests[0]).toContain("/pods/p-1/kill");
 		expect(restartRequests[0]).toContain("/pods/p-1/restart");
+	});
+
+	it("labels the lifecycle action Stop on a running pod and Start on a stopped pod", async () => {
+		mockPods([
+			podFixture({ id: "p-1", state: "Running" }),
+			podFixture({ id: "p-2", name: "stopped-pod", state: "Exited" }),
+		]);
+		renderPodList();
+
+		await screen.findAllByTestId("pod-row");
+		expect(screen.getByTestId("stop-pod-button")).toBeInTheDocument();
+		expect(screen.getByTestId("start-pod-button")).toBeInTheDocument();
+	});
+
+	it("sends stop to the running pod's endpoint and refetches the list", async () => {
+		const stopRequests: string[] = [];
+		let listRequests = 0;
+		server.use(
+			http.get("*/api/machines/m-1/pods", () => {
+				listRequests++;
+				return podsListResponse([podFixture({ id: "p-1", state: "Running" })]);
+			}),
+			http.post("*/api/machines/m-1/pods/*/stop", ({ request }) => {
+				stopRequests.push(request.url);
+				return HttpResponse.json({
+					id: "p-1",
+					state: "stopped",
+					timestamp: "2026-10-24T12:00:00Z",
+				});
+			}),
+		);
+		renderPodList();
+		const user = userEvent.setup();
+
+		await screen.findAllByTestId("pod-row");
+		await user.click(screen.getByTestId("stop-pod-button"));
+
+		await waitFor(() => {
+			expect(stopRequests).toHaveLength(1);
+		});
+		expect(stopRequests[0]).toContain("/pods/p-1/stop");
+		// The mutation invalidates the pods list; the refetch rides MSW.
+		await waitFor(() => {
+			expect(listRequests).toBeGreaterThan(1);
+		});
+	});
+
+	it("shows the row-level error envelope when the action fails", async () => {
+		server.use(
+			http.get("*/api/machines/m-1/pods", () =>
+				podsListResponse([podFixture({ id: "p-1", state: "Running" })]),
+			),
+			http.post("*/api/machines/m-1/pods/p-1/stop", () =>
+				errorResponse(
+					409,
+					"POD_STATE_CONFLICT",
+					"pod has containers with non-zero exit codes",
+					"req-13",
+				),
+			),
+		);
+		renderPodList();
+		const user = userEvent.setup();
+
+		const button = await screen.findByTestId("stop-pod-button");
+		await user.click(button);
+
+		expect(await screen.findByRole("alert")).toBeInTheDocument();
+		expect(screen.getByText("POD_STATE_CONFLICT")).toBeInTheDocument();
+		expect(
+			screen.getByText("pod has containers with non-zero exit codes"),
+		).toBeInTheDocument();
+		await waitFor(() => expect(button).toBeEnabled());
 	});
 
 	it("keeps a lifecycle action button click from navigating to the detail page", async () => {

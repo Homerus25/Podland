@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -135,6 +136,40 @@ func TestPodHandler_Inspect_ReturnsRawReportAsTopLevelBody(t *testing.T) {
 	require.NotNil(t, body.InspectPodData)
 	assert.Equal(t, "pod-a", body.ID)
 	assert.Equal(t, "web", body.Name)
+}
+
+// TestPodHandler_Inspect_SurfacesInfraPortMappings pins the portMappings
+// acceptance criterion (spec #402 ticket #405): the raw inspect passthrough
+// carries the infra container's published port mappings verbatim — the
+// mappings create requests plant surface in the pod's inspect data with
+// no mapping layer in between.
+func TestPodHandler_Inspect_SurfacesInfraPortMappings(t *testing.T) {
+	report := podInspectFixture("pod-a", "web", "Running")
+	report.InspectPodData.InfraConfig.PortBindings = map[string][]define.InspectHostPort{
+		"80/tcp": {{HostIP: "", HostPort: "8080"}},
+		"53/udp": {{HostIP: "127.0.0.1", HostPort: "53"}},
+	}
+	engine := &fakePodEngine{
+		inspectFn: func(nameOrID string) ([]*entities.PodInspectReport, []error, error) {
+			return []*entities.PodInspectReport{report}, nil, nil
+		},
+	}
+
+	w := inspectRequest(newTestHandler(engine).Inspect, "web")
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var body entities.PodInspectReport
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), "the top-level body must be podman's raw report")
+	require.NotNil(t, body.InspectPodData)
+	require.NotNil(t, body.InspectPodData.InfraConfig)
+	assert.Equal(t,
+		map[string][]define.InspectHostPort{
+			"80/tcp": {{HostIP: "", HostPort: "8080"}},
+			"53/udp": {{HostIP: "127.0.0.1", HostPort: "53"}},
+		},
+		body.InspectPodData.InfraConfig.PortBindings,
+		"the infra container's published port mappings must cross verbatim",
+	)
 }
 
 // TestPodHandler_Inspect_MissingPodAnswers404 pins the documented 404

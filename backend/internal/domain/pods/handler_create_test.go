@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	netTypes "go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/specgen"
 
@@ -39,11 +40,13 @@ func TestPodHandler_Create_Success(t *testing.T) {
 		},
 	}
 
-	w := createRequest(newTestHandler(engine).Create, `{"name":"web-pod","networks":["podman"],"labels":{"app":"web"}}`)
+	w := createRequest(newTestHandler(engine).Create, `{"name":"web-pod","networks":["podman"],"labels":{"app":"web"},"portMappings":[{"hostPort":8080,"containerPort":80}]}`)
 
 	require.Equal(t, http.StatusCreated, w.Code, "create should return 201")
 	require.NotNil(t, gotSpec, "the request must reach the machine's spec")
 	assert.Equal(t, "web-pod", gotSpec.Name)
+	require.Len(t, gotSpec.PortMappings, 1, "the requested port mappings must reach the machine's spec")
+	assert.Equal(t, netTypes.PortMapping{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}, gotSpec.PortMappings[0])
 
 	var body PodCreateResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), "the top-level body must be the create DTO")
@@ -79,6 +82,29 @@ func TestPodHandler_Create_MountFlagsMutuallyExclusive(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "a mount with both selinuxShared and selinuxPrivate must be refused with 400")
 	assert.Contains(t, w.Body.String(), "VALIDATION_FAILED")
+}
+
+// TestPodHandler_Create_PortMappingValidation pins the port mapping
+// validation gate: an out-of-range port or an unknown protocol is
+// refused with 400 before the machine is asked (the engine stays
+// unarmed and would panic on a call).
+func TestPodHandler_Create_PortMappingValidation(t *testing.T) {
+	cases := map[string]string{
+		"host port out of range":      `{"name": "web-pod", "portMappings": [{"hostPort": 70000, "containerPort": 80}]}`,
+		"container port out of range": `{"name": "web-pod", "portMappings": [{"hostPort": 8080, "containerPort": 0}]}`,
+		"unknown protocol":            `{"name": "web-pod", "portMappings": [{"hostPort": 8080, "containerPort": 80, "protocol": "sctp"}]}`,
+	}
+
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			engine := &fakePodEngine{}
+
+			w := createRequest(newTestHandler(engine).Create, body)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code, "an invalid port mapping must be refused with 400")
+			assert.Contains(t, w.Body.String(), "VALIDATION_FAILED")
+		})
+	}
 }
 
 // TestPodHandler_Create_InvalidJSON pins the decode gate: a body that

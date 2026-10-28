@@ -65,6 +65,7 @@ export function CreatePodDialog({
 				volumes: [],
 				mounts: [],
 				labels: [],
+				portMappings: [],
 				cpus: "",
 				memory: "",
 			},
@@ -74,6 +75,7 @@ export function CreatePodDialog({
 	const volumeRows = useFieldArray({ control, name: "volumes" });
 	const mountRows = useFieldArray({ control, name: "mounts" });
 	const labelRows = useFieldArray({ control, name: "labels" });
+	const portRows = useFieldArray({ control, name: "portMappings" });
 	const selectedNetworks = watch("networks");
 	const mountValues = watch("mounts");
 
@@ -120,6 +122,56 @@ export function CreatePodDialog({
 									selected={selectedNetworks}
 									onSelect={(nextSelection) =>
 										setValue("networks", nextSelection)
+									}
+								/>
+							</FormSection>
+
+							<Divider />
+
+							<FormSection title="Ports">
+								<RowListEditor
+									rows={portRows}
+									noun="port-mapping"
+									addLabel="Add port mapping"
+									removeAriaLabel={(rowNumber) =>
+										`Remove port mapping ${rowNumber}`
+									}
+									renderRow={(index) => (
+										<>
+											<RowInput
+												type="number"
+												placeholder="Host port"
+												ariaLabel={`Host port ${index + 1}`}
+												registration={register(
+													`portMappings.${index}.hostPort` as const,
+												)}
+											/>
+											<RowInput
+												type="number"
+												placeholder="Container port"
+												ariaLabel={`Container port ${index + 1}`}
+												registration={register(
+													`portMappings.${index}.containerPort` as const,
+												)}
+											/>
+											<RowSelect
+												ariaLabel={`Protocol ${index + 1}`}
+												options={[
+													{ value: "tcp", label: "tcp" },
+													{ value: "udp", label: "udp" },
+												]}
+												registration={register(
+													`portMappings.${index}.protocol` as const,
+												)}
+											/>
+										</>
+									)}
+									onAdd={() =>
+										portRows.append({
+											hostPort: "",
+											containerPort: "",
+											protocol: "tcp",
+										})
 									}
 								/>
 							</FormSection>

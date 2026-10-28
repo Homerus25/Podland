@@ -1,4 +1,5 @@
-import { api, machineApiPath } from "@shared/utils/api";
+import { createLogSource, type LogSource } from "@shared/streaming/logSource";
+import { api, machineApiPath, machineApiUrl } from "@shared/utils/api";
 import { keyValueRowsToRecord } from "@shared/utils/keyValueRows";
 
 // Pod as returned by GET /api/machines/{id}/pods
@@ -107,6 +108,14 @@ export interface PodLabelRow {
 	value: string;
 }
 
+// One row of the create-pod dialog's port-mappings editor — the same
+// shape as the container create form's port-binding row.
+export interface PodPortRow {
+	hostPort: string;
+	containerPort: string;
+	protocol: "tcp" | "udp";
+}
+
 // The create-pod dialog's form values: the form's own shape, owned here so
 // the payload builder below is the single owner of the form-to-payload
 // mapping and the dialog imports it (the buildCreateContainerInput
@@ -117,6 +126,8 @@ export interface PodFormValues {
 	volumes: PodVolumeRow[];
 	mounts: PodMountRow[];
 	labels: PodLabelRow[];
+	// Host ports to publish on the pod's infra container.
+	portMappings: PodPortRow[];
 	// Both limits travel as strings — the form fields are text inputs;
 	// the builder parses cpus and trims memory.
 	cpus: string;
@@ -142,6 +153,14 @@ export interface CreatePodInput {
 		chownUser?: boolean;
 	}[];
 	labels?: Record<string, string>;
+	// Host ports published on the pod's infra container (backend
+	// PodCreateRequest.PortMappings); the protocol defaults to tcp
+	// server-side when omitted.
+	portMappings?: {
+		hostPort: number;
+		containerPort: number;
+		protocol?: "tcp" | "udp";
+	}[];
 	cpus?: number;
 	memory?: string;
 }
@@ -179,6 +198,26 @@ function mountRowsToInput(rows: PodMountRow[]): CreatePodInput["mounts"] {
 	return entries.length > 0 ? entries : undefined;
 }
 
+// A port-mapping row is complete only when both ports parse to integers;
+// empty or non-numeric rows are filtered out of the payload — the same
+// silent filtering as the container create page's port bindings.
+function parsePort(text: string): number | undefined {
+	const trimmed = text.trim();
+	if (trimmed === "") return undefined;
+	const port = Number(trimmed);
+	return Number.isInteger(port) ? port : undefined;
+}
+
+function portRowsToInput(rows: PodPortRow[]): CreatePodInput["portMappings"] {
+	const mappings = rows.flatMap((row) => {
+		const hostPort = parsePort(row.hostPort);
+		const containerPort = parsePort(row.containerPort);
+		if (hostPort === undefined || containerPort === undefined) return [];
+		return [{ hostPort, containerPort, protocol: row.protocol || "tcp" }];
+	});
+	return mappings.length > 0 ? mappings : undefined;
+}
+
 // Builds the POST /api/machines/{id}/pods body from the create-pod
 // dialog's form values: the single owner of the form-to-payload mapping
 // (the buildCreateContainerInput precedent, candidate C3) — name trim,
@@ -192,6 +231,7 @@ export function buildCreatePodInput(values: PodFormValues): CreatePodInput {
 	const memory = values.memory.trim();
 	const volumes = volumeRowsToInput(values.volumes);
 	const mounts = mountRowsToInput(values.mounts);
+	const portMappings = portRowsToInput(values.portMappings ?? []);
 	const labels = keyValueRowsToRecord(values.labels ?? []);
 
 	return {
@@ -199,6 +239,7 @@ export function buildCreatePodInput(values: PodFormValues): CreatePodInput {
 		...(values.networks.length > 0 ? { networks: values.networks } : {}),
 		...(volumes ? { volumes } : {}),
 		...(mounts ? { mounts } : {}),
+		...(portMappings ? { portMappings } : {}),
 		...(labels ? { labels } : {}),
 		...(values.cpus.trim() !== "" && Number.isFinite(cpus) ? { cpus } : {}),
 		...(memory !== "" ? { memory } : {}),
@@ -225,9 +266,15 @@ export async function createPod(
 	return response.data;
 }
 
-// The pod lifecycle actions (backend PodActionResponse): pause, unpause,
-// kill (podman's default signal, no parameter), restart.
-export type PodAction = "pause" | "unpause" | "kill" | "restart";
+// The pod lifecycle actions (backend PodActionResponse): start, stop,
+// pause, unpause, kill (podman's default signal, no parameter), restart.
+export type PodAction =
+	| "start"
+	| "stop"
+	| "pause"
+	| "unpause"
+	| "kill"
+	| "restart";
 
 export interface PodActionResult {
 	id: string;
@@ -244,6 +291,17 @@ export async function podAction(
 		machineApiPath(machineId, "pods", podId, action),
 	);
 	return response.data;
+}
+
+// Log source for GET /api/machines/{machineId}/pods/{podId}/logs: the kit
+// owns the buffered tail fetch and the follow stream
+// (backend/internal/domain/pods handler pair). Podman aggregates every
+// container in the pod, infra included — plain output, no prefixing.
+export function podLogs(machineId: string, podId: string): LogSource {
+	return createLogSource(
+		machineApiPath(machineId, "pods", podId, "logs"),
+		machineApiUrl(machineId, "pods", podId, "logs"),
+	);
 }
 
 // DELETE /api/machines/{id}/pods/{podId} -> 204. Running containers refuse

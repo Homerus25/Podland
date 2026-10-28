@@ -30,10 +30,17 @@ type PodEngine interface {
 	Kill(nameOrID string) error
 	// Restart restarts the pod's containers.
 	Restart(nameOrID string) error
+	// Start starts the pod's containers.
+	Start(nameOrID string) error
+	// Stop stops the pod's containers.
+	Stop(nameOrID string) error
 	// Remove removes the pod; force also removes running containers.
 	Remove(nameOrID string, force bool) error
 	// Prune removes every stopped pod (podman's own selection).
 	Prune() ([]*entities.PodPruneReport, error)
+	// Logs streams the pod's aggregated logs — every container in the
+	// pod, infra included — into the options' writers.
+	Logs(name string, opts entities.ContainerLogsOptions) error
 }
 
 // PodEngineProvider is the pods domain's slice of the connection seam:
@@ -142,6 +149,20 @@ func (e *podmanPodEngine) Restart(nameOrID string) error {
 	return narrowReports(reports, err, func(report *entities.PodRestartReport) []error { return report.Errs })
 }
 
+// Start narrows podman's report-slice start like Pause above. No
+// timeout options travel — podman's defaults apply.
+func (e *podmanPodEngine) Start(nameOrID string) error {
+	reports, err := e.tunnelEngine().PodStart(e.ctx, []string{nameOrID}, entities.PodStartOptions{})
+	return narrowReports(reports, err, func(report *entities.PodStartReport) []error { return report.Errs })
+}
+
+// Stop narrows podman's report-slice stop like Pause above. No timeout
+// or force options travel — podman's defaults apply.
+func (e *podmanPodEngine) Stop(nameOrID string) error {
+	reports, err := e.tunnelEngine().PodStop(e.ctx, []string{nameOrID}, entities.PodStopOptions{})
+	return narrowReports(reports, err, func(report *entities.PodStopReport) []error { return report.Errs })
+}
+
 // Remove narrows podman's report-slice remove to the single error the
 // service classifies: a transport error, or the one-entry report slice's
 // own per-pod error — the race window where the pod's containers changed
@@ -162,4 +183,13 @@ func (e *podmanPodEngine) Remove(nameOrID string, force bool) error {
 
 func (e *podmanPodEngine) Prune() ([]*entities.PodPruneReport, error) {
 	return e.tunnelEngine().PodPrune(e.ctx, entities.PodPruneOptions{})
+}
+
+// Logs streams the pod's aggregated logs. The container-log options the
+// streaming kit builds convert to pod-log options here, at the engine
+// edge: the tunnel's PodLogs owns the conversion, and podman aggregates
+// every container in the pod, infra included — plain text, no
+// per-container prefixing.
+func (e *podmanPodEngine) Logs(name string, opts entities.ContainerLogsOptions) error {
+	return e.tunnelEngine().PodLogs(e.ctx, name, entities.PodLogsOptions{ContainerLogsOptions: opts})
 }

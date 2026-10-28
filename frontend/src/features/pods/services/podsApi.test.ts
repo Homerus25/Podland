@@ -1,11 +1,14 @@
-import { buildCreatePodInput } from "@features/pods/services/podsApi";
+import {
+	buildCreatePodInput,
+	type PodFormValues,
+} from "@features/pods/services/podsApi";
 import { describe, expect, it } from "vitest";
 
 // The create-pod payload builder's unit tests (spec 352 ticket #355): the
 // form-to-payload mapping is a pure builder in the services module, tested
 // here without a DOM (the buildCreateContainerInput precedent, C3).
 
-const baseValues = {
+const baseValues: PodFormValues = {
 	name: "  app-pod  ",
 	networks: ["app-net", "db-net"],
 	volumes: [{ name: "app-data", destination: "/data", mode: "rw" }],
@@ -21,6 +24,7 @@ const baseValues = {
 		{ key: "app", value: "web" },
 		{ key: "tier", value: "frontend" },
 	],
+	portMappings: [{ hostPort: "8080", containerPort: "80", protocol: "udp" }],
 	cpus: "1.5",
 	memory: " 512m ",
 };
@@ -40,6 +44,7 @@ describe("buildCreatePodInput", () => {
 				},
 			],
 			labels: { app: "web", tier: "frontend" },
+			portMappings: [{ hostPort: 8080, containerPort: 80, protocol: "udp" }],
 			cpus: 1.5,
 			memory: "512m",
 		});
@@ -79,6 +84,27 @@ describe("buildCreatePodInput", () => {
 		]);
 	});
 
+	it("filters incomplete port-mapping rows and defaults the protocol to tcp", () => {
+		const input = buildCreatePodInput({
+			...baseValues,
+			portMappings: [
+				{ hostPort: "", containerPort: "80", protocol: "tcp" },
+				{ hostPort: "8080", containerPort: "", protocol: "tcp" },
+				{ hostPort: "not-a-port", containerPort: "80", protocol: "tcp" },
+				// The protocol select always offers a value; an empty one
+				// falls back to tcp.
+				{
+					hostPort: "8080",
+					containerPort: "80",
+					protocol: "" as "tcp" | "udp",
+				},
+			],
+		});
+		expect(input.portMappings).toEqual([
+			{ hostPort: 8080, containerPort: 80, protocol: "tcp" },
+		]);
+	});
+
 	it("keeps the mount flags only when checked", () => {
 		const input = buildCreatePodInput({
 			...baseValues,
@@ -110,6 +136,7 @@ describe("buildCreatePodInput", () => {
 			volumes: [],
 			mounts: [],
 			labels: [],
+			portMappings: [],
 			cpus: "",
 			memory: "",
 		});
@@ -118,6 +145,7 @@ describe("buildCreatePodInput", () => {
 		expect("volumes" in input).toBe(false);
 		expect("mounts" in input).toBe(false);
 		expect("labels" in input).toBe(false);
+		expect("portMappings" in input).toBe(false);
 		expect("cpus" in input).toBe(false);
 		expect("memory" in input).toBe(false);
 	});

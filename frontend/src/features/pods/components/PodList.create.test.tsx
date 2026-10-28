@@ -79,6 +79,11 @@ describe("PodList create", () => {
 			await screen.findByLabelText("Name");
 			await user.type(screen.getByLabelText("Name"), "web");
 			await user.click(await screen.findByLabelText("app-net"));
+			// Port mapping published on the pod's infra container.
+			await user.click(screen.getByTestId("add-port-mapping"));
+			await user.type(screen.getByLabelText("Host port 1"), "8080");
+			await user.type(screen.getByLabelText("Container port 1"), "80");
+			await user.selectOptions(screen.getByLabelText("Protocol 1"), "udp");
 			// Bind mount with the z flag.
 			await user.click(screen.getByTestId("add-bind-mount"));
 			await user.type(screen.getByLabelText("Mount source 1"), "/srv/app");
@@ -112,6 +117,7 @@ describe("PodList create", () => {
 			expect(createRequests[0]).toEqual({
 				name: "web",
 				networks: ["app-net"],
+				portMappings: [{ hostPort: 8080, containerPort: 80, protocol: "udp" }],
 				mounts: [
 					{
 						source: "/srv/app",
@@ -165,6 +171,19 @@ describe("PodList create", () => {
 		expect(screen.queryByTestId("remove-bind-mount-1")).not.toBeInTheDocument();
 		expect(screen.getByLabelText("Mount source 1")).toBeInTheDocument();
 
+		expect(screen.getByTestId("add-port-mapping")).toHaveTextContent(
+			"Add port mapping",
+		);
+		await user.click(screen.getByTestId("add-port-mapping"));
+		expect(screen.getByTestId("remove-port-mapping-0")).toHaveAttribute(
+			"aria-label",
+			"Remove port mapping 1",
+		);
+		await user.click(screen.getByTestId("remove-port-mapping-0"));
+		expect(
+			screen.queryByTestId("remove-port-mapping-0"),
+		).not.toBeInTheDocument();
+
 		expect(screen.getByTestId("add-named-volume")).toHaveTextContent(
 			"Add volume",
 		);
@@ -173,6 +192,60 @@ describe("PodList create", () => {
 			"aria-label",
 			"Remove named volume 1",
 		);
+	});
+
+	it("filters incomplete port-mapping rows and defaults the protocol to tcp", async () => {
+		const createRequests: unknown[] = [];
+		server.use(
+			http.get("*/api/machines/m-1/pods", () =>
+				podsListResponse([podFixture()]),
+			),
+			http.get("*/api/machines/m-1/networks", () =>
+				HttpResponse.json([networkFixture()]),
+			),
+			http.get("*/api/machines/m-1/volumes", () =>
+				HttpResponse.json([volumeFixture()]),
+			),
+			http.post("*/api/machines/m-1/pods", async ({ request }) => {
+				createRequests.push(await request.json());
+				return HttpResponse.json(
+					{
+						id: "p-new",
+						name: "web",
+						state: "Created",
+						createdAt: "2026-10-24T12:00:00Z",
+					},
+					{ status: 201 },
+				);
+			}),
+		);
+		renderPodList();
+		const user = userEvent.setup();
+
+		await screen.findByTestId("pod-row");
+		await user.click(screen.getByTestId("create-pod-button"));
+		await screen.findByLabelText("Name");
+		await user.type(screen.getByLabelText("Name"), "web");
+
+		// A complete row with the protocol left on its default.
+		await user.click(screen.getByTestId("add-port-mapping"));
+		await user.type(screen.getByLabelText("Host port 1"), "9090");
+		await user.type(screen.getByLabelText("Container port 1"), "90");
+		// An incomplete row — silently filtered, the same validation
+		// feedback as the container create page's port bindings.
+		await user.click(screen.getByTestId("add-port-mapping"));
+		await user.type(screen.getByLabelText("Host port 2"), "8080");
+		expect(screen.getByTestId("pod-form-submit")).toBeEnabled();
+
+		await user.click(screen.getByTestId("pod-form-submit"));
+
+		await waitFor(() => {
+			expect(createRequests).toHaveLength(1);
+		});
+		expect(createRequests[0]).toEqual({
+			name: "web",
+			portMappings: [{ hostPort: 9090, containerPort: 90, protocol: "tcp" }],
+		});
 	});
 
 	it("blocks the submit while a resource limit is unparseable and explains why", async () => {

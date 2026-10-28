@@ -1,4 +1,8 @@
-import { LOG_ROUTE_PATTERN, logsPath } from "@shared/logs/logRoute";
+import {
+	LOG_ROUTE_PATTERN,
+	type LogKind,
+	logsPath,
+} from "@shared/logs/logRoute";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
@@ -22,7 +26,7 @@ import { downloadText } from "@shared/utils/download";
 const mockedDownloadText = vi.mocked(downloadText);
 
 function renderLogsPage(
-	kind: "container" | "quadlet" = "container",
+	kind: LogKind = "container",
 	targetId = kind === "container" ? "c-1" : "q-1",
 	name?: string,
 ) {
@@ -106,6 +110,24 @@ describe("LogsPage download", () => {
 		expect(mockedDownloadText).toHaveBeenCalledWith(
 			"quadlet-line\n",
 			"my-quadlet-logs.txt",
+		);
+	});
+
+	it("serves the pod kind through the pod logs endpoint", async () => {
+		server.use(
+			http.get("*/api/machines/m-1/pods/p-1/logs", () =>
+				HttpResponse.json({ id: "p-1", logs: "pod-line\n" }),
+			),
+		);
+		renderLogsPage("pod", "p-1", "my-pod");
+
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("button", { name: /download/i }));
+
+		await waitFor(() => expect(mockedDownloadText).toHaveBeenCalled());
+		expect(mockedDownloadText).toHaveBeenCalledWith(
+			"pod-line\n",
+			"my-pod-logs.txt",
 		);
 	});
 

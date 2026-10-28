@@ -67,9 +67,10 @@ export function useCreatePod(machineId: string) {
 	);
 }
 
-// One lifecycle action (pause, unpause, kill, restart) mutates the pod's
-// containers, so the pods list refetches on success. Each row owns its
-// mutation instance, so pending state and errors stay scoped to that row.
+// One lifecycle action (start, stop, pause, unpause, kill, restart)
+// mutates the pod's containers, so the pods list refetches on success.
+// Each row owns its mutation instance, so pending state and errors stay
+// scoped to that row.
 export function usePodAction(machineId: string, action: PodAction) {
 	return useListInvalidatingMutation(machineId, "pods", (podId: string) =>
 		podAction(machineId, podId, action),

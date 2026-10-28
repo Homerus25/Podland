@@ -30,8 +30,9 @@ type PodListResponse struct {
 }
 
 // PodCreateRequest is the POST /api/machines/{id}/pods body: the pod's
-// name, the networks it joins, named volumes and bind mounts in the same
-// shapes as the container create request, labels, and resource limits.
+// name, the networks it joins, named volumes, bind mounts, and port
+// mappings in the same shapes as the container create request, labels,
+// and resource limits.
 type PodCreateRequest struct {
 	// Name of the pod (required)
 	Name string `json:"name" validate:"required,min=1,max=255"`
@@ -41,6 +42,8 @@ type PodCreateRequest struct {
 	Volumes []VolumeRequest `json:"volumes,omitempty" validate:"omitempty,dive"`
 	// Bind mounts (optional)
 	Mounts []MountRequest `json:"mounts,omitempty" validate:"omitempty,dive"`
+	// Port mappings published on the pod's infra container (optional)
+	PortMappings []PortBindingRequest `json:"portMappings,omitempty" validate:"omitempty,dive"`
 	// Labels for the pod (optional)
 	Labels map[string]string `json:"labels,omitempty"`
 	// CPU limit in cores (optional)
@@ -76,6 +79,18 @@ type MountRequest struct {
 	SelinuxPrivate bool `json:"selinuxPrivate,omitempty"`
 	// Chown the mounted content to the container's user (U) (optional)
 	ChownUser bool `json:"chownUser,omitempty"`
+}
+
+// PortBindingRequest represents a port mapping to publish on the pod's
+// infra container — the same shape as the container create request's
+// port binding entry.
+type PortBindingRequest struct {
+	// Port on the host (required, 1-65535)
+	HostPort int `json:"hostPort" validate:"required,min=1,max=65535"`
+	// Port inside the pod (required, 1-65535)
+	ContainerPort int `json:"containerPort" validate:"required,min=1,max=65535"`
+	// Protocol (optional, defaults to tcp)
+	Protocol string `json:"protocol,omitempty" validate:"omitempty,oneof=tcp udp"`
 }
 
 // PodCreateResponse represents the response after creating a pod,
@@ -268,4 +283,13 @@ func FromPodmanPruneReports(reports []*entities.PodPruneReport) []PodPruneRespon
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+// PodLogsResponse represents the response for pod logs
+type PodLogsResponse struct {
+	// Pod ID
+	ID string `json:"id"`
+	// Pod logs content (multiline string; podman's aggregated output
+	// across every container in the pod, infra included)
+	Logs string `json:"logs"`
 }

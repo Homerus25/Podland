@@ -2,10 +2,12 @@ package pods
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
+	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -177,6 +179,42 @@ func (h *PodHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Start handles starting a pod's containers. Route-level
+// RequireMachinePermission(write) (app.go) gates it at write. No
+// timeout parameters travel — podman's defaults apply.
+func (h *PodHandler) Start(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*PodActionResponse, error) {
+		podID, guard := web.URLParam(r, "podId", "MISSING_POD_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		if err := h.service.Start(ctx, userID, machineID, podID); err != nil {
+			return nil, err
+		}
+		response := PodActionResponse{ID: podID, State: "running", Timestamp: time.Now().UTC().Format(time.RFC3339)}
+		return &response, nil
+	})
+}
+
+// Stop handles stopping a pod's containers. Route-level
+// RequireMachinePermission(write) (app.go) gates it at write. No
+// timeout or force parameters travel — podman's defaults apply.
+func (h *PodHandler) Stop(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*PodActionResponse, error) {
+		podID, guard := web.URLParam(r, "podId", "MISSING_POD_ID")
+		if guard != nil {
+			return nil, guard
+		}
+
+		if err := h.service.Stop(ctx, userID, machineID, podID); err != nil {
+			return nil, err
+		}
+		response := PodActionResponse{ID: podID, State: "stopped", Timestamp: time.Now().UTC().Format(time.RFC3339)}
+		return &response, nil
+	})
+}
+
 // Remove handles deleting a pod; the force query flag also removes its
 // running containers (default false, mirroring the container delete).
 func (h *PodHandler) Remove(w http.ResponseWriter, r *http.Request) {
@@ -202,5 +240,40 @@ func (h *PodHandler) Prune(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 		return FromPodmanPruneReports(prunes), nil
+	})
+}
+
+// Logs handles retrieving the pod's aggregated logs. The query is parsed
+// once: only a clean follow request crosses the streaming envelope, while
+// query errors ride the JSON envelope even when follow=true was
+// requested, so no code path here writes an error response by hand.
+func (h *PodHandler) Logs(w http.ResponseWriter, r *http.Request) {
+	since, tail, queryErr := streaming.ParseLogWindow(r)
+	if queryErr != nil {
+		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+			return struct{}{}, queryErr
+		})
+		return
+	}
+
+	podID, guard := web.URLParam(r, "podId", "MISSING_POD_ID")
+
+	if guard == nil && streaming.ParseFollow(r) {
+		slog.InfoContext(r.Context(), "streamLogs", slog.String("podID", podID), slog.Bool("follow", true))
+		streaming.RunLogStream(w, r, streaming.LogStreamOp{
+			Since: since,
+			Tail:  tail,
+			Stream: func(ctx context.Context, userID, machineID string, onEvent func(streaming.LogEvent)) error {
+				return h.service.GetLogsWithStream(ctx, userID, machineID, podID, since, tail, onEvent)
+			},
+		})
+		return
+	}
+
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*PodLogsResponse, error) {
+		if guard != nil {
+			return nil, guard
+		}
+		return h.service.GetLogs(ctx, userID, machineID, podID, since, tail)
 	})
 }

@@ -2,7 +2,7 @@
 
 Part of the [API contract](description_api.md). See the main document for base URL, common headers, and the error response format.
 
-Pods live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. Listing, the per-pod detail endpoint, and the raw inspect endpoint are available at `read` level; creating a pod, pruning, the lifecycle actions (pause, unpause, kill, restart), and removing mutate remote state and gate at `write` level.
+Pods live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. Listing, the per-pod detail endpoint, the raw inspect endpoint, and the pod's aggregated logs are available at `read` level; creating a pod, pruning, the lifecycle actions (start, stop, pause, unpause, kill, restart), and removing mutate remote state and gate at `write` level.
 
 ---
 
@@ -48,7 +48,7 @@ Notes:
 
 ### POST /api/machines/{id}/pods
 
-Create a pod on the machine. The body carries the pod's `name` (required), the networks its infra container joins, named volumes and bind mounts in the same shapes as the container create request, labels, and resource limits. The infra container stays at podman's default.
+Create a pod on the machine. The body carries the pod's `name` (required), the networks its infra container joins, named volumes, bind mounts, and port mappings in the same shapes as the container create request, labels, and resource limits. The infra container stays at podman's default.
 
 **Authentication:** Required
 
@@ -76,6 +76,13 @@ Create a pod on the machine. The body carries the pod's `name` (required), the n
       "chownUser": "boolean (U, chown to the container's user, optional)"
     }
   ],
+  "portMappings": [
+    {
+      "hostPort": "integer (port on the host, required, 1-65535)",
+      "containerPort": "integer (port inside the pod, required, 1-65535)",
+      "protocol": "string (\"tcp\" or \"udp\", optional, defaults to \"tcp\")"
+    }
+  ],
   "labels": { "string": "string" },
   "cpus": "number (CPU limit in cores, optional)",
   "memory": "string (podman units syntax, e.g. \"512m\", \"1g\", optional)"
@@ -84,6 +91,7 @@ Create a pod on the machine. The body carries the pod's `name` (required), the n
 
 Notes:
 - `selinuxShared` (z) and `selinuxPrivate` (Z) are mutually exclusive; a mount carrying both is refused with 400 `VALIDATION_FAILED`.
+- `portMappings` publish on the pod's infra container; the protocol defaults to `tcp` when omitted. An out-of-range port or a protocol other than `tcp`/`udp` is refused with 400 `VALIDATION_FAILED`. The published mappings appear on the infra container in the raw inspect report (`GET .../pods/{podId}/inspect`).
 - `cpus` maps onto the pod spec's CPU limit (quota = cpus × 100000, period 100000).
 - `memory` parses through podman's units parser into a byte limit; an unparseable value is 400 `VALIDATION_FAILED`.
 
@@ -98,7 +106,7 @@ Notes:
 ```
 
 **Response (Error):**
-- 400: `INVALID_REQUEST` (malformed body; podman-rejected names and other podman-side 4xx rejections, carrying podman's message), `VALIDATION_FAILED` (missing name; a mount with both `selinuxShared` and `selinuxPrivate`; unparseable `memory`)
+- 400: `INVALID_REQUEST` (malformed body; podman-rejected names and other podman-side 4xx rejections, carrying podman's message), `VALIDATION_FAILED` (missing name; a mount with both `selinuxShared` and `selinuxPrivate`; an out-of-range port or unknown protocol in `portMappings`; unparseable `memory`)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
 - 404: `MACHINE_NOT_FOUND`
@@ -251,6 +259,83 @@ Restart the pod's containers.
 **Response (Success - 200):** the action response shape above, with `"state": "running"`.
 
 **Response (Error):** same as pause.
+
+### POST /api/machines/{id}/pods/{podId}/start
+
+Start the pod's containers. Takes no timeout or force parameters — podman's defaults apply. Starting an already-running pod is refused by podman and surfaces as 409 `POD_STATE_CONFLICT`.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Response (Success - 200):** the action response shape above, with `"state": "running"`.
+
+**Response (Error):** same as pause.
+
+### POST /api/machines/{id}/pods/{podId}/stop
+
+Stop the pod's containers. Takes no timeout or force parameters — podman's defaults apply. Stopping an already-stopped pod is refused by podman and surfaces as 409 `POD_STATE_CONFLICT`.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Response (Success - 200):** the action response shape above, with `"state": "stopped"`.
+
+**Response (Error):** same as pause.
+
+### GET /api/machines/{id}/pods/{podId}/logs
+
+Get the pod's aggregated logs — every container in the pod, infra
+included, as plain text with no per-container prefixing.
+
+**Authentication:** Required
+
+**Access:** Any user with a machine-access row for `{id}` (read level).
+
+**Query Parameters:**
+- `follow` (boolean, optional): Follow log output as an NDJSON stream
+- `since` (string, optional): Show logs since timestamp (RFC3339)
+- `tail` (integer, optional): Number of lines to show from the end
+
+**Response (Success - 200):**
+```json
+{
+  "id": "string",
+  "logs": "string (multiline log content)"
+}
+```
+
+For streaming logs (`follow=true`):
+- **Content-Type**: `application/json`
+- **Format**: Newline-delimited JSON (NDJSON)
+- Each line is a log line object:
+
+```json
+{
+  "timestamp": "ISO8601 timestamp",
+  "level": "INFO|WARN|ERROR",
+  "message": "string"
+}
+```
+
+The stream stays open while the pod runs and terminates with exactly
+one terminal event:
+
+- A clean stream end (pod stopped, podman EOF) emits `{"level": "INFO", "message": "STREAM_ENDED"}`.
+- A failure emits an ERROR-level event whose message embeds the error code:
+  `"POD_NOT_FOUND: Pod not found"`, `"CONNECTION_FAILED: Failed to connect to machine"`, etc.
+- A client disconnect cancels the stream server-side and emits a WARN
+  `OPERATION_CANCELLED` event (to the already-closed connection).
+
+**Response (Error):**
+- 400: `INVALID_SINCE_PARAM` / `INVALID_TAIL_PARAM` (malformed `since`/`tail`, message says "use RFC3339"; answered through the JSON envelope even when `follow=true`), `MISSING_POD_ID`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `POD_NOT_FOUND`
+- 500: `INTERNAL_ERROR` (also for a miswired route missing identity), `STREAMING_NOT_SUPPORTED`
+- 502: `CONNECTION_FAILED`
+- 504: `OPERATION_CANCELLED` (buffered fetch cancelled by a client disconnect; follow-mode cancellation is the WARN terminal event above)
 
 ### DELETE /api/machines/{id}/pods/{podId}
 

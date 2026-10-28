@@ -100,6 +100,22 @@ func TestBuildCreateSpec(t *testing.T) {
 			},
 		},
 		{
+			name: "port mappings map to the spec's port mappings with the protocol defaulting to tcp",
+			request: PodCreateRequest{
+				Name: "web-pod",
+				PortMappings: []PortBindingRequest{
+					{HostPort: 8080, ContainerPort: 80},
+					{HostPort: 8081, ContainerPort: 81, Protocol: "udp"},
+				},
+			},
+			check: func(t *testing.T, spec *specgen.PodSpecGenerator) {
+				assert.Equal(t, []netTypes.PortMapping{
+					{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"},
+					{HostPort: 8081, ContainerPort: 81, Protocol: "udp"},
+				}, spec.PortMappings, "each requested port mapping must reach the spec's port mappings, the protocol defaulting to tcp")
+			},
+		},
+		{
 			name:    "cpus maps onto the CPU limit (quota = cpus x 100000, period 100000)",
 			request: PodCreateRequest{Name: "web-pod", CPUs: 1.5},
 			check: func(t *testing.T, spec *specgen.PodSpecGenerator) {

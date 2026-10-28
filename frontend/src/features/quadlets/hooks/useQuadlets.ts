@@ -1,6 +1,7 @@
 import type {
 	CreateQuadletInput,
 	DeleteQuadletOptions,
+	GenerateQuadletInput,
 	QuadletImportRequest,
 	QuadletLifecycleOptions,
 	QuadletMoveInput,
@@ -10,6 +11,7 @@ import {
 	convertCompose,
 	createQuadlet,
 	deleteQuadlet,
+	generateQuadlet,
 	getQuadlet,
 	importQuadlets,
 	listQuadlets,
@@ -49,6 +51,16 @@ export function useCreateQuadlet(machineId: string) {
 		"quadlets",
 		(input: CreateQuadletInput) => createQuadlet(machineId, input),
 	);
+}
+
+// Generating a quadlet from an existing resource installs nothing on the
+// machine, so it rides a plain mutation (spec #402 ticket #406); the save
+// that follows is a regular create through useCreateQuadlet.
+export function useGenerateQuadlet(machineId: string) {
+	return useMutation({
+		mutationFn: (input: GenerateQuadletInput) =>
+			generateQuadlet(machineId, input),
+	});
 }
 
 export function useQuadlet(machineId: string, quadletId: string) {
