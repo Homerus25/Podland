@@ -14,12 +14,13 @@ import (
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// renamedInspect answers the post-rename inspect: the container now
-// carries newName.
+// renamedInspect answers the post-rename inspect — the container now
+// carries newName — for the handler and service rename suites alike.
 func renamedInspect(newName string) func(string) ([]*entities.ContainerInspectReport, []error, error) {
 	return func(string) ([]*entities.ContainerInspectReport, []error, error) {
 		return []*entities.ContainerInspectReport{{
 			InspectContainerData: &define.InspectContainerData{
+				ID:    "container-123",
 				Name:  "/" + newName,
 				State: &define.InspectContainerState{Status: "running", Running: true},
 			},
@@ -105,9 +106,8 @@ func TestContainerService_Rename_MapsNotFoundTo404(t *testing.T) {
 // TestContainerService_Rename_MapsNameCollisionTo409 pins the documented
 // 409. Podman answers a rename onto a taken name as a 500 sqlite UNIQUE
 // constraint failure rather than a typed conflict (RenameContainer →
-// RewriteContainerConfig in podman's source), so the collision is
-// resolved by asking whether the name is taken — the follow-up inspect
-// resolving a container is the collision.
+// RewriteContainerConfig in podman's source), so the constraint phrase
+// is the collision's signature, classified through the shared adapter.
 func TestContainerService_Rename_MapsNameCollisionTo409(t *testing.T) {
 	engine := &fakeContainerEngine{
 		renameFn: func(string, string) error {
@@ -116,12 +116,7 @@ func TestContainerService_Rename_MapsNameCollisionTo409(t *testing.T) {
 				Message:      "renaming container abc: updating container config table with new configuration for container abc: UNIQUE constraint failed: ContainerConfig.Name",
 			}
 		},
-		inspectFn: func(name string) ([]*entities.ContainerInspectReport, []error, error) {
-			require.Equal(t, "taken", name, "the collision check must inspect the requested name")
-			return []*entities.ContainerInspectReport{{
-				InspectContainerData: &define.InspectContainerData{Name: "/taken"},
-			}}, nil, nil
-		},
+		// inspectFn stays unarmed: the predicate answers first.
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
@@ -188,9 +183,8 @@ func TestContainerService_Rename_AcquireFailureIsThe502Sentinel(t *testing.T) {
 }
 
 // TestContainerService_Rename_SameNameSucceeds pins that a no-op rename
-// is not a collision: the requested name resolves the container itself,
-// but the rename succeeds before any collision check runs, so the
-// heuristic never fires on it.
+// is not a collision: podman accepts renaming a container to its own
+// name, so the request succeeds and answers the post-rename report.
 func TestContainerService_Rename_SameNameSucceeds(t *testing.T) {
 	engine := &fakeContainerEngine{
 		renameFn:  func(string, string) error { return nil },
@@ -206,13 +200,13 @@ func TestContainerService_Rename_SameNameSucceeds(t *testing.T) {
 }
 
 // TestContainerService_Rename_WrapsEngineFailure pins that an unrelated
-// failure with a free name is wrapped, never answered as a collision.
+// failure is wrapped, never answered as a collision: classification
+// reads the failure itself, so no follow-up probe runs whatever the
+// name's state.
 func TestContainerService_Rename_WrapsEngineFailure(t *testing.T) {
 	engine := &fakeContainerEngine{
 		renameFn: func(string, string) error { return assert.AnError },
-		inspectFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
-			return nil, []error{fmt.Errorf("no such container %q", "free")}, nil
-		},
+		// inspectFn stays unarmed: an unrelated failure must not probe.
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 

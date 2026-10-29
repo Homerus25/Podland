@@ -46,6 +46,15 @@ func IsAlreadyExists(err error) bool {
 	return containsAny(err, "already exists")
 }
 
+// IsUniqueConstraintViolation reports whether err is podman's sqlite
+// unique-constraint failure — the shape podman's rename answers a name
+// collision with: a 500 with no typed conflict of its own
+// (RenameContainer → RewriteContainerConfig in podman's source), so the
+// constraint phrase is the collision's only signature.
+func IsUniqueConstraintViolation(err error) bool {
+	return containsAny(err, "unique constraint failed")
+}
+
 // IsConflict reports whether err is podman's conflict answer: a 409
 // ErrorModel, or the refusal texts podman emits when a resource is still
 // referenced ("in use", "used by", "unable to delete") — which arrive as

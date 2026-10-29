@@ -2,7 +2,6 @@ package containers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -261,21 +260,18 @@ func (s *ContainerService) Rename(ctx context.Context, userID, machineID, contai
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrContainerNotFound
 			}
+			// Podman answers a rename onto a taken name as a 500 sqlite
+			// UNIQUE constraint failure rather than a typed conflict
+			// (RenameContainer → RewriteContainerConfig in podman's
+			// source), so the constraint phrase is the collision's
+			// signature, classified through the shared adapter — never
+			// a follow-up probe, which could attribute an unrelated
+			// failure to a name it did not refuse.
+			if podmanerr.IsUniqueConstraintViolation(err) {
+				return appErrors.ErrContainerAlreadyExists
+			}
 			if podmanerr.IsClientError(err) {
 				return appErrors.ErrInvalidRequest.WithMessage(podmanerr.Message(err))
-			}
-			// Podman answers a name collision as a 500 sqlite UNIQUE
-			// constraint failure rather than a typed conflict
-			// (RenameContainer → RewriteContainerConfig in podman's
-			// source), so the collision is resolved by asking whether
-			// the name is taken instead of by classifying the failure
-			// text.
-			taken, takenErr := containerNameTaken(e, newName)
-			if takenErr != nil {
-				return takenErr
-			}
-			if taken {
-				return appErrors.ErrContainerAlreadyExists
 			}
 			return fmt.Errorf("failed to rename container: %w", err)
 		}
@@ -289,22 +285,6 @@ func (s *ContainerService) Rename(ctx context.Context, userID, machineID, contai
 		return nil
 	})
 	return report, err
-}
-
-// containerNameTaken reports whether a container already carries name.
-// A not-found answer means the name is free; any other inspect failure
-// is reported as-is, so a broken connection never masquerades as a name
-// collision.
-func containerNameTaken(e ContainerEngine, name string) (bool, error) {
-	reports, inspectErrs, err := e.Inspect(name)
-	_, resolveErr := inspect.Resolve(reports, inspectErrs, err, appErrors.ErrContainerNotFound, "container", name)
-	if resolveErr == nil {
-		return true, nil
-	}
-	if errors.Is(resolveErr, appErrors.ErrContainerNotFound) {
-		return false, nil
-	}
-	return false, resolveErr
 }
 
 // containerRunning reports the container's running state, nil-safe

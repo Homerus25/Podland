@@ -11,8 +11,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.podman.io/podman/v6/libpod/define"
-	"go.podman.io/podman/v6/pkg/domain/entities"
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
@@ -39,15 +37,7 @@ func TestContainerHandler_Rename_Success(t *testing.T) {
 			gotID, gotName = id, newName
 			return nil
 		},
-		inspectFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
-			return []*entities.ContainerInspectReport{{
-				InspectContainerData: &define.InspectContainerData{
-					ID:    "container-123",
-					Name:  "/renamed",
-					State: &define.InspectContainerState{Status: "running", Running: true},
-				},
-			}}, nil, nil
-		},
+		inspectFn: renamedInspect("renamed"),
 	}
 
 	w := renameRequest(newTestHandler(engine).Rename, "container-123", `{"name":"renamed"}`)
@@ -105,11 +95,7 @@ func TestContainerHandler_Rename_NameCollisionAnswers409(t *testing.T) {
 				Message:      "renaming container abc: UNIQUE constraint failed: ContainerConfig.Name",
 			}
 		},
-		inspectFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
-			return []*entities.ContainerInspectReport{{
-				InspectContainerData: &define.InspectContainerData{Name: "/taken"},
-			}}, nil, nil
-		},
+		// inspectFn stays unarmed: the collision predicate answers first.
 	}
 
 	w := renameRequest(newTestHandler(engine).Rename, "container-123", `{"name":"taken"}`)
@@ -140,15 +126,12 @@ func TestContainerHandler_Rename_MissingContainerAnswers404(t *testing.T) {
 }
 
 // TestContainerHandler_Rename_FailureAnswers500 pins that an unrelated
-// rename failure with a free name is classified through the HTTP
-// surface: a failed rename must not answer 200 with a stale detail DTO.
+// rename failure is classified through the HTTP surface: a failed
+// rename must not answer 200 with a stale detail DTO.
 func TestContainerHandler_Rename_FailureAnswers500(t *testing.T) {
 	engine := &fakeContainerEngine{
 		renameFn: func(string, string) error { return assert.AnError },
-		inspectFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
-			// The follow-up collision check finds the name free.
-			return nil, []error{&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such container"}}, nil
-		},
+		// inspectFn stays unarmed: an unrelated failure must not probe.
 	}
 
 	w := renameRequest(newTestHandler(engine).Rename, "container-123", `{"name":"free"}`)

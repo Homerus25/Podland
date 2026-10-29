@@ -27,10 +27,9 @@ interface RenameContainerDialogProps {
 // Rename-container dialog: one text input prefilled with the current
 // name. The client guards only the two cases it can decide — an empty
 // name and an unchanged one — and leaves the name's shape to the server,
-// which owns podman's regex. The name is trimmed before submit (podman
-// trims it too), so the guards read the trimmed value. This component is
-// the form owner, so it mounts with the dialog (the field starts at the
-// current name on every open) and publishes its validity through the
+// which owns podman's regex; the value is sent as typed. This component
+// is the form owner, so it mounts with the dialog (the field starts at
+// the current name on every open) and publishes its validity through the
 // scope for the module footer; failure renders in the module's error
 // region, success closes through it.
 export function RenameContainerDialog({
@@ -47,7 +46,7 @@ export function RenameContainerDialog({
 	const { errors } = formState;
 
 	const submit = handleSubmit((values) => {
-		mutation.mutate(values.name.trim());
+		mutation.mutate(values.name);
 	});
 
 	return (
@@ -69,9 +68,8 @@ export function RenameContainerDialog({
 									fontFamily="mono"
 									{...register("name", {
 										validate: (value) => {
-											const name = value.trim();
-											if (name.length === 0) return "Name is required";
-											if (name === currentName) return "Name is unchanged";
+											if (value.length === 0) return "Name is required";
+											if (value === currentName) return "Name is unchanged";
 											return true;
 										},
 									})}

@@ -69,6 +69,25 @@ func TestIsAlreadyExists(t *testing.T) {
 	}
 }
 
+func TestIsUniqueConstraintViolation(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"podman's rename collision text", model(http.StatusInternalServerError, "renaming container abc: updating container config table with new configuration for container abc: UNIQUE constraint failed: ContainerConfig.Name", ""), true},
+		{"case-insensitive", errors.New("UNIQUE CONSTRAINT FAILED: ContainerConfig.Name"), true},
+		{"unrelated 500 does not match", model(http.StatusInternalServerError, "boom", ""), false},
+		{"unrelated", assert.AnError, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsUniqueConstraintViolation(tt.err))
+		})
+	}
+}
+
 func TestIsConflict(t *testing.T) {
 	tests := []struct {
 		name string
