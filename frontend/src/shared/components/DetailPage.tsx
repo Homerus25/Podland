@@ -54,6 +54,11 @@ export type DetailPageProps = {
 	onToggleInspect: () => void;
 	// The overview: the resource's label/value rows.
 	children: ReactNode;
+	// Optional actions rendered in the header row beside the title (spec
+	// 412, ticket #414): a page hands over the header actions its
+	// resource supports (the container detail page's "Edit configuration"
+	// button). Pages that pass nothing render the header they always did.
+	headerActions?: ReactNode;
 };
 
 export function DetailPage({
@@ -66,6 +71,7 @@ export function DetailPage({
 	revealed,
 	onToggleInspect,
 	children,
+	headerActions,
 }: DetailPageProps) {
 	const { machineId } = useParams<{ machineId: string }>();
 	const navigate = useNavigate();
@@ -113,6 +119,11 @@ export function DetailPage({
 				>
 					{title}
 				</Heading>
+				{headerActions ? (
+					<HStack spacing={2} data-testid="detail-page-header-actions">
+						{headerActions}
+					</HStack>
+				) : null}
 			</HStack>
 			{isPending ? (
 				<Box data-testid="detail-page-loading">

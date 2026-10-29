@@ -287,6 +287,48 @@ func (s *ContainerService) Rename(ctx context.Context, userID, machineID, contai
 	return report, err
 }
 
+// Update changes a container's resource limits and healthcheck
+// configuration on the specified machine and answers the container's
+// post-update inspect report, so the handler maps the same detail DTO
+// the detail GET does — one round trip carries the new state. The
+// request → podman update options mapping lives in the pure update
+// builder (buildUpdateOptions, update_spec.go — the update twin of the
+// create builder settlement, backend-conventions); the options are
+// built before the lease is acquired, so a request-local validation
+// failure (the unparseable memory, a malformed duration, a
+// non-positive cpus, the disable-flag exclusivity) never costs an
+// engine lease. Patch semantics are podman's own contract: only the
+// fields the request carries are forwarded, and podman merges resource
+// fields. Like Rename there is no state gate — podman applies limit
+// changes live to a running container and rewrites a stopped one's
+// config for the next start — and a missing container answers
+// ErrContainerNotFound, the same envelope as start/stop.
+func (s *ContainerService) Update(ctx context.Context, userID, machineID, containerID string, request ContainerUpdateRequest) (*entities.ContainerInspectReport, error) {
+	opts, err := buildUpdateOptions(request)
+	if err != nil {
+		return nil, err
+	}
+
+	var report *entities.ContainerInspectReport
+	err = s.engines.WithEngine(ctx, userID, machineID, "containers.Update", func(e ContainerEngine) error {
+		if err := e.Update(containerID, opts); err != nil {
+			if podmanerr.IsNotFound(err) {
+				return appErrors.ErrContainerNotFound
+			}
+			return fmt.Errorf("failed to update container: %w", err)
+		}
+
+		inspectReport, err := inspectContainer(e, containerID)
+		if err != nil {
+			return err
+		}
+
+		report = inspectReport
+		return nil
+	})
+	return report, err
+}
+
 // containerRunning reports the container's running state, nil-safe
 // through the embedded inspect data. A paused container counts as
 // running: podman's State.Running is true for it.

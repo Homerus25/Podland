@@ -204,6 +204,32 @@ func (h *ContainerHandler) Rename(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Update handles changing a container's resource limits and healthcheck
+// configuration. The response is the same detail DTO the GET answers,
+// mapped from the post-update inspect — one round trip carries the new
+// state. Patch semantics: omitted request fields mean "unchanged"; the
+// guards that cannot be struct tags live in the update builder behind
+// the service.
+func (h *ContainerHandler) Update(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerGetResponse, error) {
+		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
+		if guard != nil {
+			return ContainerGetResponse{}, guard
+		}
+
+		var request ContainerUpdateRequest
+		if appErr := web.Decode(r, &request); appErr != nil {
+			return ContainerGetResponse{}, appErr
+		}
+
+		report, err := h.service.Update(ctx, userID, machineID, containerID, request)
+		if err != nil {
+			return ContainerGetResponse{}, err
+		}
+		return FromPodmanInspectContainer(report), nil
+	})
+}
+
 // Delete handles deleting a container
 func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {

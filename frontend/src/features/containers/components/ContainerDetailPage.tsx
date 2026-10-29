@@ -9,11 +9,13 @@ import {
 	Td,
 	Text,
 	Tr,
+	VStack,
 } from "@chakra-ui/react";
 import {
 	useContainer,
 	useContainerInspect,
 	useRenameContainer,
+	useUpdateContainer,
 } from "@features/containers/hooks/useContainers";
 import type { ContainerDetail } from "@features/containers/services/containersApi";
 import { useMachine } from "@features/machines/hooks/useMachines";
@@ -30,6 +32,7 @@ import { detailPath } from "@shared/routes/detailRoute";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { Link as ReactRouterLink, useParams } from "react-router-dom";
+import { EditConfigurationDialog } from "./EditConfigurationDialog";
 import { RenameContainerDialog } from "./RenameContainerDialog";
 
 // The rename control's gate: "pending" while the machine query is in
@@ -57,6 +60,26 @@ function ContainerOverview({
 	onRename: () => void;
 }) {
 	const environment = Object.entries(container.environment ?? {});
+	// The healthcheck's timing line: only the fields the container
+	// carries, joined into one gray line under the command.
+	const healthcheckTiming = container.healthcheck
+		? [
+				container.healthcheck.interval
+					? `Interval ${container.healthcheck.interval}`
+					: null,
+				container.healthcheck.timeout
+					? `Timeout ${container.healthcheck.timeout}`
+					: null,
+				container.healthcheck.startPeriod
+					? `Start period ${container.healthcheck.startPeriod}`
+					: null,
+				container.healthcheck.retries != null
+					? `Retries ${container.healthcheck.retries}`
+					: null,
+			]
+				.filter((part) => part !== null)
+				.join(" · ")
+		: "";
 	return (
 		<TableContainer data-testid="container-detail-overview">
 			<Table size="sm">
@@ -203,6 +226,41 @@ function ContainerOverview({
 								: "None"}
 						</Text>
 					</DetailRow>
+					{/* The current limits and healthcheck (spec 412): what the
+					edit-configuration dialog prefills from and what a
+					successful update refreshes. */}
+					<DetailRow label="CPUs">
+						<Text data-testid="container-detail-cpus">
+							{container.limits?.cpus ? container.limits.cpus : "None"}
+						</Text>
+					</DetailRow>
+					<DetailRow label="Memory">
+						<Text fontFamily="mono" data-testid="container-detail-memory">
+							{container.limits?.memory ? container.limits.memory : "None"}
+						</Text>
+					</DetailRow>
+					<DetailRow label="Healthcheck">
+						{container.healthcheck ? (
+							<VStack
+								spacing={0}
+								align="start"
+								data-testid="container-detail-healthcheck"
+							>
+								<Text fontFamily="mono">
+									{container.healthcheck.disabled
+										? "Disabled"
+										: container.healthcheck.command || "None"}
+								</Text>
+								{!container.healthcheck.disabled && healthcheckTiming ? (
+									<Text fontSize="sm" color="gray.500">
+										{healthcheckTiming}
+									</Text>
+								) : null}
+							</VStack>
+						) : (
+							<Text color="gray.500">None</Text>
+						)}
+					</DetailRow>
 				</Tbody>
 			</Table>
 		</TableContainer>
@@ -223,11 +281,13 @@ export function ContainerDetailPage() {
 	const query = useContainer(machineId!, containerId!);
 	const [revealed, setRevealed] = useState(false);
 	const [renaming, setRenaming] = useState(false);
+	const [editingConfig, setEditingConfig] = useState(false);
 	const inspectQuery = useContainerInspect(machineId!, containerId!, {
 		enabled: revealed,
 	});
 	const { data: machine, error: machineError } = useMachine(machineId!);
 	const rename = useRenameContainer(machineId!, containerId!);
+	const update = useUpdateContainer(machineId!, containerId!);
 	const container = query.data;
 	// A failed machine query leaves the caller's level unknown; render the
 	// hint rather than a bare gap, so a read-only caller is never left
@@ -251,6 +311,22 @@ export function ContainerDetailPage() {
 				inspectQuery={inspectQuery}
 				revealed={revealed}
 				onToggleInspect={() => setRevealed((value) => !value)}
+				headerActions={
+					// The edit-configuration action (spec 412, ticket #414),
+					// gated by the containers manage capability — the pod
+					// detail page's header-button pattern: hidden below write
+					// level and while the machine query is pending, so a
+					// read-only caller is never baited into a 403.
+					machine && can(machine, "manage-containers") ? (
+						<Button
+							size="sm"
+							onClick={() => setEditingConfig(true)}
+							data-testid="edit-configuration-button"
+						>
+							Edit configuration
+						</Button>
+					) : undefined
+				}
 			>
 				{container ? (
 					<ContainerOverview
@@ -266,6 +342,13 @@ export function ContainerDetailPage() {
 					currentName={container.name}
 					mutation={rename}
 					onClose={() => setRenaming(false)}
+				/>
+			) : null}
+			{editingConfig && container ? (
+				<EditConfigurationDialog
+					container={container}
+					mutation={update}
+					onClose={() => setEditingConfig(false)}
 				/>
 			) : null}
 		</>

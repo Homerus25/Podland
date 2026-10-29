@@ -237,6 +237,38 @@ describe("DetailPage", () => {
 		).toBe("1");
 	});
 
+	// The optional header actions slot (spec 412, ticket #414): a page
+	// hands over the actions its header carries (the container detail
+	// page's "Edit configuration" button). The slot is optional — the
+	// pages that pass nothing render exactly the header they always did.
+	it("renders the optional header actions beside the title when handed over", () => {
+		renderDetailPage(
+			<DetailPage
+				{...defaultProps({
+					headerActions: (
+						<button type="button" data-testid="header-action-button">
+							Edit configuration
+						</button>
+					),
+				})}
+			/>,
+		);
+
+		const action = screen.getByTestId("header-action-button");
+		expect(action).toBeInTheDocument();
+		// The action rides the header row, beside the back button and title.
+		const header = screen.getByTestId("detail-page-title").parentElement;
+		expect(header).toContainElement(action);
+	});
+
+	it("renders no header actions region when the slot is not used", () => {
+		renderDetailPage(<DetailPage {...defaultProps()} />);
+
+		expect(
+			screen.queryByTestId("detail-page-header-actions"),
+		).not.toBeInTheDocument();
+	});
+
 	it("keeps the inspect JSON hidden by default and toggles it on reveal", async () => {
 		const user = userEvent.setup();
 		renderDetailPage(<StatefulDetailPage {...defaultProps()} />);

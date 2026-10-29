@@ -328,6 +328,7 @@ func New(cfg *config.Config) (*App, error) {
 							r.With(requireWrite).Post("/stop", containerHandler.Stop)
 							r.With(requireWrite).Post("/restart", containerHandler.Restart)
 							r.With(requireWrite).Post("/rename", containerHandler.Rename)
+							r.With(requireWrite).Post("/update", containerHandler.Update)
 							r.With(requireWrite).Delete("/", containerHandler.Delete)
 							r.Get("/logs", containerHandler.Logs)
 							r.Get("/inspect", containerHandler.Inspect)

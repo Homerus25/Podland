@@ -254,7 +254,19 @@ Get details of a specific container.
   "labels": { "key": "value" },
   "networks": ["string"],
   "logPath": "string",
-  "config": { ... }
+  "config": { ... },
+  "limits": {
+    "cpus": "number (from the inspect report's CPU quota/period; 0 when unset)",
+    "memory": "string (podman units syntax e.g. \"512m\"; empty when unset)"
+  },
+  "healthcheck": {
+    "command": "string (from the inspect report's test array; empty when disabled)",
+    "interval": "string (Go duration e.g. \"30s\"; omitted when inherited)",
+    "timeout": "string (Go duration; omitted when inherited)",
+    "startPeriod": "string (Go duration; omitted when inherited)",
+    "retries": "integer",
+    "disabled": "boolean (true when the test array is NONE)"
+  }
 }
 ```
 
@@ -271,7 +283,16 @@ and binds alike, in report order; the mount's `rw` flag is not included in
 these display strings — use the structured `volumes` entries for read-write
 state); `networks` lists the names of the networks the container is
 attached to (the keys of the inspect report's `NetworkSettings.Networks`),
-sorted by name.
+sorted by name. The `limits` and `healthcheck` fields are optional too
+(omitted when the container carries no limits / no healthcheck): `limits`
+reports the current resource limits — `cpus` derived from the inspect
+report's CPU quota/period, `memory` rendered back into podman units
+syntax — and `healthcheck` reports the current healthcheck — the command
+derived from the inspect report's test array (`CMD` arguments or a
+`CMD-SHELL` command joined into one string; a `NONE` test reports
+`disabled: true`), durations as Go duration strings (a zero duration
+means "inherit podman's default" and is omitted). Together they prefill
+the edit-configuration form served by `POST .../containers/{containerId}/update`.
 
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
@@ -434,6 +455,57 @@ new name.
 - 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 409: `CONTAINER_ALREADY_EXISTS` (another container on the machine
   already carries the new name)
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
+### POST /api/machines/{id}/containers/{containerId}/update
+
+Change an existing container's resource limits (cpus, memory) and
+healthcheck configuration. The contract is patch semantics: omitted
+fields mean "unchanged" — only the fields the request carries are
+forwarded to podman's container update, and podman merges resource
+fields, so sending only a memory limit leaves the CPU limit alone, and
+vice versa. Clearing a limit is not supported (an empty field means
+"unchanged"; podman has no clear semantics). Podman applies limit
+changes live to a running container and rewrites a stopped container's
+config for the next start, so there is no state restriction. The
+healthcheck command accepts podman CLI syntax — a bare command, or a
+`CMD`/`CMD-SHELL`-prefixed one. The disable flag is mutually exclusive
+with every other healthcheck field (podman refuses the combination, so
+the backend answers 400 without a round trip).
+
+**Authentication:** Required
+
+**Request:**
+```json
+{
+  "cpus": "number (optional, positive; omitted or zero means unchanged)",
+  "memory": "string (optional, podman units syntax e.g. \"512m\"; omitted or empty means unchanged)",
+  "healthcheck": {
+    "cmd": "string (optional, podman CLI syntax — bare, CMD-prefixed, or CMD-SHELL-prefixed)",
+    "interval": "string (optional, Go duration e.g. \"30s\")",
+    "timeout": "string (optional, Go duration e.g. \"5s\")",
+    "startPeriod": "string (optional, Go duration e.g. \"0m30s\")",
+    "retries": "integer (optional, non-negative)",
+    "disabled": "boolean (optional; mutually exclusive with every other healthcheck field)"
+  }
+}
+```
+
+**Response (Success - 200):** the updated container detail DTO, the same
+shape as `GET /api/machines/{id}/containers/{containerId}`, carrying the
+new limits and healthcheck.
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body), `VALIDATION_FAILED` (an
+  unparseable memory value, a malformed duration, a non-positive cpus
+  value, or the disable flag combined with another healthcheck field —
+  the message names the field), `MISSING_CONTAINER_ID`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 

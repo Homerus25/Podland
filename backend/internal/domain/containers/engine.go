@@ -31,6 +31,13 @@ type ContainerEngine interface {
 	// Podman renames running and stopped containers alike, so there is
 	// no state restriction here.
 	Rename(id, newName string) error
+	// Update changes the container's resource limits and healthcheck
+	// configuration through podman's container update and answers one
+	// error, like Rename (podman's update answers a bare error, no
+	// report slice, so nothing is folded). Patch semantics: the
+	// options carry only the fields the request presented, nil means
+	// unchanged.
+	Update(id string, opts *entities.ContainerUpdateOptions) error
 	// Remove removes the container (force also removes a running one)
 	// and answers one error, like Start.
 	Remove(id string, force bool) error
@@ -175,6 +182,17 @@ func (e *podmanContainerEngine) Remove(id string, force bool) error {
 // report slice), so nothing is folded here.
 func (e *podmanContainerEngine) Rename(id, newName string) error {
 	return e.tunnelEngine().ContainerRename(e.ctx, id, entities.ContainerRenameOptions{NewName: newName})
+}
+
+// Update changes the container's resource limits and healthcheck
+// configuration. Podman's update answers a bare error like rename (no
+// report slice), so nothing is folded here; the tunnel impl runs the
+// deprecated specgen processing itself, which is a no-op with a nil
+// specgen.
+func (e *podmanContainerEngine) Update(id string, opts *entities.ContainerUpdateOptions) error {
+	opts.NameOrID = id
+	_, err := e.tunnelEngine().ContainerUpdate(e.ctx, opts)
+	return err
 }
 
 func (e *podmanContainerEngine) Logs(name string, opts entities.ContainerLogsOptions) error {

@@ -63,6 +63,44 @@ type ContainerGetResponse struct {
 	ExitCode *int32 `json:"exitCode,omitempty"`
 	// Container size information
 	Size *ContainerSizeResponse `json:"size,omitempty"`
+	// Current resource limits (cpus, memory), mapped from the inspect
+	// report; nil when the container carries no limits
+	Limits *ContainerLimitsResponse `json:"limits,omitempty"`
+	// Current healthcheck configuration, mapped from the inspect
+	// report; nil when the container carries no healthcheck
+	Healthcheck *ContainerHealthcheckResponse `json:"healthcheck,omitempty"`
+}
+
+// ContainerLimitsResponse reports the container's current resource
+// limits — the prefill for the edit form. CPUs derives from the inspect
+// report's CPU quota/period; memory renders back into podman units
+// syntax, the same vocabulary the update request accepts.
+type ContainerLimitsResponse struct {
+	// CPU limit (quota/period from the inspect report; 0 when unset)
+	CPUs float64 `json:"cpus"`
+	// Memory limit in podman units syntax (e.g. "512m"; empty when
+	// unset)
+	Memory string `json:"memory"`
+}
+
+// ContainerHealthcheckResponse reports the container's current
+// healthcheck configuration — the prefill for the edit form. The
+// command derives from the inspect report's test array (CMD arguments
+// or a CMD-SHELL command joined into one string); durations render as
+// Go duration strings, the same vocabulary the update request accepts.
+type ContainerHealthcheckResponse struct {
+	// Healthcheck command (empty when the healthcheck is disabled)
+	Command string `json:"command"`
+	// Probe interval as a Go duration string
+	Interval string `json:"interval,omitempty"`
+	// Probe timeout as a Go duration string
+	Timeout string `json:"timeout,omitempty"`
+	// Start period as a Go duration string
+	StartPeriod string `json:"startPeriod,omitempty"`
+	// Retries before the container is marked unhealthy
+	Retries uint `json:"retries,omitempty"`
+	// Whether the healthcheck is disabled (a NONE test)
+	Disabled bool `json:"disabled"`
 }
 
 // PortMappingResponse represents a port mapping in the API response
@@ -198,6 +236,53 @@ type ContainerCreateRequest struct {
 type ContainerRenameRequest struct {
 	// New name for the container (required)
 	Name string `json:"name" validate:"required,min=1,max=255"`
+}
+
+// ContainerUpdateRequest is the body of POST
+// /api/machines/{id}/containers/{containerId}/update. The contract is
+// patch semantics: omitted fields mean "unchanged", and only present
+// fields are forwarded to podman's container update. The wire guards
+// that can be struct tags live there (the positive-cpus guard, owned by
+// web.Decode per the create-builder settlement); the ones that cannot
+// (the memory units parse, the Go duration parses, the disable-flag
+// exclusivity) live in the pure update builder (update_spec.go),
+// mirroring the create builder's memory-parse exception.
+type ContainerUpdateRequest struct {
+	// CPU limit (optional, positive; omitted or zero means unchanged).
+	// The struct tag owns the guard: zero is the absent marker (patch
+	// semantics), a negative value fails decode with the documented 400
+	// VALIDATION_FAILED.
+	CPUs float64 `json:"cpus,omitempty" validate:"omitempty,gt=0"`
+	// Memory limit in podman units syntax (optional, e.g. "512m";
+	// omitted or empty means unchanged)
+	Memory string `json:"memory,omitempty"`
+	// Healthcheck changes (optional; absent means the healthcheck is
+	// unchanged)
+	Healthcheck *ContainerHealthcheckUpdateRequest `json:"healthcheck,omitempty"`
+}
+
+// ContainerHealthcheckUpdateRequest carries the healthcheck fields of an
+// update request. Every field is a pointer so presence is detectable —
+// nil means unchanged, mirroring podman's own changed-healthcheck
+// struct. The disable flag is mutually exclusive with every other field
+// (enforced in the update builder, because go-playground/validator has
+// no cross-field tag).
+type ContainerHealthcheckUpdateRequest struct {
+	// Healthcheck command in podman CLI syntax — a bare command or a
+	// CMD/CMD-SHELL-prefixed one (optional)
+	Cmd *string `json:"cmd,omitempty"`
+	// Probe interval as a Go duration string (optional, e.g. "30s")
+	Interval *string `json:"interval,omitempty"`
+	// Probe timeout as a Go duration string (optional, e.g. "5s")
+	Timeout *string `json:"timeout,omitempty"`
+	// Start period as a Go duration string (optional, e.g. "0m30s")
+	StartPeriod *string `json:"startPeriod,omitempty"`
+	// Retries before the container is marked unhealthy (optional,
+	// non-negative)
+	Retries *uint `json:"retries,omitempty"`
+	// Disable the container's healthcheck (optional; mutually exclusive
+	// with every other field)
+	Disabled *bool `json:"disabled,omitempty"`
 }
 
 // PortBindingRequest represents a port binding request
@@ -344,6 +429,12 @@ func FromPodmanInspectContainer(containerReport *entities.ContainerInspectReport
 	// matching the frontend fixture format.
 	response.Mounts = mapContainerMounts(containerReport.Mounts)
 
+	// The current resource limits and healthcheck — the edit form's
+	// prefill, owned by the backend mapping (the frontend never parses
+	// the raw inspect report for form defaults).
+	response.Limits = mapContainerLimits(containerReport.HostConfig)
+	response.Healthcheck = mapContainerHealthcheck(containerReport.Config)
+
 	// The attached networks, sorted by name for a stable response
 	response.Networks = mapContainerNetworks(containerReport.NetworkSettings)
 
@@ -482,6 +573,95 @@ func mapContainerMounts(mounts []libpoddefine.InspectMount) []string {
 		result = append(result, fmt.Sprintf("type=%s,source=%s,destination=%s", mount.Type, mount.Source, mount.Destination))
 	}
 	return result
+}
+
+// mapContainerLimits maps the inspect report's host config down to the
+// current resource limits: cpus derives from the CPU quota/period when
+// both are set, and memory renders back into podman units syntax
+// (renderMemoryLimit, the same vocabulary RAMInBytes parses — the
+// create page's and the podman CLI's "512m", not go-units' "512MiB").
+// A host config without limits maps nil, so the JSON response omits the
+// field.
+func mapContainerLimits(hostConfig *libpoddefine.InspectContainerHostConfig) *ContainerLimitsResponse {
+	if hostConfig == nil {
+		return nil
+	}
+	limits := &ContainerLimitsResponse{}
+	if hostConfig.CpuPeriod > 0 && hostConfig.CpuQuota > 0 {
+		limits.CPUs = float64(hostConfig.CpuQuota) / float64(hostConfig.CpuPeriod)
+	}
+	if hostConfig.Memory > 0 {
+		limits.Memory = renderMemoryLimit(hostConfig.Memory)
+	}
+	if limits.CPUs == 0 && limits.Memory == "" {
+		return nil
+	}
+	return limits
+}
+
+// renderMemoryLimit renders a byte limit back into podman units syntax —
+// the inverse of go-units' RAMInBytes, which parses "512m" as 512 MiB:
+// the exact binary multiples render with their one-letter suffix (b, k,
+// m, g, t; k = 1024), the largest exact multiple wins, and a limit that
+// is no clean multiple falls back to plain bytes with the "b" suffix.
+// The create page's memory field and the podman CLI accept exactly this
+// vocabulary, so a prefilled value survives an in-place edit.
+func renderMemoryLimit(limit int64) string {
+	steps := []struct {
+		size   int64
+		suffix string
+	}{
+		{1 << 40, "t"},
+		{1 << 30, "g"},
+		{1 << 20, "m"},
+		{1 << 10, "k"},
+	}
+	for _, step := range steps {
+		if limit >= step.size && limit%step.size == 0 {
+			return strconv.FormatInt(limit/step.size, 10) + step.suffix
+		}
+	}
+	return strconv.FormatInt(limit, 10) + "b"
+}
+
+// mapContainerHealthcheck maps the inspect report's healthcheck config
+// down to the current healthcheck: the command derives from the test
+// array (CMD arguments or a CMD-SHELL command joined into one string; a
+// NONE test marks the healthcheck disabled), and the durations render
+// as Go duration strings — the same vocabulary the update request
+// accepts. A zero duration means "inherit podman's default", so it maps
+// to an empty string: prefilled into a form and resubmitted, a "0s"
+// would disable the probe timer instead of leaving it unchanged. A
+// config without a healthcheck maps nil, so the JSON response omits
+// the field.
+func mapContainerHealthcheck(config *libpoddefine.InspectContainerConfig) *ContainerHealthcheckResponse {
+	if config == nil || config.Healthcheck == nil {
+		return nil
+	}
+	healthcheck := &ContainerHealthcheckResponse{
+		Retries: uint(config.Healthcheck.Retries),
+	}
+	if config.Healthcheck.Interval > 0 {
+		healthcheck.Interval = config.Healthcheck.Interval.String()
+	}
+	if config.Healthcheck.Timeout > 0 {
+		healthcheck.Timeout = config.Healthcheck.Timeout.String()
+	}
+	if config.Healthcheck.StartPeriod > 0 {
+		healthcheck.StartPeriod = config.Healthcheck.StartPeriod.String()
+	}
+	switch {
+	case len(config.Healthcheck.Test) == 0:
+	case config.Healthcheck.Test[0] == "NONE":
+		healthcheck.Disabled = true
+	case config.Healthcheck.Test[0] == "CMD":
+		healthcheck.Command = strings.Join(config.Healthcheck.Test[1:], " ")
+	case config.Healthcheck.Test[0] == "CMD-SHELL":
+		healthcheck.Command = strings.Join(config.Healthcheck.Test[1:], " ")
+	default:
+		healthcheck.Command = strings.Join(config.Healthcheck.Test, " ")
+	}
+	return healthcheck
 }
 
 // Helper function to map the report's attached networks to their names,

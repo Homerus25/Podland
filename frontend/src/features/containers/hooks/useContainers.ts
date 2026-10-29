@@ -1,4 +1,7 @@
-import type { CreateContainerInput } from "@features/containers/services/containersApi";
+import type {
+	CreateContainerInput,
+	UpdateContainerInput,
+} from "@features/containers/services/containersApi";
 import {
 	createContainer,
 	deleteContainer,
@@ -10,6 +13,7 @@ import {
 	restartContainer,
 	startContainer,
 	stopContainer,
+	updateContainer,
 } from "@features/containers/services/containersApi";
 import {
 	containerInspectQueryKey,
@@ -95,6 +99,19 @@ export function useRenameContainer(machineId: string, containerId: string) {
 		machineId,
 		["containers", "pods"],
 		(name: string) => renameContainer(machineId, containerId, name),
+	);
+}
+
+// A configuration update changes the container's own detail data (limits
+// and healthcheck) and nothing else: the containers list and the detail and
+// inspect queries refetch (the detail and inspect keys extend the
+// containers key, so the invalidation's prefix match covers them).
+export function useUpdateContainer(machineId: string, containerId: string) {
+	return useListInvalidatingMutation(
+		machineId,
+		"containers",
+		(input: UpdateContainerInput) =>
+			updateContainer(machineId, containerId, input),
 	);
 }
 

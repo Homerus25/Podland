@@ -62,6 +62,27 @@ export interface ContainerSize {
 	rwSize: number;
 }
 
+// The container's current resource limits (backend dto.go
+// ContainerLimitsResponse): the prefill for the edit-configuration form.
+// CPUs is 0 when unset; memory is empty when unset.
+export interface ContainerLimits {
+	cpus: number;
+	memory: string;
+}
+
+// The container's current healthcheck (backend dto.go
+// ContainerHealthcheckResponse): the prefill for the edit-configuration
+// form. The command is empty when the healthcheck is disabled; durations
+// are Go duration strings.
+export interface ContainerHealthcheck {
+	command: string;
+	interval?: string;
+	timeout?: string;
+	startPeriod?: string;
+	retries?: number;
+	disabled: boolean;
+}
+
 // Container as returned by GET /api/machines/{id}/containers/{containerId}
 // (backend/internal/domain/containers/dto.go ContainerGetResponse, extended
 // with entrypoint/secrets/volumes/exposedPorts by spec 301 ticket #302).
@@ -89,6 +110,10 @@ export interface ContainerDetail {
 	exited: boolean;
 	exitCode?: number;
 	size?: ContainerSize;
+	// Current resource limits; absent when the container carries none.
+	limits?: ContainerLimits;
+	// Current healthcheck; absent when the container carries none.
+	healthcheck?: ContainerHealthcheck;
 }
 
 // Envelope of GET /api/machines/{id}/containers
@@ -530,6 +555,134 @@ export async function renameContainer(
 		{ name },
 	);
 	return response.data;
+}
+
+// The healthcheck slice of an update request (backend dto.go
+// ContainerHealthcheckUpdateRequest): every field optional — absent means
+// unchanged. The disable flag is mutually exclusive with every other
+// healthcheck field.
+export interface ContainerHealthcheckUpdate {
+	cmd?: string;
+	interval?: string;
+	timeout?: string;
+	startPeriod?: string;
+	retries?: number;
+	disabled?: boolean;
+}
+
+// The body of POST /api/machines/{id}/containers/{containerId}/update
+// (backend dto.go ContainerUpdateRequest): patch semantics — absent
+// fields mean "unchanged", and only present fields are forwarded to
+// podman's container update.
+export interface UpdateContainerInput {
+	cpus?: number;
+	memory?: string;
+	healthcheck?: ContainerHealthcheckUpdate;
+}
+
+// POST /api/machines/{id}/containers/{containerId}/update -> 200
+// (backend/internal/domain/containers/handler.go ContainerHandler.Update).
+// The response is the updated container detail DTO, the same shape the
+// detail GET answers, carrying the new limits and healthcheck.
+export async function updateContainer(
+	machineId: string,
+	containerId: string,
+	input: UpdateContainerInput,
+): Promise<ContainerDetail> {
+	const response = await api.post<ContainerDetail>(
+		machineApiPath(machineId, "containers", containerId, "update"),
+		input,
+	);
+	return response.data;
+}
+
+// The edit-configuration form's values (spec 412, ticket #414): the
+// resource-limit slice the shared inputs own, plus the healthcheck
+// fields. Every field is a string the user typed (or the prefill
+// rendered); the builder below maps them onto the patch payload.
+export interface ContainerConfigFormValues {
+	cpus: string;
+	memory: string;
+	command: string;
+	interval: string;
+	timeout: string;
+	startPeriod: string;
+	retries: string;
+	disabled: boolean;
+}
+
+// Maps the container detail DTO onto the edit-configuration form's
+// prefill: the current limits and healthcheck the user sees before
+// changing anything. Unset limits and absent healthcheck fields render
+// as empty strings — the form's "unchanged" vocabulary.
+export function containerConfigPrefill(
+	container: ContainerDetail,
+): ContainerConfigFormValues {
+	return {
+		cpus: container.limits?.cpus ? String(container.limits.cpus) : "",
+		memory: container.limits?.memory ?? "",
+		command: container.healthcheck?.command ?? "",
+		interval: container.healthcheck?.interval ?? "",
+		timeout: container.healthcheck?.timeout ?? "",
+		startPeriod: container.healthcheck?.startPeriod ?? "",
+		retries:
+			container.healthcheck?.retries != null
+				? String(container.healthcheck.retries)
+				: "",
+		disabled: container.healthcheck?.disabled ?? false,
+	};
+}
+
+// Maps the edit-configuration form onto the update request (the
+// create-page precedent: the form-to-payload mapping lives in the
+// services module). The contract is patch semantics — only fields the
+// user changed travel, empty means unchanged, and clearing a limit or a
+// healthcheck field is not a supported change (podman has no clear
+// semantics). A field changed when its trimmed value differs from the
+// trimmed prefill — whitespace alone is no change — and a changed value
+// travels trimmed. The disable toggle is exclusive: when set, the
+// healthcheck carries the disable flag alone.
+export function buildUpdateContainerInput(
+	values: ContainerConfigFormValues,
+	prefill: ContainerConfigFormValues,
+): UpdateContainerInput {
+	const input: UpdateContainerInput = {};
+	// The one changed-check: a non-empty trimmed value that differs from
+	// the trimmed prefill.
+	const changed = (value: string, prefillValue: string) =>
+		value.trim() !== "" && value.trim() !== prefillValue.trim();
+	if (changed(values.cpus, prefill.cpus)) {
+		input.cpus = Number.parseFloat(values.cpus.trim());
+	}
+	if (changed(values.memory, prefill.memory)) {
+		input.memory = values.memory.trim();
+	}
+	if (values.disabled) {
+		if (!prefill.disabled) {
+			input.healthcheck = { disabled: true };
+		}
+		return input;
+	}
+	const healthcheck: ContainerHealthcheckUpdate = {};
+	if (changed(values.command, prefill.command)) {
+		healthcheck.cmd = values.command.trim();
+	}
+	if (changed(values.interval, prefill.interval)) {
+		healthcheck.interval = values.interval.trim();
+	}
+	if (changed(values.timeout, prefill.timeout)) {
+		healthcheck.timeout = values.timeout.trim();
+	}
+	if (changed(values.startPeriod, prefill.startPeriod)) {
+		healthcheck.startPeriod = values.startPeriod.trim();
+	}
+	if (changed(values.retries, prefill.retries)) {
+		healthcheck.retries = Number.parseInt(values.retries, 10);
+	}
+	if (Object.keys(healthcheck).length > 0) {
+		input.healthcheck = healthcheck;
+	}
+	return input;
 }
 
 // DELETE /api/machines/{id}/containers/{containerId} -> 204

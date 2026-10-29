@@ -154,6 +154,17 @@ export function containerDetailFixture(
 		networks: ["app-net"],
 		restarts: 0,
 		exited: false,
+		// The current limits and healthcheck (spec 412): the
+		// edit-configuration form's prefill baseline.
+		limits: { cpus: 1.5, memory: "512m" },
+		healthcheck: {
+			command: "curl -f http://localhost/health || exit 1",
+			interval: "30s",
+			timeout: "5s",
+			startPeriod: "0m30s",
+			retries: 3,
+			disabled: false,
+		},
 		...overrides,
 	};
 }
