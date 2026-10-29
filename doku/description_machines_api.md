@@ -166,6 +166,33 @@ Perform a live status check of a machine. The machine is online when the SSH con
 
 ---
 
+### GET /api/machines/{id}/version
+
+Ask the remote Podman service API for its `/version` report over the cached per-machine connection (the same acquisition seam as every other machine-scoped podman call) and answer the server component's `Version` and `APIVersion`. The versions are a live remote fact, not stored data. Any user with access may call the endpoint (read level suffices, same as status).
+
+Unavailable is a valid answer, not an error: when the connection or the version call fails, the endpoint answers 200 with both fields `null`. The failure is logged server-side with the request ID; connection-level detail never reaches the response, because SSH-level errors describe the owner's infrastructure and machines can be shared with read-only users (the status endpoint's rule).
+
+**Authentication:** Required
+
+**Response (Success - 200):**
+```json
+{
+  "podmanVersion": "5.4.1",
+  "apiVersion": "5.4.1"
+}
+```
+
+- `podmanVersion`: the remote Podman server component's version, or `null` when it could not be asked
+- `apiVersion`: the remote Podman service API's version, or `null` when it could not be asked
+
+**Response (Error):**
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+
+---
+
 ### PUT /api/machines/{id}
 
 Update an existing machine's connection details.

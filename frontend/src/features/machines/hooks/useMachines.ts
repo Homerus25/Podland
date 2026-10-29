@@ -4,6 +4,7 @@ import {
 	deleteMachine,
 	getMachine,
 	getMachineStatus,
+	getMachineVersion,
 	grantMachineAccess,
 	listMachineAccess,
 	listMachines,
@@ -16,6 +17,7 @@ import {
 	machineDetailKey,
 	machineStatusQueryKey,
 	machinesQueryKey,
+	machineVersionQueryKey,
 } from "@shared/queries/queryKeys";
 import type { MachinePermission } from "@shared/types/api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -35,6 +37,18 @@ export function useMachineStatus(machineId: string) {
 	return useQuery({
 		queryKey: machineStatusQueryKey(machineId),
 		queryFn: () => getMachineStatus(machineId),
+		staleTime: 0,
+	});
+}
+
+// Remote Podman's version report for the detail page header. Mirrors the
+// status probe's staleness pattern exactly: staleTime 0 and no refetch
+// interval — the version is fresh on every mount of the page and never
+// polled.
+export function useMachineVersion(machineId: string) {
+	return useQuery({
+		queryKey: machineVersionQueryKey(machineId),
+		queryFn: () => getMachineVersion(machineId),
 		staleTime: 0,
 	});
 }

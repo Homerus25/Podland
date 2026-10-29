@@ -13,7 +13,10 @@ import { ContainerList } from "@features/containers/components/ContainerList";
 import { ImageList } from "@features/images/components/ImageList";
 import { MachineSettingsTab } from "@features/machines/components/MachineSettingsTab";
 import { PermissionBadge } from "@features/machines/components/PermissionBadge";
-import { useMachine } from "@features/machines/hooks/useMachines";
+import {
+	useMachine,
+	useMachineVersion,
+} from "@features/machines/hooks/useMachines";
 import { NetworkList } from "@features/networks/components/NetworkList";
 import { PodList } from "@features/pods/components/PodList";
 import { QuadletList } from "@features/quadlets/components/QuadletList";
@@ -50,6 +53,15 @@ export function MachineDetailPage() {
 	const { machineId } = useParams<{ machineId: string }>();
 	const [searchParams] = useSearchParams();
 	const { data: machine, isPending, error } = useMachine(machineId!);
+	// The remote Podman's version report is a live fact, fetched fresh on
+	// every page visit (staleTime 0, the status probe's pattern). While the
+	// fetch is pending the header shows no version text; null fields (the
+	// machine is offline or the version call failed) render the
+	// unavailable fallback — never an error, a down machine must not break
+	// the page header.
+	const { data: version, isPending: versionPending } = useMachineVersion(
+		machineId!,
+	);
 
 	if (isPending) {
 		return <Text data-testid="machine-loading">Loading machine…</Text>;
@@ -83,6 +95,17 @@ export function MachineDetailPage() {
 				<Text fontFamily="mono" color="gray.500" data-testid="machine-ssh-user">
 					ssh user: {machine.sshUsername}
 				</Text>
+				{!versionPending && (
+					<Text
+						fontFamily="mono"
+						color="gray.500"
+						data-testid="machine-podman-version"
+					>
+						{version?.podmanVersion && version?.apiVersion
+							? `podman ${version.podmanVersion} · api ${version.apiVersion}`
+							: "podman version unavailable"}
+					</Text>
+				)}
 			</HStack>
 			{/* Lazy mounting: a tab's panel mounts on first activation and
 			unmounts on leave (Chakra's default lazyBehavior), so each tab's

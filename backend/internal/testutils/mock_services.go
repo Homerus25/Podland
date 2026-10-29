@@ -71,7 +71,15 @@ type MockConnectionManager struct {
 	testConnectionCalls []MockTestConnectionCall
 	probeErr            error
 	probeCalls          []MockProbeCall
+	withConnectionCalls []MockWithConnectionCall
 	removeMachineCalls  []string
+}
+
+// MockWithConnectionCall records a single WithConnection invocation.
+type MockWithConnectionCall struct {
+	Op        string
+	MachineID string
+	UserID    string
 }
 
 // The mock satisfies the full connections.Manager seam so services can
@@ -127,10 +135,19 @@ func NewMockConnectionManagerWithTestError(testErr error) *MockConnectionManager
 // crosses as-is (the 502 mapping is the production manager's job),
 // otherwise fn's error propagates untouched.
 func (m *MockConnectionManager) WithConnection(ctx context.Context, userID, machineID, op string, fn func(connCtx context.Context) error) error {
+	m.withConnectionCalls = append(m.withConnectionCalls, MockWithConnectionCall{Op: op, MachineID: machineID, UserID: userID})
 	if m.acquireErr != nil {
 		return m.acquireErr
 	}
 	return fn(mockConnectionContext())
+}
+
+// WithConnectionCalls returns a snapshot of every WithConnection
+// invocation, in call order.
+func (m *MockConnectionManager) WithConnectionCalls() []MockWithConnectionCall {
+	out := make([]MockWithConnectionCall, len(m.withConnectionCalls))
+	copy(out, m.withConnectionCalls)
+	return out
 }
 
 // RemoveMachine records the invalidation. MachineService.Delete must call

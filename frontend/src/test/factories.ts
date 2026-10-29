@@ -9,6 +9,7 @@ import type {
 	ImageDetail,
 	ImageSummary,
 } from "@features/images/services/imagesApi";
+import type { MachineVersion } from "@features/machines/services/machinesApi";
 import type {
 	NetworkDetail,
 	NetworkSummary,
@@ -613,6 +614,19 @@ export function rawInspectFixture(
 			Image: "docker.io/library/nginx:1.27",
 			Labels: { app: "web" },
 		},
+		...overrides,
+	};
+}
+
+// MachineVersion mirrors GET /api/machines/{id}/version: both fields are
+// null when the remote Podman could not be asked (offline is a valid
+// answer, not an error).
+export function machineVersionFixture(
+	overrides: Partial<MachineVersion> = {},
+): MachineVersion {
+	return {
+		podmanVersion: "5.4.1",
+		apiVersion: "5.4.1",
 		...overrides,
 	};
 }

@@ -101,6 +101,24 @@ export async function getMachineStatus(
 	return response.data;
 }
 
+// MachineVersion mirrors GET /api/machines/{id}/version
+// (backend/internal/domain/machines/handler.go). Both fields are null when
+// the remote Podman could not be asked — offline is a valid answer, not an
+// error.
+export interface MachineVersion {
+	podmanVersion: string | null;
+	apiVersion: string | null;
+}
+
+export async function getMachineVersion(
+	machineId: string,
+): Promise<MachineVersion> {
+	const response = await api.get<MachineVersion>(
+		machineApiPath(machineId, "version"),
+	);
+	return response.data;
+}
+
 export async function createMachine(
 	input: CreateMachineInput,
 ): Promise<MachineResponse> {

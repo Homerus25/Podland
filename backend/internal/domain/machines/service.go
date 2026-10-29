@@ -25,6 +25,12 @@ type MachineService struct {
 	conn        connections.Manager
 	encryption  sshKeyEncryptor
 	sshPool     sshInvalidator
+
+	// fetchVersion asks a live connection context for the remote Podman's
+	// version report (version.go). Production wires fetchRemoteVersion
+	// (engine.go); tests swap the field — the connections.Manager dial
+	// seam pattern.
+	fetchVersion versionFetcher
 }
 
 // NewMachineService creates a new MachineService. sshPool is the SSH-exec
@@ -38,11 +44,12 @@ func NewMachineService(
 	sshPool sshInvalidator,
 ) *MachineService {
 	return &MachineService{
-		machineRepo: machineRepo,
-		accessRepo:  accessRepo,
-		conn:        conn,
-		encryption:  encryption,
-		sshPool:     sshPool,
+		machineRepo:  machineRepo,
+		accessRepo:   accessRepo,
+		conn:         conn,
+		encryption:   encryption,
+		sshPool:      sshPool,
+		fetchVersion: fetchRemoteVersion,
 	}
 }
 

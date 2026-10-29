@@ -115,6 +115,10 @@ export function machineStatusQueryKey(id: string) {
 	return ["machines", id, "status"] as const;
 }
 
+export function machineVersionQueryKey(id: string) {
+	return ["machines", id, "version"] as const;
+}
+
 export function machineAccessQueryKey(id: string) {
 	return ["machines", id, "access"] as const;
 }

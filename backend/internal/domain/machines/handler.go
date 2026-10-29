@@ -80,6 +80,30 @@ func (h *MachineHandler) Status(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// MachineVersionResponse is the payload of GET /api/machines/{id}/version.
+// Both fields are null when the remote Podman could not be asked — offline
+// is a valid answer, not an error, and the underlying failure is logged
+// server-side only (the status endpoint's rule: SSH-level errors describe
+// the owner's infrastructure).
+type MachineVersionResponse struct {
+	PodmanVersion *string `json:"podmanVersion"`
+	APIVersion    *string `json:"apiVersion"`
+}
+
+// Version handles the live version check for a machine
+func (h *MachineHandler) Version(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (MachineVersionResponse, error) {
+		podmanVersion, apiVersion, err := h.service.GetMachineVersion(ctx, userID, machineID)
+		if err != nil {
+			return MachineVersionResponse{}, err
+		}
+		return MachineVersionResponse{
+			PodmanVersion: podmanVersion,
+			APIVersion:    apiVersion,
+		}, nil
+	})
+}
+
 // List handles listing the machines the caller can access
 func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) ([]AccessibleMachineResponse, error) {
