@@ -258,6 +258,46 @@ func (h *ContainerHandler) Prune(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Stats handles the all-stats literal route: one one-shot snapshot for
+// every running container on the machine. Nothing running is a legal
+// empty snapshot (200 with an empty array), and the route stays at the
+// subtree's read level like list/get/logs.
+func (h *ContainerHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerStatsResult, error) {
+		stats, err := h.service.Stats(ctx, userID, machineID, nil, true)
+		if err != nil {
+			return ContainerStatsResult{}, err
+		}
+		return ToContainerStatsResult(stats), nil
+	})
+}
+
+// ContainerStats handles the per-container stats subroute: the one
+// container's snapshot as a single DTO. A container without stats —
+// unknown or known-but-not-running, which podman's own stats handler
+// refuses alike — answers the domain's 404 sentinel.
+func (h *ContainerHandler) ContainerStats(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerStatsResponse, error) {
+		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
+		if guard != nil {
+			return ContainerStatsResponse{}, guard
+		}
+
+		stats, err := h.service.Stats(ctx, userID, machineID, []string{containerID}, false)
+		if err != nil {
+			return ContainerStatsResponse{}, err
+		}
+		if len(stats) == 0 {
+			// Podman's stats handler maps any first-report error to
+			// 404; a clean empty answer for a targeted container (a
+			// race between running and sampled) gets the same
+			// terminal rather than a fabricated zero DTO.
+			return ContainerStatsResponse{}, appErrors.ErrContainerNotFound
+		}
+		return FromPodmanContainerStats(stats[0]), nil
+	})
+}
+
 // Logs handles retrieving logs for a container. The query is parsed once:
 // only a clean follow request crosses the streaming envelope, while query
 // errors ride the JSON envelope even when follow=true was requested, so

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -207,4 +208,79 @@ func TestMapExposedPorts_RangeExpands(t *testing.T) {
 		{ContainerPort: 2002, Protocol: "udp"},
 		{ContainerPort: 8080, Protocol: "tcp"},
 	}, got)
+}
+
+// TestFromPodmanContainerStats_MapsRawValues pins the stats DTO mapping:
+// every field rides the DTO as a raw value (no formatting server-side),
+// and the network byte counters are summed over the container's
+// interfaces — two interfaces contribute to both directions.
+func TestFromPodmanContainerStats_MapsRawValues(t *testing.T) {
+	stats := define.ContainerStats{
+		ContainerID: "container-123",
+		Name:        "web",
+		CPU:         12.5,
+		MemUsage:    1048576,
+		MemLimit:    2147483648,
+		MemPerc:     0.05,
+		Network: map[string]define.ContainerNetworkStats{
+			"eth0": {RxBytes: 1000, TxBytes: 500},
+			"eth1": {RxBytes: 200, TxBytes: 300},
+		},
+		BlockInput:  4096,
+		BlockOutput: 8192,
+		PIDs:        7,
+	}
+
+	got := FromPodmanContainerStats(stats)
+
+	assert.Equal(t, ContainerStatsResponse{
+		ID:              "container-123",
+		Name:            "web",
+		CPUPercent:      12.5,
+		MemoryUsage:     1048576,
+		MemoryLimit:     2147483648,
+		MemoryPercent:   0.05,
+		NetworkBytesIn:  1200,
+		NetworkBytesOut: 800,
+		BlockBytesIn:    4096,
+		BlockBytesOut:   8192,
+		PIDs:            7,
+	}, got)
+}
+
+// TestFromPodmanContainerStats_NoInterfacesSumToZero pins the empty
+// network case: a container without interface stats maps to zero byte
+// counters, not a panic.
+func TestFromPodmanContainerStats_NoInterfacesSumToZero(t *testing.T) {
+	got := FromPodmanContainerStats(define.ContainerStats{ContainerID: "container-123"})
+
+	assert.Zero(t, got.NetworkBytesIn)
+	assert.Zero(t, got.NetworkBytesOut)
+}
+
+// TestToContainerStatsResult_Envelope pins the plural wrapper: the list
+// envelope carries one DTO per stats entry, the entry count as total,
+// and a timestamp — and an empty snapshot maps to an empty array,
+// never null.
+func TestToContainerStatsResult_Envelope(t *testing.T) {
+	got := ToContainerStatsResult([]define.ContainerStats{
+		{ContainerID: "container-123", Name: "web"},
+		{ContainerID: "container-456", Name: "db"},
+	})
+
+	require.Len(t, got.Containers, 2)
+	assert.Equal(t, "container-123", got.Containers[0].ID)
+	assert.Equal(t, "container-456", got.Containers[1].ID)
+	assert.Equal(t, 2, got.Total)
+	assert.NotEmpty(t, got.Timestamp, "the envelope carries a timestamp")
+}
+
+// TestToContainerStatsResult_EmptySnapshotIsLegal pins the legal empty
+// answer: nothing running maps to an empty (non-nil) container array.
+func TestToContainerStatsResult_EmptySnapshotIsLegal(t *testing.T) {
+	got := ToContainerStatsResult(nil)
+
+	require.NotNil(t, got.Containers, "an empty snapshot must map to an empty array, not null")
+	assert.Empty(t, got.Containers)
+	assert.Zero(t, got.Total)
 }

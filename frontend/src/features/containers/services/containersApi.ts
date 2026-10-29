@@ -730,6 +730,61 @@ export async function inspectContainer(
 	return response.data;
 }
 
+// One container's resource-usage snapshot
+// (backend/internal/domain/containers/dto.go ContainerStatsResponse): a
+// one-shot sample, no streaming. All values are raw numbers on the wire —
+// the frontend formats (spec 415).
+export interface ContainerStats {
+	id: string;
+	name: string;
+	cpuPercent: number;
+	memoryUsage: number;
+	memoryLimit: number;
+	memoryPercent: number;
+	// Summed over the container's interfaces.
+	networkBytesIn: number;
+	networkBytesOut: number;
+	blockBytesIn: number;
+	blockBytesOut: number;
+	pids: number;
+}
+
+// Envelope of GET /api/machines/{id}/containers/stats
+// (backend/internal/domain/containers/dto.go ContainerStatsResult).
+// Nothing running is a legal 200 with an empty containers array.
+export interface ContainerStatsListResult {
+	containers: ContainerStats[];
+	total: number;
+	timestamp: string;
+}
+
+// GET /api/machines/{id}/containers/stats -> 200
+// (backend/internal/domain/containers/handler.go ContainerHandler.Stats):
+// one snapshot of every running container on the machine. Stopped and
+// created containers do not appear.
+export async function listContainerStats(
+	machineId: string,
+): Promise<ContainerStats[]> {
+	const response = await api.get<ContainerStatsListResult>(
+		machineApiPath(machineId, "containers", "stats"),
+	);
+	return response.data.containers;
+}
+
+// GET /api/machines/{id}/containers/{containerId}/stats -> 200
+// (backend/internal/domain/containers/handler.go ContainerHandler.ContainerStats):
+// one container's snapshot. The container must be running — a stopped one
+// answers 404 with podman's own message riding in the error envelope.
+export async function getContainerStats(
+	machineId: string,
+	containerId: string,
+): Promise<ContainerStats> {
+	const response = await api.get<ContainerStats>(
+		machineApiPath(machineId, "containers", containerId, "stats"),
+	);
+	return response.data;
+}
+
 // Log source for GET /api/machines/{machineId}/containers/{containerId}/logs:
 // the kit owns the buffered tail fetch and the follow stream
 // (backend/internal/domain/containers handler pair).

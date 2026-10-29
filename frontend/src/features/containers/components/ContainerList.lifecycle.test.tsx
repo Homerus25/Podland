@@ -225,7 +225,11 @@ describe("ContainerList lifecycle", () => {
 				listRequests.push("list");
 				return HttpResponse.json({
 					containers: [
-						containerFixture({ id: "c-1", names: ["/runner"], state: "running" }),
+						containerFixture({
+							id: "c-1",
+							names: ["/runner"],
+							state: "running",
+						}),
 					],
 					total: 1,
 					timestamp: "2026-08-26T00:00:00Z",

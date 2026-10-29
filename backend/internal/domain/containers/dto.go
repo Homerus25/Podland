@@ -973,6 +973,84 @@ func FromPodmanContainerPruneReports(reports []*reports.PruneReport) []Container
 	return out
 }
 
+// ContainerStatsResponse is one container's row in a stats snapshot: raw
+// numeric values, no formatting server-side. The network byte counters
+// are summed over the container's interfaces at mapping time.
+type ContainerStatsResponse struct {
+	// Container ID
+	ID string `json:"id"`
+	// Container name
+	Name string `json:"name"`
+	// CPU usage in percent
+	CPUPercent float64 `json:"cpuPercent"`
+	// Memory usage in bytes
+	MemoryUsage uint64 `json:"memoryUsage"`
+	// Memory limit in bytes
+	MemoryLimit uint64 `json:"memoryLimit"`
+	// Memory usage in percent of the limit
+	MemoryPercent float64 `json:"memoryPercent"`
+	// Network bytes received, summed over interfaces
+	NetworkBytesIn uint64 `json:"networkBytesIn"`
+	// Network bytes sent, summed over interfaces
+	NetworkBytesOut uint64 `json:"networkBytesOut"`
+	// Block device bytes read
+	BlockBytesIn uint64 `json:"blockBytesIn"`
+	// Block device bytes written
+	BlockBytesOut uint64 `json:"blockBytesOut"`
+	// Number of processes in the container
+	PIDs uint64 `json:"pids"`
+}
+
+// ContainerStatsResult wraps the stats snapshot with metadata, the same
+// envelope shape as the container list.
+type ContainerStatsResult struct {
+	// One stats row per container in the snapshot
+	Containers []ContainerStatsResponse `json:"containers"`
+	// Count of stats rows
+	Total int `json:"total"`
+	// Snapshot timestamp
+	Timestamp string `json:"timestamp"`
+}
+
+// FromPodmanContainerStats converts a podman ContainerStats entity to the
+// stats DTO. Typed at both ends, mirroring the list mappers
+// (backend-conventions, candidate C22); the network byte counters are
+// summed over the entity's interfaces.
+func FromPodmanContainerStats(stats libpoddefine.ContainerStats) ContainerStatsResponse {
+	var networkBytesIn, networkBytesOut uint64
+	for _, iface := range stats.Network {
+		networkBytesIn += iface.RxBytes
+		networkBytesOut += iface.TxBytes
+	}
+	return ContainerStatsResponse{
+		ID:              stats.ContainerID,
+		Name:            stats.Name,
+		CPUPercent:      stats.CPU,
+		MemoryUsage:     stats.MemUsage,
+		MemoryLimit:     stats.MemLimit,
+		MemoryPercent:   stats.MemPerc,
+		NetworkBytesIn:  networkBytesIn,
+		NetworkBytesOut: networkBytesOut,
+		BlockBytesIn:    stats.BlockInput,
+		BlockBytesOut:   stats.BlockOutput,
+		PIDs:            stats.PIDs,
+	}
+}
+
+// ToContainerStatsResult converts a stats snapshot to the list envelope.
+// An empty snapshot maps to an empty array, never null.
+func ToContainerStatsResult(stats []libpoddefine.ContainerStats) ContainerStatsResult {
+	result := ContainerStatsResult{
+		Containers: make([]ContainerStatsResponse, len(stats)),
+		Total:      len(stats),
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+	}
+	for i, container := range stats {
+		result.Containers[i] = FromPodmanContainerStats(container)
+	}
+	return result
+}
+
 // Helper function to check if container is exited
 func isContainerExited(containerReport *entities.ContainerInspectReport) bool {
 	if containerReport != nil && containerReport.State != nil {

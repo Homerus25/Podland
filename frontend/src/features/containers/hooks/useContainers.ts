@@ -6,7 +6,9 @@ import {
 	createContainer,
 	deleteContainer,
 	getContainer,
+	getContainerStats,
 	inspectContainer,
+	listContainerStats,
 	listContainers,
 	pruneContainers,
 	renameContainer,
@@ -18,7 +20,9 @@ import {
 import {
 	containerInspectQueryKey,
 	containerQueryKey,
+	containerStatsQueryKey,
 	containersQueryKey,
+	containersStatsQueryKey,
 } from "@shared/queries/queryKeys";
 import {
 	invalidateMachineResources,
@@ -61,6 +65,39 @@ export function useContainerInspect(
 	return useQuery({
 		queryKey: containerInspectQueryKey(machineId, containerId),
 		queryFn: () => inspectContainer(machineId, containerId),
+		enabled: options?.enabled ?? true,
+		gcTime: 0,
+	});
+}
+
+// The all-stats snapshot behind the containers tab's stats dialog (spec
+// 415). The dialog mounts only while open and passes enabled so the
+// query runs only then; gcTime: 0 drops the cache entry the moment the
+// dialog unmounts, so every open fetches a fresh one-shot snapshot
+// instead of serving the previous one.
+export function useContainerStatsList(
+	machineId: string,
+	options?: { enabled?: boolean },
+) {
+	return useQuery({
+		queryKey: containersStatsQueryKey(machineId),
+		queryFn: () => listContainerStats(machineId),
+		enabled: options?.enabled ?? true,
+		gcTime: 0,
+	});
+}
+
+// The one-container stats snapshot behind the details page's stats
+// dialog (spec 415), the list hook's sibling: enabled only while the
+// dialog is open, gcTime: 0 so a reopen never serves a cached snapshot.
+export function useContainerStats(
+	machineId: string,
+	containerId: string,
+	options?: { enabled?: boolean },
+) {
+	return useQuery({
+		queryKey: containerStatsQueryKey(machineId, containerId),
+		queryFn: () => getContainerStats(machineId, containerId),
 		enabled: options?.enabled ?? true,
 		gcTime: 0,
 	});

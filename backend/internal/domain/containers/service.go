@@ -10,6 +10,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/inspect"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 	"github.com/Homerus25/podland/backend/internal/streaming"
+	libpoddefine "go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
@@ -377,6 +378,29 @@ func (s *ContainerService) Prune(ctx context.Context, userID, machineID string) 
 		return nil
 	})
 	return prunes, err
+}
+
+// Stats answers a one-shot stats snapshot: every running container on
+// the machine when no target IDs are given (all set), or the target
+// containers' snapshot otherwise. A not-found answer is the domain's
+// existing 404 sentinel with podman's own message riding along as the
+// disambiguator: podman's stats handler maps any first-report error to
+// 404, so an unknown container and a known-but-not-running one cannot
+// be honestly distinguished here.
+func (s *ContainerService) Stats(ctx context.Context, userID, machineID string, ids []string, all bool) ([]libpoddefine.ContainerStats, error) {
+	var stats []libpoddefine.ContainerStats
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Stats", func(e ContainerEngine) error {
+		snapshot, err := e.Stats(ids, all)
+		if err != nil {
+			if podmanerr.IsNotFound(err) {
+				return appErrors.ErrContainerNotFound.WithMessage(podmanerr.Message(err))
+			}
+			return fmt.Errorf("failed to get container stats: %w", err)
+		}
+		stats = snapshot
+		return nil
+	})
+	return stats, err
 }
 
 // GetLogs retrieves logs for a specific container on the specified

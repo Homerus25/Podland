@@ -11,6 +11,7 @@ import {
 	Tr,
 	VStack,
 } from "@chakra-ui/react";
+import { ContainerStatsDialog } from "@features/containers/components/ContainerStatsDialog";
 import {
 	useContainer,
 	useContainerInspect,
@@ -281,6 +282,7 @@ export function ContainerDetailPage() {
 	const query = useContainer(machineId!, containerId!);
 	const [revealed, setRevealed] = useState(false);
 	const [renaming, setRenaming] = useState(false);
+	const [statsOpen, setStatsOpen] = useState(false);
 	const [editingConfig, setEditingConfig] = useState(false);
 	const inspectQuery = useContainerInspect(machineId!, containerId!, {
 		enabled: revealed,
@@ -329,14 +331,37 @@ export function ContainerDetailPage() {
 				}
 			>
 				{container ? (
-					<ContainerOverview
-						machineId={machineId!}
-						container={container}
-						renameAccess={renameAccess}
-						onRename={() => setRenaming(true)}
-					/>
+					<>
+						{/* Stats is a read, so the button renders for every caller.
+						It sits feature-locally at the top of the content area —
+						the shared layout's header actions are deliberately not
+						extended (ticket #414 owns that slot). */}
+						<HStack justify="flex-end" mb={2}>
+							<Button
+								size="sm"
+								variant="outline"
+								onClick={() => setStatsOpen(true)}
+								data-testid="container-stats-button"
+							>
+								Stats
+							</Button>
+						</HStack>
+						<ContainerOverview
+							machineId={machineId!}
+							container={container}
+							renameAccess={renameAccess}
+							onRename={() => setRenaming(true)}
+						/>
+					</>
 				) : null}
 			</DetailPage>
+			{statsOpen ? (
+				<ContainerStatsDialog
+					machineId={machineId!}
+					containerId={containerId!}
+					onClose={() => setStatsOpen(false)}
+				/>
+			) : null}
 			{renaming && container ? (
 				<RenameContainerDialog
 					currentName={container.name}

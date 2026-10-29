@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
+	"go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
@@ -47,6 +48,12 @@ type ContainerEngine interface {
 	// Prune removes every stopped container (podman's own selection,
 	// no filters) and answers podman's per-container prune reports.
 	Prune() ([]*reports.PruneReport, error)
+	// Stats answers a one-shot stats snapshot for the target containers
+	// (every running container on the machine when all is set) and one
+	// error. The adapter reads podman's single stats report inside the
+	// connection lease and folds its error into the returned error —
+	// the report channel never crosses the seam.
+	Stats(ids []string, all bool) ([]define.ContainerStats, error)
 }
 
 // ContainerEngineProvider is the containers domain's slice of the
@@ -203,4 +210,30 @@ func (e *podmanContainerEngine) Logs(name string, opts entities.ContainerLogsOpt
 // podman's own selection, no filters, per-container reports back.
 func (e *podmanContainerEngine) Prune() ([]*reports.PruneReport, error) {
 	return e.tunnelEngine().ContainerPrune(e.ctx, entities.ContainerPruneOptions{})
+}
+
+// Stats answers a one-shot stats snapshot. Podman's tunnel stats answers a
+// report channel; with streaming disabled exactly one report arrives, so
+// the adapter reads it here — inside the connection lease — and folds its
+// error into the single returned error. The channel never crosses the
+// seam, mirroring the report-slice folds above. Interval must be >= 1 or
+// the libpod server rejects the request ("invalid interval"), so the
+// one-shot snapshot pins it to the smallest legal value.
+func (e *podmanContainerEngine) Stats(ids []string, all bool) ([]define.ContainerStats, error) {
+	statsChan, err := e.tunnelEngine().ContainerStats(e.ctx, ids, entities.ContainerStatsOptions{All: all, Interval: 1})
+	if err != nil {
+		return nil, err
+	}
+	report, ok := <-statsChan
+	if !ok {
+		// A closed channel without a report cannot happen with
+		// streaming disabled (the bindings goroutine always sends
+		// one report before closing); an empty snapshot is the
+		// honest fallback if it ever does.
+		return nil, nil
+	}
+	if report.Error != nil {
+		return nil, report.Error
+	}
+	return report.Stats, nil
 }

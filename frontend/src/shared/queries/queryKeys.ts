@@ -154,6 +154,21 @@ export function containerInspectQueryKey(
 	return [...containersQueryKey(machineId), containerId, "inspect"] as const;
 }
 
+// The all-stats snapshot is a machine's containers sub-resource, so every
+// dialog open resolves to its own entry. Never an invalidation target of
+// its own: containers-prefix invalidation covers it.
+export function containersStatsQueryKey(machineId: string) {
+	return [...containersQueryKey(machineId), "stats"] as const;
+}
+
+// The one-container stats snapshot is a container sub-resource keyed by
+// the container, a sibling of the inspect key, so every dialog open
+// resolves to its own entry. Never an invalidation target of its own:
+// containers-prefix invalidation covers it.
+export function containerStatsQueryKey(machineId: string, containerId: string) {
+	return [...containersQueryKey(machineId), containerId, "stats"] as const;
+}
+
 // The detail view is a network sub-resource keyed by the network, so every
 // page visit resolves to its own entry. Never an invalidation target of its
 // own: networks-prefix invalidation covers it.

@@ -1,4 +1,5 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
+import { ContainerStatsDialog } from "@features/containers/components/ContainerStatsDialog";
 import { containerDisplayName } from "@features/containers/components/containerDisplayName";
 import {
 	useContainers,
@@ -256,10 +257,31 @@ export function ContainerList({ machine }: { machine: Machine }) {
 		null,
 	);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
+	const [isStatsOpen, setIsStatsOpen] = useState(false);
 	const openLogs = useOpenLogs(machineId, "container");
+	// Stats is a read, so the button must survive ResourceList's manage
+	// gate: manage users get it in the toolbar beside Create/Prune, while
+	// read users — whose toolbar the module swaps for the permission hint
+	// — get the same button feature-locally above the list. The shared
+	// module is deliberately not extended for one ungated action.
+	const statsButton = (
+		<Button
+			size="sm"
+			variant="outline"
+			onClick={() => setIsStatsOpen(true)}
+			data-testid="container-stats-button"
+		>
+			Stats
+		</Button>
+	);
 
 	return (
 		<>
+			{canManage ? null : (
+				<HStack justify="flex-end" mb={2}>
+					{statsButton}
+				</HStack>
+			)}
 			<ResourceList
 				resource="container"
 				isPending={isPending}
@@ -312,6 +334,7 @@ export function ContainerList({ machine }: { machine: Machine }) {
 						>
 							Prune
 						</Button>
+						{statsButton}
 					</>
 				}
 				canManage={canManage}
@@ -327,6 +350,12 @@ export function ContainerList({ machine }: { machine: Machine }) {
 				<PruneContainersModal
 					onClose={() => setIsPruneOpen(false)}
 					pruneContainers={pruneContainers}
+				/>
+			) : null}
+			{isStatsOpen ? (
+				<ContainerStatsDialog
+					machineId={machineId}
+					onClose={() => setIsStatsOpen(false)}
 				/>
 			) : null}
 			{pendingConnect ? (

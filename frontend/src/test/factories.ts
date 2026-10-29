@@ -1,6 +1,8 @@
 import type { AuthStatusResponse } from "@features/auth/services/authApi";
 import type {
 	ContainerDetail,
+	ContainerStats,
+	ContainerStatsListResult,
 	ContainerSummary,
 } from "@features/containers/services/containersApi";
 import type {
@@ -169,6 +171,45 @@ export function containerDetailFixture(
 	};
 }
 // --- end spec 301 ticket #306 -------------------------------------------
+
+// --- spec 415 ticket #417: container stats fixture ----------------------
+// Container stats (GET .../containers/stats and .../containers/{id}/stats):
+// the one-shot snapshot DTO. All values are raw numbers on the wire; the
+// frontend formats, so the defaults are picked to have unambiguous
+// formatBytes outputs ("1.5 KB", "2 GB", …).
+export function containerStatsFixture(
+	overrides: Partial<ContainerStats> = {},
+): ContainerStats {
+	return {
+		id: "c-1",
+		name: "web",
+		cpuPercent: 12.34,
+		memoryUsage: 1500,
+		memoryLimit: 2_000_000_000,
+		memoryPercent: 42.1,
+		networkBytesIn: 999,
+		networkBytesOut: 1_500_000,
+		blockBytesIn: 250,
+		blockBytesOut: 3_000_000_000,
+		pids: 42,
+		...overrides,
+	};
+}
+
+// Envelope of GET .../containers/stats (backend ContainerStatsResult,
+// mirroring the containers/pods list envelopes): the snapshot's rows with
+// the count and request timestamp. Tests pass their rows; the count always
+// matches them.
+export function containerStatsListFixture(
+	containers: ContainerStats[],
+): ContainerStatsListResult {
+	return {
+		containers,
+		total: containers.length,
+		timestamp: "2026-10-30T00:00:00Z",
+	};
+}
+// --- end spec 415 ticket #417 -------------------------------------------
 
 export function quadletFixture(
 	overrides: Partial<QuadletSummary> = {},

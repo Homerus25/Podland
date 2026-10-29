@@ -27,7 +27,9 @@ function renderMachineDetailPage() {
 }
 
 function versionHandler(respond: () => Promise<Response> | Response) {
-	return http.get(`*/api/machines/${machine.id}/version`, async () => respond());
+	return http.get(`*/api/machines/${machine.id}/version`, async () =>
+		respond(),
+	);
 }
 
 describe("MachineDetailPage podman version", () => {

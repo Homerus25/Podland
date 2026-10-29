@@ -322,6 +322,13 @@ func New(cfg *config.Config) (*App, error) {
 						// subtree so a container named "prune"
 						// cannot swallow it.
 						r.With(requireWrite).Post("/prune", containerHandler.Prune)
+						// One-shot stats snapshot for every running
+						// container, read-level like list/get/logs.
+						// The literal route is registered ahead of
+						// the /{containerId} subtree so a container
+						// named "stats" cannot swallow it (the
+						// prune precedent).
+						r.Get("/stats", containerHandler.Stats)
 						r.Route("/{containerId}", func(r chi.Router) {
 							r.Get("/", containerHandler.Get)
 							r.With(requireWrite).Post("/start", containerHandler.Start)
@@ -332,6 +339,7 @@ func New(cfg *config.Config) (*App, error) {
 							r.With(requireWrite).Delete("/", containerHandler.Delete)
 							r.Get("/logs", containerHandler.Logs)
 							r.Get("/inspect", containerHandler.Inspect)
+							r.Get("/stats", containerHandler.ContainerStats)
 						})
 					})
 

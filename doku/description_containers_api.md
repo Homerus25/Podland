@@ -200,6 +200,53 @@ Notes:
 
 ---
 
+### GET /api/machines/{id}/containers/stats
+
+One-shot resource-usage snapshot for every running container on the
+machine. Stats are sampled once per call (no streaming); stopped or
+created containers do not appear.
+
+**Authentication:** Required
+
+**Permission:** `read` (any grantee of the machine)
+
+**Response (Success - 200):**
+```json
+{
+  "containers": [
+    {
+      "id": "string",
+      "name": "string",
+      "cpuPercent": 0.0,
+      "memoryUsage": 0,
+      "memoryLimit": 0,
+      "memoryPercent": 0.0,
+      "networkBytesIn": 0,
+      "networkBytesOut": 0,
+      "blockBytesIn": 0,
+      "blockBytesOut": 0,
+      "pids": 0
+    }
+  ],
+  "total": 0,
+  "timestamp": "ISO8601 timestamp"
+}
+```
+
+Notes:
+- All values are raw numbers — no formatting server-side. The network
+  byte counters are summed over the container's interfaces.
+- Nothing running is a legal 200 with an empty `containers` array.
+
+**Response (Error):**
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
 ### GET /api/machines/{id}/containers/{containerId}
 
 Get details of a specific container.
@@ -582,3 +629,46 @@ one terminal event:
 - 500: `INTERNAL_ERROR` (also for a miswired route missing identity), `STREAMING_NOT_SUPPORTED`
 - 502: `CONNECTION_FAILED`
 - 504: `OPERATION_CANCELLED` (buffered fetch cancelled by a client disconnect; follow-mode cancellation is the WARN terminal event above)
+
+---
+
+### GET /api/machines/{id}/containers/{containerId}/stats
+
+One-shot resource-usage snapshot for one container. Stats are sampled
+once per call (no streaming); the container must be running.
+
+**Authentication:** Required
+
+**Permission:** `read` (any grantee of the machine)
+
+**Response (Success - 200):**
+```json
+{
+  "id": "string",
+  "name": "string",
+  "cpuPercent": 0.0,
+  "memoryUsage": 0,
+  "memoryLimit": 0,
+  "memoryPercent": 0.0,
+  "networkBytesIn": 0,
+  "networkBytesOut": 0,
+  "blockBytesIn": 0,
+  "blockBytesOut": 0,
+  "pids": 0
+}
+```
+
+Notes:
+- All values are raw numbers — no formatting server-side. The network
+  byte counters are summed over the container's interfaces.
+
+**Response (Error):**
+- 400: `MISSING_CONTAINER_ID`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND` (unknown container and
+  known-but-not-running container alike — podman's stats handler maps any
+  first-report error to 404, so the two cannot be distinguished; podman's
+  own message rides along as the error message)
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
