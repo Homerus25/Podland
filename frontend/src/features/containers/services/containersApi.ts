@@ -515,6 +515,23 @@ export async function restartContainer(
 	);
 }
 
+// POST /api/machines/{id}/containers/{containerId}/rename -> 200
+// (backend/internal/domain/containers/handler.go ContainerHandler.Rename).
+// The response is the updated container detail DTO, the same shape the
+// detail GET answers. The name's shape is the server's to validate: the
+// client guards only the empty and unchanged cases.
+export async function renameContainer(
+	machineId: string,
+	containerId: string,
+	name: string,
+): Promise<ContainerDetail> {
+	const response = await api.post<ContainerDetail>(
+		machineApiPath(machineId, "containers", containerId, "rename"),
+		{ name },
+	);
+	return response.data;
+}
+
 // DELETE /api/machines/{id}/containers/{containerId} -> 204
 // (backend/internal/domain/containers/handler.go ContainerHandler.Delete).
 // The force query param exists on the endpoint but is out of scope for now.

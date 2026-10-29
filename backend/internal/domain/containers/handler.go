@@ -180,6 +180,30 @@ func (h *ContainerHandler) Restart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Rename handles renaming a container. The new name's shape is podman's
+// to validate — the client guards only the empty and unchanged cases —
+// so the request carries no name-regex tag. The response is the same
+// detail DTO the GET answers, mapped from the post-rename inspect.
+func (h *ContainerHandler) Rename(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerGetResponse, error) {
+		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
+		if guard != nil {
+			return ContainerGetResponse{}, guard
+		}
+
+		var request ContainerRenameRequest
+		if appErr := web.Decode(r, &request); appErr != nil {
+			return ContainerGetResponse{}, appErr
+		}
+
+		report, err := h.service.Rename(ctx, userID, machineID, containerID, request.Name)
+		if err != nil {
+			return ContainerGetResponse{}, err
+		}
+		return FromPodmanInspectContainer(report), nil
+	})
+}
+
 // Delete handles deleting a container
 func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {

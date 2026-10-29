@@ -189,6 +189,17 @@ type ContainerCreateRequest struct {
 	CPUs float64 `json:"cpus,omitempty"`
 }
 
+// ContainerRenameRequest is the body of POST
+// /api/machines/{id}/containers/{containerId}/rename. The struct tags own
+// the wire-documented guards (an empty or over-long name answers 400
+// VALIDATION_FAILED through web.Decode); podman's own name regex is not
+// duplicated here — the engine is the validator of the name's shape, and
+// its rejection maps to 400 INVALID_REQUEST.
+type ContainerRenameRequest struct {
+	// New name for the container (required)
+	Name string `json:"name" validate:"required,min=1,max=255"`
+}
+
 // PortBindingRequest represents a port binding request
 type PortBindingRequest struct {
 	HostPort      int    `json:"hostPort" validate:"required,min=1,max=65535"`

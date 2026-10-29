@@ -2,6 +2,7 @@ package containers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -239,6 +240,71 @@ func (s *ContainerService) Restart(ctx context.Context, userID, machineID, conta
 func inspectContainer(e ContainerEngine, containerID string) (*entities.ContainerInspectReport, error) {
 	reports, inspectErrs, err := e.Inspect(containerID)
 	return inspect.Resolve(reports, inspectErrs, err, appErrors.ErrContainerNotFound, "container", containerID)
+}
+
+// Rename renames a container on the specified machine and answers the
+// container's post-rename inspect report, so the handler maps the same
+// detail DTO the detail GET does. Podman renames running and stopped
+// containers alike — no state restriction, and no quadlet-owned
+// restriction either (podman's CLI imposes neither) — so unlike
+// Start/Stop/Restart there is no pre-action state gate. The name's
+// shape is podman's to validate: an invalid name is a client error and
+// answers 400 INVALID_REQUEST carrying podman's message, while a name
+// already in use answers the domain's 409 collision sentinel.
+func (s *ContainerService) Rename(ctx context.Context, userID, machineID, containerID, newName string) (*entities.ContainerInspectReport, error) {
+	var report *entities.ContainerInspectReport
+	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Rename", func(e ContainerEngine) error {
+		if err := e.Rename(containerID, newName); err != nil {
+			if podmanerr.IsAlreadyExists(err) {
+				return appErrors.ErrContainerAlreadyExists
+			}
+			if podmanerr.IsNotFound(err) {
+				return appErrors.ErrContainerNotFound
+			}
+			if podmanerr.IsClientError(err) {
+				return appErrors.ErrInvalidRequest.WithMessage(podmanerr.Message(err))
+			}
+			// Podman answers a name collision as a 500 sqlite UNIQUE
+			// constraint failure rather than a typed conflict
+			// (RenameContainer → RewriteContainerConfig in podman's
+			// source), so the collision is resolved by asking whether
+			// the name is taken instead of by classifying the failure
+			// text.
+			taken, takenErr := containerNameTaken(e, newName)
+			if takenErr != nil {
+				return takenErr
+			}
+			if taken {
+				return appErrors.ErrContainerAlreadyExists
+			}
+			return fmt.Errorf("failed to rename container: %w", err)
+		}
+
+		inspectReport, err := inspectContainer(e, containerID)
+		if err != nil {
+			return err
+		}
+
+		report = inspectReport
+		return nil
+	})
+	return report, err
+}
+
+// containerNameTaken reports whether a container already carries name.
+// A not-found answer means the name is free; any other inspect failure
+// is reported as-is, so a broken connection never masquerades as a name
+// collision.
+func containerNameTaken(e ContainerEngine, name string) (bool, error) {
+	reports, inspectErrs, err := e.Inspect(name)
+	_, resolveErr := inspect.Resolve(reports, inspectErrs, err, appErrors.ErrContainerNotFound, "container", name)
+	if resolveErr == nil {
+		return true, nil
+	}
+	if errors.Is(resolveErr, appErrors.ErrContainerNotFound) {
+		return false, nil
+	}
+	return false, resolveErr
 }
 
 // containerRunning reports the container's running state, nil-safe

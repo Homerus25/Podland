@@ -1,5 +1,8 @@
+import { EditIcon } from "@chakra-ui/icons";
 import {
+	Button,
 	Link as ChakraLink,
+	HStack,
 	Table,
 	TableContainer,
 	Tbody,
@@ -10,29 +13,48 @@ import {
 import {
 	useContainer,
 	useContainerInspect,
+	useRenameContainer,
 } from "@features/containers/hooks/useContainers";
 import type { ContainerDetail } from "@features/containers/services/containersApi";
+import { useMachine } from "@features/machines/hooks/useMachines";
+import { can } from "@features/machines/permissions";
 import { DetailPage } from "@shared/components/DetailPage";
 import {
 	DetailList,
 	DetailRow,
 	isNotFound,
 } from "@shared/components/detailKit";
+import { PermissionHint } from "@shared/components/PermissionHint";
 import { StateBadge } from "@shared/components/StateBadge";
 import { detailPath } from "@shared/routes/detailRoute";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { Link as ReactRouterLink, useParams } from "react-router-dom";
+import { RenameContainerDialog } from "./RenameContainerDialog";
+
+// The rename control's gate: "pending" while the machine query is in
+// flight (the caller's level is unknown), then the permission answer.
+type RenameAccess = "pending" | "allowed" | "denied";
 
 // The container's overview: one label/value row per attribute the spec
 // lists. Cross-links (image, secrets) point at the related resources'
-// detail pages.
+// detail pages. The Name row carries the rename control: a pencil button
+// for callers who can manage containers, the shared write-permission hint
+// for everyone else — the secret detail page's hidden-admin-control
+// pattern, so a read-only caller is never baited into a 403. The gate is
+// tri-state: while the machine query is pending the caller's level is
+// unknown, so the row renders neither control rather than flashing the
+// read-only hint at a write-capable caller.
 function ContainerOverview({
 	machineId,
 	container,
+	renameAccess,
+	onRename,
 }: {
 	machineId: string;
 	container: ContainerDetail;
+	renameAccess: RenameAccess;
+	onRename: () => void;
 }) {
 	const environment = Object.entries(container.environment ?? {});
 	return (
@@ -40,9 +62,30 @@ function ContainerOverview({
 			<Table size="sm">
 				<Tbody>
 					<DetailRow label="Name">
-						<Text fontFamily="mono" data-testid="container-detail-name">
-							{container.name}
-						</Text>
+						<HStack spacing={2} align="center">
+							<Text fontFamily="mono" data-testid="container-detail-name">
+								{container.name}
+							</Text>
+							{renameAccess === "allowed" ? (
+								<Button
+									size="xs"
+									variant="ghost"
+									aria-label={`Rename ${container.name}`}
+									onClick={onRename}
+									data-testid="rename-container-button"
+								>
+									<EditIcon />
+								</Button>
+							) : null}
+						</HStack>
+						{renameAccess === "denied" ? (
+							<PermissionHint
+								scope="rename"
+								requirement="write"
+								resource="container"
+								fontSize="sm"
+							/>
+						) : null}
 					</DetailRow>
 					<DetailRow label="Id">
 						<Text fontFamily="mono" data-testid="container-detail-id">
@@ -169,7 +212,9 @@ function ContainerOverview({
 // The container detail page (spec 301, ticket #306): the shared layout's
 // shell with this feature's overview rows. The overview query refetches on
 // every visit (gcTime: 0); the raw inspect report fetches lazily on the
-// first "Show inspect JSON" click, never on page mount.
+// first "Show inspect JSON" click, never on page mount. The machine query
+// supplies the per-caller facts the rename gate reads; the overview itself
+// is readable at read level.
 export function ContainerDetailPage() {
 	const { machineId, containerId } = useParams<{
 		machineId: string;
@@ -177,25 +222,52 @@ export function ContainerDetailPage() {
 	}>();
 	const query = useContainer(machineId!, containerId!);
 	const [revealed, setRevealed] = useState(false);
+	const [renaming, setRenaming] = useState(false);
 	const inspectQuery = useContainerInspect(machineId!, containerId!, {
 		enabled: revealed,
 	});
+	const { data: machine, error: machineError } = useMachine(machineId!);
+	const rename = useRenameContainer(machineId!, containerId!);
 	const container = query.data;
+	// A failed machine query leaves the caller's level unknown; render the
+	// hint rather than a bare gap, so a read-only caller is never left
+	// without the explanation (the secret detail page's ruling).
+	const renameAccess: RenameAccess = machine
+		? can(machine, "manage-containers")
+			? "allowed"
+			: "denied"
+		: machineError
+			? "denied"
+			: "pending";
 
 	return (
-		<DetailPage
-			title={container?.name ?? containerId!}
-			backTo="containers"
-			isPending={query.isPending}
-			error={query.error}
-			notFound={isNotFound(query.error)}
-			inspectQuery={inspectQuery}
-			revealed={revealed}
-			onToggleInspect={() => setRevealed((value) => !value)}
-		>
-			{container ? (
-				<ContainerOverview machineId={machineId!} container={container} />
+		<>
+			<DetailPage
+				title={container?.name ?? containerId!}
+				backTo="containers"
+				isPending={query.isPending}
+				error={query.error}
+				notFound={isNotFound(query.error)}
+				inspectQuery={inspectQuery}
+				revealed={revealed}
+				onToggleInspect={() => setRevealed((value) => !value)}
+			>
+				{container ? (
+					<ContainerOverview
+						machineId={machineId!}
+						container={container}
+						renameAccess={renameAccess}
+						onRename={() => setRenaming(true)}
+					/>
+				) : null}
+			</DetailPage>
+			{renaming && container ? (
+				<RenameContainerDialog
+					currentName={container.name}
+					mutation={rename}
+					onClose={() => setRenaming(false)}
+				/>
 			) : null}
-		</DetailPage>
+		</>
 	);
 }

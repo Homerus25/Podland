@@ -6,6 +6,7 @@ import {
 	inspectContainer,
 	listContainers,
 	pruneContainers,
+	renameContainer,
 	restartContainer,
 	startContainer,
 	stopContainer,
@@ -82,6 +83,18 @@ export function useRestartContainer(machineId: string) {
 		machineId,
 		"containers",
 		(containerId: string) => restartContainer(machineId, containerId),
+	);
+}
+
+// A rename changes the container's name, which surfaces in three places:
+// the containers list, the container's own detail query (a prefix of the
+// containers key, so the same invalidation covers it), and the pods list
+// (pod data carries its containers' names).
+export function useRenameContainer(machineId: string, containerId: string) {
+	return useListInvalidatingMutation(
+		machineId,
+		["containers", "pods"],
+		(name: string) => renameContainer(machineId, containerId, name),
 	);
 }
 

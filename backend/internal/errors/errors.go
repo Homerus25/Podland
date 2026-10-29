@@ -146,7 +146,14 @@ var (
 	ErrContainerAlreadyRunning = NewAppError("CONTAINER_ALREADY_RUNNING", "Container is already running", http.StatusBadRequest)
 	ErrContainerNotRunning     = NewAppError("CONTAINER_NOT_RUNNING", "Container is not running", http.StatusBadRequest)
 	ErrContainerCreationFailed = NewAppError("CONTAINER_CREATION_FAILED", "Failed to create container", http.StatusInternalServerError)
-	ErrPodNotFound             = NewAppError("POD_NOT_FOUND", "Pod not found", http.StatusNotFound)
+	// ErrContainerAlreadyExists is 409: podman refused a rename because
+	// another container on the machine already carries the new name. The
+	// containers domain's entry in the name-collision vocabulary the
+	// other domains already speak (QUADLET_ALREADY_EXISTS,
+	// SECRET_ALREADY_EXISTS, VOLUME_ALREADY_EXISTS,
+	// NETWORK_ALREADY_EXISTS).
+	ErrContainerAlreadyExists = NewAppError("CONTAINER_ALREADY_EXISTS", "Container with this name already exists", http.StatusConflict)
+	ErrPodNotFound            = NewAppError("POD_NOT_FOUND", "Pod not found", http.StatusNotFound)
 )
 
 // Pods

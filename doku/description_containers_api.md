@@ -404,8 +404,42 @@ the start endpoint for a stopped container.
 
 ---
 
-### DELETE /api/machines/{id}/containers/{containerId}
+### POST /api/machines/{id}/containers/{containerId}/rename
 
+Rename a container. Podman renames running and stopped containers alike,
+so there is no state restriction and no quadlet-owned restriction. The
+new name's shape is validated server-side by podman — the client guards
+only the empty and unchanged cases and does not duplicate podman's name
+regex.
+
+**Authentication:** Required
+
+**Request:**
+```json
+{
+  "name": "string (required, 1-255 characters)"
+}
+```
+
+**Response (Success - 200):** the updated container detail DTO, the same
+shape as `GET /api/machines/{id}/containers/{containerId}`, carrying the
+new name.
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body, or a name podman rejects — the
+  message carries podman's reason), `VALIDATION_FAILED` (empty or
+  over-long name), `MISSING_CONTAINER_ID`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
+- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 409: `CONTAINER_ALREADY_EXISTS` (another container on the machine
+  already carries the new name)
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
+### DELETE /api/machines/{id}/containers/{containerId}
 Remove a container.
 
 **Authentication:** Required

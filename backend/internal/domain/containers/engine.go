@@ -27,6 +27,10 @@ type ContainerEngine interface {
 	// Restart restarts the container (podman's default timeout applies,
 	// no force) and answers one error, like Start.
 	Restart(id string) error
+	// Rename renames the container to newName and answers one error.
+	// Podman renames running and stopped containers alike, so there is
+	// no state restriction here.
+	Rename(id, newName string) error
 	// Remove removes the container (force also removes a running one)
 	// and answers one error, like Start.
 	Remove(id string, force bool) error
@@ -165,6 +169,12 @@ func (e *podmanContainerEngine) Restart(id string) error {
 func (e *podmanContainerEngine) Remove(id string, force bool) error {
 	reports, err := e.tunnelEngine().ContainerRm(e.ctx, []string{id}, entities.RmOptions{Force: force})
 	return narrowReports(reports, err, removeReportErr)
+}
+
+// Rename renames the container. Podman's rename answers a bare error (no
+// report slice), so nothing is folded here.
+func (e *podmanContainerEngine) Rename(id, newName string) error {
+	return e.tunnelEngine().ContainerRename(e.ctx, id, entities.ContainerRenameOptions{NewName: newName})
 }
 
 func (e *podmanContainerEngine) Logs(name string, opts entities.ContainerLogsOptions) error {
