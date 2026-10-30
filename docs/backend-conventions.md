@@ -85,8 +85,9 @@ closest sibling that already exists. Rulings so far:
   `streaming.RunLogStream` is the reference, owning the terminal
   events (`INFO` `STREAM_ENDED` on a clean end, `"CODE: message"`
   errors) and the `ErrConnectionFailed` error default; a log handler is
-  query parse + follow dispatch + two closures (the `LogStreamOp.Stream`
-  callback and the buffered `web.Handle` service call). The kit owns the
+  one `streaming.HandleLogs` call plus its two closures (the domain's
+  follow-mode and buffered log services — the dispatch clause further
+  down this bullet). The kit owns the
   buffered fetch too:
   `streaming.FetchLogs` (same file) builds the podman logs options
   itself (`Follow=false`, `Timestamps=false`, the `Since`/`Tail` window
@@ -136,13 +137,32 @@ closest sibling that already exists. Rulings so far:
   kit's DTO vocabulary — the shared `LogEvent` and the
   `LogEventWriter` (RFC3339Nano parse, RFC3339 UTC re-emit,
   spaceless-line guard) — is pinned in `internal/streaming/logs.go`,
-  and a log handler's query parse keeps its JSON-envelope fallback
-  (issue 340's dispatch ruling). The
+  and the handler-side log dispatch is kit-owned end to end:
+  `streaming.HandleLogs` (`internal/streaming/dispatch.go`) is the one
+  entry point — the strict window parse, the query-error fallback (the
+  error rides the endpoint envelope even when follow=true was
+  requested, issue 340's dispatch ruling), the URL-param guard (the
+  domain's param name and missing-param guard code passed in, the
+  guard itself `web.URLParam`'s), the follow fork (a clean follow
+  request crosses the streaming envelope, everything else the buffered
+  endpoint envelope), the target resolved once and handed to both
+  closures, and the follow-dispatch log line. A log handler is one kit
+  call plus its two closures; the fallback, the guard, and the fork
+  belong to the kit's vocabulary, never hand-assembled per domain.
+  The dispatch fork is pinned once in the `streaming` package's suite
+  over fake closures; the per-domain handler suites keep only their
+  composition pins (the domain's two service calls receive the right
+  target and window through the HTTP surface). The containers Logs
+  handler (`internal/domain/containers/handler.go`) is the reference
+  adapter; the pods and quadlets Logs handlers have migrated to the same
+  call under the same ruling. The
   images pull handler remains the reference for progress streams.
   Settled 2026-09-13 (architecture-review candidate C7); the buffered
   fetch settled 2026-09-18 (candidate C16); the follow fetch and the
   `Cancellable` abandonment contract settled 2026-09-22 (candidate
-  C21); the progress-stream seam settled 2026-10-09 (issue 265, §20).
+  C21); the progress-stream seam settled 2026-10-09 (issue 265, §20);
+  the handler-side log dispatch settled 2026-10-30 (issue 423,
+  spec 421).
 - **Binary endpoints (the binary envelope)** — `web.HandleStream`
   (`internal/web`) is the seam every machine-scoped endpoint whose
   success is a byte stream or multipart upload rather than a DTO

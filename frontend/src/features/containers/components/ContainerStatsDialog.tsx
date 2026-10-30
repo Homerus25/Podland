@@ -59,8 +59,8 @@ function StatsRow({ stats }: { stats: ContainerStats }) {
 // containers tab (all running containers) and the container details page
 // (one container, via containerId). Stats is a read, so the dialog owns no
 // mutation: it fetches its own snapshot query on open — the pages mount it
-// conditionally, and the hooks' gcTime: 0 keeps a reopen from serving the
-// previous snapshot. The ~1s sample pause is the honest loading state; a
+// conditionally, and the hooks' one-shot freshness keeps a reopen from
+// serving the previous snapshot. The ~1s sample pause is the honest loading state; a
 // stopped container's 404 (podman maps any first-report error to
 // not-found) surfaces its message through the shared error envelope.
 export function ContainerStatsDialog({

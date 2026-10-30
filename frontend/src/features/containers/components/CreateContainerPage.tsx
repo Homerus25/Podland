@@ -35,6 +35,7 @@ import {
 import { CheckboxList } from "@shared/components/CheckboxList";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { KeyValueEditor } from "@shared/components/KeyValueEditor";
+import { ResourceLimitInputs } from "@shared/components/ResourceLimitInputs";
 import {
 	FormSection,
 	MountFlags,
@@ -47,7 +48,6 @@ import { getApiError } from "@shared/utils/api";
 import { useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
-import { ResourceLimitInputs } from "./ResourceLimitInputs";
 
 // The create-container page (spec 341, ticket #344): the full-page
 // replacement for the former create dialog — 14 fields across 7 sections
@@ -150,7 +150,7 @@ export function CreateContainerPage() {
 	// run-after-create is off, or through the start endpoint when it is
 	// on. A start failure after a successful create still returns (the
 	// container exists) and toasts what happened; the mutation's list
-	// invalidation plus the tab's refetchOnMount refresh the list there.
+	// invalidation plus the tab's always-fresh list refresh the list there.
 	const submit = handleSubmit((values) => {
 		createContainer.mutate(buildCreateContainerInput(values, secrets), {
 			onSuccess: (created) => {
@@ -580,12 +580,17 @@ export function CreateContainerPage() {
 					<Divider />
 
 					{/* The Resources section (issue #377): the shared
-						resource-limit inputs (spec 412, ticket #414) —
+						resource-limit inputs (spec 412, ticket #414;
+						promoted to shared by spec 437, ticket #431) —
 						one owner for the labels, helper text, and
 						client-side checks, shared with the
 						edit-configuration dialog. */}
 					<FormSection title="Resources">
-						<ResourceLimitInputs register={register} errors={errors} />
+						<ResourceLimitInputs
+							idPrefix="container"
+							register={register}
+							errors={errors}
+						/>
 					</FormSection>
 
 					{createError ? (

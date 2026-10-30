@@ -27,22 +27,21 @@ import {
 	quadletQueryKey,
 	quadletsQueryKey,
 } from "@shared/queries/queryKeys";
+import {
+	useAlwaysRefetchListQuery,
+	useOneShotQuery,
+} from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import {
 	invalidateMoveResult,
 	useMovePreview,
 } from "@shared/transfers/transferHooks";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function useQuadlets(machineId: string) {
-	return useQuery({
-		queryKey: quadletsQueryKey(machineId),
-		queryFn: () => listQuadlets(machineId),
-		// Lazy tabs remount the panel on every activation; refetching on
-		// mount makes each activation issue a fresh request, even inside the
-		// app-wide five-minute stale window.
-		refetchOnMount: "always",
-	});
+	return useAlwaysRefetchListQuery(quadletsQueryKey(machineId), () =>
+		listQuadlets(machineId),
+	);
 }
 
 export function useCreateQuadlet(machineId: string) {
@@ -63,15 +62,13 @@ export function useGenerateQuadlet(machineId: string) {
 	});
 }
 
+// One-shot: the editor must reopen on the file's current content, so a
+// reopen after a save refetches instead of reseeding the form with the
+// pre-edit file.
 export function useQuadlet(machineId: string, quadletId: string) {
-	return useQuery({
-		queryKey: quadletQueryKey(machineId, quadletId),
-		queryFn: () => getQuadlet(machineId, quadletId),
-		// The editor must open on the quadlet's current content, so the detail
-		// cache is dropped as soon as the modal unmounts: reopening (e.g. after
-		// a save) refetches instead of reseeding the form with the pre-edit file.
-		gcTime: 0,
-	});
+	return useOneShotQuery(quadletQueryKey(machineId, quadletId), () =>
+		getQuadlet(machineId, quadletId),
+	);
 }
 
 // A content update can change the quadlet's systemd state, so the list

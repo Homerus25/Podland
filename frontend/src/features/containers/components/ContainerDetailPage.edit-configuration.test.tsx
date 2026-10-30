@@ -184,6 +184,26 @@ describe("ContainerDetailPage edit configuration", () => {
 		expect(counters.update).toBe(0);
 	});
 
+	// The resource-limit fields render through the shared module (spec
+	// 437, ticket #431) with the container id prefix; the module's own
+	// suite pins the labels, checks, and stacking once.
+	it("renders the resource-limit fields through the shared module with the container id prefix", async () => {
+		setup();
+		renderDetailPage();
+		const user = userEvent.setup();
+
+		await user.click(await screen.findByTestId("edit-configuration-button"));
+
+		expect(screen.getByLabelText("CPUs")).toHaveAttribute(
+			"id",
+			"container-cpus",
+		);
+		expect(screen.getByLabelText("Memory")).toHaveAttribute(
+			"id",
+			"container-memory",
+		);
+	});
+
 	it("blocks the submit while a value is unparseable and explains why", async () => {
 		setup();
 		renderDetailPage();

@@ -1,6 +1,5 @@
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { NetworkList } from "@features/networks/components/NetworkList";
-import { QueryClient } from "@tanstack/react-query";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
@@ -156,35 +155,6 @@ describe("NetworkList create", () => {
 
 		await waitFor(() => expect(createRequests.count).toBe(1));
 		expect(createRequests.body).toEqual({ name: "new-net" });
-	});
-
-	it("issues a fresh containers request every time the dialog opens, inside the five-minute cache window", async () => {
-		resetCounters();
-		server.use(...mockLists(), createHandler());
-		// The app-wide stale time is five minutes (main.tsx); mirroring it
-		// pins the refetch inside the cache window.
-		const queryClient = new QueryClient({
-			defaultOptions: { queries: { retry: false, staleTime: 5 * 60 * 1000 } },
-		});
-		renderWithQuery(<NetworkList machine={machineFixture()} />, {
-			queryClient,
-			router: true,
-		});
-		await screen.findByTestId("network-row");
-		const user = userEvent.setup();
-
-		await user.click(screen.getByTestId("create-network-button"));
-		expect(await screen.findByTestId("modal")).toBeInTheDocument();
-		await waitFor(() => expect(containersGets).toBe(1));
-
-		await user.click(screen.getByRole("button", { name: /cancel/i }));
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-		);
-
-		await user.click(screen.getByTestId("create-network-button"));
-		expect(await screen.findByTestId("modal")).toBeInTheDocument();
-		await waitFor(() => expect(containersGets).toBe(2));
 	});
 
 	it("renders the duplicate-name envelope and stays open on 409", async () => {

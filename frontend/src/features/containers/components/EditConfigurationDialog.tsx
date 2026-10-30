@@ -20,9 +20,9 @@ import {
 	FormValidityScope,
 	type MutationSlice,
 } from "@shared/components/MutationDialog";
+import { ResourceLimitInputs } from "@shared/components/ResourceLimitInputs";
 import { FormSection } from "@shared/components/RowEditor";
 import { useForm } from "react-hook-form";
-import { ResourceLimitInputs } from "./ResourceLimitInputs";
 
 // A Go duration string as podman accepts it: one or more unit-suffixed
 // numbers ("30s", "1m30s", "0m30s"). No leading "-": a negative
@@ -108,7 +108,11 @@ export function EditConfigurationDialog({
 					<form id="edit-configuration-form" onSubmit={submit} noValidate>
 						<VStack spacing={4} align="stretch">
 							<FormSection title="Resources">
-								<ResourceLimitInputs register={register} errors={errors} />
+								<ResourceLimitInputs
+									idPrefix="container"
+									register={register}
+									errors={errors}
+								/>
 							</FormSection>
 							<Divider />
 							<FormSection title="Healthcheck">

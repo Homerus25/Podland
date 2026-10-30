@@ -1,6 +1,5 @@
 import { Box, Button, HStack, Table, Tbody, Text } from "@chakra-ui/react";
-import { useMachine } from "@features/machines/hooks/useMachines";
-import { can } from "@features/machines/permissions";
+import { useCapabilityGate } from "@features/machines/hooks/useCapabilityGate";
 import { GenerateQuadletModal } from "@features/pods/components/GenerateQuadletModal";
 import {
 	usePod,
@@ -10,6 +9,7 @@ import {
 import { DetailPage } from "@shared/components/DetailPage";
 import { DetailRow, isNotFound } from "@shared/components/detailKit";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
+import { PermissionHint } from "@shared/components/PermissionHint";
 import { detailPath } from "@shared/routes/detailRoute";
 import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
@@ -81,8 +81,9 @@ function PodLifecycleSection({
 
 // The pod detail page (spec 352): the shared layout's shell with the
 // pod's detail DTO as overview rows and cross-links to the containers in
-// the pod. The overview is the usePod detail query (gcTime: 0, refetched
-// on every visit); the raw inspect report fetches lazily on the first
+// the pod. The overview is the usePod detail query (the freshness
+// factory's one-shot flavor, refetched on every visit); the raw inspect
+// report fetches lazily on the first
 // "Show inspect JSON" click and never on page mount.
 export function PodDetailPage() {
 	const { machineId, podId } = useParams<{
@@ -97,10 +98,15 @@ export function PodDetailPage() {
 	const inspectQuery = usePodInspect(machineId!, podId!, {
 		enabled: revealed,
 	});
-	// The machine query supplies the per-caller facts the manage gate
-	// reads; below the manage capability the buttons hide (never disabled),
-	// like the list's affordances.
-	const { data: machine } = useMachine(machineId!);
+	// The capability gates (the machines feature's hook) own the
+	// per-caller classification end to end: the lifecycle section renders
+	// from the manage-pods tri-state — allowed renders the buttons, denied
+	// renders the shared write hint (for a read-only caller and a failed
+	// machine query alike, never a silent gap), pending renders neither —
+	// and the generate-quadlet modal's save flag derives from the
+	// manage-quadlets answer (allowed → savable).
+	const lifecycleGate = useCapabilityGate(machineId!, "manage-pods");
+	const quadletGate = useCapabilityGate(machineId!, "manage-quadlets");
 
 	return (
 		<>
@@ -116,13 +122,27 @@ export function PodDetailPage() {
 			>
 				{pod.data ? (
 					<>
-						{machine && can(machine, "manage-pods") ? (
+						{lifecycleGate === "allowed" ? (
 							<PodLifecycleSection
 								machineId={machineId!}
 								podId={podId!}
 								name={pod.data.name}
 								state={pod.data.state}
 							/>
+						) : null}
+						{lifecycleGate === "denied" ? (
+							// The write hint in place of the lifecycle
+							// buttons: a read-only caller — and a caller
+							// whose machine query failed — learns why the
+							// controls are gone instead of a bare gap.
+							<Box mb={4}>
+								<PermissionHint
+									scope="pod-lifecycle"
+									requirement="write"
+									resource="pod"
+									fontSize="sm"
+								/>
+							</Box>
 						) : null}
 						<Button
 							size="sm"
@@ -221,10 +241,10 @@ export function PodDetailPage() {
 					podId={podId!}
 					podName={pod.data?.name ?? podId!}
 					// Save posts to the write-gated quadlet create endpoint,
-					// so it hides below the manage-quadlets capability — the
-					// same capability the quadlets list gates its toolbar
-					// with. Generate and copy stay read-level.
-					canSave={machine ? can(machine, "manage-quadlets") : false}
+					// so it hides below the manage-quadlets capability —
+					// the same capability the quadlets list gates its
+					// toolbar with. Generate and copy stay read-level.
+					canSave={quadletGate === "allowed"}
 					onClose={() => setGenerateOpen(false)}
 				/>
 			) : null}

@@ -296,6 +296,24 @@ describe("CreateContainerPage", () => {
 	// dialog's resource limits: the fields render, an unparseable value
 	// blocks the submit with the field error, and the payload carries
 	// cpus as a number and memory as the trimmed string.
+	//
+	// The fields render through the shared resource-limit module
+	// (spec 437, ticket #431) with the container id prefix; the
+	// module's own suite pins the labels, checks, and stacking once.
+	it("renders the resource-limit fields through the shared module with the container id prefix", async () => {
+		setupCreatePage();
+		await openCreatePage();
+
+		expect(screen.getByLabelText("CPUs")).toHaveAttribute(
+			"id",
+			"container-cpus",
+		);
+		expect(screen.getByLabelText("Memory")).toHaveAttribute(
+			"id",
+			"container-memory",
+		);
+	});
+
 	it("blocks the submit while a resource limit is unparseable and explains why", async () => {
 		setupCreatePage();
 		const user = await openCreatePage();

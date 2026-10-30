@@ -63,10 +63,11 @@ function NetworkOverview({
 }
 
 // The network detail page (spec 301, ticket #309): an adapter over the
-// shared DetailPage layout. It owns the overview query (gcTime 0, so every
-// page visit refetches) and the lazy inspect query (enabled on first
-// reveal), and hands the layout its structural slices; the layout owns the
-// shell. The back button returns to the Networks tab.
+// shared DetailPage layout. It owns the overview query (the freshness
+// factory's one-shot flavor, so every page visit refetches) and the lazy
+// inspect query (enabled on first reveal), and hands the layout its
+// structural slices; the layout owns the shell. The back button returns
+// to the Networks tab.
 export function NetworkDetailPage() {
 	const { machineId, networkName } = useParams<{
 		machineId: string;

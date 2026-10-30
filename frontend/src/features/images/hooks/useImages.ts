@@ -12,47 +12,35 @@ import {
 	imageQueryKey,
 	imagesQueryKey,
 } from "@shared/queries/queryKeys";
+import {
+	useAlwaysRefetchListQuery,
+	useOneShotQuery,
+} from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import { useMovePreview } from "@shared/transfers/transferHooks";
-import { useQuery } from "@tanstack/react-query";
 
 export function useImages(machineId: string) {
-	return useQuery({
-		queryKey: imagesQueryKey(machineId),
-		queryFn: () => listImages(machineId),
-		// Lazy tabs remount the panel on every activation; refetching on
-		// mount makes each activation issue a fresh request, even inside the
-		// app-wide five-minute stale window.
-		refetchOnMount: "always",
-	});
+	return useAlwaysRefetchListQuery(imagesQueryKey(machineId), () =>
+		listImages(machineId),
+	);
 }
 
-// The image detail view (GET .../images/{imageId}, spec 301): the detail
-// page's overview query. gcTime: 0 drops the cache entry the moment the
-// page unmounts, so every page visit refetches the current detail.
 export function useImage(machineId: string, imageId: string) {
-	return useQuery({
-		queryKey: imageQueryKey(machineId, imageId),
-		queryFn: () => getImage(machineId, imageId),
-		gcTime: 0,
-	});
+	return useOneShotQuery(imageQueryKey(machineId, imageId), () =>
+		getImage(machineId, imageId),
+	);
 }
 
-// The raw inspect report behind the inspect dialog. gcTime: 0 drops the
-// cache entry the moment the dialog unmounts, so every open refetches the
-// current report. The detail page passes enabled: revealed so the report
-// fetches lazily on the first "Show inspect JSON" click, not on page mount.
 export function useImageInspect(
 	machineId: string,
 	imageId: string,
 	options?: { enabled?: boolean },
 ) {
-	return useQuery({
-		queryKey: imageInspectQueryKey(machineId, imageId),
-		queryFn: () => inspectImage(machineId, imageId),
-		enabled: options?.enabled ?? true,
-		gcTime: 0,
-	});
+	return useOneShotQuery(
+		imageInspectQueryKey(machineId, imageId),
+		() => inspectImage(machineId, imageId),
+		options,
+	);
 }
 
 export function useDeleteImage(machineId: string) {

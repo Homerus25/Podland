@@ -11,19 +11,14 @@ import {
 	volumeMovePreviewQueryKey,
 	volumesQueryKey,
 } from "@shared/queries/queryKeys";
+import { useAlwaysRefetchListQuery } from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import { useMovePreview } from "@shared/transfers/transferHooks";
-import { useQuery } from "@tanstack/react-query";
 
 export function useVolumes(machineId: string) {
-	return useQuery({
-		queryKey: volumesQueryKey(machineId),
-		queryFn: () => listVolumes(machineId),
-		// Lazy tabs remount the panel on every activation; refetching on
-		// mount makes each activation issue a fresh request, even inside the
-		// app-wide five-minute stale window.
-		refetchOnMount: "always",
-	});
+	return useAlwaysRefetchListQuery(volumesQueryKey(machineId), () =>
+		listVolumes(machineId),
+	);
 }
 
 // A create extends the machine's volume list, so the list refetches on

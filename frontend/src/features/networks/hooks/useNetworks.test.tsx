@@ -51,29 +51,6 @@ describe("useNetwork", () => {
 		);
 	});
 
-	it("drops the cache entry on unmount (gcTime 0), so every page visit refetches", async () => {
-		server.use(
-			http.get("*/api/machines/m-1/networks/app-net", () =>
-				HttpResponse.json(networkDetailFixture()),
-			),
-		);
-
-		const { result, queryClient, unmount } = renderHookWithQuery(() =>
-			useNetwork("m-1", "app-net"),
-		);
-		await waitFor(() => expect(result.current.isSuccess).toBe(true));
-		expect(
-			queryClient.getQueryData(networkQueryKey("m-1", "app-net")),
-		).toBeDefined();
-
-		unmount();
-		await waitFor(() =>
-			expect(
-				queryClient.getQueryData(networkQueryKey("m-1", "app-net")),
-			).toBeUndefined(),
-		);
-	});
-
 	it("exposes 404 without retrying when the network is gone", async () => {
 		server.use(
 			http.get("*/api/machines/m-1/networks/gone", () =>

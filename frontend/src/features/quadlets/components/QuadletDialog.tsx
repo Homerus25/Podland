@@ -190,9 +190,9 @@ interface EditQuadletDialogProps {
 // entity loading and error states are the body's own — the module has no
 // query knowledge — and the arriving content seeds the form, which is what
 // flips the footer submit from its disabled start to enabled. The query
-// drops its cache on unmount (gcTime 0), so reopening after a save never
-// serves the pre-edit file; keepDirtyValues keeps user edits if a refetch
-// lands mid-edit.
+// drops its cache on unmount (the freshness factory's one-shot flavor),
+// so reopening after a save never serves the pre-edit file; keepDirtyValues
+// keeps user edits if a refetch lands mid-edit.
 export function EditQuadletDialog({
 	machineId,
 	quadlet,

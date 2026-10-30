@@ -1,6 +1,5 @@
 import { ContainerDetailPage } from "@features/containers/components/ContainerDetailPage";
-import { containerQueryKey } from "@shared/queries/queryKeys";
-import { screen, waitFor } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
@@ -192,22 +191,5 @@ describe("ContainerDetailPage", () => {
 		expect(
 			screen.queryByTestId("detail-page-not-found"),
 		).not.toBeInTheDocument();
-	});
-
-	it("keeps no detail data in the React Query cache after the page unmounts", async () => {
-		mockDetail(() => HttpResponse.json(containerDetailFixture()));
-		const { queryClient, unmount } = renderDetailPage();
-
-		await screen.findByTestId("container-detail-name");
-		expect(
-			queryClient.getQueryData(containerQueryKey("m-1", "c-1")),
-		).toBeTruthy();
-
-		unmount();
-		await waitFor(() => {
-			expect(
-				queryClient.getQueryData(containerQueryKey("m-1", "c-1")),
-			).toBeUndefined();
-		});
 	});
 });

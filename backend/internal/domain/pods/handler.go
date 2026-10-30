@@ -2,7 +2,6 @@ package pods
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -243,37 +242,15 @@ func (h *PodHandler) Prune(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Logs handles retrieving the pod's aggregated logs. The query is parsed
-// once: only a clean follow request crosses the streaming envelope, while
-// query errors ride the JSON envelope even when follow=true was
-// requested, so no code path here writes an error response by hand.
+// Logs handles retrieving the pod's aggregated logs: one kit call — the
+// streaming kit owns the whole handler-side dispatch (the window parse,
+// the query-error fallback, the param guard, the follow fork), and the
+// domain contributes its param name, guard code, and two service calls.
 func (h *PodHandler) Logs(w http.ResponseWriter, r *http.Request) {
-	since, tail, queryErr := streaming.ParseLogWindow(r)
-	if queryErr != nil {
-		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (struct{}, error) {
-			return struct{}{}, queryErr
-		})
-		return
-	}
-
-	podID, guard := web.URLParam(r, "podId", "MISSING_POD_ID")
-
-	if guard == nil && streaming.ParseFollow(r) {
-		slog.InfoContext(r.Context(), "streamLogs", slog.String("podID", podID), slog.Bool("follow", true))
-		streaming.RunLogStream(w, r, streaming.LogStreamOp{
-			Since: since,
-			Tail:  tail,
-			Stream: func(ctx context.Context, userID, machineID string, onEvent func(streaming.LogEvent)) error {
-				return h.service.GetLogsWithStream(ctx, userID, machineID, podID, since, tail, onEvent)
-			},
-		})
-		return
-	}
-
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*PodLogsResponse, error) {
-		if guard != nil {
-			return nil, guard
-		}
-		return h.service.GetLogs(ctx, userID, machineID, podID, since, tail)
+	streaming.HandleLogs(w, r, streaming.LogsDispatchOp[*PodLogsResponse]{
+		ParamName: "podId",
+		GuardCode: "MISSING_POD_ID",
+		Follow:    h.service.GetLogsWithStream,
+		Buffered:  h.service.GetLogs,
 	})
 }

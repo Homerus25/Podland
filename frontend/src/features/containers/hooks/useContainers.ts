@@ -25,82 +25,60 @@ import {
 	containersStatsQueryKey,
 } from "@shared/queries/queryKeys";
 import {
+	useAlwaysRefetchListQuery,
+	useOneShotQuery,
+} from "@shared/queries/useFreshQuery";
+import {
 	invalidateMachineResources,
 	useListInvalidatingMutation,
 } from "@shared/queries/useListInvalidatingMutation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function useContainers(machineId: string) {
-	return useQuery({
-		queryKey: containersQueryKey(machineId),
-		queryFn: () => listContainers(machineId),
-		// Lazy tabs remount the panel on every activation; refetching on
-		// mount makes each activation issue a fresh request, even inside the
-		// app-wide five-minute stale window.
-		refetchOnMount: "always",
-	});
+	return useAlwaysRefetchListQuery(containersQueryKey(machineId), () =>
+		listContainers(machineId),
+	);
 }
 
-// The container detail view behind the detail page (spec 301): a singular
-// sub-resource keyed by the container, gcTime: 0 so every page visit
-// refetches the container's current state.
 export function useContainer(machineId: string, containerId: string) {
-	return useQuery({
-		queryKey: containerQueryKey(machineId, containerId),
-		queryFn: () => getContainer(machineId, containerId),
-		gcTime: 0,
-	});
+	return useOneShotQuery(containerQueryKey(machineId, containerId), () =>
+		getContainer(machineId, containerId),
+	);
 }
 
-// The raw inspect report behind the detail page's "Show inspect JSON"
-// reveal. gcTime: 0 drops the cache entry the moment the page unmounts, so
-// every reveal refetches the current report. The detail page passes
-// enabled: revealed so the report fetches lazily on the first "Show
-// inspect JSON" click, not on page mount.
 export function useContainerInspect(
 	machineId: string,
 	containerId: string,
 	options?: { enabled?: boolean },
 ) {
-	return useQuery({
-		queryKey: containerInspectQueryKey(machineId, containerId),
-		queryFn: () => inspectContainer(machineId, containerId),
-		enabled: options?.enabled ?? true,
-		gcTime: 0,
-	});
+	return useOneShotQuery(
+		containerInspectQueryKey(machineId, containerId),
+		() => inspectContainer(machineId, containerId),
+		options,
+	);
 }
 
-// The all-stats snapshot behind the containers tab's stats dialog (spec
-// 415). The dialog mounts only while open and passes enabled so the
-// query runs only then; gcTime: 0 drops the cache entry the moment the
-// dialog unmounts, so every open fetches a fresh one-shot snapshot
-// instead of serving the previous one.
 export function useContainerStatsList(
 	machineId: string,
 	options?: { enabled?: boolean },
 ) {
-	return useQuery({
-		queryKey: containersStatsQueryKey(machineId),
-		queryFn: () => listContainerStats(machineId),
-		enabled: options?.enabled ?? true,
-		gcTime: 0,
-	});
+	return useOneShotQuery(
+		containersStatsQueryKey(machineId),
+		() => listContainerStats(machineId),
+		options,
+	);
 }
 
-// The one-container stats snapshot behind the details page's stats
-// dialog (spec 415), the list hook's sibling: enabled only while the
-// dialog is open, gcTime: 0 so a reopen never serves a cached snapshot.
 export function useContainerStats(
 	machineId: string,
 	containerId: string,
 	options?: { enabled?: boolean },
 ) {
-	return useQuery({
-		queryKey: containerStatsQueryKey(machineId, containerId),
-		queryFn: () => getContainerStats(machineId, containerId),
-		enabled: options?.enabled ?? true,
-		gcTime: 0,
-	});
+	return useOneShotQuery(
+		containerStatsQueryKey(machineId, containerId),
+		() => getContainerStats(machineId, containerId),
+		options,
+	);
 }
 
 export function useStartContainer(machineId: string) {

@@ -20,6 +20,14 @@ function mockMachine(permission: "read" | "write" | "admin" = "admin") {
 	);
 }
 
+function mockMachineError() {
+	server.use(
+		http.get("*/api/machines/m-1", () =>
+			errorResponse(500, "MACHINE_UNREACHABLE", "Machine unreachable"),
+		),
+	);
+}
+
 function mockPodDetail(state = "Running") {
 	server.use(
 		http.get("*/api/machines/m-1/pods/p-1", () =>
@@ -43,9 +51,10 @@ function renderPodDetailPage() {
 // The pod detail page's start/stop wiring (spec 402 ticket #407): the
 // button's label follows the pod's state, the request hits the pod's
 // lifecycle endpoint, a success refetches the pod detail through MSW, a
-// failure surfaces the API's error envelope, and the buttons hide below
-// the manage capability. The shared layout's skeleton is pinned once in
-// the shared DetailPage suite; this suite keeps domain assertions only.
+// failure surfaces the API's error envelope, and below the manage
+// capability the shared write hint replaces the buttons. The shared
+// layout's skeleton is pinned once in the shared DetailPage suite; this
+// suite keeps domain assertions only.
 describe("PodDetailPage lifecycle actions", () => {
 	it("sends stop to the running pod's endpoint and refetches the pod detail", async () => {
 		const stopRequests: string[] = [];
@@ -134,13 +143,61 @@ describe("PodDetailPage lifecycle actions", () => {
 		await waitFor(() => expect(button).toBeEnabled());
 	});
 
-	it("hides the lifecycle buttons below the manage capability", async () => {
+	// The gate renders from the hook's tri-state (spec #437 ticket #436):
+	// allowed renders the lifecycle section, denied renders the shared
+	// write hint — for a read-only caller and a failed machine query
+	// alike, the divergence fix — and pending renders neither. The
+	// classification itself is pinned once in the hook's suite.
+	it("shows the write hint in place of the lifecycle buttons for a read-only caller", async () => {
 		mockMachine("read");
 		mockPodDetail();
 		renderPodDetailPage();
 
 		await screen.findByTestId("pod-detail-name");
+		const hint = await screen.findByTestId("pod-lifecycle-permission-hint");
+		expect(hint).toHaveAttribute("data-requirement", "write");
+		expect(hint).toHaveTextContent(
+			"You have read-only access to this machine. Ask an owner or admin for write access to manage its pods.",
+		);
 		expect(screen.queryByTestId("stop-pod-button")).not.toBeInTheDocument();
 		expect(screen.queryByTestId("start-pod-button")).not.toBeInTheDocument();
+	});
+
+	it("renders the write hint when the machine query fails, not a silent gap", async () => {
+		mockMachineError();
+		mockPodDetail();
+		renderPodDetailPage();
+
+		await screen.findByTestId("pod-detail-name");
+		expect(
+			await screen.findByTestId("pod-lifecycle-permission-hint"),
+		).toBeInTheDocument();
+		expect(screen.queryByTestId("stop-pod-button")).not.toBeInTheDocument();
+		expect(screen.queryByTestId("start-pod-button")).not.toBeInTheDocument();
+	});
+
+	it("renders neither the lifecycle buttons nor the hint while the gate is pending", async () => {
+		mockPodDetail();
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		server.use(
+			http.get("*/api/machines/m-1", async () => {
+				await gate;
+				return HttpResponse.json(machineFixture({ permission: "write" }));
+			}),
+		);
+		renderPodDetailPage();
+
+		await screen.findByTestId("pod-detail-name");
+		expect(screen.queryByTestId("stop-pod-button")).not.toBeInTheDocument();
+		expect(screen.queryByTestId("start-pod-button")).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("pod-lifecycle-permission-hint"),
+		).not.toBeInTheDocument();
+
+		release();
+		await screen.findByTestId("stop-pod-button");
 	});
 });

@@ -17,49 +17,39 @@ import {
 	networksQueryKey,
 } from "@shared/queries/queryKeys";
 import {
+	useAlwaysRefetchListQuery,
+	useOneShotQuery,
+} from "@shared/queries/useFreshQuery";
+import {
 	invalidateMachineResources,
 	useListInvalidatingMutation,
 } from "@shared/queries/useListInvalidatingMutation";
 import type { ApiError } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function useNetworks(machineId: string) {
-	return useQuery({
-		queryKey: networksQueryKey(machineId),
-		queryFn: () => listNetworks(machineId),
-		// Lazy tabs remount the panel on every activation; refetching on
-		// mount makes each activation issue a fresh request, even inside the
-		// app-wide five-minute stale window.
-		refetchOnMount: "always",
-	});
+	return useAlwaysRefetchListQuery(networksQueryKey(machineId), () =>
+		listNetworks(machineId),
+	);
 }
 
-// The network detail view (spec 301): a network sub-resource keyed by the
-// network, gcTime 0 so every page visit refetches and the cache entry dies
-// with the page.
 export function useNetwork(machineId: string, networkName: string) {
-	return useQuery({
-		queryKey: networkQueryKey(machineId, networkName),
-		queryFn: () => getNetwork(machineId, networkName),
-		gcTime: 0,
-	});
+	return useOneShotQuery(networkQueryKey(machineId, networkName), () =>
+		getNetwork(machineId, networkName),
+	);
 }
 
-// The detail page passes enabled: revealed, so the report fetches lazily on
-// the first "Show inspect JSON" click, never on page mount; gcTime 0 makes
-// every reveal refetch.
 export function useNetworkInspect(
 	machineId: string,
 	networkName: string,
 	options?: { enabled?: boolean },
 ) {
-	return useQuery({
-		queryKey: networkInspectQueryKey(machineId, networkName),
-		queryFn: () => inspectNetwork(machineId, networkName),
-		enabled: options?.enabled ?? true,
-		gcTime: 0,
-	});
+	return useOneShotQuery(
+		networkInspectQueryKey(machineId, networkName),
+		() => inspectNetwork(machineId, networkName),
+		options,
+	);
 }
 
 // Every network mutation invalidates both lists: the containers DTO carries

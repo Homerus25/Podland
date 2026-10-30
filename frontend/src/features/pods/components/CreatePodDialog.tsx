@@ -2,9 +2,7 @@ import {
 	Divider,
 	FormControl,
 	FormErrorMessage,
-	FormHelperText,
 	FormLabel,
-	HStack,
 	Input,
 	Text,
 	VStack,
@@ -23,6 +21,7 @@ import {
 	FormValidityScope,
 	type MutationSlice,
 } from "@shared/components/MutationDialog";
+import { ResourceLimitInputs } from "@shared/components/ResourceLimitInputs";
 import {
 	FormSection,
 	MountFlags,
@@ -30,7 +29,6 @@ import {
 	RowListEditor,
 	RowSelect,
 } from "@shared/components/RowEditor";
-import { MEMORY_UNITS_PATTERN } from "@shared/utils/memoryUnits";
 import { useFieldArray, useForm } from "react-hook-form";
 
 interface CreatePodDialogProps {
@@ -44,12 +42,12 @@ interface CreatePodDialogProps {
 // joins (the shared checkbox list over the machine's networks), named
 // volumes and bind mounts (the shared row-editor module — the dialog
 // keeps the row shapes, options, and copy), labels (the shared key/value
-// editor), and the resource limits. The form-to-payload mapping lives in
-// the services module (buildCreatePodInput); the dialog keeps form
-// ownership only. The memory field's client-side check (user story 11)
-// rides the register validation, so an unparseable value disables the
+// editor), and the resource limits (the shared resource-limit inputs,
+// spec 437 ticket #432 — the module owns the fields' labels, helper
+// text, and client-side checks, so an unparseable value disables the
 // submit before a round trip; the backend's units parser stays the
-// validator.
+// validator). The form-to-payload mapping lives in the services module
+// (buildCreatePodInput); the dialog keeps form ownership only.
 export function CreatePodDialog({
 	mutation,
 	machineId,
@@ -313,53 +311,11 @@ export function CreatePodDialog({
 							<Divider />
 
 							<FormSection title="Resource limits">
-								{/* The two limit fields stack at base (spec 393): side
-								    by side they cannot fit a 360px dialog. */}
-								<HStack
-									spacing={4}
-									align="flex-start"
-									flexDirection={{ base: "column", md: "row" }}
-								>
-									<FormControl isInvalid={!!errors.cpus}>
-										<FormLabel htmlFor="pod-cpus">CPUs</FormLabel>
-										<Input
-											id="pod-cpus"
-											type="number"
-											step="0.1"
-											min="0"
-											placeholder="1.5"
-											{...register("cpus", {
-												validate: (value) =>
-													value === "" || Number.parseFloat(value) > 0
-														? true
-														: "CPU limit must be a positive number",
-											})}
-										/>
-										<FormHelperText>CPU limit in cores.</FormHelperText>
-										<FormErrorMessage>{errors.cpus?.message}</FormErrorMessage>
-									</FormControl>
-									<FormControl isInvalid={!!errors.memory}>
-										<FormLabel htmlFor="pod-memory">Memory</FormLabel>
-										<Input
-											id="pod-memory"
-											fontFamily="mono"
-											placeholder="512m"
-											{...register("memory", {
-												validate: (value) =>
-													value.trim() === "" ||
-													MEMORY_UNITS_PATTERN.test(value.trim())
-														? true
-														: "Use podman units syntax, e.g. 512m or 1g",
-											})}
-										/>
-										<FormHelperText>
-											Podman units syntax, e.g. 512m or 1g.
-										</FormHelperText>
-										<FormErrorMessage>
-											{errors.memory?.message}
-										</FormErrorMessage>
-									</FormControl>
-								</HStack>
+								<ResourceLimitInputs
+									idPrefix="pod"
+									register={register}
+									errors={errors}
+								/>
 							</FormSection>
 						</VStack>
 					</form>

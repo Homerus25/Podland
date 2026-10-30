@@ -19,8 +19,10 @@ import {
 	useUpdateContainer,
 } from "@features/containers/hooks/useContainers";
 import type { ContainerDetail } from "@features/containers/services/containersApi";
-import { useMachine } from "@features/machines/hooks/useMachines";
-import { can } from "@features/machines/permissions";
+import {
+	type CapabilityGate,
+	useCapabilityGate,
+} from "@features/machines/hooks/useCapabilityGate";
 import { DetailPage } from "@shared/components/DetailPage";
 import {
 	DetailList,
@@ -36,19 +38,16 @@ import { Link as ReactRouterLink, useParams } from "react-router-dom";
 import { EditConfigurationDialog } from "./EditConfigurationDialog";
 import { RenameContainerDialog } from "./RenameContainerDialog";
 
-// The rename control's gate: "pending" while the machine query is in
-// flight (the caller's level is unknown), then the permission answer.
-type RenameAccess = "pending" | "allowed" | "denied";
-
 // The container's overview: one label/value row per attribute the spec
 // lists. Cross-links (image, secrets) point at the related resources'
 // detail pages. The Name row carries the rename control: a pencil button
 // for callers who can manage containers, the shared write-permission hint
 // for everyone else — the secret detail page's hidden-admin-control
 // pattern, so a read-only caller is never baited into a 403. The gate is
-// tri-state: while the machine query is pending the caller's level is
-// unknown, so the row renders neither control rather than flashing the
-// read-only hint at a write-capable caller.
+// the capability-gate hook's tri-state (the reference adapter of the
+// detail-page gating settlement): while the caller's level is pending the
+// row renders neither control, rather than flashing the read-only hint
+// at a write-capable caller.
 function ContainerOverview({
 	machineId,
 	container,
@@ -57,7 +56,7 @@ function ContainerOverview({
 }: {
 	machineId: string;
 	container: ContainerDetail;
-	renameAccess: RenameAccess;
+	renameAccess: CapabilityGate;
 	onRename: () => void;
 }) {
 	const environment = Object.entries(container.environment ?? {});
@@ -269,11 +268,13 @@ function ContainerOverview({
 }
 
 // The container detail page (spec 301, ticket #306): the shared layout's
-// shell with this feature's overview rows. The overview query refetches on
-// every visit (gcTime: 0); the raw inspect report fetches lazily on the
-// first "Show inspect JSON" click, never on page mount. The machine query
-// supplies the per-caller facts the rename gate reads; the overview itself
-// is readable at read level.
+// shell with this feature's overview rows. The overview query rides the
+// shared freshness factory's one-shot flavor, so every visit refetches;
+// the raw inspect report fetches lazily on the
+// first "Show inspect JSON" click, never on page mount. The capability
+// gate (the machines feature's hook) answers the per-caller facts both
+// gated affordances render from; the overview itself is readable at read
+// level.
 export function ContainerDetailPage() {
 	const { machineId, containerId } = useParams<{
 		machineId: string;
@@ -287,20 +288,10 @@ export function ContainerDetailPage() {
 	const inspectQuery = useContainerInspect(machineId!, containerId!, {
 		enabled: revealed,
 	});
-	const { data: machine, error: machineError } = useMachine(machineId!);
+	const gate = useCapabilityGate(machineId!, "manage-containers");
 	const rename = useRenameContainer(machineId!, containerId!);
 	const update = useUpdateContainer(machineId!, containerId!);
 	const container = query.data;
-	// A failed machine query leaves the caller's level unknown; render the
-	// hint rather than a bare gap, so a read-only caller is never left
-	// without the explanation (the secret detail page's ruling).
-	const renameAccess: RenameAccess = machine
-		? can(machine, "manage-containers")
-			? "allowed"
-			: "denied"
-		: machineError
-			? "denied"
-			: "pending";
 
 	return (
 		<>
@@ -315,11 +306,11 @@ export function ContainerDetailPage() {
 				onToggleInspect={() => setRevealed((value) => !value)}
 				headerActions={
 					// The edit-configuration action (spec 412, ticket #414),
-					// gated by the containers manage capability — the pod
-					// detail page's header-button pattern: hidden below write
-					// level and while the machine query is pending, so a
+					// riding the same capability gate as the rename control:
+					// rendered on allowed, nothing otherwise — hidden below
+					// write level and while the gate is pending, so a
 					// read-only caller is never baited into a 403.
-					machine && can(machine, "manage-containers") ? (
+					gate === "allowed" ? (
 						<Button
 							size="sm"
 							onClick={() => setEditingConfig(true)}
@@ -349,7 +340,7 @@ export function ContainerDetailPage() {
 						<ContainerOverview
 							machineId={machineId!}
 							container={container}
-							renameAccess={renameAccess}
+							renameAccess={gate}
 							onRename={() => setRenaming(true)}
 						/>
 					</>

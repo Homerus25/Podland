@@ -2,7 +2,6 @@ package containers
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -298,37 +297,15 @@ func (h *ContainerHandler) ContainerStats(w http.ResponseWriter, r *http.Request
 	})
 }
 
-// Logs handles retrieving logs for a container. The query is parsed once:
-// only a clean follow request crosses the streaming envelope, while query
-// errors ride the JSON envelope even when follow=true was requested, so
-// no code path here writes an error response by hand.
+// Logs handles retrieving logs for a container: one kit call — the
+// streaming kit owns the whole handler-side dispatch (the window parse,
+// the query-error fallback, the param guard, the follow fork), and the
+// domain contributes its param name, guard code, and two service calls.
 func (h *ContainerHandler) Logs(w http.ResponseWriter, r *http.Request) {
-	since, tail, queryErr := streaming.ParseLogWindow(r)
-	if queryErr != nil {
-		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (struct{}, error) {
-			return struct{}{}, queryErr
-		})
-		return
-	}
-
-	containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
-
-	if guard == nil && streaming.ParseFollow(r) {
-		slog.InfoContext(r.Context(), "streamLogs", slog.String("containerID", containerID), slog.Bool("follow", true))
-		streaming.RunLogStream(w, r, streaming.LogStreamOp{
-			Since: since,
-			Tail:  tail,
-			Stream: func(ctx context.Context, userID, machineID string, onEvent func(streaming.LogEvent)) error {
-				return h.service.GetLogsWithStream(ctx, userID, machineID, containerID, since, tail, onEvent)
-			},
-		})
-		return
-	}
-
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerLogsResponse, error) {
-		if guard != nil {
-			return nil, guard
-		}
-		return h.service.GetLogs(ctx, userID, machineID, containerID, since, tail)
+	streaming.HandleLogs(w, r, streaming.LogsDispatchOp[*ContainerLogsResponse]{
+		ParamName: "containerId",
+		GuardCode: "MISSING_CONTAINER_ID",
+		Follow:    h.service.GetLogsWithStream,
+		Buffered:  h.service.GetLogs,
 	})
 }

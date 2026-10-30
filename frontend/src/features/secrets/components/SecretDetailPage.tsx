@@ -1,6 +1,8 @@
 import { Box, Button, HStack, Table, Tbody, Text } from "@chakra-ui/react";
-import { useMachine } from "@features/machines/hooks/useMachines";
-import { can } from "@features/machines/permissions";
+import {
+	type CapabilityGate,
+	useCapabilityGate,
+} from "@features/machines/hooks/useCapabilityGate";
 import {
 	useRevealSecret,
 	useSecret,
@@ -10,7 +12,6 @@ import { DetailPage } from "@shared/components/DetailPage";
 import { DetailRow, isNotFound } from "@shared/components/detailKit";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { PermissionHint } from "@shared/components/PermissionHint";
-import type { Machine } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
@@ -21,18 +22,25 @@ const MASK = "••••••••••••";
 // The reveal-value flow, preserved from the former SecretDetailModal (spec
 // 301): the value travels through a mutation, so React Query never caches
 // it and it dies with the page. On screen the value stays masked until a
-// second click on the eye. Admin-gated: below admin the hint replaces the
-// control, so users are never baited into a 403.
+// second click on the eye. The section renders from the capability gate's
+// tri-state: the flow on allowed, the admin hint on denied — including a
+// failed machine query — and neither while pending, so an admin caller
+// never sees the hint flash while their level loads.
 function RevealValueSection({
-	machine,
+	machineId,
 	secretId,
+	revealAccess,
 }: {
-	machine: Machine;
+	machineId: string;
 	secretId: string;
+	revealAccess: CapabilityGate;
 }) {
-	const reveal = useRevealSecret(machine.id);
+	const reveal = useRevealSecret(machineId);
 	const [isVisible, setIsVisible] = useState(false);
-	const canReveal = can(machine, "reveal-secrets");
+
+	if (revealAccess === "pending") {
+		return null;
+	}
 
 	return (
 		<Box borderTopWidth={1} pt={3}>
@@ -41,7 +49,7 @@ function RevealValueSection({
 					<ErrorDisplay error={getApiError(reveal.error)} />
 				</Box>
 			) : null}
-			{canReveal ? (
+			{revealAccess === "allowed" ? (
 				reveal.data ? (
 					<HStack>
 						<Text
@@ -84,10 +92,12 @@ function RevealValueSection({
 // The secret detail page (spec 301, ticket #310): the shared layout's shell
 // with the secret's metadata as overview rows and the former modal's
 // reveal-value flow preserved below them. The overview is the useSecret
-// detail query (gcTime: 0, refetched on every visit); the raw inspect
+// detail query (the freshness factory's one-shot flavor, refetched on
+// every visit); the raw inspect
 // report fetches lazily on the first "Show inspect JSON" click and never
-// carries the value. The machine query supplies the per-caller facts the
-// reveal gate reads; the overview itself is readable at read level.
+// carries the value. The capability gate (the machines feature's hook)
+// answers the per-caller fact the reveal flow renders from; the overview
+// itself is readable at read level.
 export function SecretDetailPage() {
 	const { machineId, secretId } = useParams<{
 		machineId: string;
@@ -98,7 +108,7 @@ export function SecretDetailPage() {
 	const inspectQuery = useSecretInspect(machineId!, secretId!, {
 		enabled: revealed,
 	});
-	const { data: machine, error: machineError } = useMachine(machineId!);
+	const gate = useCapabilityGate(machineId!, "reveal-secrets");
 
 	return (
 		<DetailPage
@@ -154,20 +164,11 @@ export function SecretDetailPage() {
 							) : null}
 						</Tbody>
 					</Table>
-					{machine ? (
-						<RevealValueSection machine={machine} secretId={secretId!} />
-					) : machineError ? (
-						// The machine query failed, so the caller's permission level
-						// is unknown — render the hint rather than nothing, so a
-						// non-admin never sees a bare gap (ticket #310).
-						<Box borderTopWidth={1} pt={3}>
-							<PermissionHint
-								scope="reveal"
-								requirement="admin"
-								fontSize="sm"
-							/>
-						</Box>
-					) : null}
+					<RevealValueSection
+						machineId={machineId!}
+						secretId={secretId!}
+						revealAccess={gate}
+					/>
 				</>
 			) : null}
 		</DetailPage>

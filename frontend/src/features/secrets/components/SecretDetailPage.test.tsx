@@ -209,6 +209,59 @@ describe("SecretDetailPage reveal value", () => {
 		},
 	);
 
+	it("renders neither the reveal button nor the hint while the machine query is pending", async () => {
+		// The machine query is the gate's only input: while it is in flight
+		// the caller's level is unknown, so the page must not flash the
+		// admin hint at an admin caller.
+		mockMachine("admin");
+		mockSecret(secretFixture());
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		server.use(
+			http.get("*/api/machines/m-1", async () => {
+				await gate;
+				return HttpResponse.json(
+					machineFixture({ permission: "admin", isOwner: true }),
+				);
+			}),
+		);
+		renderDetailPage();
+
+		await screen.findByTestId("secret-detail-id");
+		expect(
+			screen.queryByTestId("reveal-secret-button"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("reveal-permission-hint"),
+		).not.toBeInTheDocument();
+
+		release();
+		await screen.findByTestId("reveal-secret-button");
+	});
+
+	it("renders the admin hint when the machine query fails", async () => {
+		// A failed machine query leaves the caller's level unknown — the
+		// hint renders rather than a bare gap, so a non-admin never reads
+		// the missing control as "this secret has no reveal".
+		mockSecret(secretFixture());
+		server.use(
+			http.get("*/api/machines/m-1", () =>
+				errorResponse(500, "MACHINE_UNREACHABLE", "Machine unreachable"),
+			),
+		);
+		renderDetailPage();
+
+		await screen.findByTestId("secret-detail-id");
+		expect(
+			await screen.findByTestId("reveal-permission-hint"),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByTestId("reveal-secret-button"),
+		).not.toBeInTheDocument();
+	});
+
 	it("renders a 403 reveal error through the shared error display", async () => {
 		mockMachine("admin");
 		server.use(

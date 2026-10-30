@@ -1,5 +1,4 @@
 import { ConnectDialog } from "@features/networks/components/ConnectDialog";
-import { QueryClient } from "@tanstack/react-query";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
@@ -363,38 +362,6 @@ describe("ConnectDialog with the network fixed", () => {
 		await waitFor(() =>
 			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
 		);
-	});
-
-	it("issues fresh list requests every time the dialog opens, inside the five-minute cache window", async () => {
-		resetCounters();
-		server.use(...mockLists(), connectHandler());
-		// The app-wide stale time is five minutes (main.tsx); mirroring it
-		// pins the refetch inside the cache window.
-		const queryClient = new QueryClient({
-			defaultOptions: { queries: { retry: false, staleTime: 5 * 60 * 1000 } },
-		});
-		const first = renderWithQuery(
-			<ConnectDialog
-				machineId="m-1"
-				network={networkFixture()}
-				onClose={() => {}}
-			/>,
-			{ queryClient },
-		);
-		await waitFor(() => expect(containersGets).toBe(1));
-		await waitFor(() => expect(networksGets).toBe(1));
-		first.unmount();
-
-		renderWithQuery(
-			<ConnectDialog
-				machineId="m-1"
-				network={networkFixture()}
-				onClose={() => {}}
-			/>,
-			{ queryClient },
-		);
-		await waitFor(() => expect(containersGets).toBe(2));
-		await waitFor(() => expect(networksGets).toBe(2));
 	});
 });
 

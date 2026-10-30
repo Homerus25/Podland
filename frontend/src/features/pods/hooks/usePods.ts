@@ -14,47 +14,34 @@ import {
 	podQueryKey,
 	podsQueryKey,
 } from "@shared/queries/queryKeys";
+import {
+	useAlwaysRefetchListQuery,
+	useOneShotQuery,
+} from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
-import { useQuery } from "@tanstack/react-query";
 
 export function usePods(machineId: string) {
-	return useQuery({
-		queryKey: podsQueryKey(machineId),
-		queryFn: () => listPods(machineId),
-		// Lazy tabs remount the panel on every activation; refetching on
-		// mount makes each activation issue a fresh request, even inside the
-		// app-wide five-minute stale window.
-		refetchOnMount: "always",
-	});
+	return useAlwaysRefetchListQuery(podsQueryKey(machineId), () =>
+		listPods(machineId),
+	);
 }
 
-// The pod detail view behind the detail page: a singular sub-resource keyed
-// by the pod, gcTime: 0 so every page visit refetches the pod's current
-// state.
 export function usePod(machineId: string, podId: string) {
-	return useQuery({
-		queryKey: podQueryKey(machineId, podId),
-		queryFn: () => getPod(machineId, podId),
-		gcTime: 0,
-	});
+	return useOneShotQuery(podQueryKey(machineId, podId), () =>
+		getPod(machineId, podId),
+	);
 }
 
-// The raw inspect report behind the detail page's "Show inspect JSON"
-// reveal. gcTime: 0 drops the cache entry the moment the page unmounts, so
-// every reveal refetches the current report. The detail page passes
-// enabled: revealed so the report fetches lazily on the first "Show
-// inspect JSON" click, not on page mount.
 export function usePodInspect(
 	machineId: string,
 	podId: string,
 	options?: { enabled?: boolean },
 ) {
-	return useQuery({
-		queryKey: podInspectQueryKey(machineId, podId),
-		queryFn: () => inspectPod(machineId, podId),
-		enabled: options?.enabled ?? true,
-		gcTime: 0,
-	});
+	return useOneShotQuery(
+		podInspectQueryKey(machineId, podId),
+		() => inspectPod(machineId, podId),
+		options,
+	);
 }
 
 // A create extends the machine's pod list, so the list refetches on

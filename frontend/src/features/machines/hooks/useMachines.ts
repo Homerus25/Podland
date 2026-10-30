@@ -19,6 +19,7 @@ import {
 	machinesQueryKey,
 	machineVersionQueryKey,
 } from "@shared/queries/queryKeys";
+import { useAlwaysRefetchListQuery } from "@shared/queries/useFreshQuery";
 import type { MachinePermission } from "@shared/types/api";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -84,14 +85,9 @@ export function useDeleteMachine() {
 }
 
 export function useMachineAccess(machineId: string) {
-	return useQuery({
-		queryKey: machineAccessQueryKey(machineId),
-		queryFn: () => listMachineAccess(machineId),
-		// The settings tab remounts on every activation (lazy tabs); refetch
-		// on mount so re-entering it re-reads the grants even inside the
-		// app-wide five-minute stale window.
-		refetchOnMount: "always",
-	});
+	return useAlwaysRefetchListQuery(machineAccessQueryKey(machineId), () =>
+		listMachineAccess(machineId),
+	);
 }
 
 // Sharing changes the machine's access list, so the access query refetches

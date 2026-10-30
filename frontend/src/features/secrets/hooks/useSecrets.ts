@@ -15,22 +15,21 @@ import {
 	secretQueryKey,
 	secretsQueryKey,
 } from "@shared/queries/queryKeys";
+import {
+	useAlwaysRefetchListQuery,
+	useOneShotQuery,
+} from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import {
 	invalidateMoveResult,
 	useMovePreview,
 } from "@shared/transfers/transferHooks";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function useSecrets(machineId: string) {
-	return useQuery({
-		queryKey: secretsQueryKey(machineId),
-		queryFn: () => listSecrets(machineId),
-		// Lazy tabs remount the panel on every activation; refetching on
-		// mount makes each activation issue a fresh request, even inside the
-		// app-wide five-minute stale window.
-		refetchOnMount: "always",
-	});
+	return useAlwaysRefetchListQuery(secretsQueryKey(machineId), () =>
+		listSecrets(machineId),
+	);
 }
 
 // A create extends the machine's secret list, so the list refetches on
@@ -43,31 +42,22 @@ export function useCreateSecret(machineId: string) {
 	);
 }
 
-// Detail view metadata. gcTime: 0 drops the cache entry the moment the
-// detail view unmounts, so reopening always refetches the current state.
 export function useSecret(machineId: string, secretId: string) {
-	return useQuery({
-		queryKey: secretQueryKey(machineId, secretId),
-		queryFn: () => getSecret(machineId, secretId),
-		gcTime: 0,
-	});
+	return useOneShotQuery(secretQueryKey(machineId, secretId), () =>
+		getSecret(machineId, secretId),
+	);
 }
 
-// The raw inspect report behind the inspect dialog. gcTime: 0 drops the
-// cache entry the moment the dialog unmounts, so every open refetches the
-// current report. The detail page passes enabled: revealed so the report
-// fetches lazily on the first "Show inspect JSON" click, not on page mount.
 export function useSecretInspect(
 	machineId: string,
 	secretId: string,
 	options?: { enabled?: boolean },
 ) {
-	return useQuery({
-		queryKey: secretInspectQueryKey(machineId, secretId),
-		queryFn: () => inspectSecret(machineId, secretId),
-		enabled: options?.enabled ?? true,
-		gcTime: 0,
-	});
+	return useOneShotQuery(
+		secretInspectQueryKey(machineId, secretId),
+		() => inspectSecret(machineId, secretId),
+		options,
+	);
 }
 
 // The revealed value travels through a mutation so React Query never caches

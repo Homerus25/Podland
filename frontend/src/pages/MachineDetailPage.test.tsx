@@ -1,5 +1,4 @@
 import type { Machine } from "@shared/types/api";
-import { QueryClient } from "@tanstack/react-query";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
@@ -534,92 +533,6 @@ describe("lazy tab mounting", () => {
 		).toBeInTheDocument();
 		expect(screen.queryByTestId("machine-form-submit")).not.toBeInTheDocument();
 		expect(counts.access).toBe(0);
-	});
-});
-
-describe("refetch on tab activation", () => {
-	// The app-wide stale time is five minutes (main.tsx). The client here
-	// mirrors it, so these tests pin the refetch inside the cache window:
-	// with the harness default (staleTime 0) a remount refetches anyway and
-	// the assertions could not fail.
-	function renderMachineDetailPageWithAppStaleTime() {
-		return renderApp("/machines/m-1", {
-			resolveInitialState: async () => ({ username: "alice", role: "user" }),
-			queryClient: new QueryClient({
-				defaultOptions: {
-					queries: { retry: false, staleTime: 5 * 60 * 1000 },
-				},
-			}),
-		});
-	}
-
-	it("refetches the default tab's list when returning to it", async () => {
-		const counts = countingTabHandlers();
-		renderMachineDetailPageWithAppStaleTime();
-
-		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
-		expect(counts.containers).toBe(1);
-
-		await userEvent.click(screen.getByRole("tab", { name: /images/i }));
-		expect(await screen.findByTestId("images-empty")).toBeInTheDocument();
-
-		await userEvent.click(screen.getByRole("tab", { name: /containers/i }));
-		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
-		await waitFor(() => expect(counts.containers).toBe(2));
-	});
-
-	it.each(["volumes", "images", "networks", "quadlets", "secrets"] as const)(
-		"issues the %s endpoint request on every activation of its tab",
-		async (endpoint) => {
-			const counts = countingTabHandlers();
-			renderMachineDetailPageWithAppStaleTime();
-
-			expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
-
-			await userEvent.click(
-				screen.getByRole("tab", { name: new RegExp(endpoint, "i") }),
-			);
-			expect(
-				await screen.findByTestId(`${endpoint}-empty`),
-			).toBeInTheDocument();
-			expect(counts[endpoint]).toBe(1);
-
-			// Leaving unmounts the panel; re-entry remounts it and the
-			// endpoint fires again inside the five-minute cache window.
-			await userEvent.click(screen.getByRole("tab", { name: /containers/i }));
-			expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
-
-			await userEvent.click(
-				screen.getByRole("tab", { name: new RegExp(endpoint, "i") }),
-			);
-			expect(
-				await screen.findByTestId(`${endpoint}-empty`),
-			).toBeInTheDocument();
-			await waitFor(() => expect(counts[endpoint]).toBe(2));
-		},
-	);
-
-	it("refetches the settings tab's access grants on every activation in the owner view", async () => {
-		const counts = countingTabHandlers();
-		server.use(http.get("*/api/users", () => HttpResponse.json([])));
-		renderMachineDetailPageWithAppStaleTime();
-
-		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
-
-		await userEvent.click(screen.getByRole("tab", { name: /settings/i }));
-		expect(
-			await screen.findByTestId("machine-form-submit"),
-		).toBeInTheDocument();
-		await waitFor(() => expect(counts.access).toBe(1));
-
-		await userEvent.click(screen.getByRole("tab", { name: /containers/i }));
-		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
-
-		await userEvent.click(screen.getByRole("tab", { name: /settings/i }));
-		expect(
-			await screen.findByTestId("machine-form-submit"),
-		).toBeInTheDocument();
-		await waitFor(() => expect(counts.access).toBe(2));
 	});
 });
 

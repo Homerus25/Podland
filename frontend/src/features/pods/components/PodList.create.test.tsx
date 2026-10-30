@@ -248,6 +248,32 @@ describe("PodList create", () => {
 		});
 	});
 
+	// The resource-limit fields render through the shared module (spec
+	// 437, ticket #432) with the pod id prefix; the module's own suite
+	// pins the labels, checks, and stacking once.
+	it("renders the resource-limit fields through the shared module with the pod id prefix", async () => {
+		server.use(
+			http.get("*/api/machines/m-1/pods", () =>
+				podsListResponse([podFixture()]),
+			),
+			http.get("*/api/machines/m-1/networks", () =>
+				HttpResponse.json([networkFixture()]),
+			),
+			http.get("*/api/machines/m-1/volumes", () =>
+				HttpResponse.json([volumeFixture()]),
+			),
+		);
+		renderPodList();
+		const user = userEvent.setup();
+
+		await screen.findByTestId("pod-row");
+		await user.click(screen.getByTestId("create-pod-button"));
+		await screen.findByLabelText("Name");
+
+		expect(screen.getByLabelText("CPUs")).toHaveAttribute("id", "pod-cpus");
+		expect(screen.getByLabelText("Memory")).toHaveAttribute("id", "pod-memory");
+	});
+
 	it("blocks the submit while a resource limit is unparseable and explains why", async () => {
 		server.use(
 			http.get("*/api/machines/m-1/pods", () =>

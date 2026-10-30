@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/stretchr/testify/assert"
@@ -32,33 +33,29 @@ func logsRequestWithBase(handler http.HandlerFunc, base context.Context, contain
 }
 
 // TestContainerHandler_Logs_Success tests successful buffered log retrieval
-// through the real service: the machine's log lines land in the response.
+// through the real service: the buffered service call receives the right
+// target and window through the HTTP surface, and the machine's log
+// lines land in the response.
 func TestContainerHandler_Logs_Success(t *testing.T) {
+	got := testutils.CallCapture[entities.ContainerLogsOptions]{}
 	engine := &fakeContainerEngine{
 		logsFn: func(name string, opts entities.ContainerLogsOptions) error {
+			got.Record(name, opts)
 			writeLogsInto(opts, "test log line 1\ntest log line 2\n", "")
 			return nil
 		},
 	}
 
-	w := logsRequest(newTestHandler(engine).Logs, "container-123", "")
+	w := logsRequest(newTestHandler(engine).Logs, "container-123", "?since=2024-01-01T00:00:00Z&tail=3")
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
+	assert.Equal(t, "container-123", got.Name, "the buffered service call must receive the resolved target")
+	assert.False(t, got.Opts.Follow, "the buffered service call must receive the buffered follow flag")
+	assert.Equal(t, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), got.Opts.Since,
+		"the buffered service call must receive the parsed since")
+	assert.Equal(t, int64(3), got.Opts.Tail, "the buffered service call must receive the parsed tail")
 	assert.Contains(t, w.Body.String(), `"id":"container-123"`, "Response should contain container ID")
 	assert.Contains(t, w.Body.String(), `"logs":"test log line 1\ntest log line 2"`, "Response should contain logs")
-}
-
-// TestContainerHandler_Logs_QueryErrorWithFollowRidesJSONEnvelope tests
-// that a query error answers through the JSON envelope even when
-// follow=true was requested: 400 before any stream begins.
-func TestContainerHandler_Logs_QueryErrorWithFollowRidesJSONEnvelope(t *testing.T) {
-	engine := &fakeContainerEngine{}
-
-	w := logsRequest(newTestHandler(engine).Logs, "container-123", "?follow=true&since=invalid-date")
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid since even with follow=true")
-	assert.Contains(t, w.Body.String(), "INVALID_SINCE_PARAM", "Response should contain INVALID_SINCE_PARAM error code")
-	assert.NotContains(t, w.Body.String(), "STREAM_ENDED", "No stream may begin for a query error")
 }
 
 // TestContainerHandler_Logs_BufferedCancellationAnswers504 pins the
@@ -81,14 +78,17 @@ func TestContainerHandler_Logs_BufferedCancellationAnswers504(t *testing.T) {
 }
 
 // TestContainerHandler_Logs_StreamingHappyPath tests successful streaming
-// logs with follow=true through the real service: follow=true crosses the
-// streaming envelope and dispatches to the service (the dispatch pin —
-// the kit owns the options build and pins it once), podman's log lines
-// are decoded into events, cross byte-identical, and a clean end fires
-// exactly one INFO STREAM_ENDED terminal event.
+// logs with follow=true through the real service: the follow service call
+// receives the right target and window through the HTTP surface (the
+// buffered/follow dispatch fork itself is pinned once in the streaming
+// kit's suite), podman's log lines are decoded into events, cross
+// byte-identical, and a clean end fires exactly one INFO STREAM_ENDED
+// terminal event.
 func TestContainerHandler_Logs_StreamingHappyPath(t *testing.T) {
+	got := testutils.CallCapture[entities.ContainerLogsOptions]{}
 	engine := &fakeContainerEngine{
 		logsFn: func(name string, opts entities.ContainerLogsOptions) error {
+			got.Record(name, opts)
 			// Simulate podman's follow-mode delivery: each line arrives
 			// with a podman timestamp prefix.
 			writeLogsInto(opts, "2024-01-01T00:00:00.000000000Z Starting application\n", "")
@@ -97,9 +97,15 @@ func TestContainerHandler_Logs_StreamingHappyPath(t *testing.T) {
 		},
 	}
 
-	w := logsRequest(newTestHandler(engine).Logs, "container-123", "?follow=true&tail=0")
+	w := logsRequest(newTestHandler(engine).Logs, "container-123", "?follow=true&since=2024-01-01T00:00:00Z&tail=0")
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 on streaming success")
+	assert.Equal(t, "container-123", got.Name, "the follow service call must receive the resolved target")
+	assert.True(t, got.Opts.Follow, "the follow service call must receive the follow flag")
+	assert.True(t, got.Opts.Timestamps, "the follow service call must receive the timestamps flag")
+	assert.Equal(t, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), got.Opts.Since,
+		"the follow service call must receive the parsed since")
+	assert.Equal(t, int64(0), got.Opts.Tail, "the follow service call must receive the parsed tail")
 	output := w.Body.String()
 	assert.Contains(t, output, `"message":"Starting application"`, "Response should contain first log")
 	assert.Contains(t, output, `"message":"Application started successfully"`, "Response should contain second log")

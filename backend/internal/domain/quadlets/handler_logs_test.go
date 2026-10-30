@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
+	"github.com/Homerus25/podland/backend/internal/testutils"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,23 +54,28 @@ func logsHandler(engine *fakeQuadletEngine, logsFn func(containerName string, op
 }
 
 // TestQuadletHandler_GetLogs_Success tests successful buffered log retrieval
-// through the real service: the quadlet is resolved on the machine and its
-// managed container's logs land in the response.
+// through the real service: the quadlet is resolved on the machine, the
+// buffered service call receives the right target and window through the
+// HTTP surface, and its managed container's logs land in the response.
 func TestQuadletHandler_GetLogs_Success(t *testing.T) {
-	var gotContainer string
+	got := testutils.CallCapture[entities.ContainerLogsOptions]{}
 	engine := &fakeQuadletEngine{}
 	handler := logsHandler(engine, func(containerName string, opts entities.ContainerLogsOptions) error {
-		gotContainer = containerName
+		got.Record(containerName, opts)
 		_, _ = opts.StdoutWriter.Write([]byte("quadlet log line\n"))
 		return nil
 	})
 
 	w := httptest.NewRecorder()
-	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs"))
+	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?since=2024-01-01T00:00:00Z&tail=3"))
 
 	require.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
-	assert.Equal(t, "systemd-web", gotContainer,
+	assert.Equal(t, "systemd-web", got.Name,
 		"a container quadlet logs under the systemd-spawned container name derived from the quadlet name")
+	assert.False(t, got.Opts.Follow, "the buffered service call must receive the buffered follow flag")
+	assert.Equal(t, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), got.Opts.Since,
+		"the buffered service call must receive the parsed since")
+	assert.Equal(t, int64(3), got.Opts.Tail, "the buffered service call must receive the parsed tail")
 	assert.Contains(t, w.Body.String(), `"id":"web.container"`, "Response should contain quadlet ID")
 	assert.Contains(t, w.Body.String(), `"logs":"quadlet log line"`, "Response should contain logs")
 }
@@ -92,29 +99,18 @@ func TestQuadletHandler_GetLogs_BufferedCancellationAnswers504(t *testing.T) {
 	assert.NotContains(t, w.Body.String(), "boom", "the raw cause must never ride the wire")
 }
 
-// TestQuadletHandler_GetLogs_QueryErrorWithFollowRidesJSONEnvelope tests
-// that a query error answers through the JSON envelope even when
-// follow=true was requested: 400 before any stream begins.
-func TestQuadletHandler_GetLogs_QueryErrorWithFollowRidesJSONEnvelope(t *testing.T) {
-	engine := &fakeQuadletEngine{}
-
-	w := httptest.NewRecorder()
-	newTestHandler(engine).GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?follow=true&since=invalid-date"))
-
-	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 for invalid since even with follow=true")
-	assert.Contains(t, w.Body.String(), "INVALID_SINCE_PARAM", "Response should contain INVALID_SINCE_PARAM error code")
-	assert.NotContains(t, w.Body.String(), "STREAM_ENDED", "No stream may begin for a query error")
-}
-
 // TestQuadletHandler_GetLogs_StreamingHappyPath tests successful streaming
-// logs with follow=true through the real service: follow=true crosses the
-// streaming envelope and dispatches to the service (the dispatch pin —
-// the kit owns the options build and pins it once), podman's log lines
-// are decoded into events, cross with their levels, and a clean end fires
-// exactly one INFO STREAM_ENDED terminal event.
+// logs with follow=true through the real service: the follow service call
+// receives the right target and window through the HTTP surface (the
+// buffered/follow dispatch fork itself is pinned once in the streaming
+// kit's suite), podman's log lines are decoded into events, cross with
+// their levels, and a clean end fires exactly one INFO STREAM_ENDED
+// terminal event.
 func TestQuadletHandler_GetLogs_StreamingHappyPath(t *testing.T) {
+	got := testutils.CallCapture[entities.ContainerLogsOptions]{}
 	engine := &fakeQuadletEngine{}
 	handler := logsHandler(engine, func(containerName string, opts entities.ContainerLogsOptions) error {
+		got.Record(containerName, opts)
 		// Simulate podman's follow-mode delivery: each line arrives
 		// with a podman timestamp prefix.
 		_, _ = opts.StdoutWriter.Write([]byte("2024-01-01T00:00:00Z Starting application\n"))
@@ -123,9 +119,16 @@ func TestQuadletHandler_GetLogs_StreamingHappyPath(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?follow=true&tail=0"))
+	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?follow=true&since=2024-01-01T00:00:00Z&tail=0"))
 
 	require.Equal(t, http.StatusOK, w.Code, "Should return 200 on streaming success")
+	assert.Equal(t, "systemd-web", got.Name,
+		"the follow service call must receive the resolved container target")
+	assert.True(t, got.Opts.Follow, "the follow service call must receive the follow flag")
+	assert.True(t, got.Opts.Timestamps, "the follow service call must receive the timestamps flag")
+	assert.Equal(t, time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), got.Opts.Since,
+		"the follow service call must receive the parsed since")
+	assert.Equal(t, int64(0), got.Opts.Tail, "the follow service call must receive the parsed tail")
 	output := w.Body.String()
 	assert.Contains(t, output, `"message":"Starting application"`, "Response should contain first log")
 	assert.Contains(t, output, `"message":"Application started successfully"`, "Response should contain second log")
