@@ -68,7 +68,7 @@ func parseContainerListOptions(r *http.Request) entities.ContainerListOptions {
 func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*ContainerCreateResponse, error) {
 		var request ContainerCreateRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 
@@ -191,7 +191,7 @@ func (h *ContainerHandler) Rename(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var request ContainerRenameRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return ContainerGetResponse{}, appErr
 		}
 
@@ -217,7 +217,7 @@ func (h *ContainerHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var request ContainerUpdateRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return ContainerGetResponse{}, appErr
 		}
 

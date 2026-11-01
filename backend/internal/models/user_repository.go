@@ -75,10 +75,10 @@ func (r *UserRepository) Create(user *User) error {
 
 // GetByID retrieves a user by their ID
 func (r *UserRepository) GetByID(id string) (*User, error) {
-	query := `SELECT id, username, password_hash, role, created_at FROM users WHERE id = ?`
+	query := `SELECT id, username, password_hash, role, created_at, access_tokens_revoked_at FROM users WHERE id = ?`
 
 	var user User
-	err := r.db.QueryRow(query, id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt)
+	err := r.db.QueryRow(query, id).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.AccessTokensRevokedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -91,10 +91,10 @@ func (r *UserRepository) GetByID(id string) (*User, error) {
 
 // GetByUsername retrieves a user by their username
 func (r *UserRepository) GetByUsername(username string) (*User, error) {
-	query := `SELECT id, username, password_hash, role, created_at FROM users WHERE username = ?`
+	query := `SELECT id, username, password_hash, role, created_at, access_tokens_revoked_at FROM users WHERE username = ?`
 
 	var user User
-	err := r.db.QueryRow(query, username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt)
+	err := r.db.QueryRow(query, username).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.AccessTokensRevokedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -108,7 +108,7 @@ func (r *UserRepository) GetByUsername(username string) (*User, error) {
 // List retrieves all users ordered by username, so the users-list
 // endpoint answers with a stable order across calls.
 func (r *UserRepository) List() ([]*User, error) {
-	query := `SELECT id, username, password_hash, role, created_at FROM users ORDER BY username`
+	query := `SELECT id, username, password_hash, role, created_at, access_tokens_revoked_at FROM users ORDER BY username`
 
 	rows, err := r.db.Query(query)
 	if err != nil {
@@ -119,7 +119,7 @@ func (r *UserRepository) List() ([]*User, error) {
 	var users []*User
 	for rows.Next() {
 		var user User
-		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt); err != nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.AccessTokensRevokedAt); err != nil {
 			return nil, fmt.Errorf("failed to list users: %w", err)
 		}
 		users = append(users, &user)
@@ -139,9 +139,9 @@ func (r *UserRepository) Update(user *User) error {
 		return fmt.Errorf("failed to update user: %w", err)
 	}
 
-	query := `UPDATE users SET username = ?, password_hash = ?, role = ? WHERE id = ?`
+	query := `UPDATE users SET username = ?, password_hash = ?, role = ?, access_tokens_revoked_at = ? WHERE id = ?`
 
-	_, err := r.db.Exec(query, user.Username, user.PasswordHash, user.Role, user.ID)
+	_, err := r.db.Exec(query, user.Username, user.PasswordHash, user.Role, user.AccessTokensRevokedAt, user.ID)
 	if err != nil {
 		return fmt.Errorf("failed to update user: %w", err)
 	}

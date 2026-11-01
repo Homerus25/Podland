@@ -20,6 +20,15 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// dummyLoginHash is the fixed bcrypt hash (at bcrypt.DefaultCost, the
+// same cost as a real stored password hash) that Login compares an
+// unknown username's password against, so the unknown-username 401 pays
+// the same bcrypt cost as the wrong-password 401 and the two paths are
+// latency-indistinguishable (pentest 2026-11-01, finding 2). It is a
+// const literal: one compare per unknown-username login, zero startup
+// cost, no per-request hash generation.
+const dummyLoginHash = "$2a$10$rGWQEN.z0yyBSBLM5AB08eyzIW6n9W3SGqTt2Yb3wHHyoL0ZRig3S"
+
 // JWTConfig holds JWT configuration
 type JWTConfig struct {
 	PrivateKeyPath string
@@ -55,6 +64,7 @@ type AuthService struct {
 	firstUsers   FirstUserCreator
 	loginBudget  *failurebudget.Surface
 	changeBudget *failurebudget.Surface
+	revokedRepo  models.RevokedTokenRepositoryInterface
 }
 
 // NewAuthService creates a new AuthService. sessionTTL is how long a
@@ -113,6 +123,19 @@ func (s *AuthService) WithChangeBudget(budget *failurebudget.Surface) *AuthServi
 	return s
 }
 
+// WithRevokedTokenRepo wires the access-token denylist (issue 441): the
+// revoked_access_tokens repository whose IsRevoked ValidateToken
+// consults, whose Create Logout feeds, and whose expired rows Login
+// lazily purges. The fluent shape mirrors WithLoginBudget: an optional
+// dependency layered onto the constructor. Unwired (a nil repo), there
+// is no denylist — a logout denylists nothing and ValidateToken skips
+// the jti check (the per-user cutoff still applies, since it lives on
+// the user row).
+func (s *AuthService) WithRevokedTokenRepo(repo models.RevokedTokenRepositoryInterface) *AuthService {
+	s.revokedRepo = repo
+	return s
+}
+
 // Login verifies the given credentials against the user repository and,
 // on success, returns a fresh access token, a new opaque refresh token
 // (whose SHA-256 hash is persisted as a session row), the authenticated
@@ -136,7 +159,11 @@ func (s *AuthService) WithChangeBudget(budget *failurebudget.Surface) *AuthServi
 // an unknown username and a wrong password both yield
 // ErrInvalidCredentials (401, indistinguishable to the caller), while
 // repository and token-signing failures are returned as-is so the
-// handler maps them to a generic 500.
+// handler maps them to a generic 500. Indistinguishable includes the
+// clock: the unknown-username path runs a dummy bcrypt compare against
+// a fixed package-level hash (dummyLoginHash) before answering, so it
+// pays the same bcrypt cost as the wrong-password path and the two 401s
+// are latency-indistinguishable too (pentest 2026-11-01, finding 2).
 //
 // Lazy cleanup: login also purges the user's expired session rows —
 // there is no background sweeper.
@@ -150,6 +177,12 @@ func (s *AuthService) Login(username, password string, rememberDevice bool) (acc
 		return "", "", nil, 0, err
 	}
 	if user == nil {
+		// Timing equalization (pentest 2026-11-01, finding 2): pay the
+		// same bcrypt cost the wrong-password path pays, so the two 401s
+		// are latency-indistinguishable and the unknown-username path
+		// is not a username-existence oracle. The result is discarded —
+		// the answer is ErrInvalidCredentials either way.
+		_ = bcrypt.CompareHashAndPassword([]byte(dummyLoginHash), []byte(password))
 		s.loginBudget.Spend(username)
 		return "", "", nil, 0, apperrors.ErrInvalidCredentials
 	}
@@ -166,6 +199,16 @@ func (s *AuthService) Login(username, password string, rememberDevice bool) (acc
 
 	if err := s.sessionRepo.DeleteExpiredForUser(user.ID); err != nil {
 		return "", "", nil, 0, err
+	}
+
+	// Lazy denylist cleanup (issue 441), the same pattern as the
+	// sessions purge above: expired rows are dead weight — the tokens
+	// they address would fail validation anyway — and there is no
+	// background sweeper.
+	if s.revokedRepo != nil {
+		if err := s.revokedRepo.DeleteExpired(); err != nil {
+			return "", "", nil, 0, err
+		}
 	}
 
 	refreshToken, err = s.mintSession(user.ID, rememberDevice)
@@ -285,22 +328,64 @@ func (s *AuthService) Refresh(refreshToken string) (accessToken, newRefreshToken
 
 // Logout revokes the refresh session addressed by the presented token:
 // the session row is deleted, so that token — and the device holding
-// it — can no longer refresh. Revoking an unknown token (never issued,
-// already rotated away from, or already revoked) is a no-op rather than
-// an error, which keeps logout idempotent; only storage failures
-// surface to the caller.
-func (s *AuthService) Logout(refreshToken string) error {
-	return s.sessionRepo.DeleteByTokenHash(HashRefreshToken(refreshToken))
+// it — can no longer refresh. When the request also presented an
+// access JWT (accessToken, the Authorization bearer), that token is
+// denylisted too (issue 441): its jti lands on the revoked_access_tokens
+// table until the token's own exp, so the old bearer dies with the
+// refresh session instead of living on until expiry. Revoking an
+// unknown refresh token (never issued, already rotated away from, or
+// already revoked) is a no-op rather than an error, and an absent or
+// invalid access token means nothing to denylist — logout stays
+// idempotent either way; only storage failures surface to the caller.
+func (s *AuthService) Logout(refreshToken, accessToken string) error {
+	if refreshToken != "" {
+		if err := s.sessionRepo.DeleteByTokenHash(HashRefreshToken(refreshToken)); err != nil {
+			return err
+		}
+	}
+	return s.denylistAccessToken(accessToken)
+}
+
+// denylistAccessToken revokes the presented access JWT by inserting its
+// jti on the denylist until the token's own exp (issue 441). An empty
+// bearer, an unwired denylist repo, or a token without a jti (minted
+// before the change — there is no key to denylist on) is a silent
+// no-op. A validation failure is swallowed when it is one of
+// ValidateToken's AppError sentinels — the token is already dead
+// (expired, invalid, or revoked by an earlier logout) — but propagates
+// when it is a storage failure: a logout that failed to kill the
+// presented access token must not report success.
+func (s *AuthService) denylistAccessToken(accessToken string) error {
+	if accessToken == "" || s.revokedRepo == nil {
+		return nil
+	}
+
+	claims, err := s.ValidateToken(accessToken)
+	if err != nil {
+		if _, ok := errors.AsType[*apperrors.AppError](err); ok {
+			return nil
+		}
+		return err
+	}
+
+	if claims.ID == "" || claims.ExpiresAt == nil {
+		return nil
+	}
+	return s.revokedRepo.Create(claims.ID, claims.ExpiresAt.Time)
 }
 
 // ChangePassword is the self-service path: the authenticated user
 // proves authority with their current password, the new password must
 // meet the length policy, and on success the hash is replaced and every
 // session of the user — the caller's other devices included — is
-// revoked. The returned fresh login (new access JWT + a brand-new
-// refresh token whose unremembered session is created after the
-// revocation) keeps the device making the change signed in; every
-// other device must log in again with the new password.
+// revoked. The per-user access-token cutoff (issue 441) rides the same
+// user-row write: every access JWT minted before the change answers
+// ErrTokenRevoked, so a stolen bearer dies with the old password
+// instead of living on until expiry. The returned fresh login (new
+// access JWT + a brand-new refresh token whose unremembered session is
+// created after the revocation) keeps the device making the change
+// signed in; every other device must log in again with the new
+// password.
 //
 // Failure budget: wrong current-password attempts count against the
 // caller, on the change-password endpoint's own failurebudget.Surface
@@ -351,6 +436,11 @@ func (s *AuthService) ChangePassword(userID, currentPassword, newPassword string
 		return "", "", nil, err
 	}
 	user.PasswordHash = string(hash)
+	// The per-user access-token cutoff (issue 441) rides the same
+	// user-row write: every access JWT minted before this stamp dies
+	// with the old password. The stamping ritual itself lives on the
+	// model (User.RevokeAccessTokens), shared with the admin reset.
+	user.RevokeAccessTokens()
 
 	// Revoke before the hash write: a failure here writes nothing, and
 	// no failure ordering can leave the new hash live while the
@@ -481,12 +571,16 @@ func loadPublicKey(path string) (*rsa.PublicKey, error) {
 	return publicKey, nil
 }
 
-// GenerateToken generates a JWT token for a user
+// GenerateToken generates a JWT token for a user. Every token carries a
+// jti (a fresh uuid): the claim logout's denylist keys on (issue 441),
+// unique per token so revoking one device's access token can never
+// collide with another's.
 func (s *AuthService) GenerateToken(userID string) (string, error) {
 	// Create claims
 	claims := TokenClaims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        uuid.New().String(),
 			Issuer:    s.issuer,
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.expiration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -505,15 +599,27 @@ func (s *AuthService) GenerateToken(userID string) (string, error) {
 	return signedToken, nil
 }
 
-// ValidateToken validates a JWT token. Its failure vocabulary is
-// exactly two AppError sentinels, returned bare: an expired library
-// error (typed — errors.Is against jwt.ErrTokenExpired, so a joined
-// multi-cause error counts too) yields ErrTokenExpired; every other
+// ValidateToken validates a JWT token. Its AppError vocabulary is
+// exactly three bare sentinels: an expired library error (typed —
+// errors.Is against jwt.ErrTokenExpired, so a joined multi-cause error
+// counts too) yields ErrTokenExpired; a server-side revocation (issue
+// 441) — a denylisted jti, or an iat earlier than the user's
+// access-tokens-revoked-at cutoff — yields ErrTokenRevoked; every other
 // failure — malformed, bad signature, not-yet-valid, unverifiable,
 // keyfunc/signing-method error, !token.Valid, claims-cast failure,
-// issuer mismatch — fails closed to ErrTokenInvalid. Classification
-// happens here, once, by type; callers (the JWT middleware) must never
-// re-classify by message string.
+// issuer mismatch — fails closed to ErrTokenInvalid. Storage failures
+// from the revocation checks (denylist lookup, user lookup) propagate
+// as-is: the JWT middleware's fail-closed fallback maps them to
+// TOKEN_INVALID, so a broken store can never read as "not revoked".
+// Classification happens here, once, by type; callers (the JWT
+// middleware) must never re-classify by message string.
+//
+// Revocation checks (issue 441), after the issuer check: the denylist
+// consult is skipped for a token without a jti (pre-change tokens) and
+// when no denylist repo is wired; the cutoff check is skipped for a nil
+// user record (the status endpoint's documented deleted-user behavior —
+// the token still validates, the handler answers authenticated with no
+// role).
 func (s *AuthService) ValidateToken(tokenString string) (*TokenClaims, error) {
 	// Parse token
 	token, err := jwt.ParseWithClaims(tokenString, &TokenClaims{}, func(token *jwt.Token) (any, error) {
@@ -546,6 +652,33 @@ func (s *AuthService) ValidateToken(tokenString string) (*TokenClaims, error) {
 	// Verify issuer
 	if claims.Issuer != s.issuer {
 		return nil, apperrors.ErrTokenInvalid
+	}
+
+	// Denylist check (issue 441): a jti on the revoked_access_tokens
+	// table means this very token was killed by a logout. Tokens
+	// minted before the change carry no jti — there is nothing to key
+	// a denylist row on, so the check skips them.
+	if s.revokedRepo != nil && claims.ID != "" {
+		revoked, err := s.revokedRepo.IsRevoked(claims.ID)
+		if err != nil {
+			return nil, err
+		}
+		if revoked {
+			return nil, apperrors.ErrTokenRevoked
+		}
+	}
+
+	// Cutoff check (issue 441): a password change or admin reset stamps
+	// users.access_tokens_revoked_at, and every token minted before
+	// the stamp dies with the old password. A nil user record (deleted
+	// user) carries no cutoff — the token still validates.
+	user, err := s.userRepo.GetByID(claims.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if user != nil && user.AccessTokensRevokedAt != nil && claims.IssuedAt != nil &&
+		claims.IssuedAt.Time.Before(*user.AccessTokensRevokedAt) {
+		return nil, apperrors.ErrTokenRevoked
 	}
 
 	return claims, nil

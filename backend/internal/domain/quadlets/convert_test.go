@@ -3,6 +3,7 @@ package quadlets
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"testing"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -173,4 +174,78 @@ func TestStripANSIColors(t *testing.T) {
 			assert.Equal(t, tt.want, stripANSIColors(tt.input))
 		})
 	}
+}
+
+// TestClassifyRunError pins the run-error classification (pentest
+// 2026-11-01, finding 7): only a process that started and exited non-zero
+// (*exec.ExitError) is a conversion rejection — podlet's stderr reaches
+// the wire as 400 VALIDATION_FAILED. Every other Run error — a missing
+// binary (exec.ErrNotFound), a canceled context, any start failure — is a
+// server-side problem wrapped as a non-ConversionError, so the envelope
+// answers the generic 500 and the raw exec text stays in the server log.
+// The errors are real, not synthesized: a failing sh -c for the ExitError,
+// a nonexistent binary name for ErrNotFound, a pre-canceled context for
+// the cancellation path.
+func TestClassifyRunError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non-zero exit is a conversion rejection carrying stderr", func(t *testing.T) {
+		t.Parallel()
+
+		runErr := exec.Command("sh", "-c", "exit 3").Run()
+		require.Error(t, runErr)
+
+		got := classifyRunError(runErr, "error converting service `app`\n")
+
+		convErr, ok := got.(*ConversionError)
+		require.True(t, ok, "a non-zero exit must classify as *ConversionError, got %T", got)
+		assert.Equal(t, "error converting service `app`\n", convErr.Stderr,
+			"the converter's stderr must pass through verbatim")
+	})
+
+	t.Run("non-zero exit with empty stderr falls back to the exit error", func(t *testing.T) {
+		t.Parallel()
+
+		runErr := exec.Command("sh", "-c", "exit 3").Run()
+		require.Error(t, runErr)
+
+		got := classifyRunError(runErr, "   \n")
+
+		convErr, ok := got.(*ConversionError)
+		require.True(t, ok, "a non-zero exit must classify as *ConversionError, got %T", got)
+		assert.Equal(t, runErr.Error(), convErr.Stderr,
+			"an empty stderr must fall back to the exit error so the message is never blank")
+	})
+
+	t.Run("missing binary is a start failure, not a rejection", func(t *testing.T) {
+		t.Parallel()
+
+		runErr := exec.Command("podland-no-such-binary").Run()
+		require.ErrorIs(t, runErr, exec.ErrNotFound)
+
+		got := classifyRunError(runErr, "")
+
+		assert.NotErrorIs(t, got, appErrors.ErrValidationFailed, "a missing binary must not map to VALIDATION_FAILED")
+		_, isConv := got.(*ConversionError)
+		assert.False(t, isConv, "a start failure must not classify as *ConversionError")
+		assert.ErrorIs(t, got, runErr, "the classification must wrap the original error")
+		assert.ErrorIs(t, got, exec.ErrNotFound, "the wrap must preserve the ErrNotFound chain")
+		assert.Contains(t, got.Error(), "failed to start podlet",
+			"the wrap must name the failure without echoing the raw exec text as the message")
+	})
+
+	t.Run("canceled context is a start failure, not a rejection", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		runErr := exec.CommandContext(ctx, "sh", "-c", "true").Run()
+		require.ErrorIs(t, runErr, context.Canceled)
+
+		got := classifyRunError(runErr, "")
+
+		_, isConv := got.(*ConversionError)
+		assert.False(t, isConv, "a canceled context must not classify as *ConversionError")
+		assert.ErrorIs(t, got, context.Canceled, "the wrap must preserve the cancellation chain")
+	})
 }

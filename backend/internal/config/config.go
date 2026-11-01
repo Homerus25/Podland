@@ -22,8 +22,28 @@ type Config struct {
 	AllowedOrigins []string
 	Log            LogConfig
 	Encryption     EncryptionConfig
+	Machines       MachineConfig
 	Volumes        VolumeConfig
 	Images         ImageConfig
+
+	// HSTSMaxAgeSeconds gates the security-headers middleware's
+	// Strict-Transport-Security header (pentest 2026-11-01, finding 6):
+	// 0 (the default) omits the header — the backend serves plain HTTP
+	// and RFC 6797 forbids the STS header over plain HTTP — and only a
+	// TLS-terminated deployment sets a positive max-age.
+	HSTSMaxAgeSeconds int
+}
+
+// MachineConfig holds machine-registration configuration.
+type MachineConfig struct {
+	// HostBlockPrivateRanges is the opt-in egress block on the
+	// registration/update probe target (pentest 2026-11-01 finding 1):
+	// when enabled, a hostname whose resolved IPs (or literal IP) fall
+	// in loopback, RFC1918, link-local, CGNAT, ULA, or unspecified
+	// ranges is rejected with 400 HOST_NOT_ALLOWED before any dial.
+	// Default false — Podland's primary use case is LAN/localhost
+	// podman hosts, so the block must not be default-on.
+	HostBlockPrivateRanges bool
 }
 
 // VolumeConfig holds volume configuration
@@ -157,6 +177,9 @@ func Load() (*Config, error) {
 	// Encryption
 	cfg.Encryption.Key = getEnv("ENCRYPTION_KEY", "")
 
+	// Machines
+	cfg.Machines.HostBlockPrivateRanges = getEnvBool("MACHINE_HOST_BLOCK_PRIVATE_RANGES", false)
+
 	// Volumes
 	// The default is the transfer kit's DefaultMaxVolumeUploadBytes —
 	// the same bound the cross-machine copy/move falls back to — so
@@ -169,6 +192,10 @@ func Load() (*Config, error) {
 	// the config default and the transfer bound share one 10 GiB
 	// policy (the kit owns the default per §19).
 	cfg.Images.MaxTransferBytes = getEnvInt64("IMAGE_TRANSFER_MAX_BYTES", transfer.DefaultMaxImageTransferBytes)
+
+	// Security headers: HSTS is config-gated (0 = header omitted); see
+	// the HSTSMaxAgeSeconds field comment for the plain-HTTP rationale.
+	cfg.HSTSMaxAgeSeconds = getEnvInt("HSTS_MAX_AGE_SECONDS", 0)
 
 	return cfg, nil
 }
@@ -196,6 +223,18 @@ func getEnvInt(key string, defaultValue int) int {
 func getEnvInt64(key string, defaultValue int64) int64 {
 	if value := os.Getenv(key); value != "" {
 		if v, err := strconv.ParseInt(value, 10, 64); err == nil {
+			return v
+		}
+	}
+	return defaultValue
+}
+
+// getEnvBool returns the value of an environment variable as bool or a
+// default. A malformed value falls back to the default — same lenient
+// contract as getEnvInt/getEnvInt64.
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if v, err := strconv.ParseBool(value); err == nil {
 			return v
 		}
 	}

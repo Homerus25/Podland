@@ -55,11 +55,24 @@ X-RateLimit-Reset: <seconds until reset>
 ```
 
 ### CORS Headers
+
+The origin decision depends on `ALLOWED_ORIGINS`; credentials are only ever emitted together with a specific exactly-matched configured origin:
+
+- **Unset (default):** same-origin only — responses carry neither `Access-Control-Allow-Origin` nor `Access-Control-Allow-Credentials`.
+- **`*`:** `Access-Control-Allow-Origin: *` (spec-valid wildcard, no credentials).
+- **Configured origins:** an exactly-matching `Origin` gets `Access-Control-Allow-Origin: <origin>`, `Access-Control-Allow-Credentials: true`, and `Vary: Origin`; any other origin gets neither header.
+
+Preflights (`OPTIONS`) answer `204` with the same origin decision plus:
 ```
-Access-Control-Allow-Origin: <configured origins>
-Access-Control-Allow-Credentials: true
-Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
-Access-Control-Allow-Headers: Content-Type, Authorization
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
+Access-Control-Allow-Headers: Origin, Content-Type, Accept, Authorization, Cookie
+Access-Control-Max-Age: 86400
+```
+
+Actual requests also carry:
+```
+Access-Control-Allow-Headers: Origin, Content-Type, Accept, Authorization, Cookie
+Access-Control-Expose-Headers: Request-Id, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
 ```
 
 ---
@@ -83,7 +96,7 @@ All error responses follow this structure:
 | Status Code | Error Code Category | Description |
 |-------------|---------------------|-------------|
 | 400 | `VALIDATION_FAILED`, `INVALID_REQUEST`, `INVALID_SSH_KEY`, `CONTAINER_ALREADY_RUNNING` | Bad request |
-| 401 | `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `INVALID_CREDENTIALS` | Unauthorized |
+| 401 | `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`, `INVALID_CREDENTIALS` | Unauthorized |
 | 403 | `ACCESS_DENIED`, `PERMISSION_DENIED` | Forbidden |
 | 404 | `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`, `IMAGE_NOT_FOUND` | Not found |
 | 409 | `MACHINE_ALREADY_EXISTS` | Conflict |
@@ -100,10 +113,12 @@ All error responses follow this structure:
 | `MACHINE_ALREADY_EXISTS` | 409 | Machine name already exists for this user |
 | `CONNECTION_FAILED` | 502 | Failed to connect to machine (during registration or operation) |
 | `CONNECTION_TEST_TIMEOUT` | 400 | Connection test timed out during registration |
+| `HOST_NOT_ALLOWED` | 400 | Machine hostname rejected by the instance's opt-in egress block (`MACHINE_HOST_BLOCK_PRIVATE_RANGES`): blocked address range or unresolvable while enabled |
 | `INVALID_CREDENTIALS` | 401 | Wrong username or password |
 | `TOKEN_MISSING` | 401 | No token provided |
 | `TOKEN_INVALID` | 401 | Malformed or tampered token |
 | `TOKEN_EXPIRED` | 401 | Token has expired |
+| `TOKEN_REVOKED` | 401 | Token has been revoked (logout, password change, admin password reset) |
 | `RATE_LIMIT_EXCEEDED` | 429 | User has exceeded rate limit |
 | `ACCESS_DENIED` | 403 | User does not have access to this resource |
 | `PERMISSION_DENIED` | 403 | User lacks required permission for action |
@@ -223,6 +238,14 @@ Currently, the API has no version prefix. For future backward compatibility:
 - **Default**: 30 seconds for regular requests
 - **Connection test**: 10 seconds (configurable)
 - **Streaming requests**: No timeout (handled by client)
+
+---
+
+## Request Body Limits
+
+- **JSON endpoints (global)**: 10 MiB cap on the request body, enforced centrally in the API's JSON decode layer. A body over the cap answers 400 `INVALID_REQUEST` with message "Invalid request body" and is cut off at the reader, never fully buffered.
+- **Compose convert** (`POST /api/quadlets/convert-compose`): tighter 1 MiB cap on the raw request body (same 400 `INVALID_REQUEST` answer when exceeded).
+- **Volume populate** (multipart upload): capped by `VOLUME_UPLOAD_MAX_BYTES` (default 2 GiB); exceeding it answers 413 `VOLUME_UPLOAD_TOO_LARGE`.
 
 ---
 

@@ -94,11 +94,13 @@ Vite bakes them into the frontend bundle (see `frontend/.env.example`).
 | `SSH_IDLE_TIMEOUT_SECONDS` | `900` | Idle timeout for SSH tunnels to managed machines |
 | `MAX_CONCURRENT_MACHINES` | `100` | Maximum number of concurrent machine connections |
 | `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | Timeout for the connection test when registering a machine |
+| `MACHINE_HOST_BLOCK_PRIVATE_RANGES` | `false` | Opt-in egress block on the machine registration/update probe target: reject hostnames whose IP (literal or resolved) falls in loopback, RFC1918, link-local, CGNAT, IPv6 ULA, or unspecified ranges with 400 `HOST_NOT_ALLOWED` (unresolvable fails closed). Off by default — LAN/localhost podman hosts are the primary use case |
 | `RATE_LIMIT_REQUESTS_PER_USER_PER_MINUTE` | `60` | Authenticated API requests allowed per minute per user |
 | `RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE` | `10` | Login/refresh requests allowed per minute per client IP |
 | `RATE_LIMIT_AUTH_FAILURE_BUDGET` | `5` | Failed password attempts allowed per window before throttling (HTTP 429) |
 | `RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES` | `15` | Credential-failure window in minutes |
-| `ALLOWED_ORIGINS` | (empty) | Comma-separated list of CORS allowed origins |
+| `ALLOWED_ORIGINS` | (empty) | Comma-separated list of CORS allowed origins. Empty = same-origin only (no CORS headers); `*` = wildcard without credentials; specific origins = exact match with credentials |
+| `HSTS_MAX_AGE_SECONDS` | `0` | Strict-Transport-Security max-age; `0` omits the header (set only behind TLS termination) |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, or `error` |
 | `LOG_FORMAT` | `json` | Log output format: `json` or `text` |
 | `ENCRYPTION_KEY` | — (required) | Base64-encoded 32-byte key (AES-256-GCM) encrypting stored SSH private keys |

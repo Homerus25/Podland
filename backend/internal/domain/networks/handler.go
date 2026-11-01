@@ -41,7 +41,7 @@ func (h *NetworkHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *NetworkHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (NetworkResponse, error) {
 		var request NetworkCreateRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return NetworkResponse{}, appErr
 		}
 
@@ -66,7 +66,7 @@ func (h *NetworkHandler) Connect(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var request NetworkConnectRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return struct{}{}, appErr
 		}
 

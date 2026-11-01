@@ -173,10 +173,10 @@ Authorization: Bearer <admin token>
 **Fields:**
 - The passwords are never echoed; the response contains exactly `id`, `username`, `role`, `createdAt`.
 
-The reset takes effect immediately: **every session of the target user is revoked**, so all of the target's refresh tokens (stolen ones included) die with the old password. No fresh login is issued for the target — unlike the self-service `POST /api/auth/password` change, the caller is the admin, and the target must log in with the new password. The admin's own sessions are untouched. A target may be any existing user other than the caller.
+The reset takes effect immediately: **every session of the target user is revoked**, so all of the target's refresh tokens (stolen ones included) die with the old password, and **every access token the target held, minted before the reset, is revoked immediately** (401 `TOKEN_REVOKED` on every protected endpoint) — a stolen bearer dies with the old password, not at token expiry. No fresh login is issued for the target — unlike the self-service `POST /api/auth/password` change, the caller is the admin, and the target must log in with the new password. The admin's own sessions are untouched. A target may be any existing user other than the caller.
 
 **Response (Error):**
-- 401 Unauthorized: Missing or invalid token (`TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`); a wrong `adminPassword` (`INVALID_CREDENTIALS`, "Current password is incorrect")
+- 401 Unauthorized: Missing, invalid, or revoked token (`TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`); a wrong `adminPassword` (`INVALID_CREDENTIALS`, "Current password is incorrect")
 - 403 Forbidden: Authenticated caller without the admin role (`ADMIN_REQUIRED`)
 - 400 Bad Request: A `newPassword` shorter than 8 characters (`PASSWORD_TOO_SHORT`, "Password must be at least 8 characters"); a missing or empty `adminPassword` or `newPassword` (`VALIDATION_FAILED`); the caller resetting their own password (`SELF_PASSWORD_RESET`, "Cannot reset your own password"); malformed JSON body (`INVALID_REQUEST`)
 - 404 Not Found: No user with the given `id` (`USER_NOT_FOUND`; answered **before** the budget check, so an unknown target stays 404 unchanged even for a locked-out caller — and the lookup verifies nothing, so it never spends the budget)

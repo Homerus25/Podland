@@ -297,6 +297,13 @@ func (s *UserService) ResetPassword(callerID, targetUserID, adminPassword, newPa
 		return nil, err
 	}
 	user.PasswordHash = hash
+	// The per-user access-token cutoff (issue 441) rides the same
+	// user-row write: every access JWT the target holds, minted before
+	// this stamp, dies with the old password — the access-token twin of
+	// the revoke-all-sessions step below. The stamping ritual itself
+	// lives on the model (User.RevokeAccessTokens), shared with the
+	// self-service password change.
+	user.RevokeAccessTokens()
 
 	// Revoke before the hash write: a failure here writes nothing, and
 	// no failure ordering can leave the new hash live while the

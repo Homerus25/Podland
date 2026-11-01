@@ -863,9 +863,9 @@ Entries are sorted by name. The shape is exactly the import endpoint's
 request body, so the response can be forwarded unchanged.
 
 **Response (Error):**
-- 400: `INVALID_REQUEST` (malformed JSON body, or a raw request body over the 1 MiB cap — the cap is enforced at the HTTP layer before decode, so an oversized body is never fully buffered), `VALIDATION_FAILED` (empty content; a compose file the converter rejects, e.g. one using an unsupported option such as `build` together with `image`, answers `VALIDATION_FAILED` with the converter's stderr as the message — ANSI color escapes stripped, the text otherwise verbatim)
+- 400: `INVALID_REQUEST` (malformed JSON body, or a raw request body over the 1 MiB cap — the cap is enforced at the HTTP layer before decode, so an oversized body is never fully buffered), `VALIDATION_FAILED` (empty content; a genuine converter rejection — the converter started and exited non-zero, e.g. over a compose file using an unsupported option such as `build` together with `image` — answers `VALIDATION_FAILED` with the converter's stderr as the message — ANSI color escapes stripped, the text otherwise verbatim)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
-- 500: `INTERNAL_ERROR`
+- 500: `INTERNAL_ERROR` (also when the converter binary is missing or unstartable — e.g. not on the server's PATH: the answer is the generic message, the raw exec error is logged server-side only, never on the wire)
 
 ---
 

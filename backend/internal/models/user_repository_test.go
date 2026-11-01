@@ -188,3 +188,47 @@ func TestUserRepository_Create_DefaultsEmptyRoleToUser(t *testing.T) {
 	require.NotNil(t, stored, "Created user should be findable")
 	assert.Equal(t, RoleUser, stored.Role, "Unset role should default to user")
 }
+
+// TestUserRepository_AccessTokensRevokedAtRoundTrip asserts the per-user
+// revocation cutoff (issue 441) rides the repository's existing paths:
+// a fresh user reads back nil (never revoked), Update persists a stamp
+// through the same write that changes the hash, and every read path —
+// GetByID, GetByUsername, List — returns it unchanged.
+func TestUserRepository_AccessTokensRevokedAtRoundTrip(t *testing.T) {
+	db := newTestUserDB(t)
+	repo := NewUserRepository(db)
+
+	user := &User{
+		ID:           "user-cutoff-1",
+		Username:     "cutoffuser",
+		PasswordHash: "hash",
+		Role:         RoleUser,
+		CreatedAt:    time.Now().UTC(),
+	}
+	require.NoError(t, repo.Create(user), "Should create user")
+
+	byID, err := repo.GetByID(user.ID)
+	require.NoError(t, err, "Should read the fresh user back")
+	require.NotNil(t, byID, "Fresh user should exist")
+	assert.Nil(t, byID.AccessTokensRevokedAt, "A fresh user has no revocation cutoff")
+
+	cutoff := time.Date(2026, 11, 1, 15, 30, 0, 0, time.UTC)
+	byID.AccessTokensRevokedAt = &cutoff
+	require.NoError(t, repo.Update(byID), "Should persist the cutoff with the hash write")
+
+	storedByID, err := repo.GetByID(user.ID)
+	require.NoError(t, err, "Should read the user back by ID")
+	require.NotNil(t, storedByID.AccessTokensRevokedAt, "The cutoff must survive the write→read cycle")
+	assert.Equal(t, cutoff.UTC(), storedByID.AccessTokensRevokedAt.UTC(), "The cutoff should round-trip by ID")
+
+	storedByName, err := repo.GetByUsername(user.Username)
+	require.NoError(t, err, "Should read the user back by username")
+	require.NotNil(t, storedByName.AccessTokensRevokedAt, "The username lookup must carry the cutoff too")
+	assert.Equal(t, cutoff.UTC(), storedByName.AccessTokensRevokedAt.UTC(), "The cutoff should round-trip by username")
+
+	listed, err := repo.List()
+	require.NoError(t, err, "Should list users")
+	require.Len(t, listed, 1, "The repository holds exactly the one user")
+	require.NotNil(t, listed[0].AccessTokensRevokedAt, "The list path must carry the cutoff too")
+	assert.Equal(t, cutoff.UTC(), listed[0].AccessTokensRevokedAt.UTC(), "The cutoff should round-trip through List")
+}

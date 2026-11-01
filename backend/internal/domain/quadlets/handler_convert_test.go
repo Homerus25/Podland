@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -189,4 +192,60 @@ func TestHandlerConvertCompose_ContentSizeCap(t *testing.T) {
 		assert.Equal(t, "INVALID_REQUEST", envelope.Error.Code)
 		assert.Equal(t, "Invalid request body", envelope.Error.Message)
 	})
+}
+
+// TestHandlerConvertCompose_ConverterStartFailure pins the wire contract
+// for a converter that cannot start (pentest 2026-11-01, finding 7): a
+// non-ConversionError from the converter crosses the envelope's 500
+// fallback — INTERNAL_ERROR with the generic message, the raw exec text
+// only in the server log, never on the wire.
+func TestHandlerConvertCompose_ConverterStartFailure(t *testing.T) {
+	t.Parallel()
+
+	converter := &fakeComposeConverter{
+		convertFn: func(context.Context, string) ([]GeneratedQuadletFile, error) {
+			return nil, fmt.Errorf("failed to start podlet: %w", exec.ErrNotFound)
+		},
+	}
+
+	w := httptest.NewRecorder()
+	newConvertTestHandler(converter).ConvertCompose(w, convertComposeRequest(t, `{"content":"services: {}"}`))
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var envelope errorEnvelope
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&envelope))
+	assert.Equal(t, "INTERNAL_ERROR", envelope.Error.Code)
+	assert.Equal(t, "An unexpected error occurred", envelope.Error.Message)
+	assert.NotContains(t, w.Body.String(), "executable file not found",
+		"the raw exec error must not reach the wire")
+	assert.NotContains(t, w.Body.String(), "podlet",
+		"the server-side binary name must not reach the wire")
+}
+
+// TestHandlerConvertCompose_StartFailureIsLogged pins the server-side
+// half of the start-failure contract (pentest 2026-11-01, finding 7): the
+// envelope logs the raw wrapped error once — requestID included — before
+// answering the generic 500, so the exec detail stays diagnosable from
+// the logs while never reaching the wire.
+func TestHandlerConvertCompose_StartFailureIsLogged(t *testing.T) {
+	converter := &fakeComposeConverter{
+		convertFn: func(context.Context, string) ([]GeneratedQuadletFile, error) {
+			return nil, fmt.Errorf("failed to start podlet: %w", exec.ErrNotFound)
+		},
+	}
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
+
+	w := httptest.NewRecorder()
+	newConvertTestHandler(converter).ConvertCompose(w, convertComposeRequest(t, `{"content":"services: {}"}`))
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, logs.String(), "endpoint envelope: unexpected error")
+	assert.Contains(t, logs.String(), "test-request-id", "the log line must carry the request ID")
+	assert.Contains(t, logs.String(), "failed to start podlet", "the raw start failure must be in the log")
+	assert.Contains(t, logs.String(), "executable file not found", "the underlying exec error must be in the log")
 }

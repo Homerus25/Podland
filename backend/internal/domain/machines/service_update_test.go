@@ -252,9 +252,9 @@ func TestMachineService_Update_ConnectionProbe(t *testing.T) {
 		assert.Equal(t, "CONNECTION_FAILED", appErr.Code,
 			"probe failure keeps the CONNECTION_FAILED code")
 		assert.Equal(t, http.StatusBadRequest, appErr.Status)
-		assert.Equal(t, "Failed to connect to machine during registration: dial tcp: connection refused",
+		assert.Equal(t, "Failed to connect to machine during registration — check the hostname, port, SSH username, private key, and podman socket path",
 			appErr.Message,
-			"update shares the registration probe path, so the enriched message rides for free (issue 399)")
+			"update shares the registration probe path, so the static message rides for free (pentest finding 1)")
 
 		// Nothing persisted: the repository write never happened, and the
 		// stored credentials (written only after a passing probe) are

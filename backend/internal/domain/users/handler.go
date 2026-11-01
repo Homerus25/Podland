@@ -60,7 +60,7 @@ func (h *UserHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *UserHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusCreated, func(ctx context.Context, userID string) (UserResponse, error) {
 		var req CreateUserRequest
-		if appErr := web.Decode(r, &req); appErr != nil {
+		if appErr := web.Decode(w, r, &req); appErr != nil {
 			return UserResponse{}, appErr
 		}
 
@@ -89,7 +89,7 @@ func (h *UserHandler) UpdateRole(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var req UpdateRoleRequest
-		if appErr := web.Decode(r, &req); appErr != nil {
+		if appErr := web.Decode(w, r, &req); appErr != nil {
 			return UserResponse{}, appErr
 		}
 
@@ -121,7 +121,7 @@ func (h *UserHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var req ResetPasswordRequest
-		if appErr := web.Decode(r, &req); appErr != nil {
+		if appErr := web.Decode(w, r, &req); appErr != nil {
 			return UserResponse{}, appErr
 		}
 

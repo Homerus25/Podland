@@ -64,10 +64,27 @@ var (
 	// DISTINCT pointers (AppError has no Is/Unwrap), so errors.Is and
 	// pointer equality distinguish a registration failure from a runtime
 	// failure — do not collapse them.
-	ErrConnectionTestFailed  = NewAppError("CONNECTION_FAILED", "Failed to connect to machine during registration", http.StatusBadRequest)
+	//
+	// The message is STATIC (pentest 2026-11-01 finding 1): the raw dial
+	// error is an internal port-scan / SSRF oracle from the server's
+	// network vantage point, so no probe detail may reach the client —
+	// the full cause lives in the server-side log line. The residual
+	// pure timing oracle (fast-fail vs timeout) is accepted and
+	// documented in the doku.
+	ErrConnectionTestFailed = NewAppError("CONNECTION_FAILED",
+		"Failed to connect to machine during registration — check the hostname, port, SSH username, private key, and podman socket path",
+		http.StatusBadRequest)
 	ErrConnectionTestTimeout = NewAppError("CONNECTION_TEST_TIMEOUT", "Connection test timed out", http.StatusBadRequest)
 	ErrInvalidSSHKey         = NewAppError("INVALID_SSH_KEY", "Invalid SSH private key format", http.StatusBadRequest)
 	ErrMissingRequiredFields = NewAppError("VALIDATION_FAILED", "Missing required fields", http.StatusBadRequest)
+	// ErrHostNotAllowed is the opt-in host policy's rejection (pentest
+	// 2026-11-01 finding 1, MACHINE_HOST_BLOCK_PRIVATE_RANGES): the
+	// machine hostname — an IP literal checked directly, or a hostname
+	// through its resolved IPs — falls in a blocked range (loopback,
+	// RFC1918, link-local, CGNAT, IPv6 ULA, unspecified), or could not
+	// be resolved while the block is enabled (fail closed). 400: the
+	// target the client described is not one this instance may probe.
+	ErrHostNotAllowed = NewAppError("HOST_NOT_ALLOWED", "Machine hostname is not allowed: this instance blocks private, loopback, link-local, CGNAT, and unspecified addresses", http.StatusBadRequest)
 )
 
 // Auth
@@ -81,6 +98,12 @@ var (
 	ErrTokenMissing = NewAppError("TOKEN_MISSING", "No token provided", http.StatusUnauthorized)
 	ErrTokenExpired = NewAppError("TOKEN_EXPIRED", "Token has expired", http.StatusUnauthorized)
 	ErrTokenInvalid = NewAppError("TOKEN_INVALID", "Invalid token", http.StatusUnauthorized)
+	// ErrTokenRevoked is the 401 for a server-side revoked access JWT
+	// (issue 441): a jti on the logout denylist, or a token minted
+	// before the user's access-tokens-revoked-at cutoff (password
+	// change, admin password reset). The token is cryptographically
+	// intact — it was deliberately killed.
+	ErrTokenRevoked = NewAppError("TOKEN_REVOKED", "Token has been revoked", http.StatusUnauthorized)
 	ErrUserNotFound = NewAppError("USER_NOT_FOUND", "User not found", http.StatusNotFound)
 	// ErrAdminRequired backs the admin-only routes (starting with
 	// POST /api/users): the caller is authenticated but lacks the

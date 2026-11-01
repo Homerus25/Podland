@@ -271,6 +271,31 @@ func TestSecretHandler_Create_HappyPath(t *testing.T) {
 		"the value must reach the machine byte-identical — never trimmed")
 }
 
+// TestSecretHandler_Create_MaxSizeValueStillPasses pins the interplay of
+// the two caps: a value of exactly maxSecretValueBytes (1 MiB) is the
+// largest legitimate secret create body, so it must clear both the
+// service's value cap and web.Decode's global 10 MiB body cap — 201,
+// value byte-identical.
+func TestSecretHandler_Create_MaxSizeValueStillPasses(t *testing.T) {
+	var gotValue string
+	engine := &fakeSecretEngine{
+		createFn: func(name, value string) (*entities.SecretCreateReport, error) {
+			gotValue = value
+			return &entities.SecretCreateReport{ID: "3f2e1d0c"}, nil
+		},
+	}
+
+	maxValue := strings.Repeat("v", 1048576)
+	rr := httptest.NewRecorder()
+	newTestHandler(engine).Create(rr, newCreateRequest("user123", "machine123",
+		`{"name":"db-password","value":"`+maxValue+`"}`))
+
+	assert.Equal(t, http.StatusCreated, rr.Code,
+		"a 1 MiB value is the largest legitimate create and must pass the global body cap")
+	assert.Equal(t, maxValue, gotValue,
+		"the max-size value must reach the machine byte-identical")
+}
+
 // TestSecretHandler_Create_ValidationFailures pins the 400 contract: a
 // missing/oversized/pattern-breaking name or an empty/oversized value is
 // refused with VALIDATION_FAILED before the machine is asked (body

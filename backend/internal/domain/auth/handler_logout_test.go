@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -108,7 +109,7 @@ func TestAuthHandler_Logout_WithUnknownCookieStillSucceeds(t *testing.T) {
 
 	_, loginToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in to mint a refresh token")
-	require.NoError(t, service.Logout(loginToken), "First logout should revoke the session")
+	require.NoError(t, service.Logout(loginToken, ""), "First logout should revoke the session")
 
 	handler := NewAuthHandler(service, mockRepo)
 	resp := performLogoutWithCookie(handler, &http.Cookie{Name: "refresh_token", Value: loginToken})
@@ -136,4 +137,73 @@ func TestAuthHandler_Logout_StorageFailureStillClearsCookie(t *testing.T) {
 	require.Equal(t, http.StatusInternalServerError, resp.StatusCode, "A storage failure must surface as a 500")
 	assert.Equal(t, "INTERNAL_ERROR", testutils.DecodeErrorEnvelope(t, resp).Error.Code, "Storage failures map to the generic internal-error code")
 	assertClearedRefreshCookie(t, resp)
+}
+
+// performLogoutWithCookieAndBearer drives the Logout handler with the
+// given refresh cookie and Authorization bearer attached (nil/"" = the
+// header or cookie is absent) and returns the recorded response.
+func performLogoutWithCookieAndBearer(h *AuthHandler, cookie *http.Cookie, bearer string) *http.Response {
+	req := httptest.NewRequest("POST", "/api/auth/logout", nil)
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	w := httptest.NewRecorder()
+	h.Logout(w, req)
+	return w.Result()
+}
+
+// TestAuthHandler_Logout_WithBearerRevokesAccessToken pins the wire
+// half of issue 441: a logout carrying the Authorization bearer
+// denylists that access token server-side, so it answers
+// ErrTokenRevoked on every protected endpoint afterwards — the
+// confirmed-live gap (old bearer still 200 on GET /api/users) is
+// closed at the HTTP seam, not just in the service.
+func TestAuthHandler_Logout_WithBearerRevokesAccessToken(t *testing.T) {
+	mockRepo := seedLoginUser(t, "testuser", "test-password-123")
+	sessionRepo := testutils.NewMockSessionRepository()
+	denylist := testutils.NewMockRevokedTokenRepository()
+	service, err := NewTestAuthServiceWithSessionRepo(mockRepo, sessionRepo, 30*24*time.Hour)
+	require.NoError(t, err, "Should create auth service without error")
+	service = service.WithRevokedTokenRepo(denylist)
+
+	accessToken, loginToken, _, _, err := service.Login("testuser", "test-password-123", false)
+	require.NoError(t, err, "Should log in to mint both tokens")
+
+	handler := NewAuthHandler(service, mockRepo)
+	resp := performLogoutWithCookieAndBearer(handler, &http.Cookie{Name: "refresh_token", Value: loginToken}, accessToken)
+	defer resp.Body.Close()
+
+	assertLogoutSuccess(t, resp)
+
+	_, err = service.ValidateToken(accessToken)
+	assert.ErrorIs(t, err, apperrors.ErrTokenRevoked, "The logged-out bearer must answer ErrTokenRevoked afterwards")
+}
+
+// TestAuthHandler_Logout_WithoutBearerLeavesTokenValid pins the
+// idempotent wire shape: a logout with no Authorization header still
+// succeeds, and the access token it did not present stays valid —
+// only the presented bearer is killed.
+func TestAuthHandler_Logout_WithoutBearerLeavesTokenValid(t *testing.T) {
+	mockRepo := seedLoginUser(t, "testuser", "test-password-123")
+	sessionRepo := testutils.NewMockSessionRepository()
+	denylist := testutils.NewMockRevokedTokenRepository()
+	service, err := NewTestAuthServiceWithSessionRepo(mockRepo, sessionRepo, 30*24*time.Hour)
+	require.NoError(t, err, "Should create auth service without error")
+	service = service.WithRevokedTokenRepo(denylist)
+
+	accessToken, loginToken, _, _, err := service.Login("testuser", "test-password-123", false)
+	require.NoError(t, err, "Should log in to mint both tokens")
+
+	handler := NewAuthHandler(service, mockRepo)
+	resp := performLogoutWithCookieAndBearer(handler, &http.Cookie{Name: "refresh_token", Value: loginToken}, "")
+	defer resp.Body.Close()
+
+	assertLogoutSuccess(t, resp)
+
+	_, err = service.ValidateToken(accessToken)
+	assert.NoError(t, err, "An un-presented bearer must survive the logout")
+	assert.Empty(t, denylist.Revoked(), "Nothing was presented to denylist")
 }

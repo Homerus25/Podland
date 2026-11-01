@@ -103,3 +103,35 @@ func TestConvertCompose_PodletEndToEnd(t *testing.T) {
 			"ANSI color escapes must be stripped from the wire message")
 	})
 }
+
+// TestConvertCompose_PodletMissingEndToEnd pins the missing-binary wire
+// contract (pentest 2026-11-01, finding 7) over the REAL exec adapter, the
+// real service, and the handler over HTTP: with podlet absent from PATH,
+// the start failure crosses the envelope's 500 fallback — INTERNAL_ERROR
+// with the generic message, no exec error text on the wire. It skips when
+// podlet IS on PATH: the binary name is a package constant, so absence
+// cannot be simulated.
+func TestConvertCompose_PodletMissingEndToEnd(t *testing.T) {
+	if _, err := exec.LookPath("podlet"); err == nil {
+		t.Skip("podlet on PATH — the missing-binary path cannot be exercised")
+	}
+
+	handler := newConvertTestHandler(NewPodletComposeConverter())
+
+	body, err := json.Marshal(QuadletConvertComposeRequest{Content: sampleCompose})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	handler.ConvertCompose(w, convertComposeRequest(t, string(body)))
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+
+	var envelope errorEnvelope
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&envelope))
+	assert.Equal(t, "INTERNAL_ERROR", envelope.Error.Code)
+	assert.Equal(t, "An unexpected error occurred", envelope.Error.Message)
+	assert.NotContains(t, w.Body.String(), "executable file not found",
+		"the raw exec error must not reach the wire")
+	assert.NotContains(t, w.Body.String(), "podlet",
+		"the server-side binary name must not reach the wire")
+}

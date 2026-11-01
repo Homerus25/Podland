@@ -573,3 +573,88 @@ func (m *MockMachineAccessRepository) AddAccess(machineID, userID, permission st
 		grantedAt:  grantedAt,
 	}
 }
+
+// MockRevokedTokenRepository implements a mock access-token denylist for
+// testing (issue 441). It records every Create so logout tests can pin
+// which jti was denylisted with which expiry, and counts DeleteExpired
+// calls for the login-purge pin.
+type MockRevokedTokenRepository struct {
+	revoked            map[string]time.Time
+	createErr          error
+	isRevokedErr       error
+	deleteExpiredErr   error
+	deleteExpiredCalls int
+}
+
+func NewMockRevokedTokenRepository() *MockRevokedTokenRepository {
+	return &MockRevokedTokenRepository{
+		revoked: make(map[string]time.Time),
+	}
+}
+
+// WithCreateError returns the same repository with Create configured to
+// fail, for tests injecting a denylist-write storage failure.
+func (m *MockRevokedTokenRepository) WithCreateError(err error) *MockRevokedTokenRepository {
+	m.createErr = err
+	return m
+}
+
+// WithIsRevokedError returns the same repository with IsRevoked
+// configured to fail, for tests injecting a denylist-lookup storage
+// failure.
+func (m *MockRevokedTokenRepository) WithIsRevokedError(err error) *MockRevokedTokenRepository {
+	m.isRevokedErr = err
+	return m
+}
+
+// WithDeleteExpiredError returns the same repository with DeleteExpired
+// configured to fail, for tests injecting a purge-time storage failure.
+func (m *MockRevokedTokenRepository) WithDeleteExpiredError(err error) *MockRevokedTokenRepository {
+	m.deleteExpiredErr = err
+	return m
+}
+
+// Revoked returns a snapshot of the denylist (jti → expiry), so tests can
+// pin exactly which tokens logout revoked and until when.
+func (m *MockRevokedTokenRepository) Revoked() map[string]time.Time {
+	out := make(map[string]time.Time, len(m.revoked))
+	for jti, expiresAt := range m.revoked {
+		out[jti] = expiresAt
+	}
+	return out
+}
+
+// DeleteExpiredCalls reports how many times the lazy purge ran.
+func (m *MockRevokedTokenRepository) DeleteExpiredCalls() int {
+	return m.deleteExpiredCalls
+}
+
+func (m *MockRevokedTokenRepository) Create(jti string, expiresAt time.Time) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
+	m.revoked[jti] = expiresAt
+	return nil
+}
+
+func (m *MockRevokedTokenRepository) IsRevoked(jti string) (bool, error) {
+	if m.isRevokedErr != nil {
+		return false, m.isRevokedErr
+	}
+	_, exists := m.revoked[jti]
+	return exists, nil
+}
+
+func (m *MockRevokedTokenRepository) DeleteExpired() error {
+	if m.deleteExpiredErr != nil {
+		return m.deleteExpiredErr
+	}
+	m.deleteExpiredCalls++
+	now := time.Now().UTC()
+	for jti, expiresAt := range m.revoked {
+		if !expiresAt.After(now) {
+			delete(m.revoked, jti)
+		}
+	}
+	return nil
+}

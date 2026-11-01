@@ -5,10 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
@@ -59,8 +57,9 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 		}
 	}
 
-	// --- AC: probe failure -> 400 CONNECTION_FAILED naming the cause ---
-	t.Run("connection test failure answers 400 CONNECTION_FAILED carrying the underlying error", func(t *testing.T) {
+	// --- AC: probe failure -> 400 CONNECTION_FAILED with a static
+	// message (pentest 2026-11-01 finding 1) ---
+	t.Run("connection test failure answers 400 CONNECTION_FAILED with the static message", func(t *testing.T) {
 		mockMachineRepo := testutils.NewMockMachineRepository()
 		mockAccessRepo := testutils.NewMockMachineAccessRepository()
 		// Any non-nil error stands in for "SSH/podman dial failed"
@@ -74,14 +73,18 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 		machine, err := service.Create(ctx, userID, newReq())
 
 		// The registration must surface a 400 CONNECTION_FAILED whose
-		// message names the registration step and carries the underlying
-		// dial/ping error (issue 399) — the caller is the owner probing
-		// their own credentials, so the detail is safe to return.
+		// message is STATIC (pentest finding 1): the raw dial error is
+		// an internal port-scan / SSRF oracle (open vs closed vs
+		// filtered, target address leaked), so no probe detail may
+		// reach the client — the full cause lives in the server-side
+		// log line.
 		require.Error(t, err)
 		assert.Nil(t, machine, "no machine should be returned when the probe fails")
 		appErr := requireAppError(t, err, "CONNECTION_FAILED", http.StatusBadRequest)
-		assert.Equal(t, "Failed to connect to machine during registration: dial tcp: connection refused",
-			appErr.Message, "the message must name the step and the underlying error")
+		assert.Equal(t, "Failed to connect to machine during registration — check the hostname, port, SSH username, private key, and podman socket path",
+			appErr.Message, "the message must be the static text — no dial error, no target address")
+		assert.NotContains(t, appErr.Message, "connection refused",
+			"the underlying dial error must not leak into the client-visible message")
 
 		// "Not persisted" is observable through the repository's public
 		// API: no machine row for this owner, and no access grant.
@@ -276,29 +279,6 @@ func TestMachineService_Create_ConnectionTest(t *testing.T) {
 
 		assert.False(t, encryptCalled,
 			"the SSH key must NOT be encrypted when the probe fails — the probe precedes encryption")
-	})
-}
-
-// TestProbeDetailCap pins the CONNECTION_FAILED detail cap: short causes
-// pass through, long causes are cut with a marker, and the cut lands on a
-// rune boundary so a multi-byte cause cannot leave invalid UTF-8 in the
-// 4xx message.
-func TestProbeDetailCap(t *testing.T) {
-	t.Run("short cause passes through untouched", func(t *testing.T) {
-		assert.Equal(t, "dial tcp: connection refused", probeDetail(errors.New("dial tcp: connection refused")))
-	})
-
-	t.Run("long cause is capped with a truncation marker", func(t *testing.T) {
-		detail := probeDetail(errors.New(strings.Repeat("a", maxProbeDetailLen+50)))
-		assert.Len(t, detail, maxProbeDetailLen+len(" (truncated)"))
-		assert.True(t, strings.HasSuffix(detail, " (truncated)"))
-	})
-
-	t.Run("the cap never splits a multi-byte rune", func(t *testing.T) {
-		// A cause of 3-byte runes whose byte length straddles the cap.
-		stride := strings.Repeat("é", maxProbeDetailLen/3+10)
-		detail := probeDetail(errors.New(stride))
-		assert.True(t, utf8.ValidString(detail), "the capped message must stay valid UTF-8")
 	})
 }
 

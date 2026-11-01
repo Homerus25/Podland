@@ -217,3 +217,29 @@ func TestUserService_ResetPassword_RevokeErrorPropagates(t *testing.T) {
 	assert.True(t, storedPasswordMatches(t, repo, "user-1", "known-old-password"), "The hash write must not run when revocation fails")
 	assert.Len(t, sessionRepo.SessionsForUser("user-1"), 2, "A failed revocation must leave the sessions standing")
 }
+
+// TestUserService_ResetPassword_SetsRevocationCutoff asserts the
+// per-user half of issue 441 on the admin path: a password reset
+// stamps users.access_tokens_revoked_at in the same user-row write
+// that replaces the hash, so every access token the target user held
+// dies with the old password — the access-token twin of the
+// revoke-all-sessions step.
+func TestUserService_ResetPassword_SetsRevocationCutoff(t *testing.T) {
+	service, repo, _ := passwordResetFixture(t)
+
+	_, err := service.ResetPassword("admin-1", "user-1", "known-old-password", "fresh-password-8")
+
+	require.NoError(t, err, "Reset should succeed")
+	stored, err := repo.GetByID("user-1")
+	require.NoError(t, err, "Should read the target user back")
+	require.NotNil(t, stored.AccessTokensRevokedAt, "The reset must stamp the target's cutoff")
+	assert.WithinDuration(t, time.Now().UTC(), *stored.AccessTokensRevokedAt, time.Minute,
+		"The cutoff must be stamped at the reset time")
+	assert.Zero(t, stored.AccessTokensRevokedAt.UTC().Nanosecond(),
+		"The cutoff must carry the shared stamp's second precision (User.RevokeAccessTokens, the jwt NumericDate granularity)")
+
+	// Only the target is stamped: the admin's own tokens must survive.
+	admin, err := repo.GetByID("admin-1")
+	require.NoError(t, err, "Should read the acting admin back")
+	assert.Nil(t, admin.AccessTokensRevokedAt, "The acting admin's cutoff must stay unset")
+}

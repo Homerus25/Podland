@@ -238,3 +238,46 @@ func TestLoad_ImageTransferMaxBytes(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(10<<30), cfg.Images.MaxTransferBytes, "garbage values must fall back to the default")
 }
+
+// TestLoad_MachineHostBlockPrivateRanges pins the machine host policy's
+// opt-in flag (pentest 2026-11-01 finding 1): the private-range block is
+// OFF by default — Podland's primary use case is LAN/localhost podman
+// hosts — honored when set, and garbage falls back to the default.
+func TestLoad_MachineHostBlockPrivateRanges(t *testing.T) {
+	t.Setenv("MACHINE_HOST_BLOCK_PRIVATE_RANGES", "")
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.False(t, cfg.Machines.HostBlockPrivateRanges,
+		"the private-range block must default to OFF — LAN/localhost hosts are the primary use case")
+
+	t.Setenv("MACHINE_HOST_BLOCK_PRIVATE_RANGES", "true")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.True(t, cfg.Machines.HostBlockPrivateRanges, "env override must be honored")
+
+	t.Setenv("MACHINE_HOST_BLOCK_PRIVATE_RANGES", "not-a-bool")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.False(t, cfg.Machines.HostBlockPrivateRanges, "garbage values must fall back to the default")
+}
+
+// TestLoad_HSTSMaxAgeSeconds pins the security-headers middleware's HSTS
+// gate (pentest 2026-11-01, finding 6): the default is 0 — the header is
+// omitted, because the backend serves plain HTTP and RFC 6797 forbids
+// the STS header over plain HTTP — and only a TLS-terminated deployment
+// sets a positive max-age.
+func TestLoad_HSTSMaxAgeSeconds(t *testing.T) {
+	cfg, err := Load()
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.HSTSMaxAgeSeconds, "default must be 0: HSTS is omitted unless explicitly configured")
+
+	t.Setenv("HSTS_MAX_AGE_SECONDS", "31536000")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.Equal(t, 31536000, cfg.HSTSMaxAgeSeconds, "env override must be honored")
+
+	t.Setenv("HSTS_MAX_AGE_SECONDS", "not-a-number")
+	cfg, err = Load()
+	require.NoError(t, err)
+	assert.Equal(t, 0, cfg.HSTSMaxAgeSeconds, "garbage values must fall back to the default")
+}

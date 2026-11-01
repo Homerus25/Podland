@@ -195,18 +195,35 @@ func respondError(w http.ResponseWriter, r *http.Request, err error) {
 // it instead of minting one per decode.
 var validate = validator.New()
 
+// MaxBodyBytes is the global cap on JSON request bodies Decode enforces:
+// 10 MiB, hardcoded. It bounds per-request memory for every body-bearing
+// endpoint at once (the cap is structural — every Decode caller crosses
+// it, images Pull included), while sitting far above the largest
+// legitimate JSON bodies (compose convert and secret values, both
+// capped at 1 MiB of raw content; JSON string escaping can inflate a
+// payload several-fold, so a 1 MiB cap would reject legitimate
+// max-size secrets). Deliberately NOT env-configurable: JSON DTO size
+// is a protocol invariant, unlike the 2 GiB volume upload cap
+// (VOLUME_UPLOAD_MAX_BYTES), which is deployment-sized.
+const MaxBodyBytes = 10 << 20
+
 // Decode reads the request body into target as JSON and validates it —
 // the decode+validate ritual every body-bearing handler crosses, with
-// one error vocabulary. A body that is not valid JSON (syntax or
-// wrong-typed field) answers 400 INVALID_REQUEST "Invalid request body";
-// a body that decodes but fails target's validate tags answers 400
-// VALIDATION_FAILED carrying the validator's message; a clean body
-// answers nil and leaves target populated. Unknown fields are ignored
-// (no DisallowUnknownFields), and a DTO without validate tags imposes no
-// rules — its domain rules stay in the service. Handlers return the
-// *AppError from their envelope closure (or respond it directly before a
-// stream begins, as images Pull does); the envelope maps it to the wire.
-func Decode(r *http.Request, target any) *appErrors.AppError {
+// one error vocabulary. The body is first wrapped in
+// http.MaxBytesReader with the MaxBodyBytes cap, so an oversized body
+// is cut off at the reader, never fully buffered, and its error
+// surfaces through json.Decode like any malformed body. A body that is
+// not valid JSON (syntax, wrong-typed field, or over the cap) answers
+// 400 INVALID_REQUEST "Invalid request body"; a body that decodes but
+// fails target's validate tags answers 400 VALIDATION_FAILED carrying
+// the validator's message; a clean body answers nil and leaves target
+// populated. Unknown fields are ignored (no DisallowUnknownFields), and
+// a DTO without validate tags imposes no rules — its domain rules stay
+// in the service. Handlers return the *AppError from their envelope
+// closure (or respond it directly before a stream begins, as images
+// Pull does); the envelope maps it to the wire.
+func Decode(w http.ResponseWriter, r *http.Request, target any) *appErrors.AppError {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(target); err != nil {
 		return appErrors.ErrInvalidRequest.WithMessage("Invalid request body")
 	}

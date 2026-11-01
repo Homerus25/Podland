@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"strings"
+
 	"context"
 	"net/http"
 	"time"
@@ -114,7 +116,7 @@ func setRefreshCookie(w http.ResponseWriter, refreshToken string, maxAge time.Du
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (LoginResponse, error) {
 		var req LoginRequest
-		if appErr := web.Decode(r, &req); appErr != nil {
+		if appErr := web.Decode(w, r, &req); appErr != nil {
 			return LoginResponse{}, appErr
 		}
 
@@ -177,22 +179,43 @@ func clearRefreshCookie(w http.ResponseWriter) {
 	http.SetCookie(w, cookie)
 }
 
+// bearerToken extracts the Authorization header's Bearer value — the
+// access JWT logout denylists (issue 441). An absent or malformed
+// header yields "": logout stays unauthenticated and idempotent, and
+// the service treats an empty or invalid bearer as nothing to
+// denylist. The JWT middleware owns this parse on protected routes;
+// logout is the one unauthenticated route that reads the header, so
+// the parse lives here.
+func bearerToken(r *http.Request) string {
+	parts := strings.Split(r.Header.Get("Authorization"), " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return ""
+	}
+	return parts[1]
+}
+
 // Logout handles user logout. When the request carries a refresh
-// cookie, the session behind it is revoked server-side; the cookie is
-// cleared in every case — before revocation runs, inside the closure —
-// so even a storage failure cannot leave the browser holding a token
-// its user tried to give up. Logout is idempotent: no cookie, or a
-// cookie whose session is already gone, still succeeds with the same
-// response — the end state (no session, no cookie) is what the caller
-// asked for.
+// cookie, the session behind it is revoked server-side; when it carries
+// an Authorization bearer, that access token is denylisted too (issue
+// 441), so the device's bearer dies with its refresh session instead of
+// living on until expiry. The cookie is cleared in every case — before
+// revocation runs, inside the closure — so even a storage failure
+// cannot leave the browser holding a token its user tried to give up.
+// Logout is idempotent: no cookie, no bearer, a cookie whose session is
+// already gone, or a bearer that fails validation all still succeed
+// with the same response — the end state (no session, no cookie, no
+// live bearer) is what the caller asked for.
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (map[string]string, error) {
 		clearRefreshCookie(w)
 
+		refreshToken := ""
 		if cookie, err := r.Cookie(refreshTokenCookieName); err == nil {
-			if err := h.service.Logout(cookie.Value); err != nil {
-				return nil, err
-			}
+			refreshToken = cookie.Value
+		}
+
+		if err := h.service.Logout(refreshToken, bearerToken(r)); err != nil {
+			return nil, err
 		}
 
 		return map[string]string{"message": "Logged out successfully"}, nil
@@ -222,7 +245,7 @@ type ChangePasswordResponse = LoginResponse
 func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (ChangePasswordResponse, error) {
 		var req ChangePasswordRequest
-		if appErr := web.Decode(r, &req); appErr != nil {
+		if appErr := web.Decode(w, r, &req); appErr != nil {
 			return ChangePasswordResponse{}, appErr
 		}
 
@@ -315,7 +338,7 @@ type SetupResponse = LoginResponse
 func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (SetupResponse, error) {
 		var req SetupRequest
-		if appErr := web.Decode(r, &req); appErr != nil {
+		if appErr := web.Decode(w, r, &req); appErr != nil {
 			return SetupResponse{}, appErr
 		}
 

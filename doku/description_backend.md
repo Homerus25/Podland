@@ -47,6 +47,7 @@ backend/
 │   │   ├── auth.go             # JWT authentication middleware
 │   │   ├── ratelimit.go        # Rate limiting middleware
 │   │   ├── logging.go          # Request logging middleware
+│   │   ├── securityheaders.go  # Global security-headers middleware (CSP, X-Frame-Options, nosniff, config-gated HSTS)
 │   │   └── requestid.go        # Request ID middleware
 │   ├── connections/            # SSH connection management
 │   │   ├── cache.go            # Connection caching with LRU eviction
@@ -95,11 +96,13 @@ backend/
 | `SSH_IDLE_TIMEOUT_SECONDS` | `900` | No | SSH connection idle timeout (15 minutes) |
 | `MAX_CONCURRENT_MACHINES` | `100` | No | Maximum concurrent machine connections |
 | `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | No | Timeout for machine connection test during registration |
+| `MACHINE_HOST_BLOCK_PRIVATE_RANGES` | `false` | No | Opt-in egress block on the machine registration/update probe target: reject hostnames whose IP (literal or resolved) falls in loopback, RFC1918, link-local, CGNAT, IPv6 ULA, or unspecified ranges with 400 `HOST_NOT_ALLOWED` (unresolvable fails closed). Off by default — LAN/localhost podman hosts are the primary use case |
 | `RATE_LIMIT_REQUESTS_PER_USER_PER_MINUTE` | `60` | No | Rate limit: requests per minute per user |
 | `RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE` | `10` | No | Rate limit: login/refresh requests per minute per client IP |
 | `RATE_LIMIT_AUTH_FAILURE_BUDGET` | `5` | No | Failed password attempts allowed per window before throttling (HTTP 429) |
 | `RATE_LIMIT_AUTH_FAILURE_WINDOW_MINUTES` | `15` | No | Credential-failure window in minutes |
-| `ALLOWED_ORIGINS` | (empty) | No | CORS allowed origins (comma-separated) |
+| `ALLOWED_ORIGINS` | (empty) | No | CORS allowed origins (comma-separated). Empty = same-origin only (no CORS headers); `*` = wildcard without credentials; specific origins = exact match with credentials |
+| `HSTS_MAX_AGE_SECONDS` | `0` | No | Strict-Transport-Security max-age; `0` omits the header (set only behind TLS termination) |
 | `LOG_LEVEL` | `info` | No | Logging level: debug, info, warn, error |
 | `LOG_FORMAT` | `json` | No | Logging format: json, text |
 | `ENCRYPTION_KEY` | (empty) | Yes | Base64-encoded 32-byte key (AES-256-GCM) encrypting stored SSH private keys |
@@ -529,6 +532,33 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 func GetRequestID(ctx context.Context) string
 ```
 
+### Security Headers Middleware
+
+One global middleware (`internal/middleware/securityheaders.go`, pentest
+2026-11-01 finding 6) sets the security headers on **every** response —
+`/api/*` (including `/api/health`), the SPA catch-all, and error/streaming
+responses — because the headers are written before `next.ServeHTTP`:
+
+```go
+// internal/middleware/securityheaders.go
+func SecurityHeaders(hstsMaxAgeSeconds int) func(http.Handler) http.Handler
+```
+
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'`
+
+`style-src` needs `'unsafe-inline'` because the SPA (Chakra UI v2 /
+Emotion) injects `<style>` tags at runtime; scripts are Vite-bundled
+external files, so `script-src 'self'` holds.
+
+`Strict-Transport-Security: max-age=<n>` is **config-gated**: it is
+emitted only when `HSTS_MAX_AGE_SECONDS` is > 0 (default `0` = header
+omitted). The backend itself serves plain HTTP and does not trust
+`X-Forwarded-*` headers, so there is no in-request TLS signal to key on;
+only a TLS-terminated deployment sets the variable (RFC 6797 forbids the
+STS header over plain HTTP).
+
 ---
 
 ## Rate Limiting
@@ -711,6 +741,28 @@ func writeJSONLine(w http.ResponseWriter, f http.Flusher, data interface{}) {
 
 ## Machine Registration Flow
 
+Before the synchronous connection probe, the opt-in host policy
+(`MACHINE_HOST_BLOCK_PRIVATE_RANGES`, default `false`) gates the probe
+target: when enabled, the hostname — an IP literal checked directly, a
+name through every resolved IP — is rejected with 400 `HOST_NOT_ALLOWED`
+when any address falls in loopback (127.0.0.0/8, ::1), RFC1918
+(10/8, 172.16/12, 192.168/16), link-local (169.254/16 — including the
+169.254.169.254 cloud-metadata endpoint — and fe80::/10), CGNAT
+(100.64/10), IPv6 ULA (fc00::/7), or 0.0.0.0/8; an unresolvable hostname
+fails closed. The check runs in Create right before the probe and in
+Update whenever `hostname` is set (even without a key change), so a
+blocked host is never dialed and never persisted. When the flag is unset
+or false, no DNS resolution is added and registration behaves exactly as
+before (pentest 2026-11-01, finding 1).
+
+A failed probe answers 400 `CONNECTION_FAILED` with a STATIC message
+("Failed to connect to machine during registration — check the hostname,
+port, SSH username, private key, and podman socket path"): the raw dial
+error is an internal port-scan/SSRF oracle, so no probe detail reaches
+the client — the full cause is logged server-side with the request ID.
+The residual pure timing oracle (fast-fail vs `CONNECTION_TEST_TIMEOUT`)
+is accepted.
+
 ```go
 // internal/domain/machines/handler.go
 func (h *MachineHandler) HandleCreateMachine(w http.ResponseWriter, r *http.Request) {
@@ -758,7 +810,11 @@ func (h *MachineHandler) HandleCreateMachine(w http.ResponseWriter, r *http.Requ
     
     _, err = bindings.NewConnectionWithOptions(ctx, config)
     if err != nil {
-        respondWithError(w, http.StatusBadRequest, "CONNECTION_FAILED", fmt.Sprintf("Failed to connect to machine: %s", err.Error()))
+        // Static message — the raw dial error is a port-scan/SSRF
+        // oracle (pentest 2026-11-01, finding 1); the cause is logged
+        // server-side with the request ID.
+        respondWithError(w, http.StatusBadRequest, "CONNECTION_FAILED",
+            "Failed to connect to machine during registration — check the hostname, port, SSH username, private key, and podman socket path")
         return
     }
     
@@ -965,6 +1021,7 @@ func main() {
     router.Use(middleware.LoggingMiddleware(logger))
     router.Use(middleware.Recoverer)
    router.Use(middleware.CORS(config.AllowedOrigins))
+    router.Use(middleware.SecurityHeaders(config.HSTSMaxAgeSeconds))
     
     // Routes
     router.Route("/api", func(r chi.Router) {

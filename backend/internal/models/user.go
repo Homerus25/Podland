@@ -24,6 +24,25 @@ type User struct {
 	PasswordHash string    `json:"-"`
 	Role         string    `json:"role"`
 	CreatedAt    time.Time `json:"createdAt"`
+	// AccessTokensRevokedAt is the per-user access-token revocation
+	// cutoff (issue 441): a password change or admin password reset
+	// stamps now here, and every access JWT of the user minted before
+	// the stamp fails validation. nil = never revoked.
+	AccessTokensRevokedAt *time.Time `json:"-"`
+}
+
+// RevokeAccessTokens stamps the per-user access-token revocation
+// cutoff (issue 441): every access JWT of the user minted before the
+// stamp fails validation. It is the one owner of the stamping ritual —
+// both password paths (the self-service change in the auth domain and
+// the admin reset in the users domain) call it in the same user-row
+// write that replaces the hash, so the stamp's shape cannot drift
+// between them. Second precision, UTC — the jwt NumericDate
+// granularity — so a fresh token minted after the call (iat >= cutoff)
+// passes the check while every older token fails it.
+func (u *User) RevokeAccessTokens() {
+	cutoff := time.Now().UTC().Truncate(time.Second)
+	u.AccessTokensRevokedAt = &cutoff
 }
 
 // ValidRole reports whether role is one of the known role values.

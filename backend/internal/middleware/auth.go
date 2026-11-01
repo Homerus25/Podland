@@ -75,9 +75,10 @@ func bearerClaims(w http.ResponseWriter, r *http.Request, authService *auth.Auth
 	}
 
 	// Validate token. ValidateToken answers bare AppError sentinels
-	// (ErrTokenExpired | ErrTokenInvalid); unwrap via errors.AsType —
-	// the house idiom — and fail closed to ErrTokenInvalid should the
-	// vocabulary ever widen.
+	// (ErrTokenExpired | ErrTokenInvalid | ErrTokenRevoked, issue 441);
+	// unwrap via errors.AsType — the house idiom — and fail closed to
+	// ErrTokenInvalid for anything else, storage failures included: a
+	// broken revocation store must never read as "not revoked".
 	claims, err := authService.ValidateToken(parts[1])
 	if err != nil {
 		appErr := apperrors.ErrTokenInvalid

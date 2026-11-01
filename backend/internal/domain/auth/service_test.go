@@ -439,3 +439,27 @@ func TestGenerateToken_Consistency(t *testing.T) {
 		assert.Equal(t, userID, claims.UserID, "User ID should match")
 	}
 }
+
+// TestAuthService_GenerateToken_MintsUniqueJti asserts every minted
+// access JWT carries a jti (issue 441): the claim logout's denylist
+// keys on, non-empty and unique per token, so denylisting one device's
+// token can never collide with another's.
+func TestAuthService_GenerateToken_MintsUniqueJti(t *testing.T) {
+	repo := seedLoginUser(t, "testuser", "test-password-123")
+	service, err := NewTestAuthServiceWithUserRepo(repo)
+	require.NoError(t, err, "Should create auth service without error")
+
+	first, err := service.GenerateToken("user-testuser")
+	require.NoError(t, err, "Should mint the first token")
+	second, err := service.GenerateToken("user-testuser")
+	require.NoError(t, err, "Should mint the second token")
+
+	firstClaims, err := service.ValidateToken(first)
+	require.NoError(t, err, "The first token should validate")
+	secondClaims, err := service.ValidateToken(second)
+	require.NoError(t, err, "The second token should validate")
+
+	assert.NotEmpty(t, firstClaims.ID, "Every minted access JWT must carry a jti")
+	assert.NotEmpty(t, secondClaims.ID, "Every minted access JWT must carry a jti")
+	assert.NotEqual(t, firstClaims.ID, secondClaims.ID, "Each token's jti must be unique")
+}

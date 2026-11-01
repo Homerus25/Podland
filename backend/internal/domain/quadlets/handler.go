@@ -52,7 +52,7 @@ func (h *QuadletHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *QuadletHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*QuadletCreateResponse, error) {
 		var request QuadletCreateRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 
@@ -80,7 +80,7 @@ func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var request QuadletUpdateRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 
@@ -221,7 +221,7 @@ func (h *QuadletHandler) Move(w http.ResponseWriter, r *http.Request) {
 	// Decode answers its 400s before the stream begins; the streaming
 	// envelope takes over from there (the images Pull arrangement).
 	var request QuadletMoveRequest
-	if appErr := web.Decode(r, &request); appErr != nil {
+	if appErr := web.Decode(w, r, &request); appErr != nil {
 		errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 		return
 	}
@@ -255,7 +255,7 @@ func (h *QuadletHandler) Move(w http.ResponseWriter, r *http.Request) {
 func (h *QuadletHandler) Generate(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletGenerateResponse, error) {
 		var request QuadletGenerateRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 
@@ -267,7 +267,7 @@ func (h *QuadletHandler) Generate(w http.ResponseWriter, r *http.Request) {
 func (h *QuadletHandler) Import(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*QuadletImportResponse, error) {
 		var request QuadletImportRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 
@@ -290,7 +290,7 @@ func (h *QuadletHandler) ConvertCompose(w http.ResponseWriter, r *http.Request) 
 		r.Body = http.MaxBytesReader(w, r.Body, MaxComposeContentBytes)
 
 		var request QuadletConvertComposeRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 

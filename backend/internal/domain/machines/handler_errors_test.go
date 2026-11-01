@@ -90,7 +90,7 @@ func TestMachineHandler_Create_EnrichedErrorMessages(t *testing.T) {
 			"the message must name the marker pair")
 	})
 
-	t.Run("failed probe answers 400 CONNECTION_FAILED carrying the underlying error", func(t *testing.T) {
+	t.Run("failed probe answers 400 CONNECTION_FAILED with the static message", func(t *testing.T) {
 		service, _ := newCreateErrorsService(
 			errors.New("ssh: handshake failed: ssh: unable to authenticate"))
 		w := testutils.Perform(NewMachineHandler(service).Create, testutils.Request{
@@ -103,9 +103,11 @@ func TestMachineHandler_Create_EnrichedErrorMessages(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 		envelope := testutils.DecodeErrorEnvelope(t, w.Result())
 		assert.Equal(t, "CONNECTION_FAILED", envelope.Error.Code)
-		assert.Equal(t, "Failed to connect to machine during registration: ssh: handshake failed: ssh: unable to authenticate",
+		assert.Equal(t, "Failed to connect to machine during registration — check the hostname, port, SSH username, private key, and podman socket path",
 			envelope.Error.Message,
-			"the message must name the step and carry the underlying SSH error")
+			"the message must be the static text — the raw dial error is a port-scan oracle (pentest finding 1)")
+		assert.NotContains(t, envelope.Error.Message, "handshake",
+			"no SSH-level detail may reach the client")
 	})
 
 	t.Run("probe timeout answers 400 CONNECTION_TEST_TIMEOUT naming the bound", func(t *testing.T) {
@@ -139,6 +141,42 @@ func TestMachineHandler_Create_EnrichedErrorMessages(t *testing.T) {
 		assert.Equal(t, "MACHINE_ALREADY_EXISTS", envelope.Error.Code)
 		assert.Equal(t, `Machine with name "test-machine" already exists`, envelope.Error.Message,
 			"the message must name the taken machine name")
+	})
+
+	t.Run("blocked hostname answers 400 HOST_NOT_ALLOWED when the policy is enabled", func(t *testing.T) {
+		// The opt-in host policy (pentest 2026-11-01 finding 1,
+		// MACHINE_HOST_BLOCK_PRIVATE_RANGES): a blocked literal is
+		// rejected before any dial. The connection manager is poisoned
+		// with a probe error — a blocked host must never reach it.
+		machineRepo := testutils.NewMockMachineRepository()
+		accessRepo := testutils.NewMockMachineAccessRepository()
+		connManager := testutils.NewMockConnectionManagerWithTestError(
+			errors.New("probe must not run for a blocked host"))
+		service := NewMachineService(machineRepo, accessRepo, connManager,
+			testutils.NewMockEncryptionService(), newFakeSSHInvalidator()).
+			WithHostPolicy(NewHostPolicy(true))
+
+		w := testutils.Perform(NewMachineHandler(service).Create, testutils.Request{
+			Method: http.MethodPost,
+			Path:   "/api/machines",
+			UserID: "user-1",
+			Body: strings.NewReader(`{
+				"name": "test-machine",
+				"hostname": "10.0.0.5",
+				"port": 22,
+				"sshUsername": "root",
+				"sshPrivateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----",
+				"podmanSocketPath": "/run/podman/podman.sock"
+			}`),
+		})
+
+		require.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+		envelope := testutils.DecodeErrorEnvelope(t, w.Result())
+		assert.Equal(t, "HOST_NOT_ALLOWED", envelope.Error.Code)
+		assert.Equal(t, "Machine hostname is not allowed: this instance blocks private, loopback, link-local, CGNAT, and unspecified addresses",
+			envelope.Error.Message)
+		assert.Empty(t, connManager.TestConnectionCalls(),
+			"a blocked host must never be dialed")
 	})
 }
 
@@ -176,7 +214,7 @@ func TestMachineHandler_Update_EnrichedErrorMessages(t *testing.T) {
 			"the update path shares the enriched PEM-format message (issue 399)")
 	})
 
-	t.Run("failed probe answers 400 CONNECTION_FAILED carrying the underlying error", func(t *testing.T) {
+	t.Run("failed probe answers 400 CONNECTION_FAILED with the static message", func(t *testing.T) {
 		service, machineRepo := newCreateErrorsService(errors.New("dial tcp: connection refused"))
 		machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "m", OwnerID: "owner-1"})
 
@@ -185,9 +223,9 @@ func TestMachineHandler_Update_EnrichedErrorMessages(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
 		envelope := testutils.DecodeErrorEnvelope(t, w.Result())
 		assert.Equal(t, "CONNECTION_FAILED", envelope.Error.Code)
-		assert.Equal(t, "Failed to connect to machine during registration: dial tcp: connection refused",
+		assert.Equal(t, "Failed to connect to machine during registration — check the hostname, port, SSH username, private key, and podman socket path",
 			envelope.Error.Message,
-			"update shares the registration probe path, so the enriched message rides for free")
+			"update shares the registration probe path, so the static message rides for free")
 	})
 
 	t.Run("probe timeout answers 400 CONNECTION_TEST_TIMEOUT naming the bound", func(t *testing.T) {

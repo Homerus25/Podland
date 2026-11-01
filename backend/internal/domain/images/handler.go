@@ -65,7 +65,7 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 // (HandleProgress) owns the rest of the handler-side ritual.
 func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 	var request ImagePullRequest
-	if appErr := web.Decode(r, &request); appErr != nil {
+	if appErr := web.Decode(w, r, &request); appErr != nil {
 		errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 		return
 	}
@@ -253,7 +253,7 @@ func (h *ImageHandler) Copy(w http.ResponseWriter, r *http.Request) {
 	// kit's progress seam takes over from there (the volumes move's
 	// arrangement).
 	var request ImageCopyRequest
-	if appErr := web.Decode(r, &request); appErr != nil {
+	if appErr := web.Decode(w, r, &request); appErr != nil {
 		errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 		return
 	}

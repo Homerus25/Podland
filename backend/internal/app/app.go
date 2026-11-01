@@ -99,6 +99,11 @@ func New(cfg *config.Config) (*App, error) {
 	// Initialize JWT (load or generate keys)
 	sessionRepo := models.NewSessionRepository(db)
 
+	// The access-token denylist (issue 441): the revoked_access_tokens
+	// repository behind logout's per-device and the password paths'
+	// per-user access-token revocation.
+	revokedTokenRepo := models.NewRevokedTokenRepository(db)
+
 	// User management and the first-run setup endpoint share one
 	// creation path; the session repo backs the admin password reset's
 	// session revocation. The service is also the auth service's
@@ -138,7 +143,7 @@ func New(cfg *config.Config) (*App, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("app: failed to initialize auth: %w", err)
 	}
-	authService = authService.WithLoginBudget(loginBudget).WithChangeBudget(changeBudget)
+	authService = authService.WithLoginBudget(loginBudget).WithChangeBudget(changeBudget).WithRevokedTokenRepo(revokedTokenRepo)
 
 	// Initialize repositories
 	machineRepo := models.NewMachineRepository(db)
@@ -165,7 +170,12 @@ func New(cfg *config.Config) (*App, error) {
 	// Initialize services. sshExecService is handed to the machine service
 	// too: it satisfies the machines package's narrow sshInvalidator seam,
 	// so machine deletion can invalidate the machine's pooled SSH clients.
-	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService, sshExecService)
+	// The host policy is the opt-in egress block on the registration probe
+	// target (pentest 2026-11-01 finding 1): NewHostPolicy(false) is the
+	// disabled zero value, so an unset/false MACHINE_HOST_BLOCK_PRIVATE_
+	// RANGES leaves registration exactly as before.
+	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService, sshExecService).
+		WithHostPolicy(machines.NewHostPolicy(cfg.Machines.HostBlockPrivateRanges))
 	containerService := containers.NewContainerService(containers.NewContainerEngineProvider(connectionManager))
 	imageService := images.NewImageService(images.NewImageEngineProvider(connectionManager)).
 		WithAccessRepo(accessRepo).
@@ -234,6 +244,13 @@ func New(cfg *config.Config) (*App, error) {
 	router.Use(chimid.Recoverer)
 	router.Use(appmiddleware.RequestIDMiddleware)
 	router.Use(appmiddleware.CORS(cfg.AllowedOrigins))
+	// Security headers live in the global chain, not in the SPA handler
+	// or per handler: the pentest finding (2026-11-01, finding 6) was that
+	// NO response carried them, /api/health included, so one owner here
+	// covers API + SPA + error and streaming responses. HSTS is
+	// config-gated (HSTS_MAX_AGE_SECONDS, default 0 = omitted — the
+	// backend serves plain HTTP).
+	router.Use(appmiddleware.SecurityHeaders(cfg.HSTSMaxAgeSeconds))
 	// Request logging lives here, not per handler: one line per request
 	// (method, path, status, duration, requestID) covering every
 	// endpoint, streaming included (long-lived streams log at stream

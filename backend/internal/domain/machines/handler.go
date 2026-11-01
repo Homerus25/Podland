@@ -30,7 +30,7 @@ func NewMachineHandler(service *MachineService) *MachineHandler {
 func (h *MachineHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusCreated, func(ctx context.Context, userID string) (MachineResponse, error) {
 		var req CreateMachineRequest
-		if appErr := web.Decode(r, &req); appErr != nil {
+		if appErr := web.Decode(w, r, &req); appErr != nil {
 			return MachineResponse{}, appErr
 		}
 
@@ -121,7 +121,7 @@ func (h *MachineHandler) List(w http.ResponseWriter, r *http.Request) {
 func (h *MachineHandler) Update(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (MachineResponse, error) {
 		var req CreateMachineRequest
-		if appErr := web.Decode(r, &req); appErr != nil {
+		if appErr := web.Decode(w, r, &req); appErr != nil {
 			return MachineResponse{}, appErr
 		}
 
@@ -174,7 +174,7 @@ func (h *MachineHandler) ListAccess(w http.ResponseWriter, r *http.Request) {
 func (h *MachineHandler) GrantAccess(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, grantorID, machineID string) (AccessResponse, error) {
 		var req GrantAccessRequest
-		if appErr := web.Decode(r, &req); appErr != nil {
+		if appErr := web.Decode(w, r, &req); appErr != nil {
 			return AccessResponse{}, appErr
 		}
 

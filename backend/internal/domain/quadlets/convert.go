@@ -143,14 +143,7 @@ func (c *podletComposeConverter) Convert(ctx context.Context, composeContent str
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		// A non-zero exit is a conversion rejection: the service surfaces
-		// podlet's stderr as 400 VALIDATION_FAILED. An empty stderr falls
-		// back to the exit error so the message is never blank.
-		stderrText := stderr.String()
-		if strings.TrimSpace(stderrText) == "" {
-			stderrText = err.Error()
-		}
-		return nil, &ConversionError{Stderr: stderrText}
+		return nil, classifyRunError(err, stderr.String())
 	}
 
 	dirEntries, err := os.ReadDir(dir)
@@ -169,4 +162,26 @@ func (c *podletComposeConverter) Convert(ctx context.Context, composeContent str
 		files = append(files, GeneratedQuadletFile{FileName: entry.Name(), Content: string(content)})
 	}
 	return files, nil
+}
+
+// classifyRunError sorts a failed podlet run into its two error families
+// (pentest 2026-11-01, finding 7). A process that started and exited
+// non-zero (*exec.ExitError) is a genuine conversion rejection: it maps to
+// *ConversionError so the service surfaces podlet's stderr as 400
+// VALIDATION_FAILED, with an empty stderr falling back to the exit error
+// so the message is never blank. Any other Run error — the binary missing
+// from PATH (exec.ErrNotFound), permission denied, fork failures, a
+// canceled context — never started converting, so it is a server-side
+// problem: it comes back wrapped as a non-ConversionError, the service
+// propagates it untouched, and the envelope answers the generic 500 with
+// the raw exec text only in the server log.
+func classifyRunError(runErr error, stderrText string) error {
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		if strings.TrimSpace(stderrText) == "" {
+			stderrText = runErr.Error()
+		}
+		return &ConversionError{Stderr: stderrText}
+	}
+	return fmt.Errorf("failed to start podlet: %w", runErr)
 }

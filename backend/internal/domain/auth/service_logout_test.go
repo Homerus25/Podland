@@ -26,7 +26,7 @@ func TestAuthService_Logout_RevokesOnlyPresentedSession(t *testing.T) {
 	require.NoError(t, err, "Should log in device B")
 	require.Len(t, sessionRepo.SessionsForUser("user-testuser"), 2, "Two logins should leave two session rows")
 
-	err = service.Logout(deviceAToken)
+	err = service.Logout(deviceAToken, "")
 
 	assert.NoError(t, err, "Logging out a live session should not error")
 	revokedRow, err := sessionRepo.GetByTokenHash(sha256Hex(deviceAToken))
@@ -49,10 +49,10 @@ func TestAuthService_Logout_UnknownTokenIsNoOp(t *testing.T) {
 
 	_, loginToken, _, _, err := service.Login("testuser", "test-password-123", false)
 	require.NoError(t, err, "Should log in to mint a refresh token")
-	require.NoError(t, service.Logout(loginToken), "First logout should succeed")
+	require.NoError(t, service.Logout(loginToken, ""), "First logout should succeed")
 
-	assert.NoError(t, service.Logout(loginToken), "Second logout of the same token must not error")
-	assert.NoError(t, service.Logout("never-issued-token"), "Logging out an unknown token must not error")
+	assert.NoError(t, service.Logout(loginToken, ""), "Second logout of the same token must not error")
+	assert.NoError(t, service.Logout("never-issued-token", ""), "Logging out an unknown token must not error")
 	assert.Empty(t, sessionRepo.SessionsForUser("user-testuser"), "No-op logouts must not disturb other rows")
 }
 
@@ -66,7 +66,7 @@ func TestAuthService_Logout_StorageFailurePropagates(t *testing.T) {
 	service, err := NewTestAuthServiceWithSessionRepo(repo, sessionRepo, 30*24*time.Hour)
 	require.NoError(t, err, "Should create auth service without error")
 
-	err = service.Logout("any-token")
+	err = service.Logout("any-token", "")
 
 	assert.ErrorIs(t, err, storageFailure, "A storage failure during logout must propagate")
 }

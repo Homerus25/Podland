@@ -49,19 +49,20 @@ Register a new remote machine.
 ```
 
 **Response (Error):**
-- 400: `INVALID_REQUEST` (malformed JSON body), `VALIDATION_FAILED`, `INVALID_SSH_KEY`, `CONNECTION_FAILED`, `CONNECTION_TEST_TIMEOUT`, `MACHINE_ALREADY_EXISTS`
+- 400: `INVALID_REQUEST` (malformed JSON body), `VALIDATION_FAILED`, `INVALID_SSH_KEY`, `CONNECTION_FAILED`, `CONNECTION_TEST_TIMEOUT`, `MACHINE_ALREADY_EXISTS`, `HOST_NOT_ALLOWED`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 500: `INTERNAL_ERROR`
 
-**Error messages (registration steps name themselves):** the 4xx messages name the failed registration step and the reason; the error codes stay stable. Clients may render the message verbatim.
+**Error messages (registration steps name themselves):** the 4xx messages name the failed registration step; the error codes stay stable. Clients may render the message verbatim.
 
 - `VALIDATION_FAILED` lists the missing field names: `"Missing required fields: name, hostname"`
 - `INVALID_SSH_KEY` describes the expected format: a PEM block, i.e. a `-----BEGIN OPENSSH PRIVATE KEY-----` (or RSA/EC/DSA/ED25519) header line paired with its matching `-----END ... PRIVATE KEY-----` footer line
-- `CONNECTION_FAILED` carries the underlying SSH/podman error, length-capped: `"Failed to connect to machine during registration: ssh: handshake failed: ssh: unable to authenticate"`
+- `CONNECTION_FAILED` is a STATIC message: `"Failed to connect to machine during registration — check the hostname, port, SSH username, private key, and podman socket path"`. No probe detail (dial error text, target address, open/closed distinction) reaches the client — the registration probe dials an arbitrary user-supplied hostname:port from the server's network vantage point, so the raw error is an internal port-scan/SSRF oracle (pentest 2026-11-01, finding 1). The full underlying error is logged server-side with the request ID. The residual pure timing oracle (fast-fail vs `CONNECTION_TEST_TIMEOUT`) is accepted.
 - `CONNECTION_TEST_TIMEOUT` states the exceeded bound: `"Connection test timed out after 10s"` (the configured `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS`)
 - `MACHINE_ALREADY_EXISTS` names the taken machine name: `"Machine with name \"my-box\" already exists"`
+- `HOST_NOT_ALLOWED` (only when `MACHINE_HOST_BLOCK_PRIVATE_RANGES=true`): the hostname was rejected by the instance's egress block before any dial — an IP literal checked directly, or a hostname through every resolved IP, falling in loopback (127.0.0.0/8, ::1), RFC1918 (10/8, 172.16/12, 192.168/16), link-local (169.254/16 — including the 169.254.169.254 cloud-metadata endpoint — and fe80::/10), CGNAT (100.64/10), IPv6 ULA (fc00::/7), or 0.0.0.0/8; an unresolvable hostname fails closed with the same answer. Message: `"Machine hostname is not allowed: this instance blocks private, loopback, link-local, CGNAT, and unspecified addresses"`
 
-The probe detail is safe to return here because the caller is the owner submitting their own credentials against the target they described. This is deliberately different from `GET /api/machines/{id}/status`, which never returns SSH-level detail because machines can be shared with read-only users. A failed registration probe is also logged server-side with the underlying error and the request ID. 5xx failures (database persist, access grant, key encryption) keep the generic internal-error message — no step naming that leaks internals.
+A failed registration probe is logged server-side with the underlying error and the request ID. 5xx failures (database persist, access grant, key encryption) keep the generic internal-error message — no step naming that leaks internals.
 
 ---
 
@@ -214,13 +215,15 @@ Update an existing machine's connection details.
 
 Only the owner may update a machine; any other user with an access row (read or write) receives 403 `ACCESS_DENIED`.
 
-**Note:** If `sshPrivateKey` is provided, the backend will test the new connection before persisting: the probe targets the resulting merged connection configuration (request fields override stored ones), a failure answers 400 `CONNECTION_FAILED`, and a probe timeout answers 400 `CONNECTION_TEST_TIMEOUT`. Updates that do not change the key skip the probe. The update path shares the registration probe, so its 4xx messages carry the same step-and-reason wording as POST /api/machines (the underlying error on `CONNECTION_FAILED`, the exceeded bound on `CONNECTION_TEST_TIMEOUT`, the PEM format description on `INVALID_SSH_KEY`).
+**Note:** If `sshPrivateKey` is provided, the backend will test the new connection before persisting: the probe targets the resulting merged connection configuration (request fields override stored ones), a failure answers 400 `CONNECTION_FAILED`, and a probe timeout answers 400 `CONNECTION_TEST_TIMEOUT`. Updates that do not change the key skip the probe. The update path shares the registration probe, so its 4xx messages carry the same wording as POST /api/machines (the static message on `CONNECTION_FAILED`, the exceeded bound on `CONNECTION_TEST_TIMEOUT`, the PEM format description on `INVALID_SSH_KEY`).
+
+When `MACHINE_HOST_BLOCK_PRIVATE_RANGES=true`, a request that sets `hostname` — with or without a new SSH key — is policy-checked before the probe and before anything is persisted: a blocked target (see POST /api/machines) answers 400 `HOST_NOT_ALLOWED` and is never dialed, never stored. Updates that do not touch `hostname` skip the check.
 
 **Response (Success - 200):**
 - The machine fields of GET /api/machines/{id} without the per-caller `permission` and `isOwner` fields (only the list and detail GET responses carry the enrichment)
 
 **Response (Error):**
-- 400: `INVALID_REQUEST`, `INVALID_SSH_KEY`, `CONNECTION_FAILED`, `CONNECTION_TEST_TIMEOUT`
+- 400: `INVALID_REQUEST`, `INVALID_SSH_KEY`, `CONNECTION_FAILED`, `CONNECTION_TEST_TIMEOUT`, `HOST_NOT_ALLOWED`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
 - 404: `MACHINE_NOT_FOUND`

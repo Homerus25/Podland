@@ -50,7 +50,7 @@ const maxSecretValueBytes = 1048576
 func (h *SecretHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*SecretCreateResponse, error) {
 		var request SecretCreateRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 
@@ -164,7 +164,7 @@ func (h *SecretHandler) Move(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var request SecretMoveRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 

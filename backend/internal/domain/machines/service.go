@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
@@ -25,6 +24,12 @@ type MachineService struct {
 	conn        connections.Manager
 	encryption  sshKeyEncryptor
 	sshPool     sshInvalidator
+
+	// hostPolicy is the opt-in egress block on the probe target
+	// (hostpolicy.go). The zero value is disabled — no resolution, no
+	// new failure modes — so a service without WithHostPolicy behaves
+	// exactly as before.
+	hostPolicy HostPolicy
 
 	// fetchVersion asks a live connection context for the remote Podman's
 	// version report (version.go). Production wires fetchRemoteVersion
@@ -207,6 +212,15 @@ func (s *MachineService) Create(ctx context.Context, userID string, req *CreateM
 		UpdatedAt:        now,
 	}
 
+	// The opt-in host policy gates the probe target right before the
+	// probe (pentest 2026-11-01 finding 1): with the block enabled, a
+	// blocked host is rejected here — never dialed, never persisted.
+	// Every earlier 400 (missing fields, PEM, duplicate name) keeps its
+	// precedence.
+	if err := s.hostPolicy.Check(ctx, machine.Hostname); err != nil {
+		return nil, err
+	}
+
 	// A registration always carries a key (validated above): the new key
 	// must earn its place on the machine row before anything is persisted.
 	if err := s.verifyKey(ctx, machine, req.SSHPrivateKey); err != nil {
@@ -240,26 +254,6 @@ func (s *MachineService) Create(ctx context.Context, userID string, req *CreateM
 // carry (issue 399): the 400 INVALID_SSH_KEY message says what valid input
 // looks like instead of only rejecting.
 const invalidSSHKeyMessage = `Invalid SSH private key format: expected a PEM block — a "-----BEGIN OPENSSH PRIVATE KEY-----" (or RSA/EC/DSA/ED25519) header line paired with its matching "-----END ... PRIVATE KEY-----" footer line`
-
-// maxProbeDetailLen caps the underlying probe error text carried in the
-// registration CONNECTION_FAILED message (issue 399): SSH/podman errors
-// are short in practice, but a pathological cause must not flood the form.
-const maxProbeDetailLen = 300
-
-// probeDetail renders the underlying probe error for the registration
-// message, length-capped. The cap cuts on a rune boundary so a multi-byte
-// cause cannot leave invalid UTF-8 in the message.
-func probeDetail(err error) string {
-	detail := err.Error()
-	if len(detail) <= maxProbeDetailLen {
-		return detail
-	}
-	cut := maxProbeDetailLen
-	for cut > 0 && !utf8.ValidString(detail[:cut]) {
-		cut--
-	}
-	return detail[:cut] + " (truncated)"
-}
 
 // IsValidPEM performs a basic check for PEM format
 func IsValidPEM(key string) bool {
@@ -410,6 +404,18 @@ func (s *MachineService) Update(ctx context.Context, userID, machineID string, r
 		machine.PodmanSocketPath = req.PodmanSocketPath
 	}
 
+	// The opt-in host policy gates a hostname change whenever one is set
+	// — with or without a key change — before the probe and before the
+	// persist (pentest 2026-11-01 finding 1): a blocked host can never
+	// be persisted. Updates that do not touch the hostname skip the
+	// check entirely; the owner-only gate and the PEM validation above
+	// keep their precedence.
+	if req.Hostname != "" {
+		if err := s.hostPolicy.Check(ctx, machine.Hostname); err != nil {
+			return nil, err
+		}
+	}
+
 	// Probe parity with registration: a new SSH private key must earn its
 	// place on the machine before anything is persisted. verifyKey probes
 	// the merged machine — the request fields above already overrode the
@@ -442,16 +448,17 @@ func (s *MachineService) Update(ctx context.Context, userID, machineID string, r
 // bound) maps to CONNECTION_TEST_TIMEOUT naming that bound; the caller's
 // own context deadline maps to the plain timeout sentinel (no configured
 // bound to name); any other failure (bad host / credentials / socket) maps
-// to CONNECTION_FAILED carrying the underlying error, length-capped.
-// Both are 400 — the target the client described is not usable.
+// to CONNECTION_FAILED with a STATIC message. Both are 400 — the target
+// the client described is not usable.
 //
-// The probe detail is safe to return here because the caller is the owner
-// submitting their own credentials against the target they described —
-// deliberately different from the status endpoint, which never returns
-// SSH-level detail because machines can be shared (issue 399 keeps that
-// ruling unextended). The failure is also logged server-side with the
-// requestID: the 400 mapping discards the underlying error, so the log
-// line is where the full cause lives.
+// The probe detail never reaches the client (pentest 2026-11-01 finding
+// 1): the raw dial error is an internal port-scan / SSRF oracle from the
+// server's network vantage point, and any authenticated user can
+// register a machine against a target that is not their own host. The
+// failure is logged server-side with the requestID: the 400 mapping
+// discards the underlying error, so the log line is where the full
+// cause lives. The residual pure timing oracle (fast-fail vs timeout)
+// is accepted and documented in the doku.
 func (s *MachineService) verifyKey(ctx context.Context, machine *models.Machine, plaintextKey string) error {
 	if err := s.conn.TestConnection(ctx, machine.Hostname, machine.Port, machine.SSHUsername, plaintextKey, machine.PodmanSocketPath); err != nil {
 		slog.ErrorContext(ctx, "machine connection probe failed",
@@ -469,8 +476,7 @@ func (s *MachineService) verifyKey(ctx context.Context, machine *models.Machine,
 		if stderrors.Is(err, context.DeadlineExceeded) {
 			return errors.ErrConnectionTestTimeout
 		}
-		return errors.ErrConnectionTestFailed.WithMessage(
-			fmt.Sprintf("Failed to connect to machine during registration: %s", probeDetail(err)))
+		return errors.ErrConnectionTestFailed
 	}
 
 	encryptedKey, fingerprint, err := s.encryption.EncryptSSHKey(plaintextKey)

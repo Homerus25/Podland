@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -401,7 +402,7 @@ func decodeRequest(body string) *http.Request {
 }
 
 func TestDecode_MalformedBodyAnswersInvalidRequest(t *testing.T) {
-	appErr := Decode(decodeRequest(`{not json`), &decodeTarget{})
+	appErr := Decode(httptest.NewRecorder(), decodeRequest(`{not json`), &decodeTarget{})
 
 	require.NotNil(t, appErr)
 	assert.Equal(t, http.StatusBadRequest, appErr.Status)
@@ -410,7 +411,7 @@ func TestDecode_MalformedBodyAnswersInvalidRequest(t *testing.T) {
 }
 
 func TestDecode_WrongTypedFieldAnswersInvalidRequest(t *testing.T) {
-	appErr := Decode(decodeRequest(`{"name": 42}`), &decodeTarget{})
+	appErr := Decode(httptest.NewRecorder(), decodeRequest(`{"name": 42}`), &decodeTarget{})
 
 	require.NotNil(t, appErr)
 	assert.Equal(t, http.StatusBadRequest, appErr.Status)
@@ -419,7 +420,7 @@ func TestDecode_WrongTypedFieldAnswersInvalidRequest(t *testing.T) {
 }
 
 func TestDecode_MissingRequiredFieldAnswersValidationFailed(t *testing.T) {
-	appErr := Decode(decodeRequest(`{}`), &decodeTarget{})
+	appErr := Decode(httptest.NewRecorder(), decodeRequest(`{}`), &decodeTarget{})
 
 	require.NotNil(t, appErr)
 	assert.Equal(t, http.StatusBadRequest, appErr.Status)
@@ -435,16 +436,86 @@ func TestDecode_TaglessStructSkipsValidation(t *testing.T) {
 		Name string `json:"name"`
 	}
 
-	assert.Nil(t, Decode(decodeRequest(`{"name": ""}`), &tagless),
+	assert.Nil(t, Decode(httptest.NewRecorder(), decodeRequest(`{"name": ""}`), &tagless),
 		"a DTO without validate tags imposes no rules in Decode")
 }
 
 func TestDecode_CleanBodyAnswersNil(t *testing.T) {
 	var target decodeTarget
 
-	assert.Nil(t, Decode(decodeRequest(`{"name": "my-volume", "extra": "ignored"}`), &target),
+	assert.Nil(t, Decode(httptest.NewRecorder(), decodeRequest(`{"name": "my-volume", "extra": "ignored"}`), &target),
 		"a clean body decodes nil, and unknown fields are ignored (no DisallowUnknownFields)")
 	assert.Equal(t, "my-volume", target.Name)
+}
+
+// countingReader counts the bytes actually pulled from the underlying
+// source, so a test can prove the max-bytes reader cut the body off
+// instead of buffering it whole.
+type countingReader struct {
+	src      io.Reader
+	consumed int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.src.Read(p)
+	c.consumed += int64(n)
+	return n, err
+}
+
+// oversizedBody builds a valid-JSON body of size bytes: a single name
+// string padded out to the requested total length.
+func oversizedBody(size int) string {
+	const prefix = `{"name":"`
+	const suffix = `"}`
+	return prefix + strings.Repeat("a", size-len(prefix)-len(suffix)) + suffix
+}
+
+// TestDecode_OversizedBodyAnswersInvalidRequest pins the global
+// MaxBodyBytes cap once for the whole envelope (not per domain): a JSON
+// body over the cap answers the same 400 INVALID_REQUEST
+// "Invalid request body" as any malformed body, while a body exactly at
+// the cap decodes normally.
+func TestDecode_OversizedBodyAnswersInvalidRequest(t *testing.T) {
+	w := httptest.NewRecorder()
+	var target decodeTarget
+
+	appErr := Decode(w, decodeRequest(oversizedBody(MaxBodyBytes+1)), &target)
+
+	require.NotNil(t, appErr)
+	assert.Equal(t, http.StatusBadRequest, appErr.Status)
+	assert.Equal(t, "INVALID_REQUEST", appErr.Code)
+	assert.Equal(t, "Invalid request body", appErr.Message)
+}
+
+func TestDecode_BodyAtCapDecodesNormally(t *testing.T) {
+	w := httptest.NewRecorder()
+	var target decodeTarget
+
+	body := oversizedBody(MaxBodyBytes)
+	require.Len(t, body, MaxBodyBytes, "the boundary body must be exactly the cap")
+
+	assert.Nil(t, Decode(w, decodeRequest(body), &target),
+		"a body exactly at the cap is legitimate and must decode")
+	assert.Equal(t, MaxBodyBytes-len(`{"name":"`)-len(`"}`), len(target.Name))
+}
+
+// TestDecode_OversizedBodyIsCutOffAtTheReader proves the cap works at
+// the HTTP layer: the source reader hands out at most MaxBodyBytes
+// bytes, so an oversized body is never fully buffered.
+func TestDecode_OversizedBodyIsCutOffAtTheReader(t *testing.T) {
+	w := httptest.NewRecorder()
+	counter := &countingReader{src: strings.NewReader(oversizedBody(MaxBodyBytes + 2<<20))}
+	req := httptest.NewRequest(http.MethodPost, "/api/machines/m/volumes", counter)
+
+	var target decodeTarget
+	appErr := Decode(w, req, &target)
+
+	require.NotNil(t, appErr, "an oversized body must not decode")
+	// The reader hands out at most the cap plus the single byte that
+	// trips it (a body of exactly MaxBodyBytes stays legitimate), so a
+	// 12 MiB body is cut off around 10 MiB, never buffered whole.
+	assert.LessOrEqual(t, counter.consumed, int64(MaxBodyBytes)+1,
+		"the reader must cut the body off at the cap, never fully buffer it")
 }
 
 // URLParam / QueryString / QueryBool / QueryInt pins — the param ritual

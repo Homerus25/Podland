@@ -87,7 +87,7 @@ func (h *VolumeHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *VolumeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (VolumeInspectResponse, error) {
 		var request VolumeCreateRequest
-		if appErr := web.Decode(r, &request); appErr != nil {
+		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return VolumeInspectResponse{}, appErr
 		}
 
@@ -250,7 +250,7 @@ func (h *VolumeHandler) Move(w http.ResponseWriter, r *http.Request) {
 	// kit's progress seam takes over from there (the quadlet move's
 	// arrangement).
 	var request VolumeMoveRequest
-	if appErr := web.Decode(r, &request); appErr != nil {
+	if appErr := web.Decode(w, r, &request); appErr != nil {
 		errors.RespondWithError(w, appErr, contextutils.GetRequestID(r.Context()))
 		return
 	}

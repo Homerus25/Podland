@@ -10,6 +10,13 @@ Part of the [API contract](description_api.md). See the main document for base U
 - **JWT tokens** signed with RS256
 - **Transport**: Authorization: Bearer header
 - **Token expiration**: Configurable, default 60 minutes
+- **Server-side revocation**: access JWTs are revocable before expiry.
+  Every token carries a unique `jti` claim. Logout denylists the
+  presented token's `jti` (per-device revocation); a password change
+  or admin password reset stamps a per-user cutoff that kills every
+  token the user minted before it. A revoked token answers **401
+  `TOKEN_REVOKED`** on every protected endpoint — the same treatment
+  as an invalid token client-side.
 
 ### Auth Endpoints
 
@@ -96,8 +103,19 @@ the `SESSION_TTL_DAYS` sliding renewal and a cookie with no `Max-Age`.
 
 #### POST /api/auth/logout
 
+Revokes the caller's credentials server-side. When the request carries
+the `refresh_token` cookie, the refresh session behind it is revoked;
+when it also carries an `Authorization: Bearer` access token, that
+token is denylisted until its own expiry — the old bearer answers 401
+`TOKEN_REVOKED` on every protected endpoint instead of living on until
+expiry. The endpoint stays unauthenticated and idempotent: no cookie,
+no bearer, an unknown cookie, or a bearer that fails validation all
+still succeed with the same response.
+
 **Request:**
 - No body required
+- Optional `Authorization: Bearer <token>`: the access token to revoke
+- Optional `refresh_token` cookie: the refresh session to revoke
 - Client should remove stored token
 
 **Response (Success - 200):**
@@ -190,7 +208,7 @@ curl -s http://localhost:8080/api/setup/user \
 - `needsSetup`: `true` only for an **unauthenticated** caller on an instance whose users table is empty — the signal to route to the setup page (see POST /api/setup/user). It flips to `false` the moment setup completes. Authenticated callers always see `false`.
 
 **Response (Error):**
-- 401 Unauthorized: Invalid token (`TOKEN_INVALID`) — a *missing* token is not an error; the endpoint answers the anonymous shape above.
+- 401 Unauthorized: Invalid, expired, or revoked token (`TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`) — a *missing* token is not an error; the endpoint answers the anonymous shape above.
 
 **Rate limiting:** login, refresh, this status probe, and the setup
 endpoint share one per-IP budget (`RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE`,
@@ -233,11 +251,14 @@ Authorization: Bearer header with a valid token. The current password
 proves the caller's authority; the new one must be at least 8
 characters. On success the stored hash is replaced and **every** session
 of the user is revoked — remembered ones included, so a compromised
-password cannot be ridden by remembered devices — and the caller
-receives a fresh login (new access JWT in the body plus a new refresh
-cookie) so the device making the change stays signed in; every other
-device is signed out and must log in again with the new password. The
-fresh session is unremembered (no cookie `Max-Age`). It lives under
+password cannot be ridden by remembered devices — and **every access
+token the user held, minted before the change, is revoked immediately**
+(401 `TOKEN_REVOKED`): a stolen bearer dies with the old password, not
+at token expiry. The caller receives a fresh login (new access JWT in
+the body plus a new refresh cookie) so the device making the change
+stays signed in; every other device is signed out and must log in again
+with the new password. The fresh session is unremembered (no cookie
+`Max-Age`). It lives under
 `/api/auth` because the fresh refresh cookie shares the login/refresh
 cookie scope (Path=/api/auth).
 
@@ -262,7 +283,7 @@ Content-Type: application/json
 ```
 
 **Response (Error):**
-- 401 Unauthorized: Wrong current password (`INVALID_CREDENTIALS`, message "Current password is incorrect"), or missing/invalid bearer token (`TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`)
+- 401 Unauthorized: Wrong current password (`INVALID_CREDENTIALS`, message "Current password is incorrect"), or missing/invalid/revoked bearer token (`TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`)
 - 400 Bad Request: New password shorter than 8 characters (`PASSWORD_TOO_SHORT`, "Password must be at least 8 characters"); malformed JSON body (`INVALID_REQUEST`, "Invalid request body"); missing or empty fields (`VALIDATION_FAILED`, carrying the validator's message)
 - 404 Not Found: The token's user no longer exists (`USER_NOT_FOUND`)
 - 429 Too Many Requests: credential-failure budget exhausted (`RATE_LIMIT_EXCEEDED`) — wrong current-password attempts count against the caller into the shared budget; see [Credential-failure budget](#credential-failure-budget)
