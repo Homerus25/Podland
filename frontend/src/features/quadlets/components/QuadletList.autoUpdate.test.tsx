@@ -58,6 +58,20 @@ function errorEvent(code: string, message: string): AutoUpdateEvent {
 	};
 }
 
+function planEvent(entries: Record<string, unknown>[]): AutoUpdateEvent {
+	return { operationId: "op-1", type: "plan", machineId: "m-1", plan: entries };
+}
+
+function pullingEvent(unit: string, image?: string): AutoUpdateEvent {
+	return {
+		operationId: "op-1",
+		type: "pulling",
+		machineId: "m-1",
+		unit,
+		...(image !== undefined ? { image } : {}),
+	};
+}
+
 const item = (overrides: Record<string, unknown>) => ({
 	containerName: "web",
 	imageName: "nginx:1.27",
@@ -232,6 +246,208 @@ describe("QuadletList auto-update", () => {
 		);
 	});
 
+	it("renders the plan's units as plain waiting rows in plan order while the run is live", async () => {
+		mockAutoUpdate(
+			[
+				planEvent([
+					{ unit: "web.service", image: "docker.io/library/web:1" },
+					// A degraded plan entry: no image, still a row.
+					{ unit: "db.service" },
+				]),
+				logEvent("Checking web.service"),
+			],
+			true,
+		);
+		await clickCheckForUpdates();
+
+		expect(await screen.findByTestId("modal")).toBeInTheDocument();
+		const web = await screen.findByTestId(
+			"auto-update-row-waiting-web.service",
+		);
+		const db = screen.getByTestId("auto-update-row-waiting-db.service");
+		expect(web).toHaveTextContent("web.service");
+		expect(web).toHaveTextContent("docker.io/library/web:1");
+		expect(db).toHaveTextContent("db.service");
+		// Plan order is the render order.
+		expect(web.compareDocumentPosition(db)).toBe(
+			Node.DOCUMENT_POSITION_FOLLOWING,
+		);
+		// Waiting is passive: no spinner on either row.
+		expect(
+			web.querySelector('[data-testid^="auto-update-row-spinner"]'),
+		).toBeNull();
+		expect(
+			db.querySelector('[data-testid^="auto-update-row-spinner"]'),
+		).toBeNull();
+		// The log line is the stream's last event — once it renders, the
+		// hold-open gate is armed and releasing ends the run.
+		expect(await screen.findByText("Checking web.service")).toBeInTheDocument();
+
+		releaseStream?.();
+		await waitFor(() =>
+			expect(
+				screen.queryByTestId("auto-update-in-progress"),
+			).not.toBeInTheDocument(),
+		);
+	});
+
+	it("flips the pulling row to a spinner and names the unit in the header", async () => {
+		mockAutoUpdate(
+			[
+				planEvent([
+					{ unit: "web.service", image: "docker.io/library/web:1" },
+					{ unit: "db.service" },
+				]),
+				pullingEvent("web.service", "docker.io/library/web:1"),
+				logEvent("Trying to pull docker.io/library/web:1"),
+			],
+			true,
+		);
+		await clickCheckForUpdates();
+
+		const pulling = await screen.findByTestId(
+			"auto-update-row-pulling-web.service",
+		);
+		expect(pulling).toHaveTextContent("web.service");
+		expect(
+			pulling.querySelector(
+				'[data-testid="auto-update-row-spinner-web.service"]',
+			),
+		).not.toBeNull();
+		// The unplanned-for-activity row stays a plain waiting row.
+		expect(
+			screen.getByTestId("auto-update-row-waiting-db.service"),
+		).toBeInTheDocument();
+		// The header names the currently-pulling unit — no counts.
+		const inProgress = screen.getByTestId("auto-update-in-progress");
+		expect(inProgress).toHaveTextContent("Pulling web.service…");
+
+		expect(
+			await screen.findByText("Trying to pull docker.io/library/web:1"),
+		).toBeInTheDocument();
+		releaseStream?.();
+		await waitFor(() =>
+			expect(
+				screen.queryByTestId("auto-update-in-progress"),
+			).not.toBeInTheDocument(),
+		);
+	});
+
+	it("reads the header as Running… while no pulling event is active", async () => {
+		mockAutoUpdate(
+			[planEvent([{ unit: "web.service" }]), logEvent("Checking web.service")],
+			true,
+		);
+		await clickCheckForUpdates();
+
+		expect(
+			await screen.findByTestId("auto-update-row-waiting-web.service"),
+		).toBeInTheDocument();
+		expect(await screen.findByText("Checking web.service")).toBeInTheDocument();
+		expect(screen.getByTestId("auto-update-in-progress")).toHaveTextContent(
+			"Running…",
+		);
+
+		releaseStream?.();
+		await waitFor(() =>
+			expect(
+				screen.queryByTestId("auto-update-in-progress"),
+			).not.toBeInTheDocument(),
+		);
+	});
+
+	it("resolves the planned rows to their outcome badges when the report lands", async () => {
+		mockAutoUpdate([
+			planEvent([
+				{ unit: "web.service", image: "docker.io/library/web:1" },
+				{ unit: "db.service" },
+			]),
+			pullingEvent("web.service"),
+			completeEvent(
+				[
+					{
+						unit: "web.service",
+						containerName: "systemd-web",
+						imageName: "docker.io/library/web:2",
+						updated: "updated",
+					},
+					{
+						unit: "db.service",
+						containerName: "systemd-db",
+						imageName: "postgres:16",
+						updated: "up-to-date",
+					},
+				],
+				"completed",
+			),
+		]);
+		await clickCheckForUpdates();
+
+		expect(
+			await screen.findByTestId("auto-update-item-updated-systemd-web"),
+		).toBeInTheDocument();
+		expect(
+			screen.getByTestId("auto-update-item-up-to-date-systemd-db"),
+		).toBeInTheDocument();
+		// No live rows remain: every planned unit resolved.
+		expect(
+			screen.queryByTestId("auto-update-row-pulling-web.service"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("auto-update-row-waiting-db.service"),
+		).not.toBeInTheDocument();
+	});
+
+	it("demotes the raw output to a section collapsed by default, expandable on demand", async () => {
+		mockAutoUpdate([
+			logEvent("Trying to pull docker.io/library/web:1"),
+			completeEvent([item({ updated: "updated" })]),
+		]);
+		await clickCheckForUpdates();
+
+		expect(
+			await screen.findByTestId("auto-update-item-updated-web"),
+		).toBeInTheDocument();
+		const toggle = screen.getByTestId("auto-update-output-toggle");
+		// Collapsed by default — the lines stay in the DOM, just hidden.
+		expect(toggle).toHaveAttribute("aria-expanded", "false");
+		expect(screen.getByTestId("auto-update-output")).toBeInTheDocument();
+		expect(
+			screen.getByText("Trying to pull docker.io/library/web:1"),
+		).toBeInTheDocument();
+
+		await userEvent.click(toggle);
+		expect(toggle).toHaveAttribute("aria-expanded", "true");
+		await userEvent.click(toggle);
+		expect(toggle).toHaveAttribute("aria-expanded", "false");
+	});
+
+	it("auto-expands the raw output when the report contains a failure", async () => {
+		mockAutoUpdate([
+			logEvent("Trying to pull redis:7"),
+			completeEvent(
+				[
+					item({
+						containerName: "cache",
+						imageName: "redis:7",
+						updated: "failed",
+						error: "health check timed out",
+					}),
+				],
+				"completed-with-failures",
+			),
+		]);
+		await clickCheckForUpdates();
+
+		expect(
+			await screen.findByTestId("auto-update-item-failed-cache"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("auto-update-output-toggle")).toHaveAttribute(
+			"aria-expanded",
+			"true",
+		);
+	});
+
 	it("renders the dry-run report: pending containers with images are distinct from updated", async () => {
 		mockAutoUpdate([
 			completeEvent(
@@ -284,6 +500,9 @@ describe("QuadletList auto-update", () => {
 		const failed = screen.getByTestId("auto-update-item-failed-cache");
 		expect(failed).toHaveTextContent("redis:7");
 		expect(failed).toHaveTextContent("health check timed out");
+		// The inline error is truncated to one line; the row's title carries
+		// the full text.
+		expect(failed).toHaveAttribute("title", "health check timed out");
 	});
 
 	it("surfaces a terminal error event as a connection error, not per-container failures", async () => {

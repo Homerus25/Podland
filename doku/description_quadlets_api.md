@@ -891,16 +891,59 @@ skipped by podman.
 - `filter` (string, optional, default empty): the systemd unit name to
   update, forwarded as `podman auto-update`'s positional argument; it
   composes with `dryRun`. Absent or empty updates every quadlet-managed
-  container with an update policy, exactly as without the parameter. The
-  value is not validated — an unknown unit surfaces podman's own error
-  through the stream.
+  container with an update policy, exactly as without the parameter; the
+  opening plan event mirrors the narrowing — every participating unit, or
+  only the filtered unit on a filtered run. The value is not validated —
+  an unknown unit surfaces podman's own error through the stream.
 
 **Response (Success - 200):** a live NDJSON stream (`Content-Type: application/json`),
 one JSON event per line. Because registry pulls routinely exceed the global
 write timeout, this endpoint extends its own response write deadline to
 **10 minutes**; the stream stays open until the run finishes.
 
-**Event schema** (all events share `operationId`, `machineId`, `timestamp`):
+**Event schema** (all events share `operationId`, `machineId`, `timestamp`).
+The stream opens with one plan event; the pulling events are additive and
+interleave with the log events; the existing log, complete, and error
+events are unchanged:
+
+Plan event — the run's opening event, always exactly one, naming every
+participating unit (the machine's `.container` files carrying
+`AutoUpdate=registry`) with its image, narrowed to the filtered unit on a
+filtered run. A unit whose file is unreadable, or whose `Image=` is missing
+or unparsable, appears as a unit-only entry (no `image`): the unit still
+shows up, it just cannot be matched mid-run:
+```json
+{
+  "operationId": "uuid",
+  "type": "plan",
+  "machineId": "machine uuid",
+  "plan": [
+    { "unit": "myapp.service", "image": "docker.io/library/myapp:latest" },
+    { "unit": "other.service" }
+  ],
+  "timestamp": "2026-11-01T10:00:00Z"
+}
+```
+
+Pulling event — a planned unit entering the pulling state: one
+`Trying to pull <image>` output line matched a planned unit's image, exact
+match first, then suffix (podman prints normalized fully-qualified names;
+quadlet files may carry short names). A suffix match counts only when the
+character preceding the suffix in the pulled image is `/` (the
+registry/repo boundary): a planned `app` matches
+`docker.io/library/app:latest` but not `myapp:latest`. An image matching
+no planned unit emits no pulling event. The pulling event precedes its
+own log event:
+```json
+{
+  "operationId": "uuid",
+  "type": "pulling",
+  "machineId": "machine uuid",
+  "unit": "myapp.service",
+  "image": "docker.io/library/myapp:latest",
+  "timestamp": "2026-11-01T10:00:02Z"
+}
+```
 
 Log event — one line of remote `podman auto-update` output as it arrives:
 ```json

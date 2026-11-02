@@ -7,7 +7,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
 )
@@ -300,17 +299,23 @@ func (h *QuadletHandler) ConvertCompose(w http.ResponseWriter, r *http.Request) 
 
 // AutoUpdate handles running `podman auto-update` on the machine with live
 // NDJSON streaming of remote output, terminating in a parsed report event.
-// The streaming kit's progress seam (HandleProgress) owns the handler-side
-// ritual, including the 10-minute write-deadline extension: registry pulls
-// make runs routinely exceed the global 30-second write timeout.
+// The stream opens with the service's plan event naming every participating
+// unit and reports each matching pull as a pulling event (issue 448); the
+// handler stamps the operation and machine identities on each service event,
+// the move stream's arrangement. The streaming kit's progress seam
+// (HandleProgress) owns the handler-side ritual, including the 10-minute
+// write-deadline extension: registry pulls make runs routinely exceed the
+// global 30-second write timeout.
 func (h *QuadletHandler) AutoUpdate(w http.ResponseWriter, r *http.Request) {
 	dryRun := web.QueryBool(r, "dryRun", false)
 	filter := r.URL.Query().Get("filter")
 
 	streaming.HandleProgress(w, r, "AutoUpdate quadlets", []slog.Attr{slog.Bool("dryRun", dryRun), slog.String("filter", filter)}, streaming.ProgressConfig[AutoUpdateEvent, AutoUpdateReport]{
 		Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(AutoUpdateEvent)) (AutoUpdateReport, error) {
-			return h.service.AutoUpdate(ctx, op.UserID, op.MachineID, dryRun, filter, func(line sshexec.OutputLine) {
-				onProgress(NewAutoUpdateLogEvent(op.OperationID, op.MachineID, line))
+			return h.service.AutoUpdate(ctx, op.UserID, op.MachineID, dryRun, filter, func(event AutoUpdateEvent) {
+				event.OperationID = op.OperationID
+				event.MachineID = op.MachineID
+				onProgress(event)
 			})
 		},
 		CompleteEvent: func(op streaming.OperationContext, report AutoUpdateReport) any {

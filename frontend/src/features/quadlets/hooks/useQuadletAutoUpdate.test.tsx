@@ -50,6 +50,20 @@ function errorEvent(code: string, message: string): AutoUpdateEvent {
 	};
 }
 
+function planEvent(entries: Record<string, unknown>[]): AutoUpdateEvent {
+	return { operationId: "op-1", type: "plan", machineId: "m-1", plan: entries };
+}
+
+function pullingEvent(unit: string, image?: string): AutoUpdateEvent {
+	return {
+		operationId: "op-1",
+		type: "pulling",
+		machineId: "m-1",
+		unit,
+		...(image !== undefined ? { image } : {}),
+	};
+}
+
 const autoUpdateUrl = "*/api/machines/:machineId/quadlets/auto-update";
 
 let requests: Request[] = [];
@@ -247,6 +261,287 @@ describe("useQuadletAutoUpdate", () => {
 			overall: "unparsable-report",
 			exitCode: 0,
 		});
+	});
+
+	it("seeds the row list from the plan event in plan order", async () => {
+		mockAutoUpdate(() =>
+			streamResponse([
+				planEvent([
+					{ unit: "web.service", image: "docker.io/library/web:1" },
+					// A degraded plan entry: no image (unreadable file or
+					// unparsable Image=) still gets its row.
+					{ unit: "db.service" },
+				]),
+				report(),
+			]),
+		);
+		const { result } = renderAutoUpdateHook();
+
+		await act(async () => {
+			result.current.run(false);
+		});
+
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.rows).toEqual([
+			{
+				unit: "web.service",
+				image: "docker.io/library/web:1",
+				state: "waiting",
+			},
+			{ unit: "db.service", state: "waiting" },
+		]);
+	});
+
+	it("flips the matching row to pulling and exposes the pulling unit", async () => {
+		mockAutoUpdate(() =>
+			streamResponse([
+				planEvent([
+					{ unit: "web.service", image: "docker.io/library/web:1" },
+					{ unit: "db.service" },
+				]),
+				pullingEvent("web.service", "docker.io/library/web:1"),
+				report(),
+			]),
+		);
+		const { result } = renderAutoUpdateHook();
+
+		await act(async () => {
+			result.current.run(false);
+		});
+
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.rows).toEqual([
+			{
+				unit: "web.service",
+				image: "docker.io/library/web:1",
+				state: "pulling",
+			},
+			{ unit: "db.service", state: "waiting" },
+		]);
+		expect(result.current.pullingUnit).toBe("web.service");
+	});
+
+	it("appends a pulling row for a unit the plan did not name", async () => {
+		mockAutoUpdate(() =>
+			streamResponse([
+				planEvent([{ unit: "web.service" }]),
+				pullingEvent("other.service"),
+				report(),
+			]),
+		);
+		const { result } = renderAutoUpdateHook();
+
+		await act(async () => {
+			result.current.run(false);
+		});
+
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.rows).toEqual([
+			{ unit: "web.service", state: "waiting" },
+			{ unit: "other.service", state: "pulling" },
+		]);
+		expect(result.current.pullingUnit).toBe("other.service");
+	});
+
+	it("resolves rows by unit when the report lands, appending report-only units", async () => {
+		mockAutoUpdate(() =>
+			streamResponse([
+				planEvent([
+					{ unit: "web.service", image: "docker.io/library/web:1" },
+					{ unit: "db.service" },
+				]),
+				pullingEvent("web.service"),
+				report({
+					containers: [
+						{
+							unit: "web.service",
+							containerName: "systemd-web",
+							imageName: "docker.io/library/web:2",
+							updated: "updated",
+						},
+						{
+							containerName: "cache",
+							imageName: "redis:7",
+							updated: "failed",
+							error: "health check timed out",
+						},
+					],
+					overall: "completed-with-failures",
+					exitCode: 1,
+				}),
+			]),
+		);
+		const { result } = renderAutoUpdateHook();
+
+		await act(async () => {
+			result.current.run(false);
+		});
+
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.rows).toEqual([
+			{
+				unit: "web.service",
+				image: "docker.io/library/web:1",
+				state: "updated",
+				item: {
+					unit: "web.service",
+					containerName: "systemd-web",
+					imageName: "docker.io/library/web:2",
+					updated: "updated",
+				},
+			},
+			// Planned but never reported: no outcome to show, last state kept.
+			{ unit: "db.service", state: "waiting" },
+			// In the report but not the plan: appended as a resolved row.
+			{
+				unit: null,
+				image: "redis:7",
+				state: "failed",
+				item: {
+					containerName: "cache",
+					imageName: "redis:7",
+					updated: "failed",
+					error: "health check timed out",
+				},
+			},
+		]);
+	});
+
+	it("skips malformed plan and pulling events without breaking the fold", async () => {
+		mockAutoUpdate(() =>
+			streamResponse([
+				// A plan event whose plan is not an array, and a pulling event
+				// without a string unit: both must be skipped, not crash the
+				// fold or poison the row list.
+				{ operationId: "op-1", type: "plan", machineId: "m-1", plan: "nope" },
+				{ operationId: "op-1", type: "pulling", machineId: "m-1", unit: 42 },
+				planEvent([{ unit: "web.service" }, { unit: 7 }]),
+				report(),
+			]),
+		);
+		const { result } = renderAutoUpdateHook();
+
+		await act(async () => {
+			result.current.run(false);
+		});
+
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		// The well-formed plan seeds the rows; its malformed entry (unit not
+		// a string) is dropped.
+		expect(result.current.rows).toEqual([
+			{ unit: "web.service", state: "waiting" },
+		]);
+		expect(result.current.pullingUnit).toBeNull();
+	});
+
+	it("skips a report item with an unknown state, keeping the row's last observed state", async () => {
+		// The report's outcome vocabulary is the backend's closed set; an
+		// item outside it is malformed content and must not fold a
+		// nonsense state onto its row — the row keeps what the stream
+		// last observed, the way the malformed-event guard skips whole
+		// events.
+		mockAutoUpdate(() =>
+			streamResponse([
+				planEvent([{ unit: "web.service", image: "docker.io/library/web:1" }]),
+				pullingEvent("web.service"),
+				report({
+					containers: [
+						{
+							unit: "web.service",
+							containerName: "web",
+							imageName: "docker.io/library/web:2",
+							updated: "not-a-known-state",
+						},
+						{
+							containerName: "cache",
+							imageName: "redis:7",
+							updated: "failed",
+							error: "health check timed out",
+						},
+					],
+					overall: "completed-with-failures",
+					exitCode: 1,
+				}),
+			]),
+		);
+		const { result } = renderAutoUpdateHook();
+
+		await act(async () => {
+			result.current.run(false);
+		});
+
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.rows).toEqual([
+			// The garbage-state item is skipped: the row keeps its last
+			// observed state instead of folding the unknown value.
+			{
+				unit: "web.service",
+				image: "docker.io/library/web:1",
+				state: "pulling",
+			},
+			// A well-formed item in the same report still resolves.
+			{
+				unit: null,
+				image: "redis:7",
+				state: "failed",
+				item: {
+					containerName: "cache",
+					imageName: "redis:7",
+					updated: "failed",
+					error: "health check timed out",
+				},
+			},
+		]);
+	});
+
+	it("resets the row list and pulling unit when a new run starts", async () => {
+		let releaseSecondRun: (() => void) | undefined;
+		requests = [];
+		server.use(
+			http.post(autoUpdateUrl, async ({ request }) => {
+				requests.push(request);
+				if (requests.length === 1) {
+					return streamResponse([
+						planEvent([{ unit: "web.service", image: "img:1" }]),
+						pullingEvent("web.service"),
+						report(),
+					]);
+				}
+				await new Promise<void>((resolve) => {
+					releaseSecondRun = resolve;
+				});
+				return streamResponse([
+					planEvent([{ unit: "api.service", image: "api:2" }]),
+					report(),
+				]);
+			}),
+		);
+		const { result } = renderAutoUpdateHook();
+
+		await act(async () => {
+			result.current.run(false);
+		});
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.rows).toEqual([
+			{ unit: "web.service", image: "img:1", state: "pulling" },
+		]);
+		expect(result.current.pullingUnit).toBe("web.service");
+
+		await act(async () => {
+			result.current.run(true);
+		});
+
+		// The new run starts from a clean slate: no rows, no pulling unit.
+		expect(result.current.rows).toEqual([]);
+		expect(result.current.pullingUnit).toBeNull();
+
+		await act(async () => {
+			releaseSecondRun?.();
+		});
+		await waitFor(() => expect(result.current.isRunning).toBe(false));
+		expect(result.current.rows).toEqual([
+			{ unit: "api.service", image: "api:2", state: "waiting" },
+		]);
 	});
 
 	it("surfaces a terminal error event as a connection error, not a report", async () => {

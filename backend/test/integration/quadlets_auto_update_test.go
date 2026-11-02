@@ -31,10 +31,11 @@ import (
 //
 //	unauthenticated request         → 401
 //	read-level access               → 403 ACCESS_DENIED (write gate)
-//	write access + dryRun=true      → 200 NDJSON stream:
-//	                                  zero or more log events, then
-//	                                  exactly one terminal complete
-//	                                  event with a parseable report
+//	write access + dryRun=true      → 200 NDJSON stream: a plan event
+//	                                  naming the fixture's unit and image
+//	                                  first, then zero or more pulling and
+//	                                  log events, then exactly one terminal
+//	                                  complete event with a parseable report
 //	dryRun leaves the fixture alone → container still running, image untouched
 func Test_Integration_Quadlets_AutoUpdate(t *testing.T) {
 	suite.SkipIfUnavailable(t)
@@ -130,12 +131,18 @@ Exec=sh -c "sleep 3600"
 			"the NDJSON stream must be served as JSON (shared NDJSON header contract)")
 
 		scanner := bufio.NewScanner(resp.Body)
-		var completeEvents, logEvents, errorEvents int
+		var planEvents, pullingEvents, completeEvents, logEvents, errorEvents int
 		var lastEventType string
+		var firstEventType string
+		var seenFirst bool
 		var report struct {
 			Type      string `json:"type"`
 			Operation string `json:"operationId"`
-			Report    *struct {
+			Plan      []struct {
+				Unit  string `json:"unit"`
+				Image string `json:"image"`
+			} `json:"plan"`
+			Report *struct {
 				Containers []struct {
 					ContainerName string `json:"containerName"`
 					ImageName     string `json:"imageName"`
@@ -153,7 +160,15 @@ Exec=sh -c "sleep 3600"
 			require.NoErrorf(t, json.Unmarshal([]byte(line), &report),
 				"every NDJSON line must decode as an event. line: %s", line)
 			require.NotEmpty(t, report.Operation, "every event must carry an operationId")
+			if !seenFirst {
+				firstEventType = report.Type
+				seenFirst = true
+			}
 			switch report.Type {
+			case "plan":
+				planEvents++
+			case "pulling":
+				pullingEvents++
 			case "log":
 				logEvents++
 			case "complete":
@@ -168,6 +183,19 @@ Exec=sh -c "sleep 3600"
 			lastEventType = report.Type
 		}
 		require.NoErrorf(t, scanner.Err(), "scanning the NDJSON stream must not fail")
+
+		// The plan event opens the stream and names the fixture's unit with
+		// its image (issue 448): the machine may carry other participating
+		// quadlets, so the fixture's entry must be present, not alone.
+		require.Equalf(t, "plan", firstEventType,
+			"the stream must open with a plan event (got %q)", firstEventType)
+		require.Equalf(t, 1, planEvents,
+			"the stream must carry exactly one plan event")
+		require.Containsf(t, report.Plan, struct {
+			Unit  string `json:"unit"`
+			Image string `json:"image"`
+		}{Unit: quadletName + ".service", Image: "docker.io/library/busybox:latest"},
+			"the plan must name the fixture's unit with its image")
 
 		// podman auto-update always emits at least some human-readable
 		// output before the JSON report, so log events are expected —
