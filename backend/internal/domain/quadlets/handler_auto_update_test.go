@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -42,7 +41,7 @@ func parseNDJSON(t *testing.T, body string) []AutoUpdateEvent {
 	return events
 }
 
-func newAutoUpdateTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*chi.Mux, *httptest.ResponseRecorder) {
+func newAutoUpdateTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*http.ServeMux, *httptest.ResponseRecorder) {
 	t.Helper()
 	engine := &fakeQuadletEngine{
 		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
@@ -52,8 +51,8 @@ func newAutoUpdateTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*c
 	provider := fakeEngineProvider{engine: engine}
 	service := NewQuadletService(provider, sshExec, lookupForUser("core"))
 	handler := NewQuadletHandler(service, NewQuadletTransferService(provider, nil, nil, 0, service))
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/quadlets/auto-update", handler.AutoUpdate)
+	r := http.NewServeMux()
+	r.HandleFunc("POST /api/machines/{id}/quadlets/auto-update", handler.AutoUpdate)
 	rec := httptest.NewRecorder()
 	return r, rec
 }
@@ -230,15 +229,11 @@ func autoUpdateAccessRouter(machineRepo *testutils.MockMachineRepository, access
 	// is still constructed over both services, with an unused engine
 	// provider for the transfer half.
 	transfer := NewQuadletTransferService(fakeEngineProvider{}, nil, nil, 0, service)
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
-			r.Route("/quadlets", func(r chi.Router) {
-				r.With(requireWrite).Post("/auto-update", NewQuadletHandler(service, transfer).AutoUpdate)
-			})
-		})
-	})
+	machineAccess := appmiddleware.RequireMachineAccess(machineRepo, accessRepo)
+	requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
+	r := http.NewServeMux()
+	r.Handle("POST /api/machines/{id}/quadlets/auto-update",
+		machineAccess(requireWrite(http.HandlerFunc(NewQuadletHandler(service, transfer).AutoUpdate))))
 	return r
 }
 
@@ -339,7 +334,7 @@ func requestAsUserForAutoUpdate(method, target, userID string) *http.Request {
 // autoUpdatePlanTestServer mounts the auto-update route over the plan
 // fixture engine: web.container carries AutoUpdate=registry with a short
 // image name, broken.container is unreadable (the unit-only degradation).
-func autoUpdatePlanTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*chi.Mux, *httptest.ResponseRecorder) {
+func autoUpdatePlanTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*http.ServeMux, *httptest.ResponseRecorder) {
 	t.Helper()
 	engine := &fakeQuadletEngine{
 		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
@@ -357,8 +352,8 @@ func autoUpdatePlanTestServer(t *testing.T, sshExec sshexec.SSHExecInterface) (*
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
 	transfer := NewQuadletTransferService(fakeEngineProvider{}, nil, nil, 0, service)
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/quadlets/auto-update", NewQuadletHandler(service, transfer).AutoUpdate)
+	r := http.NewServeMux()
+	r.HandleFunc("POST /api/machines/{id}/quadlets/auto-update", NewQuadletHandler(service, transfer).AutoUpdate)
 	rec := httptest.NewRecorder()
 	return r, rec
 }

@@ -7,18 +7,17 @@ import (
 	"net/http/httptest"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/go-chi/chi/v5"
 )
 
 // Request describes one handler invocation for Perform: the identity
-// the subtree middleware would have validated, the chi URL params the
+// the subtree middleware would have validated, the URL params the
 // router would have routed, and an optional body.
 type Request struct {
 	Method string
 
 	// Path is used for the httptest request; URL params come from
-	// URLParams, mirroring how chi populates them (the path string
-	// itself is not parsed).
+	// URLParams, mirroring how the ServeMux populates them (the path
+	// string itself is not parsed).
 	Path string
 
 	// UserID is the authenticated caller the subtree middleware would
@@ -29,14 +28,14 @@ type Request struct {
 
 	// Context is the base context the request carries; it defaults to
 	// context.Background(). Set it to inject a pre-arranged context
-	// (a cancelled one, say) — identity and chi params are layered on
+	// (a cancelled one, say) — identity and URL params are layered on
 	// top, so a cancelled base stays cancelled.
 	Context context.Context
 
 	// RequestID defaults to "test-request-id".
 	RequestID string
 
-	// URLParams are injected into a fresh chi route context, e.g.
+	// URLParams are injected via SetPathValue, e.g.
 	// {"id": "test-machine", "volumeName": "my-volume"}.
 	URLParams map[string]string
 
@@ -47,7 +46,7 @@ type Request struct {
 }
 
 // Perform invokes a handler the way the router does — request-scoped
-// context values plus a chi route context — and records the response.
+// context values plus URL params — and records the response.
 // It replaces the per-domain recordXRequest scaffolding so handler
 // contract tests share one request builder.
 func Perform(handler http.HandlerFunc, req Request) *httptest.ResponseRecorder {
@@ -80,11 +79,9 @@ func Perform(handler http.HandlerFunc, req Request) *httptest.ResponseRecorder {
 		}
 	}
 
-	rctx := chi.NewRouteContext()
 	for key, value := range req.URLParams {
-		rctx.URLParams.Add(key, value)
+		httpReq.SetPathValue(key, value)
 	}
-	httpReq = httpReq.WithContext(context.WithValue(httpReq.Context(), chi.RouteCtxKey, rctx))
 
 	w := httptest.NewRecorder()
 	handler(w, httpReq)

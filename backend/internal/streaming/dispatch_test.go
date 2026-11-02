@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -63,18 +62,17 @@ func (c *dispatchCapture) op() LogsDispatchOp[fakeLogsDTO] {
 	}
 }
 
-// performLogDispatch drives HandleLogs the way the router wires it: chi
-// URL params (the machine id and the domain's target param) plus the
+// performLogDispatch drives HandleLogs the way the router wires it: URL
+// params (the machine id and the domain's target param) plus the
 // caller identity the subtree middleware already validated.
 func performLogDispatch(t *testing.T, capture *dispatchCapture, urlParams map[string]string, query string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, "/api/machines/test-machine/things/thing-123/logs"+query, nil)
-	rctx := chi.NewRouteContext()
 	for key, value := range urlParams {
-		rctx.URLParams.Add(key, value)
+		req.SetPathValue(key, value)
 	}
 	ctx := contextutils.SetUserID(context.Background(), "test-user")
-	req = req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx))
+	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	HandleLogs(w, req, capture.op())
 	return w

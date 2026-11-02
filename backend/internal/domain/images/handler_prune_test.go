@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
@@ -73,10 +72,7 @@ func TestFromImagePruneReports_NilEntries(t *testing.T) {
 func recordPruneRequest(prune http.HandlerFunc, machineID string) *httptest.ResponseRecorder {
 	ctx := contextutils.SetUserID(contextutils.SetRequestID(context.Background(), "test-request-id"), "test-user")
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/"+machineID+"/images/prune", nil).WithContext(ctx)
-
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	req.SetPathValue("id", machineID)
 
 	w := httptest.NewRecorder()
 	prune(w, req)

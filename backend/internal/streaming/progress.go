@@ -8,7 +8,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -77,7 +76,7 @@ func HandleProgress[Event, Result any](w http.ResponseWriter, r *http.Request, o
 	logArgs := make([]any, 0, len(attrs)+3)
 	logArgs = append(logArgs,
 		slog.String("requestID", contextutils.GetRequestID(r.Context())),
-		slog.String("machineID", chi.URLParam(r, "id")),
+		slog.String("machineID", r.PathValue("id")),
 		slog.String("operationID", operationID))
 	for _, attr := range attrs {
 		logArgs = append(logArgs, attr)

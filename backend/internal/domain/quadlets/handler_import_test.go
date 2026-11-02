@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -18,12 +17,11 @@ import (
 func importRequest(t *testing.T, body string) *http.Request {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader([]byte(body)))
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine-1")
-	ctx := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
-	ctx = contextutils.SetUserID(ctx, "user-1")
+	ctx := contextutils.SetUserID(context.Background(), "user-1")
 	ctx = contextutils.SetRequestID(ctx, "test-request-id")
-	return req.WithContext(ctx)
+	req = req.WithContext(ctx)
+	req.SetPathValue("id", "machine-1")
+	return req
 }
 
 const twoQuadletsBody = `{"quadlets":[

@@ -635,7 +635,7 @@ func RateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
 ```go
 // internal/domain/images/handler.go
 func (h *ImageHandler) HandlePullImage(w http.ResponseWriter, r *http.Request) {
-    machineID := chi.URLParam(r, "id")
+    machineID := r.PathValue("id")
     userID := GetUserIDFromContext(r.Context())
     
     // Parse request
@@ -1013,80 +1013,105 @@ func main() {
         time.Minute,
     )
     
-    // Create router
-    router := chi.NewRouter()
+    // Create router: nested *http.ServeMux with Go 1.22+ method
+    // patterns (issue #451). The global middleware chain is applied
+    // by wrapping the root mux, outermost first.
+    apiMux := http.NewServeMux()
+    machineMux := http.NewServeMux()
     
-    // Global middleware
-    router.Use(middleware.RequestIDMiddleware)
-    router.Use(middleware.LoggingMiddleware(logger))
-    router.Use(middleware.Recoverer)
-   router.Use(middleware.CORS(config.AllowedOrigins))
-    router.Use(middleware.SecurityHeaders(config.HSTSMaxAgeSeconds))
+    // Auth routes (per-route auth rate limit). Logout stays outside
+    // the group: it is idempotent, so there is nothing to brute-force.
+    apiMux.Handle("POST /auth/login", authRateLimit(authHandler.Login))
+    apiMux.HandleFunc("POST /auth/logout", authHandler.Logout)
+    apiMux.HandleFunc("GET /auth/status", authHandler.Status)
     
-    // Routes
-    router.Route("/api", func(r chi.Router) {
-        // Auth
-        r.Post("/auth/login", authHandler.Login)
-        r.Post("/auth/logout", authHandler.Logout)
-        r.Get("/auth/status", authHandler.Status)
-        
-        // Protected routes
-        r.Group(func(r chi.Router) {
-            r.Use(middleware.JWTMiddleware(authService))
-            r.Use(middleware.RateLimitMiddleware(rateLimiter))
-            
-            // Machines
-            r.Route("/machines", func(r chi.Router) {
-                r.Post("/", machineHandler.Create)
-                r.Get("/", machineHandler.List)
-                r.Route("/{id}", func(r chi.Router) {
-                    r.Get("/", machineHandler.Get)
-                    r.Put("/", machineHandler.Update)
-                    r.Delete("/", machineHandler.Delete)
-                    r.Get("/access", machineHandler.ListAccess)
-                    r.Post("/access", machineHandler.GrantAccess)
-                    r.Delete("/access/{userId}", machineHandler.RevokeAccess)
-                    
-                    // Containers
-                    r.Route("/containers", func(r chi.Router) {
-                        r.Get("/", containerHandler.List)
-                        r.Post("/", containerHandler.Create)
-                        r.Route("/{containerId}", func(r chi.Router) {
-                            r.Get("/", containerHandler.Get)
-                            r.Post("/start", containerHandler.Start)
-                            r.Post("/stop", containerHandler.Stop)
-                            r.Delete("/", containerHandler.Delete)
-                        })
-                    })
-                    
-                    // Images
-                    r.Route("/images", func(r chi.Router) {
-                        r.Get("/", imageHandler.List)
-                        r.Post("/pull", imageHandler.Pull)
-                        r.Delete("/{imageId}", imageHandler.Delete)
-                    })
-                    
-                    // Quadlets
-                    r.Route("/quadlets", func(r chi.Router) {
-                        r.Get("/", quadletHandler.List)
-                        r.Post("/", quadletHandler.Create)
-                        r.Post("/import", quadletHandler.Import)
-                        r.Route("/{quadletId}", func(r chi.Router) {
-                            r.Get("/", quadletHandler.Get)
-                            r.Put("/", quadletHandler.Update)
-                            r.Delete("/", quadletHandler.Delete)
-                            r.Post("/start", quadletHandler.Start)
-                            r.Post("/stop", quadletHandler.Stop)
-                            r.Post("/restart", quadletHandler.Restart)
-                            r.Get("/logs", quadletHandler.GetLogs)
-                            r.Post("/generate", quadletHandler.Generate)
-                        })
-                    })
-                    
-                })
-            })
-        })
-    })
+    // Protected routes: JWT auth + per-user rate limit wrap each
+    // handler (or a whole sub-mux, as with the machine subtree).
+    apiMux.Handle("GET /machines", protected(machineHandler.List))
+    apiMux.Handle("POST /machines", protected(machineHandler.Create))
+    
+    // Machine subtree: RequireMachineAccess wraps the whole sub-mux,
+    // mounted behind StripPrefix so its patterns are rooted at {id}.
+    machineMux.HandleFunc("GET /{id}", machineHandler.Get)
+    machineMux.HandleFunc("PUT /{id}", machineHandler.Update)
+    machineMux.HandleFunc("DELETE /{id}", machineHandler.Delete)
+    machineMux.HandleFunc("GET /{id}/access", machineHandler.ListAccess)
+    machineMux.HandleFunc("POST /{id}/access", machineHandler.GrantAccess)
+    machineMux.HandleFunc("DELETE /{id}/access/{userId}", machineHandler.RevokeAccess)
+    
+    // Containers — one sub-mux per domain family, mounted on the
+    // machine sub-mux with the exact + subtree twin. The family
+    // sub-mux sees the full path (no prefix stripping), so its
+    // patterns keep the /{id}/containers prefix; it carries its own
+    // "/" JSON-404 catch-all. Images, quadlets, secrets, volumes,
+    // networks, and pods follow the same shape.
+    containersMux := http.NewServeMux()
+    containersMux.HandleFunc("GET /{id}/containers", containerHandler.List)
+    containersMux.Handle("POST /{id}/containers", requireWrite(containerHandler.Create))
+    containersMux.HandleFunc("GET /{id}/containers/{containerId}", containerHandler.Get)
+    containersMux.Handle("POST /{id}/containers/{containerId}/start", requireWrite(containerHandler.Start))
+    containersMux.Handle("POST /{id}/containers/{containerId}/stop", requireWrite(containerHandler.Stop))
+    containersMux.Handle("DELETE /{id}/containers/{containerId}", requireWrite(containerHandler.Delete))
+    containersMux.HandleFunc("/", apiNotFound)
+    machineMux.Handle("/{id}/containers", containersMux)
+    machineMux.Handle("/{id}/containers/", containersMux)
+    
+    // Images
+    imagesMux := http.NewServeMux()
+    imagesMux.HandleFunc("GET /{id}/images", imageHandler.List)
+    imagesMux.Handle("POST /{id}/images/pull", requireWrite(imageHandler.Pull))
+    imagesMux.Handle("DELETE /{id}/images/{imageId}", requireWrite(imageHandler.Delete))
+    imagesMux.HandleFunc("/", apiNotFound)
+    machineMux.Handle("/{id}/images", imagesMux)
+    machineMux.Handle("/{id}/images/", imagesMux)
+    
+    // Quadlets
+    quadletsMux := http.NewServeMux()
+    quadletsMux.HandleFunc("GET /{id}/quadlets", quadletHandler.List)
+    quadletsMux.Handle("POST /{id}/quadlets", requireWrite(quadletHandler.Create))
+    quadletsMux.Handle("POST /{id}/quadlets/import", requireWrite(quadletHandler.Import))
+    quadletsMux.HandleFunc("GET /{id}/quadlets/{quadletId}", quadletHandler.Get)
+    quadletsMux.Handle("PUT /{id}/quadlets/{quadletId}", requireWrite(quadletHandler.Update))
+    quadletsMux.Handle("DELETE /{id}/quadlets/{quadletId}", requireWrite(quadletHandler.Delete))
+    quadletsMux.Handle("POST /{id}/quadlets/{quadletId}/start", requireWrite(quadletHandler.Start))
+    quadletsMux.Handle("POST /{id}/quadlets/{quadletId}/stop", requireWrite(quadletHandler.Stop))
+    quadletsMux.Handle("POST /{id}/quadlets/{quadletId}/restart", requireWrite(quadletHandler.Restart))
+    quadletsMux.HandleFunc("GET /{id}/quadlets/{quadletId}/logs", quadletHandler.GetLogs)
+    quadletsMux.HandleFunc("POST /{id}/quadlets/{quadletId}/generate", quadletHandler.Generate)
+    quadletsMux.HandleFunc("/", apiNotFound)
+    machineMux.Handle("/{id}/quadlets", quadletsMux)
+    machineMux.Handle("/{id}/quadlets/", quadletsMux)
+    
+    // Unknown /api/* paths answer a 404 JSON envelope, never the SPA.
+    machineMux.HandleFunc("/", apiNotFound)
+    apiMux.HandleFunc("/", apiNotFound)
+    
+    // Mount the machine subtree behind RequireMachineAccess.
+    // StripPrefix drops the /machines literal, so the sub-mux's
+    // patterns are rooted at {id}; the two mount patterns match
+    // only when an {id} segment is present.
+    apiMux.Handle("/machines/{id}", jwtAuth(perUserLimit(
+        requireMachineAccess(http.StripPrefix("/machines", machineMux)))))
+    apiMux.Handle("/machines/{id}/", jwtAuth(perUserLimit(
+        requireMachineAccess(http.StripPrefix("/machines", machineMux)))))
+    
+    // Root mux: /api/* to the API, everything else to the web UI.
+    rootMux := http.NewServeMux()
+    rootMux.Handle("/api/", http.StripPrefix("/api", apiMux))
+    rootMux.Handle("/", webui.Handler())
+    
+    // Global middleware chain, outermost first
+    global := []func(http.Handler) http.Handler{
+        middleware.Recoverer,
+        middleware.RequestIDMiddleware,
+        middleware.CORS(config.AllowedOrigins),
+        middleware.SecurityHeaders(config.HSTSMaxAgeSeconds),
+        middleware.RequestLogging,
+    }
+    var handler http.Handler = rootMux
+    for i := len(global) - 1; i >= 0; i-- {
+        handler = global[i](handler)
+    }
     
     // Start connection manager cleanup
     go connectionManager.Cleanup()
@@ -1149,7 +1174,6 @@ go 1.21
 
 require (
     github.com/containers/podman/v6 v6.x.x  // Your forked version
-    github.com/go-chi/chi/v5 v5.0.10
     github.com/go-playground/validator/v10 v10.16.0
     github.com/golang-jwt/jwt/v5 v5.0.0
     github.com/google/uuid v1.3.0

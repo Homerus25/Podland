@@ -8,7 +8,6 @@ import (
 	apperrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/permission"
-	"github.com/go-chi/chi/v5"
 )
 
 // machineRepoGetter is the slice of the machine repository
@@ -43,7 +42,7 @@ func resolveMachineAndCaller(w http.ResponseWriter, r *http.Request, machineRepo
 		return "", "", false
 	}
 
-	machineID = chi.URLParam(r, "id")
+	machineID = r.PathValue("id")
 	if machineID == "" {
 		apperrors.RespondWithHTTPError(w, http.StatusBadRequest, "MISSING_MACHINE_ID", "Machine ID is required", requestID)
 		return "", "", false

@@ -12,7 +12,6 @@ import (
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -128,14 +127,9 @@ func TestImageHandler_Get_MissingParamAnswers400(t *testing.T) {
 // route: GET /api/machines/{id}/images/{imageId} rides the
 // RequireMachineAccess subtree at read level (no requireWrite).
 func imagesGetAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *ImageService) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			r.Route("/images", func(r chi.Router) {
-				r.Get("/{imageId}", NewImageHandler(service).Get)
-			})
-		})
-	})
+	r := http.NewServeMux()
+	r.Handle("GET /api/machines/{id}/images/{imageId}",
+		appmiddleware.RequireMachineAccess(machineRepo, accessRepo)(http.HandlerFunc(NewImageHandler(service).Get)))
 	return r
 }
 

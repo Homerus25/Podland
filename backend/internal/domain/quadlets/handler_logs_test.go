@@ -11,7 +11,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -34,12 +33,11 @@ func logsRequest(target string) *http.Request {
 
 func logsRequestWithBase(base context.Context, target string) *http.Request {
 	req := httptest.NewRequest("GET", target, nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine123")
-	rctx.URLParams.Add("quadletId", "web.container")
-	ctx := context.WithValue(base, chi.RouteCtxKey, rctx)
-	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-	return req.WithContext(ctx)
+	ctx := context.WithValue(base, contextutils.UserIDContextKey, "user123")
+	req = req.WithContext(ctx)
+	req.SetPathValue("id", "machine123")
+	req.SetPathValue("quadletId", "web.container")
+	return req
 }
 
 func logsHandler(engine *fakeQuadletEngine, logsFn func(containerName string, opts entities.ContainerLogsOptions) error) *QuadletHandler {

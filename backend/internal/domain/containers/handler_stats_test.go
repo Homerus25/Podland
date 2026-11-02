@@ -11,7 +11,6 @@ import (
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/libpod/define"
@@ -232,29 +231,21 @@ func TestContainerHandler_ContainerStats_EmptySnapshotAnswers404(t *testing.T) {
 
 // --- Route wiring: the containers subtree serves stats at read level ---
 //
-// These tests mount the containers routes on a chi subtree exactly the way
-// internal/app/app.go does (RequireMachineAccess at /{id}, the literal
-// GET /stats registered ahead of the /{containerId} subtree, the
-// per-container GET /stats beside /logs and /inspect) so the read-level
-// gate and the literal-route win the ACs promise are exercised through
-// the real middleware.
+// These tests mount the containers routes on a ServeMux exactly the way
+// internal/app/app.go does (RequireMachineAccess wrapping the routes,
+// the literal GET /stats winning over the /{containerId} wildcard by
+// ServeMux precedence, the per-container GET /stats beside /logs and
+// /inspect) so the read-level gate and the literal-route win the ACs
+// promise are exercised through the real middleware.
 
 func statsAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, handler *ContainerHandler) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			r.Route("/containers", func(r chi.Router) {
-				// The literal /stats route must beat the
-				// /{containerId} subtree or an all-stats call
-				// gets swallowed as a container named "stats".
-				r.Get("/stats", handler.Stats)
-				r.Route("/{containerId}", func(r chi.Router) {
-					r.Get("/", handler.Get)
-					r.Get("/stats", handler.ContainerStats)
-				})
-			})
-		})
-	})
+	machineAccess := appmiddleware.RequireMachineAccess(machineRepo, accessRepo)
+	r := http.NewServeMux()
+	// The literal /stats route must beat the /{containerId} wildcard or
+	// an all-stats call gets swallowed as a container named "stats".
+	r.Handle("GET /api/machines/{id}/containers/stats", machineAccess(http.HandlerFunc(handler.Stats)))
+	r.Handle("GET /api/machines/{id}/containers/{containerId}", machineAccess(http.HandlerFunc(handler.Get)))
+	r.Handle("GET /api/machines/{id}/containers/{containerId}/stats", machineAccess(http.HandlerFunc(handler.ContainerStats)))
 	return r
 }
 

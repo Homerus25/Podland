@@ -6,7 +6,6 @@ replace go.podman.io/podman/v6 => ../../podman
 
 require (
 	github.com/docker/go-units v0.5.0
-	github.com/go-chi/chi/v5 v5.0.10
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/google/uuid v1.6.0
@@ -15,6 +14,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/stretchr/testify v1.11.1
 	go.podman.io/common v0.68.1-0.20260611132908-ea2c6da53f91
+	go.podman.io/image/v5 v5.40.1-0.20260611132908-ea2c6da53f91
 	go.podman.io/podman/v6 v6.0.0
 	golang.org/x/crypto v0.54.0
 )
@@ -141,7 +141,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	go.podman.io/buildah v1.44.0 // indirect
-	go.podman.io/image/v5 v5.40.1-0.20260611132908-ea2c6da53f91 // indirect
 	go.podman.io/storage v1.63.1-0.20260611132908-ea2c6da53f91 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect

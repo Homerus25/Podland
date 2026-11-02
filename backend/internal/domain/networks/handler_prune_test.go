@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -101,20 +100,14 @@ func TestFromPodmanPruneReports_Empty(t *testing.T) {
 // through the real middleware.
 
 func pruneAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, handler *NetworkHandler) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
-			r.Route("/networks", func(r chi.Router) {
-				// The literal /prune route must beat the
-				// /{networkName} subtree or prune calls get
-				// swallowed as a network named "prune".
-				r.With(requireWrite).Post("/prune", handler.Prune)
-				r.Get("/", handler.List)
-				r.Get("/{networkName}", handler.Get)
-			})
-		})
-	})
+	machineAccess := appmiddleware.RequireMachineAccess(machineRepo, accessRepo)
+	requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
+	r := http.NewServeMux()
+	// The literal /prune route must beat the /{networkName} subtree or
+	// prune calls get swallowed as a network named "prune".
+	r.Handle("POST /api/machines/{id}/networks/prune", machineAccess(requireWrite(http.HandlerFunc(handler.Prune))))
+	r.Handle("GET /api/machines/{id}/networks", machineAccess(http.HandlerFunc(handler.List)))
+	r.Handle("GET /api/machines/{id}/networks/{networkName}", machineAccess(http.HandlerFunc(handler.Get)))
 	return r
 }
 

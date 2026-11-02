@@ -176,8 +176,8 @@ closest sibling that already exists. Rulings so far:
   (`internal/domain/volumes/handler.go`, `Export`/`Populate`) is the
   reference. Settled 2026-09-15 (architecture-review candidate C8).
 - **Handler contract tests** — `testutils.Perform` builds the
-  request (identity, chi URL params, body) the way the router would;
-  per-domain `recordXRequest` chi scaffolding is retired. Handler tests
+  request (identity, URL path values, body) the way the router would;
+  per-domain `recordXRequest` router scaffolding is retired. Handler tests
   drive the **real domain service over the domain's fake engine** (the
   function-field fake in `engine_fake_test.go` behind its fake provider)
   — no service mock sits between handler and service. They pin only what
@@ -293,8 +293,8 @@ closest sibling that already exists. Rulings so far:
   (`internal/domain/images/handler.go`, `Pull`) is the reference
   handler.
 - **Permission gating** — list/inspect at read level; anything that
-  mutates remote state at write level via `r.With(requireWrite)` in
-  `internal/app/app.go`. Bulk operations (prune) are write-level even
+  mutates remote state at write level via the `requireWrite` adapter
+  in `internal/app/app.go`. Bulk operations (prune) are write-level even
   if single-item deletes might be argued otherwise. The level contract
   itself — permission lookup fails ⇒ 500 `ErrInternalError`, stored
   level below the required one (an empty row included) ⇒ 403

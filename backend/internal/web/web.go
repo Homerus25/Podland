@@ -26,7 +26,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
 )
 
@@ -57,7 +56,7 @@ import (
 func Handle[T any](w http.ResponseWriter, r *http.Request, successStatus int, call func(ctx context.Context, userID, machineID string) (T, error)) {
 	requestID := contextutils.GetRequestID(r.Context())
 	userID := contextutils.GetUserIDFromContext(r.Context())
-	machineID := chi.URLParam(r, "id")
+	machineID := r.PathValue("id")
 
 	if userID == "" || machineID == "" {
 		slog.ErrorContext(r.Context(), "endpoint envelope: identity invariant violated (route mounted outside the machine subtree?)",
@@ -101,7 +100,7 @@ func Handle[T any](w http.ResponseWriter, r *http.Request, successStatus int, ca
 func HandleStream(w http.ResponseWriter, r *http.Request, stream func(ctx context.Context, userID, machineID string) error) {
 	requestID := contextutils.GetRequestID(r.Context())
 	userID := contextutils.GetUserIDFromContext(r.Context())
-	machineID := chi.URLParam(r, "id")
+	machineID := r.PathValue("id")
 
 	if userID == "" || machineID == "" {
 		slog.ErrorContext(r.Context(), "endpoint envelope: identity invariant violated (route mounted outside the machine subtree?)",

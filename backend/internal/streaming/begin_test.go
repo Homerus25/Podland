@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,11 +24,9 @@ func serveBegin(t *testing.T, w http.ResponseWriter, userID, machineID string, e
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/machines/"+machineID+"/containers/x/logs", nil).WithContext(ctx)
 
-	rctx := chi.NewRouteContext()
 	if machineID != "" {
-		rctx.URLParams.Add("id", machineID)
+		req.SetPathValue("id", machineID)
 	}
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	endpoint(w, req)
 }

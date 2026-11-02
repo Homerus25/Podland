@@ -12,7 +12,6 @@ import (
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -108,15 +107,10 @@ func TestNetworkHandler_Get_MissingNetworkName(t *testing.T) {
 // RequireMachineAccess subtree at read level (no requireWrite), side
 // by side without shadowing each other.
 func networksDetailAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *NetworkService) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			r.Route("/networks", func(r chi.Router) {
-				r.Get("/{networkName}", NewNetworkHandler(service).Get)
-				r.Get("/{networkName}/inspect", NewNetworkHandler(service).Inspect)
-			})
-		})
-	})
+	r := http.NewServeMux()
+	machineAccess := appmiddleware.RequireMachineAccess(machineRepo, accessRepo)
+	r.Handle("GET /api/machines/{id}/networks/{networkName}", machineAccess(http.HandlerFunc(NewNetworkHandler(service).Get)))
+	r.Handle("GET /api/machines/{id}/networks/{networkName}/inspect", machineAccess(http.HandlerFunc(NewNetworkHandler(service).Inspect)))
 	return r
 }
 

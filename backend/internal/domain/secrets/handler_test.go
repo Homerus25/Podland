@@ -12,7 +12,6 @@ import (
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -107,11 +106,10 @@ func mustParseSecretTime(value string) time.Time {
 
 func listRequest() *http.Request {
 	req := httptest.NewRequest("GET", "/api/machines/machine123/secrets", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine123")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-	return req.WithContext(ctx)
+	ctx := context.WithValue(req.Context(), contextutils.UserIDContextKey, "user123")
+	req = req.WithContext(ctx)
+	req.SetPathValue("id", "machine123")
+	return req
 }
 
 // --- Inspect (GET /api/machines/{id}/secrets/{secretId}) ---
@@ -197,12 +195,11 @@ func TestSecretHandler_Get_RevealParamDecoding(t *testing.T) {
 
 func getRequest(target string) *http.Request {
 	req := httptest.NewRequest("GET", target, nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine123")
-	rctx.URLParams.Add("secretId", "db-password")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
-	return req.WithContext(ctx)
+	ctx := context.WithValue(req.Context(), contextutils.UserIDContextKey, "user123")
+	req = req.WithContext(ctx)
+	req.SetPathValue("id", "machine123")
+	req.SetPathValue("secretId", "db-password")
+	return req
 }
 
 // TestSecretHandler_Get_ReadLevelGranteeReachesInspectRoute pins the
@@ -237,13 +234,13 @@ func TestSecretHandler_Get_ReadLevelGranteeReachesInspectRoute(t *testing.T) {
 // would extract them.
 func newCreateRequest(userID, machineID, body string) *http.Request {
 	req := httptest.NewRequest("POST", "/api/machines/"+machineID+"/secrets", strings.NewReader(body))
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx := req.Context()
 	if userID != "" {
 		ctx = context.WithValue(ctx, contextutils.UserIDContextKey, userID)
 	}
-	return req.WithContext(ctx)
+	req = req.WithContext(ctx)
+	req.SetPathValue("id", machineID)
+	return req
 }
 
 // TestSecretHandler_Create_HappyPath pins the create contract through the
@@ -418,21 +415,14 @@ func TestSecretHandler_Create_WriteGate(t *testing.T) {
 
 // secretsAccessRouter mirrors app.go's mounting of the secrets routes.
 func secretsAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *SecretService) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
-			r.Route("/secrets", func(r chi.Router) {
-				r.Get("/", NewSecretHandler(service).List)
-				r.With(requireWrite).Post("/", NewSecretHandler(service).Create)
-				r.Route("/{secretId}", func(r chi.Router) {
-					r.Get("/", NewSecretHandler(service).Get)
-					r.Get("/inspect", NewSecretHandler(service).Inspect)
-					r.With(requireWrite).Delete("/", NewSecretHandler(service).Delete)
-				})
-			})
-		})
-	})
+	machineAccess := appmiddleware.RequireMachineAccess(machineRepo, accessRepo)
+	requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
+	r := http.NewServeMux()
+	r.Handle("GET /api/machines/{id}/secrets", machineAccess(http.HandlerFunc(NewSecretHandler(service).List)))
+	r.Handle("POST /api/machines/{id}/secrets", machineAccess(requireWrite(http.HandlerFunc(NewSecretHandler(service).Create))))
+	r.Handle("GET /api/machines/{id}/secrets/{secretId}", machineAccess(http.HandlerFunc(NewSecretHandler(service).Get)))
+	r.Handle("GET /api/machines/{id}/secrets/{secretId}/inspect", machineAccess(http.HandlerFunc(NewSecretHandler(service).Inspect)))
+	r.Handle("DELETE /api/machines/{id}/secrets/{secretId}", machineAccess(requireWrite(http.HandlerFunc(NewSecretHandler(service).Delete))))
 	return r
 }
 
@@ -506,12 +496,10 @@ func TestSecretHandler_Delete_Success(t *testing.T) {
 	}
 
 	req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/db-password", nil)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", "machine123")
-	rctx.URLParams.Add("secretId", "db-password")
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, "user123")
+	ctx := context.WithValue(req.Context(), contextutils.UserIDContextKey, "user123")
 	req = req.WithContext(ctx)
+	req.SetPathValue("id", "machine123")
+	req.SetPathValue("secretId", "db-password")
 
 	rr := httptest.NewRecorder()
 	newTestHandler(engine).Delete(rr, req)

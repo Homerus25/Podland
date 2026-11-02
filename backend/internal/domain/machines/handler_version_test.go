@@ -14,7 +14,6 @@ import (
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,12 +24,9 @@ import (
 // suffices for the version endpoint, so no RequireMachinePermission layer).
 func versionAccessRouter(machineRepo *testutils.MockMachineRepository,
 	accessRepo *testutils.MockMachineAccessRepository, service *MachineService) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			r.Get("/version", NewMachineHandler(service).Version)
-		})
-	})
+	r := http.NewServeMux()
+	r.Handle("GET /api/machines/{id}/version",
+		appmiddleware.RequireMachineAccess(machineRepo, accessRepo)(http.HandlerFunc(NewMachineHandler(service).Version)))
 	return r
 }
 

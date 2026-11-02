@@ -8,23 +8,19 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// machineAccessRouter mounts RequireMachineAccess on a chi subtree the
-// same way app.go does (With(...).Route("/{id}", ...)), so the tests
-// exercise the real URL-param extraction, not a hand-built context.
-// The leaf handler records the user ID it observed, proving both
-// pass-through and that the handler never runs on rejection.
+// machineAccessRouter mounts RequireMachineAccess on a ServeMux subtree
+// the same way app.go does (the middleware wrapping the sub-mux), so
+// the tests exercise the real URL-param extraction, not a hand-built
+// context. The leaf handler records the user ID it observed, proving
+// both pass-through and that the handler never runs on rejection.
 func machineAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, observed *string) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			r.Get("/containers", observedUserIDHandler(observed).ServeHTTP)
-		})
-	})
+	r := http.NewServeMux()
+	r.Handle("GET /api/machines/{id}/containers",
+		RequireMachineAccess(machineRepo, accessRepo)(observedUserIDHandler(observed)))
 	return r
 }
 
@@ -160,18 +156,16 @@ func TestRequireMachineAccess_AccessRepoErrorIs500(t *testing.T) {
 // RequireMachinePermission
 // ---------------------------------------------------------------------------
 
-// machinePermissionRouter mounts RequireMachinePermission on a chi
+// machinePermissionRouter mounts RequireMachinePermission on a ServeMux
 // subtree the same way app.go wires a mutating route (RequireMachine-
 // Access at the subtree level, RequireMachinePermission(write) on the
 // route), so the tests exercise the real URL-param extraction.
 func machinePermissionRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, observed *string) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			r.With(RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)).
-				Post("/containers/no-such-container/start", observedUserIDHandler(observed).ServeHTTP)
-		})
-	})
+	r := http.NewServeMux()
+	r.Handle("POST /api/machines/{id}/containers/no-such-container/start",
+		RequireMachineAccess(machineRepo, accessRepo)(
+			RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)(
+				observedUserIDHandler(observed))))
 	return r
 }
 

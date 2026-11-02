@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -63,8 +62,8 @@ func TestImageHandler_List_Success(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/machines/test-machine/images", nil).WithContext(authedContext())
 
 	rr := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/images", handler.List)
+	r := http.NewServeMux()
+	r.HandleFunc("GET /api/machines/{id}/images", handler.List)
 	r.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code, "Should return 200 OK")
@@ -104,8 +103,8 @@ func TestImageHandler_List_AllQueryParam(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/machines/test-machine/images?all=true", nil).WithContext(authedContext())
 
 	rr := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/images", handler.List)
+	r := http.NewServeMux()
+	r.HandleFunc("GET /api/machines/{id}/images", handler.List)
 	r.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -164,8 +163,8 @@ func TestImageHandler_List_FiltersQueryParam(t *testing.T) {
 			req := httptest.NewRequest("GET", "/api/machines/test-machine/images"+tt.queryParams, nil).WithContext(authedContext())
 
 			rr := httptest.NewRecorder()
-			r := chi.NewRouter()
-			r.Get("/api/machines/{id}/images", handler.List)
+			r := http.NewServeMux()
+			r.HandleFunc("GET /api/machines/{id}/images", handler.List)
 			r.ServeHTTP(rr, req)
 
 			assert.Equal(t, http.StatusOK, rr.Code, "an (even ignored) filters param must never fail the request")
@@ -193,8 +192,8 @@ func TestImageHandler_Delete_Success(t *testing.T) {
 	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil).WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+	r := http.NewServeMux()
+	r.HandleFunc("DELETE /api/machines/{id}/images/{imageId}", handler.Delete)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code, "Should return 204 on success")
@@ -216,8 +215,8 @@ func TestImageHandler_Delete_Force(t *testing.T) {
 	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123?force=true", nil).WithContext(authedContext())
 
 	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Delete("/api/machines/{id}/images/{imageId}", handler.Delete)
+	r := http.NewServeMux()
+	r.HandleFunc("DELETE /api/machines/{id}/images/{imageId}", handler.Delete)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code, "Should return 204 on success with force=true")
@@ -233,8 +232,8 @@ func TestImageHandler_Pull_InvalidRequestBody(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/images/pull", handler.Pull)
+	r := http.NewServeMux()
+	r.HandleFunc("POST /api/machines/{id}/images/pull", handler.Pull)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when request body is invalid")
@@ -254,8 +253,8 @@ func TestImageHandler_Pull_ValidationFailure(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/images/pull", handler.Pull)
+	r := http.NewServeMux()
+	r.HandleFunc("POST /api/machines/{id}/images/pull", handler.Pull)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when validation fails")
@@ -311,8 +310,8 @@ func TestImageHandler_Pull_Success_Streaming(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Post("/api/machines/{id}/images/pull", handler.Pull)
+	r := http.NewServeMux()
+	r.HandleFunc("POST /api/machines/{id}/images/pull", handler.Pull)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 for streaming response")

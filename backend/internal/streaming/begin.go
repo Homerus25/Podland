@@ -6,7 +6,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
 )
 
 // streamHandle is the handle begin returns: the NDJSON writer plus the
@@ -29,7 +28,7 @@ type streamHandle struct {
 func begin(w http.ResponseWriter, r *http.Request) *streamHandle {
 	requestID := contextutils.GetRequestID(r.Context())
 	userID := contextutils.GetUserIDFromContext(r.Context())
-	machineID := chi.URLParam(r, "id")
+	machineID := r.PathValue("id")
 
 	if userID == "" || machineID == "" {
 		slog.ErrorContext(r.Context(), "streaming envelope: identity invariant violated (route mounted outside the machine subtree?)",

@@ -12,7 +12,6 @@ import (
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
@@ -84,30 +83,22 @@ func TestFromPodmanContainerPruneReports_NilEntries(t *testing.T) {
 
 // --- Route wiring: the containers subtree gates prune at write level ---
 //
-// These tests mount the containers routes on a chi subtree exactly the way
-// internal/app/app.go does (RequireMachineAccess at /{id},
+// These tests mount the containers routes on a ServeMux exactly the way
+// internal/app/app.go does (RequireMachineAccess wrapping the sub-mux,
 // RequireMachinePermission(write) on the literal POST /prune, the
-// literal registered ahead of the /{containerId} subtree) so the 403
-// semantics and the literal-route win the ACs promise are exercised
-// through the real middleware.
+// literal winning over the /{containerId} wildcard by ServeMux
+// precedence) so the 403 semantics and the literal-route win the ACs
+// promise are exercised through the real middleware.
 
 func pruneAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, handler *ContainerHandler) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
-			r.Route("/containers", func(r chi.Router) {
-				r.Get("/", handler.List)
-				// The literal /prune route must beat the
-				// /{containerId} subtree or prune calls get
-				// swallowed as a container named "prune".
-				r.With(requireWrite).Post("/prune", handler.Prune)
-				r.Route("/{containerId}", func(r chi.Router) {
-					r.Get("/", handler.Get)
-				})
-			})
-		})
-	})
+	machineAccess := appmiddleware.RequireMachineAccess(machineRepo, accessRepo)
+	requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
+	r := http.NewServeMux()
+	r.Handle("GET /api/machines/{id}/containers", machineAccess(http.HandlerFunc(handler.List)))
+	// The literal /prune route must beat the /{containerId} wildcard
+	// or prune calls get swallowed as a container named "prune".
+	r.Handle("POST /api/machines/{id}/containers/prune", machineAccess(requireWrite(http.HandlerFunc(handler.Prune))))
+	r.Handle("GET /api/machines/{id}/containers/{containerId}", machineAccess(http.HandlerFunc(handler.Get)))
 	return r
 }
 

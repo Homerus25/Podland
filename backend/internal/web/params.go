@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
 )
 
 // URLParam reads a route parameter and owns the missing-param guard: an
@@ -16,7 +15,7 @@ import (
 // the NewAppError ritual. The code stays explicit at the call site —
 // the vocabulary stays domain-visible, like the podmanerr sentinels.
 func URLParam(r *http.Request, name, code string) (string, *appErrors.AppError) {
-	value := chi.URLParam(r, name)
+	value := r.PathValue(name)
 	if value == "" {
 		return "", appErrors.NewAppError(code, requiredMessage(code), http.StatusBadRequest)
 	}

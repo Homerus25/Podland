@@ -12,6 +12,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
@@ -201,6 +202,50 @@ func TestApp_Handler_SPARidesUnderAPI(t *testing.T) {
 	assert.Equal(t, http.StatusOK, spa.StatusCode,
 		"non-API client-side routes fall back to index.html with 200")
 	assert.Contains(t, spa.Header.Get("Content-Type"), "text/html")
+}
+
+// TestApp_Handler_ServeMuxCanonicalization pins the URL-shape promises of
+// the ServeMux router (issue #451): the slashless /api/machines serves (it
+// reaches the JWT middleware: 401, not a route miss), while the slashed
+// /api/machines/ — the one form that would otherwise reach
+// RequireMachineAccess with an empty {id} — answers the API's JSON 404
+// envelope (code NOT_FOUND), as does every other unknown /api path; none
+// of them ever falls back to the SPA shell.
+func TestApp_Handler_ServeMuxCanonicalization(t *testing.T) {
+	cfg := newTestConfig(t)
+
+	a, err := app.New(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = a.Close() })
+
+	srv := httptest.NewServer(a.Handler())
+	t.Cleanup(srv.Close)
+
+	slashless, err := http.Get(srv.URL + "/api/machines")
+	require.NoError(t, err, "GET /api/machines must connect")
+	defer slashless.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, slashless.StatusCode,
+		"the slashless form serves: it must reach the JWT middleware (401), not miss the route (404)")
+
+	for _, target := range []string{"/api/machines/", "/api/nonexistent"} {
+		resp, err := http.Get(srv.URL + target)
+		require.NoError(t, err, "GET %s must connect", target)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusNotFound, resp.StatusCode,
+			"GET %s: the slashed/unknown form must answer 404", target)
+
+		var body struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&body),
+			"GET %s: the 404 must be the JSON error envelope, never the SPA shell", target)
+		assert.Equal(t, "NOT_FOUND", body.Error.Code)
+		assert.Equal(t, "Route not found", body.Error.Message)
+	}
 }
 
 // TestApp_Close_IsIdempotent pins the "safe to call once" promise: App.Close

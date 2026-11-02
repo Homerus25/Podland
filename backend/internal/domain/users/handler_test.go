@@ -13,7 +13,6 @@ import (
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -67,16 +66,13 @@ func newUsersTestRouterWithBudget(t *testing.T, budget *failurebudget.Surface) (
 		userHandler = userHandler.WithFailureBudget(budget)
 	}
 
-	router := chi.NewRouter()
-	router.Route("/api", func(api chi.Router) {
-		api.Group(func(protected chi.Router) {
-			protected.Use(appmiddleware.JWTMiddleware(authService))
-			protected.Get("/users", userHandler.List)
-			protected.With(appmiddleware.RequireAdmin(repo)).Post("/users", userHandler.Create)
-			protected.With(appmiddleware.RequireAdmin(repo)).Put("/users/{userId}/role", userHandler.UpdateRole)
-			protected.With(appmiddleware.RequireAdmin(repo)).Put("/users/{userId}/password", userHandler.ResetPassword)
-		})
-	})
+	jwtAuth := appmiddleware.JWTMiddleware(authService)
+	requireAdmin := appmiddleware.RequireAdmin(repo)
+	router := http.NewServeMux()
+	router.Handle("GET /api/users", jwtAuth(http.HandlerFunc(userHandler.List)))
+	router.Handle("POST /api/users", jwtAuth(requireAdmin(http.HandlerFunc(userHandler.Create))))
+	router.Handle("PUT /api/users/{userId}/role", jwtAuth(requireAdmin(http.HandlerFunc(userHandler.UpdateRole))))
+	router.Handle("PUT /api/users/{userId}/password", jwtAuth(requireAdmin(http.HandlerFunc(userHandler.ResetPassword))))
 
 	return router, authService, sessionRepo
 }

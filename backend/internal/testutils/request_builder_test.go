@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,8 +18,8 @@ func TestPerform_WiresContextIdentityAndURLParams(t *testing.T) {
 	w := Perform(func(w http.ResponseWriter, r *http.Request) {
 		gotUserID = contextutils.GetUserIDFromContext(r.Context())
 		gotRequestID = contextutils.GetRequestID(r.Context())
-		gotMachineID = chi.URLParam(r, "id")
-		gotVolumeName = chi.URLParam(r, "volumeName")
+		gotMachineID = r.PathValue("id")
+		gotVolumeName = r.PathValue("volumeName")
 		w.WriteHeader(http.StatusNoContent)
 	}, Request{
 		Method:    http.MethodDelete,

@@ -15,7 +15,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +24,7 @@ import (
 // failure default); LogEventWriter pins the line handling every log
 // domain's podman writers share.
 
-// serveLogStream drives RunLogStream through a chi route so begin's
+// serveLogStream drives RunLogStream through a ServeMux route so begin's
 // identity extraction sees a real {id} URL param, the way the router
 // wires it in production.
 func serveLogStream(t *testing.T, ctx context.Context, op LogStreamOp) *httptest.ResponseRecorder {
@@ -33,8 +32,8 @@ func serveLogStream(t *testing.T, ctx context.Context, op LogStreamOp) *httptest
 	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/c-123/logs?follow=true", nil).
 		WithContext(ctx)
 	w := httptest.NewRecorder()
-	r := chi.NewRouter()
-	r.Get("/api/machines/{id}/containers/{containerId}/logs", func(w http.ResponseWriter, r *http.Request) {
+	r := http.NewServeMux()
+	r.HandleFunc("GET /api/machines/{id}/containers/{containerId}/logs", func(w http.ResponseWriter, r *http.Request) {
 		RunLogStream(w, r, op)
 	})
 	r.ServeHTTP(w, req)

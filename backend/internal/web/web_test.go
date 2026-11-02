@@ -13,7 +13,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +27,7 @@ type envelope struct {
 }
 
 // serve runs a Handle endpoint the way the router does: request-scoped
-// context values plus chi URL params.
+// context values plus URL params.
 func serve(t *testing.T, handler http.HandlerFunc, userID, machineID string) *httptest.ResponseRecorder {
 	t.Helper()
 
@@ -38,11 +37,9 @@ func serve(t *testing.T, handler http.HandlerFunc, userID, machineID string) *ht
 	}
 	req := httptest.NewRequest(http.MethodGet, "/api/machines/"+machineID+"/volumes", nil).WithContext(ctx)
 
-	rctx := chi.NewRouteContext()
 	if machineID != "" {
-		rctx.URLParams.Add("id", machineID)
+		req.SetPathValue("id", machineID)
 	}
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	w := httptest.NewRecorder()
 	handler(w, req)
@@ -522,15 +519,14 @@ func TestDecode_OversizedBodyIsCutOffAtTheReader(t *testing.T) {
 // every route-param guard and query parse crosses, pinned here once, not
 // per domain.
 
-// paramRequest builds a request carrying chi URL params the way the
+// paramRequest builds a request carrying URL params the way the
 // router would.
 func paramRequest(params map[string]string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, "/api/machines/m/volumes", nil)
-	rctx := chi.NewRouteContext()
 	for name, value := range params {
-		rctx.URLParams.Add(name, value)
+		req.SetPathValue(name, value)
 	}
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	return req
 }
 
 func TestURLParam_PresentValuePassesThrough(t *testing.T) {

@@ -11,7 +11,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/slogtest"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,11 +32,9 @@ func serveProgress(t *testing.T, w http.ResponseWriter, userID, machineID string
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/machines/"+machineID+"/op", nil).WithContext(ctx)
 
-	rctx := chi.NewRouteContext()
 	if machineID != "" {
-		rctx.URLParams.Add("id", machineID)
+		req.SetPathValue("id", machineID)
 	}
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	endpoint(w, req)
 }

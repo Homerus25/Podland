@@ -13,7 +13,6 @@ import (
 	appmiddleware "github.com/Homerus25/podland/backend/internal/middleware"
 	"github.com/Homerus25/podland/backend/internal/models"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/libpod/define"
@@ -106,16 +105,9 @@ func TestContainerHandler_Inspect_MissingContainerIDAnswers400(t *testing.T) {
 // inspect route: GET /api/machines/{id}/containers/{containerId}/inspect
 // rides the RequireMachineAccess subtree at read level (no requireWrite).
 func containersAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *ContainerService) http.Handler {
-	r := chi.NewRouter()
-	r.Route("/api/machines", func(r chi.Router) {
-		r.With(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)).Route("/{id}", func(r chi.Router) {
-			r.Route("/containers", func(r chi.Router) {
-				r.Route("/{containerId}", func(r chi.Router) {
-					r.Get("/inspect", NewContainerHandler(service).Inspect)
-				})
-			})
-		})
-	})
+	r := http.NewServeMux()
+	r.Handle("GET /api/machines/{id}/containers/{containerId}/inspect",
+		appmiddleware.RequireMachineAccess(machineRepo, accessRepo)(http.HandlerFunc(NewContainerHandler(service).Inspect)))
 	return r
 }
 

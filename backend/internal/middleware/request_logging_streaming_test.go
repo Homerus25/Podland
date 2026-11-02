@@ -10,7 +10,6 @@ import (
 
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/streaming"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -28,9 +27,9 @@ func TestRequestLogging_ForwardsWriteDeadlineExtension(t *testing.T) {
 
 	streamEndpoint := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := contextutils.SetUserID(r.Context(), "test-user")
-		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "test-machine")
-		streaming.HandleProgress(w, r.WithContext(context.WithValue(ctx, chi.RouteCtxKey, rctx)), "test-op", nil,
+		r = r.WithContext(ctx)
+		r.SetPathValue("id", "test-machine")
+		streaming.HandleProgress(w, r, "test-op", nil,
 			streaming.ProgressConfig[int, string]{
 				Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(int)) (string, error) {
 					onProgress(1)

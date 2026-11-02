@@ -13,7 +13,6 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/sshexec"
 	"github.com/Homerus25/podland/backend/internal/testutils"
-	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.podman.io/podman/v6/libpod/define"
@@ -65,18 +64,17 @@ func listFixture() []*entities.ListQuadlet {
 	}
 }
 
-// quadletRequest builds a request carrying the identity and chi URL params
+// quadletRequest builds a request carrying the identity and URL params
 // the mounted route would extract.
 func quadletRequest(method, target, userID, machineID, quadletID string, body io.Reader) *http.Request {
 	req := httptest.NewRequest(method, target, body)
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("id", machineID)
+	ctx := context.WithValue(req.Context(), contextutils.UserIDContextKey, userID)
+	req = req.WithContext(ctx)
+	req.SetPathValue("id", machineID)
 	if quadletID != "" {
-		rctx.URLParams.Add("quadletId", quadletID)
+		req.SetPathValue("quadletId", quadletID)
 	}
-	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
-	ctx = context.WithValue(ctx, contextutils.UserIDContextKey, userID)
-	return req.WithContext(ctx)
+	return req
 }
 
 func TestQuadletHandler_List(t *testing.T) {
