@@ -127,6 +127,25 @@ describe("ContainerDetailPage", () => {
 		).toHaveAttribute("href", "/machines/m-1/secrets/api-token");
 	});
 
+	it("links each volume name to the volume detail page, keeping the rest of the line plain text", async () => {
+		mockDetail(() => HttpResponse.json(containerDetailFixture()));
+		renderDetailPage();
+
+		const link = await screen.findByTestId("container-volume-link-app-data");
+		expect(link).toHaveAttribute("href", "/machines/m-1/volumes/app-data");
+		expect(link).toHaveTextContent("app-data");
+		// Only the name is the link: the source path, destination, and
+		// rw/ro suffix stay outside it.
+		expect(link).not.toHaveTextContent("/data");
+		expect(link).not.toHaveTextContent("rw");
+		const volumes = screen.getByTestId("container-detail-volumes");
+		expect(volumes).toHaveTextContent(
+			"/var/lib/containers/storage/volumes/app-data/_data",
+		);
+		expect(volumes).toHaveTextContent("/data");
+		expect(volumes).toHaveTextContent("rw");
+	});
+
 	it("returns to the containers tab via the back button", async () => {
 		mockDetail(() => HttpResponse.json(containerDetailFixture()));
 		renderDetailPage();

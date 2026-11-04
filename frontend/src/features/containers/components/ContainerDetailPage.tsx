@@ -39,8 +39,8 @@ import { EditConfigurationDialog } from "./EditConfigurationDialog";
 import { RenameContainerDialog } from "./RenameContainerDialog";
 
 // The container's overview: one label/value row per attribute the spec
-// lists. Cross-links (image, secrets) point at the related resources'
-// detail pages. The Name row carries the rename control: a pencil button
+// lists. Cross-links (image, volumes, secrets) point at the related
+// resources' detail pages. The Name row carries the rename control: a pencil button
 // for callers who can manage containers, the shared write-permission hint
 // for everyone else — the secret detail page's hidden-admin-control
 // pattern, so a read-only caller is never baited into a 403. The gate is
@@ -139,7 +139,15 @@ function ContainerOverview({
 							testId="container-detail-volumes"
 							renderItem={(volume) => (
 								<>
-									{volume.name}: {volume.source} → {volume.destination} (
+									<ChakraLink
+										as={ReactRouterLink}
+										to={detailPath(machineId, "volumes", volume.name)}
+										color="blue.500"
+										data-testid={`container-volume-link-${volume.name}`}
+									>
+										{volume.name}
+									</ChakraLink>
+									: {volume.source} → {volume.destination} (
 									{volume.rw ? "rw" : "ro"})
 								</>
 							)}

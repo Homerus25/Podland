@@ -17,13 +17,15 @@ import {
 	machineFixture,
 	rawInspectFixture,
 	secretFixture,
+	volumeFixture,
 } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 // The cross-link chain (spec 301, ticket #311): the containers list row
 // opens the container detail page, whose image link opens the image detail
-// page and whose secret links open the secret detail page. This suite
+// page, whose secret links open the secret detail page, and whose volume
+// links open the volume detail page. This suite
 // drives the whole chain through the real routes and the real pages, so a
 // broken link target anywhere in the chain fails here.
 const container = containerFixture({ id: "c-1", names: ["/web"] });
@@ -64,6 +66,9 @@ function mockChainEndpoints() {
 		),
 		http.get("*/api/machines/m-1/secrets/db-password/inspect", () =>
 			HttpResponse.json(rawInspectFixture()),
+		),
+		http.get("*/api/machines/m-1/volumes/app-data", () =>
+			HttpResponse.json(volumeFixture()),
 		),
 	);
 }
@@ -115,7 +120,7 @@ function renderAppRoutes() {
 }
 
 describe("detail page cross-links", () => {
-	it("navigates the chain: containers list → container detail → image detail → back → container detail → secret detail", async () => {
+	it("navigates the chain: containers list → container detail → image detail → back → container detail → secret detail → back → container detail → volume detail", async () => {
 		mockChainEndpoints();
 		renderAppRoutes();
 		const user = userEvent.setup();
@@ -170,6 +175,24 @@ describe("detail page cross-links", () => {
 		);
 		expect(screen.getByTestId("location")).toHaveTextContent(
 			"/machines/m-1/secrets/db-password",
+		);
+
+		// Back to the container detail page once more, then the volume
+		// name links to the volume's detail page, addressed by the
+		// volume's name.
+		await user.click(screen.getByTestId("detail-back-button"));
+		expect(
+			await screen.findByTestId("container-detail-name"),
+		).toHaveTextContent("web");
+		await user.click(screen.getByTestId("container-volume-link-app-data"));
+		expect(
+			await screen.findByTestId("volume-detail-overview"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("detail-page-title")).toHaveTextContent(
+			"app-data",
+		);
+		expect(screen.getByTestId("location")).toHaveTextContent(
+			"/machines/m-1/volumes/app-data",
 		);
 	});
 });
