@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import {
-	machineFixture,
+	hostFixture,
 	networkFixture,
 	podFixture,
 	volumeFixture,
@@ -22,7 +22,7 @@ function podsListResponse(pods: PodSummary[]) {
 }
 
 function renderPodList() {
-	return renderWithQuery(<PodList machine={machineFixture()} />, {
+	return renderWithQuery(<PodList host={hostFixture()} />, {
 		router: true,
 	});
 }
@@ -43,22 +43,22 @@ describe("PodList create", () => {
 		async () => {
 			const createRequests: unknown[] = [];
 			server.use(
-				http.get("*/api/machines/m-1/pods", () =>
+				http.get("*/api/hosts/m-1/pods", () =>
 					podsListResponse([podFixture()]),
 				),
-				http.get("*/api/machines/m-1/networks", () =>
+				http.get("*/api/hosts/m-1/networks", () =>
 					HttpResponse.json([
 						networkFixture(),
 						networkFixture({ name: "db-net", subnets: ["10.89.0.0/16"] }),
 					]),
 				),
-				http.get("*/api/machines/m-1/volumes", () =>
+				http.get("*/api/hosts/m-1/volumes", () =>
 					HttpResponse.json([
 						volumeFixture(),
 						volumeFixture({ name: "pgdata" }),
 					]),
 				),
-				http.post("*/api/machines/m-1/pods", async ({ request }) => {
+				http.post("*/api/hosts/m-1/pods", async ({ request }) => {
 					createRequests.push(await request.json());
 					return HttpResponse.json(
 						{
@@ -94,7 +94,7 @@ describe("PodList create", () => {
 					name: "Bind mount 1 SELinux shared (z)",
 				}),
 			);
-			// Named volume picked from the machine's volume list.
+			// Named volume picked from the host's volume list.
 			await user.click(screen.getByTestId("add-named-volume"));
 			const volumeSelect = screen.getByLabelText("Volume name 1");
 			await within(volumeSelect).findByText("pgdata");
@@ -137,13 +137,11 @@ describe("PodList create", () => {
 
 	it("derives the storage rows' testids, copy, and remove aria labels", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/pods", () =>
-				podsListResponse([podFixture()]),
-			),
-			http.get("*/api/machines/m-1/networks", () =>
+			http.get("*/api/hosts/m-1/pods", () => podsListResponse([podFixture()])),
+			http.get("*/api/hosts/m-1/networks", () =>
 				HttpResponse.json([networkFixture()]),
 			),
-			http.get("*/api/machines/m-1/volumes", () =>
+			http.get("*/api/hosts/m-1/volumes", () =>
 				HttpResponse.json([volumeFixture()]),
 			),
 		);
@@ -197,16 +195,14 @@ describe("PodList create", () => {
 	it("filters incomplete port-mapping rows and defaults the protocol to tcp", async () => {
 		const createRequests: unknown[] = [];
 		server.use(
-			http.get("*/api/machines/m-1/pods", () =>
-				podsListResponse([podFixture()]),
-			),
-			http.get("*/api/machines/m-1/networks", () =>
+			http.get("*/api/hosts/m-1/pods", () => podsListResponse([podFixture()])),
+			http.get("*/api/hosts/m-1/networks", () =>
 				HttpResponse.json([networkFixture()]),
 			),
-			http.get("*/api/machines/m-1/volumes", () =>
+			http.get("*/api/hosts/m-1/volumes", () =>
 				HttpResponse.json([volumeFixture()]),
 			),
-			http.post("*/api/machines/m-1/pods", async ({ request }) => {
+			http.post("*/api/hosts/m-1/pods", async ({ request }) => {
 				createRequests.push(await request.json());
 				return HttpResponse.json(
 					{
@@ -253,13 +249,11 @@ describe("PodList create", () => {
 	// pins the labels, checks, and stacking once.
 	it("renders the resource-limit fields through the shared module with the pod id prefix", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/pods", () =>
-				podsListResponse([podFixture()]),
-			),
-			http.get("*/api/machines/m-1/networks", () =>
+			http.get("*/api/hosts/m-1/pods", () => podsListResponse([podFixture()])),
+			http.get("*/api/hosts/m-1/networks", () =>
 				HttpResponse.json([networkFixture()]),
 			),
-			http.get("*/api/machines/m-1/volumes", () =>
+			http.get("*/api/hosts/m-1/volumes", () =>
 				HttpResponse.json([volumeFixture()]),
 			),
 		);
@@ -276,13 +270,11 @@ describe("PodList create", () => {
 
 	it("blocks the submit while a resource limit is unparseable and explains why", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/pods", () =>
-				podsListResponse([podFixture()]),
-			),
-			http.get("*/api/machines/m-1/networks", () =>
+			http.get("*/api/hosts/m-1/pods", () => podsListResponse([podFixture()])),
+			http.get("*/api/hosts/m-1/networks", () =>
 				HttpResponse.json([networkFixture()]),
 			),
-			http.get("*/api/machines/m-1/volumes", () =>
+			http.get("*/api/hosts/m-1/volumes", () =>
 				HttpResponse.json([volumeFixture()]),
 			),
 		);

@@ -212,7 +212,7 @@ func TestUserService_List_AdminCaller(t *testing.T) {
 
 // TestUserService_List_UserCallerNotAdmin asserts a regular-user caller
 // is flagged non-admin but still receives every user — the admin
-// included, so the machine-sharing picker can discover them. The
+// included, so the host-sharing picker can discover them. The
 // minimal wire shape for this caller is the handler's DTO mapping.
 func TestUserService_List_UserCallerNotAdmin(t *testing.T) {
 	service, _, ids := listTestUsers(t)

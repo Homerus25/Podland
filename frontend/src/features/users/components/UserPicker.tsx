@@ -12,7 +12,7 @@ interface UserPickerProps {
 	// two can never disagree.
 	value: UserSummary | null;
 	onChange: (user: UserSummary | null) => void;
-	// Users the picker must not offer (e.g. the machine owner and users
+	// Users the picker must not offer (e.g. the host owner and users
 	// who already hold a grant on the share form).
 	excludeUserIds?: string[];
 }

@@ -16,18 +16,18 @@ import (
 // Podland integration suite. It issues a single HTTP call against the
 // real in-process backend:
 //
-//	GET /api/machines/{id}/containers
+//	GET /api/hosts/{id}/containers
 //
-// on the once-registered, ready machine and asserts 200 + an empty
+// on the once-registered, ready host and asserts 200 + an empty
 // container list. That single assertion exercises the entire pipeline:
 //
-//	HTTP → middleware JWT validation → machine access check
+//	HTTP → middleware JWT validation → host access check
 //	     → connection-manager acquire → connection-factory decrypt SSH key
 //	     → SSH tunnel to the podman test host → podman socket
 //	     → ContainerList → JSON encode → HTTP response
 //
 // If anything in that chain is broken (auth misconfigured, SSH key
-// perms wrong, socket cold, machine unreachable, …) this test fails and
+// perms wrong, socket cold, host unreachable, …) this test fails and
 // surfaces the real error rather than a downstream symptom.
 //
 // Per the PRD's "surface, don't silently work around" rule, an SSH
@@ -37,7 +37,7 @@ import (
 func Test_Integration_TracerBullet(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
-	url := suite.ServerURL + "/api/machines/" + suite.MachineID + "/containers/"
+	url := suite.ServerURL + "/api/hosts/" + suite.HostID + "/containers/"
 
 	resp, err := suite.AuthenticatedClient().Get(url)
 	require.NoError(t, err, "GET containers must connect to the in-process server")
@@ -61,7 +61,7 @@ func Test_Integration_TracerBullet(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &result),
 		"tracer bullet: response must decode as a ContainerListResult. body: %s", string(body))
 	assert.Empty(t, result.Containers,
-		"tracer bullet: expected empty container list on a clean machine. body: %s", string(body))
+		"tracer bullet: expected empty container list on a clean host. body: %s", string(body))
 	assert.Equal(t, 0, result.Total,
-		"tracer bullet: expected total=0 on a clean machine. body: %s", string(body))
+		"tracer bullet: expected total=0 on a clean host. body: %s", string(body))
 }

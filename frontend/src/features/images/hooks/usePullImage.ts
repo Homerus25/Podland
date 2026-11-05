@@ -1,5 +1,5 @@
 import { pullStreamUrl } from "@features/images/services/imagesApi";
-import { invalidateMachineResources } from "@shared/queries/useListInvalidatingMutation";
+import { invalidateHostResources } from "@shared/queries/useListInvalidatingMutation";
 import {
 	isStreamEvent,
 	type StreamEventState,
@@ -25,7 +25,7 @@ interface UsePullImageResult {
 // The image pull rides the shared stream transport: the abort, supersede,
 // terminal, and error-mapping rules are the module's; this hook keeps only
 // the pull request, the progress state, and the images invalidation.
-export function usePullImage(machineId: string): UsePullImageResult {
+export function usePullImage(hostId: string): UsePullImageResult {
 	const queryClient = useQueryClient();
 	const [progress, setProgress] = useState<PullProgress | null>(null);
 	const { isRunning, error, start, cancel } = useNdjsonOperation();
@@ -34,7 +34,7 @@ export function usePullImage(machineId: string): UsePullImageResult {
 		(image: string) => {
 			setProgress(null);
 			start({
-				url: pullStreamUrl(machineId),
+				url: pullStreamUrl(hostId),
 				init: { method: "POST", body: JSON.stringify({ image }) },
 				onEvent: (value) => {
 					if (!isStreamEvent(value)) {
@@ -50,12 +50,12 @@ export function usePullImage(machineId: string): UsePullImageResult {
 							state: value.state,
 						});
 					} else if (value.type === "complete") {
-						invalidateMachineResources(queryClient, machineId, "images");
+						invalidateHostResources(queryClient, hostId, "images");
 					}
 				},
 			});
 		},
-		[machineId, queryClient, start],
+		[hostId, queryClient, start],
 	);
 
 	return { isPulling: isRunning, progress, error, pull, cancel };

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 // The query-side freshness factory, the twin of the list-invalidating
 // mutation factory: the one owner of the freshness vocabulary. A view that
-// must always show the machine's current state rides the one-shot flavor —
+// must always show the host's current state rides the one-shot flavor —
 // zero gcTime drops the cache entry the moment the view unmounts, so a
 // remount refetches instead of serving the cache. The optional enabled
 // gate (defaulting to true) keeps a lazy fetch — an inspect reveal, a

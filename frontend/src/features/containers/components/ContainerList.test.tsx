@@ -1,12 +1,12 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { containersQueryKey } from "@shared/queries/queryKeys";
-import type { Machine, MachinePermission } from "@shared/types/api";
+import type { Host, HostPermission } from "@shared/types/api";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { containerFixture, machineFixture } from "@/test/factories";
+import { containerFixture, hostFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -20,7 +20,7 @@ function containersResponse(containers: ContainerSummary[]) {
 
 function mockContainers(containers: ContainerSummary[]) {
 	server.use(
-		http.get("*/api/machines/m-1/containers", () =>
+		http.get("*/api/hosts/m-1/containers", () =>
 			HttpResponse.json(containersResponse(containers)),
 		),
 	);
@@ -29,14 +29,14 @@ function mockContainers(containers: ContainerSummary[]) {
 // Default fixture is the owner's own view, so the ungated suites below
 // exercise the toolbar-on path; grantee fixtures override permission and
 // isOwner together.
-function renderContainerList(machine: Machine = machineFixture()) {
-	return renderWithQuery(<ContainerList machine={machine} />, {
+function renderContainerList(host: Host = hostFixture()) {
+	return renderWithQuery(<ContainerList host={host} />, {
 		router: true,
 	});
 }
 
-function granteeWith(permission: MachinePermission): Machine {
-	return machineFixture({ permission, isOwner: false });
+function granteeWith(permission: HostPermission): Host {
+	return hostFixture({ permission, isOwner: false });
 }
 
 describe("ContainerList permission gating", () => {
@@ -83,7 +83,7 @@ describe("ContainerList permission gating", () => {
 		},
 	);
 
-	it("shows the toolbar to the machine's owner", async () => {
+	it("shows the toolbar to the host's owner", async () => {
 		mockContainers([containerFixture()]);
 		renderContainerList();
 
@@ -153,7 +153,7 @@ describe("ContainerList", () => {
 		expect(await screen.findByText(state)).toBeInTheDocument();
 	});
 
-	it("caches containers under the per-machine query key hierarchy", async () => {
+	it("caches containers under the per-host query key hierarchy", async () => {
 		mockContainers([containerFixture({ id: "abc123def4567890" })]);
 		const { queryClient } = renderContainerList();
 
@@ -167,7 +167,7 @@ describe("ContainerList", () => {
 
 	it("shows a loading state before containers arrive, with the toolbar still above it", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/containers", async () => {
+			http.get("*/api/hosts/m-1/containers", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
 				return HttpResponse.json(containersResponse([containerFixture()]));
 			}),

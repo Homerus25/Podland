@@ -46,7 +46,7 @@ function resetCounters() {
 
 function mockLists() {
 	return [
-		http.get("*/api/machines/m-1/networks", () => {
+		http.get("*/api/hosts/m-1/networks", () => {
 			networksGets++;
 			return HttpResponse.json([
 				networkFixture(),
@@ -54,7 +54,7 @@ function mockLists() {
 				networkFixture({ name: "third-net", subnets: ["10.90.0.0/16"] }),
 			]);
 		}),
-		http.get("*/api/machines/m-1/containers", () => {
+		http.get("*/api/hosts/m-1/containers", () => {
 			containersGets++;
 			const containers = [attached, eligible, eligible2, stopped].map(
 				(container) => ({
@@ -81,7 +81,7 @@ type ConnectRule = { status: number; body: JsonBodyType; times?: number };
 function connectHandler(rules: Record<string, ConnectRule> = {}) {
 	const attempts: Record<string, number> = {};
 	return http.post(
-		"*/api/machines/m-1/networks/:networkName/connect",
+		"*/api/hosts/m-1/networks/:networkName/connect",
 		async ({ request, params }) => {
 			const networkName = params.networkName as string;
 			const body = (await request.json()) as { container: string };
@@ -107,11 +107,7 @@ function connectHandler(rules: Record<string, ConnectRule> = {}) {
 // containers.
 function renderNetworkFixed(onClose: () => void = () => {}) {
 	return renderWithQuery(
-		<ConnectDialog
-			machineId="m-1"
-			network={networkFixture()}
-			onClose={onClose}
-		/>,
+		<ConnectDialog hostId="m-1" network={networkFixture()} onClose={onClose} />,
 	);
 }
 
@@ -119,7 +115,7 @@ function renderNetworkFixed(onClose: () => void = () => {}) {
 // networks.
 function renderContainerFixed(onClose: () => void = () => {}) {
 	return renderWithQuery(
-		<ConnectDialog machineId="m-1" container={attached} onClose={onClose} />,
+		<ConnectDialog hostId="m-1" container={attached} onClose={onClose} />,
 	);
 }
 
@@ -129,7 +125,7 @@ function NetworkFixedHarness() {
 	const [open, setOpen] = useState(true);
 	return open ? (
 		<ConnectDialog
-			machineId="m-1"
+			hostId="m-1"
 			network={networkFixture()}
 			onClose={() => setOpen(false)}
 		/>
@@ -140,7 +136,7 @@ function ContainerFixedHarness() {
 	const [open, setOpen] = useState(true);
 	return open ? (
 		<ConnectDialog
-			machineId="m-1"
+			hostId="m-1"
 			container={attached}
 			onClose={() => setOpen(false)}
 		/>
@@ -229,7 +225,7 @@ describe("ConnectDialog with the network fixed", () => {
 		for (const request of connectRequests) {
 			expect(request.networkName).toBe("app-net");
 			expect(
-				request.url.endsWith("/api/machines/m-1/networks/app-net/connect"),
+				request.url.endsWith("/api/hosts/m-1/networks/app-net/connect"),
 			).toBe(true);
 		}
 	});
@@ -366,7 +362,7 @@ describe("ConnectDialog with the network fixed", () => {
 });
 
 describe("ConnectDialog with the container fixed", () => {
-	it("offers the machine's networks excluding the container's current ones", async () => {
+	it("offers the host's networks excluding the container's current ones", async () => {
 		resetCounters();
 		server.use(...mockLists(), connectHandler());
 		renderContainerFixed();
@@ -408,7 +404,7 @@ describe("ConnectDialog with the container fixed", () => {
 		for (const request of connectRequests) {
 			expect(
 				request.url.endsWith(
-					`/api/machines/m-1/networks/${request.networkName}/connect`,
+					`/api/hosts/m-1/networks/${request.networkName}/connect`,
 				),
 			).toBe(true);
 		}

@@ -14,22 +14,20 @@ const image = imageDetailFixture();
 // the :imageId param matches the encoded segment, and the router decodes it
 // on the far side.
 function detailHandler(responder: () => ReturnType<typeof HttpResponse.json>) {
-	server.use(http.get("*/api/machines/m-1/images/:imageId", responder));
+	server.use(http.get("*/api/hosts/m-1/images/:imageId", responder));
 }
 
 function renderDetailPage() {
 	return renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId/images/:imageId"
+				path="/hosts/:hostId/images/:imageId"
 				element={<ImageDetailPage />}
 			/>
 		</Routes>,
 		{
 			router: {
-				initialEntries: [
-					`/machines/m-1/images/${encodeURIComponent(image.id)}`,
-				],
+				initialEntries: [`/hosts/m-1/images/${encodeURIComponent(image.id)}`],
 			},
 		},
 	);
@@ -149,7 +147,7 @@ describe("ImageDetailPage", () => {
 			errorResponse(
 				403,
 				"ACCESS_DENIED",
-				"You do not have access to this machine",
+				"You do not have access to this host",
 				"r-1",
 			),
 		);
@@ -157,7 +155,7 @@ describe("ImageDetailPage", () => {
 
 		const alert = await screen.findByTestId("detail-page-error");
 		expect(alert).toHaveTextContent("ACCESS_DENIED");
-		expect(alert).toHaveTextContent("You do not have access to this machine");
+		expect(alert).toHaveTextContent("You do not have access to this host");
 		expect(
 			screen.queryByTestId("detail-page-overview"),
 		).not.toBeInTheDocument();
@@ -171,21 +169,21 @@ describe("ImageDetailPage", () => {
 
 		expect(
 			await screen.findByTestId("detail-page-not-found"),
-		).toHaveTextContent("This item no longer exists on the machine.");
+		).toHaveTextContent("This item no longer exists on the host.");
 		expect(screen.queryByTestId("detail-page-error")).not.toBeInTheDocument();
 		expect(
 			screen.queryByTestId("detail-page-overview"),
 		).not.toBeInTheDocument();
 	});
 
-	it("links the back button to the machine's images tab", async () => {
+	it("links the back button to the host's images tab", async () => {
 		detailHandler(() => HttpResponse.json(image));
 		renderDetailPage();
 
 		await screen.findByTestId("detail-page-overview");
 		expect(screen.getByTestId("detail-back-button")).toHaveAttribute(
 			"href",
-			"/machines/m-1?tab=images",
+			"/hosts/m-1?tab=images",
 		);
 	});
 });

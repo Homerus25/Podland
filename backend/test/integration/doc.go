@@ -11,7 +11,7 @@
 //
 // The suite brings the backend up in-process (httptest.NewServer wrapping
 // internal/app.App.Handler) and exercises the full pipeline — HTTP → JWT
-// → machine registration → SSH tunnel → podman socket → HTTP — against
+// → host registration → SSH tunnel → podman socket → HTTP — against
 // the containerized podman test host (see testhost.go). TestMain owns
 // the shared fixture (Suite, exposed via the package-level `suite`
 // variable) and downstream slices (080-02 images, 080-03 containers, …)

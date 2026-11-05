@@ -27,7 +27,7 @@ func TestImageService_Inspect_ReturnsEngineReport(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "image-123")
+	got, err := service.Inspect(context.Background(), "user", "host", "image-123")
 
 	require.NoError(t, err)
 	assert.Same(t, report, got)
@@ -44,7 +44,7 @@ func TestImageService_Inspect_MissingImageIsAnError(t *testing.T) {
 		}
 		service := NewImageService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Inspect(context.Background(), "user", "machine", "image-123")
+		got, err := service.Inspect(context.Background(), "user", "host", "image-123")
 
 		require.Error(t, err)
 		assert.Nil(t, got)
@@ -59,7 +59,7 @@ func TestImageService_Inspect_MissingImageIsAnError(t *testing.T) {
 		}
 		service := NewImageService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Inspect(context.Background(), "user", "machine", "image-123")
+		got, err := service.Inspect(context.Background(), "user", "host", "image-123")
 
 		require.Error(t, err)
 		assert.Nil(t, got)
@@ -75,7 +75,7 @@ func TestImageService_Inspect_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "image-123")
+	got, err := service.Inspect(context.Background(), "user", "host", "image-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -90,7 +90,7 @@ func TestImageService_Inspect_ZeroReportsWithPerItemErrorWrapsCause(t *testing.T
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "image-123")
+	got, err := service.Inspect(context.Background(), "user", "host", "image-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -107,7 +107,7 @@ func TestImageService_Inspect_ZeroReportsWithoutErrorsIsAnomaly(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "image-123")
+	got, err := service.Inspect(context.Background(), "user", "host", "image-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -121,7 +121,7 @@ func TestImageService_Inspect_ZeroReportsWithoutErrorsIsAnomaly(t *testing.T) {
 func TestImageService_Inspect_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewImageService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "image-123")
+	got, err := service.Inspect(context.Background(), "user", "host", "image-123")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, got)

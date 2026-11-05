@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
-import { machineFixture, secretFixture } from "@/test/factories";
+import { hostFixture, secretFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -18,7 +18,7 @@ function resetCounters() {
 }
 
 function secretsHandler(secrets: () => SecretSummary[]) {
-	return http.get("*/api/machines/m-1/secrets", () =>
+	return http.get("*/api/hosts/m-1/secrets", () =>
 		HttpResponse.json(secrets()),
 	);
 }
@@ -28,7 +28,7 @@ function createHandler(
 	body?: JsonBodyType,
 	onCreated?: () => void,
 ) {
-	return http.post("*/api/machines/m-1/secrets", async ({ request }) => {
+	return http.post("*/api/hosts/m-1/secrets", async ({ request }) => {
 		createRequests.count++;
 		createRequests.body = await request.json();
 		if (status !== 201) return HttpResponse.json(body, { status });
@@ -39,7 +39,7 @@ function createHandler(
 
 function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
 	// The row navigates on click, so the list renders inside a router.
-	renderWithQuery(<SecretList machine={machineFixture({ permission })} />, {
+	renderWithQuery(<SecretList host={hostFixture({ permission })} />, {
 		router: true,
 	});
 }

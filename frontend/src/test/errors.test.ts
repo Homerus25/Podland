@@ -4,9 +4,9 @@ import { axiosError, errorJson, errorResponse } from "@/test/errors";
 
 describe("errorJson", () => {
 	it("builds exactly the backend envelope, defaulting requestId to req-1", () => {
-		expect(errorJson("MACHINE_NOT_FOUND", "no such machine")).toEqual({
+		expect(errorJson("HOST_NOT_FOUND", "no such host")).toEqual({
 			requestId: "req-1",
-			error: { code: "MACHINE_NOT_FOUND", message: "no such machine" },
+			error: { code: "HOST_NOT_FOUND", message: "no such host" },
 		});
 	});
 
@@ -44,7 +44,7 @@ describe("errorResponse", () => {
 
 describe("axiosError", () => {
 	it("carries the axios fields and the envelope as response.data", () => {
-		const error = axiosError(404, "MACHINE_NOT_FOUND", "no such machine");
+		const error = axiosError(404, "HOST_NOT_FOUND", "no such host");
 
 		expect(error).toBeInstanceOf(AxiosError);
 		expect(error.isAxiosError).toBe(true);
@@ -52,7 +52,7 @@ describe("axiosError", () => {
 		expect(error.code).toBe("ERR_BAD_REQUEST");
 		expect(error.response?.status).toBe(404);
 		expect(error.response?.data).toEqual(
-			errorJson("MACHINE_NOT_FOUND", "no such machine"),
+			errorJson("HOST_NOT_FOUND", "no such host"),
 		);
 	});
 

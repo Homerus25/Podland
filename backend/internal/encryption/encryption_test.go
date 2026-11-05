@@ -104,7 +104,7 @@ func TestEncrypt_DistinctPlaintextsYieldDistinctCiphertexts(t *testing.T) {
 	svc := mustService(t, testKey32A())
 
 	ciphertexts := make(map[string]bool)
-	for _, plaintext := range []string{"machine-a-key", "machine-b-key", "machine-c-key"} {
+	for _, plaintext := range []string{"host-a-key", "host-b-key", "host-c-key"} {
 		ciphertext, err := svc.Encrypt(plaintext)
 		require.NoError(t, err)
 		assert.False(t, ciphertexts[string(ciphertext)],

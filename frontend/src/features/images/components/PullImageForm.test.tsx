@@ -4,7 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
-import { machineFixture } from "@/test/factories";
+import { hostFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import {
@@ -16,7 +16,7 @@ import {
 
 const { progressEvent, completeEvent, errorEvent } = streamFixtures;
 
-const pullUrl = "*/api/machines/:machineId/images/pull";
+const pullUrl = "*/api/hosts/:hostId/images/pull";
 
 // Routes the pull endpoint through MSW (the repo's single test seam); chunks
 // are emitted one per macrotask so the UI renders progress updates live.
@@ -33,14 +33,14 @@ function mockPullStream(chunks: Array<StreamEvent | string>) {
 }
 
 function renderForm() {
-	renderWithQuery(<PullImageForm machineId="m-1" />);
+	renderWithQuery(<PullImageForm hostId="m-1" />);
 }
 
 // The pull form lives inside the Images tab's toolbar in every list state,
 // next to the list it refreshes.
 function renderTab() {
-	renderWithQuery(<ImageList machine={machineFixture()} />, {
-		router: { initialEntries: ["/machines/m-1"] },
+	renderWithQuery(<ImageList host={hostFixture()} />, {
+		router: { initialEntries: ["/hosts/m-1"] },
 	});
 }
 
@@ -127,7 +127,7 @@ describe("PullImageForm", () => {
 		let imagesRequests = 0;
 		let pulled = false;
 		server.use(
-			http.get("*/api/machines/m-1/images", () => {
+			http.get("*/api/hosts/m-1/images", () => {
 				imagesRequests++;
 				const list = pulled
 					? [

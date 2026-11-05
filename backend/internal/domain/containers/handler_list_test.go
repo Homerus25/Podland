@@ -14,14 +14,14 @@ import (
 	define "go.podman.io/podman/v6/pkg/ps/define"
 )
 
-// listRequest serves GET /api/machines/{id}/containers{query} through
+// listRequest serves GET /api/hosts/{id}/containers{query} through
 // the handler with an authenticated test identity.
 func listRequest(list http.HandlerFunc, query string) *httptest.ResponseRecorder {
 	return testutils.Perform(list, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/containers" + query,
+		Path:      "/api/hosts/test-host/containers" + query,
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 }
 
@@ -125,7 +125,7 @@ func TestContainerHandler_List_QueryParameters(t *testing.T) {
 			rr := listRequest(newTestHandler(engine).List, tc.query)
 
 			assert.Equal(t, http.StatusOK, rr.Code, tc.description)
-			assert.Equal(t, tc.expectedOpts, gotOpts, "the parsed query options must reach the machine")
+			assert.Equal(t, tc.expectedOpts, gotOpts, "the parsed query options must reach the host")
 		})
 	}
 }

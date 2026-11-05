@@ -205,7 +205,7 @@ func TestQuadletService_ApplyUnitAction_ArgvTable(t *testing.T) {
 			// The engine stays unarmed: applyUnitAction crosses only the SSH seam.
 			service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, sshExec, lookupForUser(tt.sshUser))
 
-			err := service.applyUnitAction(context.Background(), "user", "machine", tt.action, tt.unit, tt.opts)
+			err := service.applyUnitAction(context.Background(), "user", "host", tt.action, tt.unit, tt.opts)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantCommand, gotCommand)
@@ -307,7 +307,7 @@ func TestQuadletService_ApplyUnitAction_WrapperExitCodes(t *testing.T) {
 			})
 			service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, sshExec, lookupForUser("core"))
 
-			err := service.applyUnitAction(context.Background(), "user", "machine", actionStop, "web.service", tt.opts)
+			err := service.applyUnitAction(context.Background(), "user", "host", actionStop, "web.service", tt.opts)
 
 			tt.assertErr(t, err)
 		})
@@ -439,10 +439,10 @@ func TestQuadletService_Start_ResolvesUnitThenRunsSystemctl(t *testing.T) {
 			"the resolved unit name must drive the systemctl invocation, scoped to the non-root SSH user's manager")
 		return sshexec.ExecResult{ExitCode: 0}, nil
 	})
-	machines := lookupForUser("core")
-	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, machines)
+	hosts := lookupForUser("core")
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, hosts)
 
-	got, err := service.Start(context.Background(), "user", "machine", "web.container")
+	got, err := service.Start(context.Background(), "user", "host", "web.container")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -450,12 +450,12 @@ func TestQuadletService_Start_ResolvesUnitThenRunsSystemctl(t *testing.T) {
 		"the lookup must filter by name")
 	assert.Equal(t, "running", got.State)
 	assert.Equal(t, "web.service", got.Unit)
-	assert.Equal(t, "machine", machines.lastID,
-		"the systemctl scope must be resolved for the machine being acted on")
+	assert.Equal(t, "host", hosts.lastID,
+		"the systemctl scope must be resolved for the host being acted on")
 }
 
 // TestQuadletService_Start_RootSSHUserOmitsUserFlag pins the root half of
-// the scoping rule: when the machine's registered SSH login is root, the
+// the scoping rule: when the host's registered SSH login is root, the
 // lifecycle addresses the system manager and `--user` must NOT be passed
 // (root has no user manager owning its units).
 func TestQuadletService_Start_RootSSHUserOmitsUserFlag(t *testing.T) {
@@ -476,7 +476,7 @@ func TestQuadletService_Start_RootSSHUserOmitsUserFlag(t *testing.T) {
 	})
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("root"))
 
-	got, err := service.Start(context.Background(), "user", "machine", "web.container")
+	got, err := service.Start(context.Background(), "user", "host", "web.container")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -492,7 +492,7 @@ func TestQuadletService_Stop_MissingQuadletIs404(t *testing.T) {
 	// The SSH exec stays unarmed: a missing quadlet must not run systemctl.
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), nil)
 
-	got, err := service.Stop(context.Background(), "user", "machine", "web.container", LifecycleOptions{})
+	got, err := service.Stop(context.Background(), "user", "host", "web.container", LifecycleOptions{})
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	assert.Nil(t, got)
@@ -507,7 +507,7 @@ func TestQuadletService_Restart_NonRunningRefused(t *testing.T) {
 	// The SSH exec stays unarmed: a wrong-state quadlet must not run systemctl.
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), nil)
 
-	got, err := service.Restart(context.Background(), "user", "machine", "web.container", LifecycleOptions{})
+	got, err := service.Restart(context.Background(), "user", "host", "web.container", LifecycleOptions{})
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletNotRunning)
 	assert.Nil(t, got)
@@ -516,47 +516,47 @@ func TestQuadletService_Restart_NonRunningRefused(t *testing.T) {
 // TestQuadletService_Lifecycle_NilSSHExec tests the defensive nil-check in
 // execSystemctl (shared by applyUnitAction and reloadUserSystemd). When a nil
 // sshExec is configured, the service should return ErrInternalError rather
-// than panic. The machine lookup is armed so the scope resolution succeeds
+// than panic. The host lookup is armed so the scope resolution succeeds
 // and the call reaches the nil-checked exec seam.
 func TestQuadletService_Lifecycle_NilSSHExec(t *testing.T) {
 	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, lookupForUser("core"))
 	ctx := context.Background()
 
-	err := service.applyUnitAction(ctx, "test-user", "test-machine", actionStart, "test.service", LifecycleOptions{})
+	err := service.applyUnitAction(ctx, "test-user", "test-host", actionStart, "test.service", LifecycleOptions{})
 	assert.Error(t, err, "Should return error when sshExec is nil")
 	assert.Equal(t, appErrors.ErrInternalError, err, "Should map to ErrInternalError")
 }
 
-// TestQuadletService_Lifecycle_NilMachineLookup pins the defensive nil-check
-// in systemctlUserScope: a nil machine lookup is a programming error and
+// TestQuadletService_Lifecycle_NilHostLookup pins the defensive nil-check
+// in systemctlUserScope: a nil host lookup is a programming error and
 // answers ErrInternalError rather than panicking, before anything crosses
 // the SSH seam.
-func TestQuadletService_Lifecycle_NilMachineLookup(t *testing.T) {
+func TestQuadletService_Lifecycle_NilHostLookup(t *testing.T) {
 	// The SSH exec stays unarmed: a nil lookup must fail before any exec.
 	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, testutils.NewMockSSHExec(), nil)
 	ctx := context.Background()
 
-	err := service.applyUnitAction(ctx, "test-user", "test-machine", actionStart, "test.service", LifecycleOptions{})
-	assert.Error(t, err, "Should return error when machine lookup is nil")
+	err := service.applyUnitAction(ctx, "test-user", "test-host", actionStart, "test.service", LifecycleOptions{})
+	assert.Error(t, err, "Should return error when host lookup is nil")
 	assert.Equal(t, appErrors.ErrInternalError, err, "Should map to ErrInternalError")
 }
 
 // TestSystemctlUserScope_LookupFailure pins the error mapping of the scope
-// resolution itself: a machine deleted concurrently with the request is the
+// resolution itself: a host deleted concurrently with the request is the
 // 404 sentinel, a store failure wraps ErrInternalError.
 func TestSystemctlUserScope_LookupFailure(t *testing.T) {
-	t.Run("machine vanished mid-request maps to not found", func(t *testing.T) {
-		service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, &fakeMachineLookup{})
+	t.Run("host vanished mid-request maps to not found", func(t *testing.T) {
+		service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, &fakeHostLookup{})
 
-		_, err := service.systemctlUserScope("gone-machine")
-		require.ErrorIs(t, err, appErrors.ErrMachineNotFound)
+		_, err := service.systemctlUserScope("gone-host")
+		require.ErrorIs(t, err, appErrors.ErrHostNotFound)
 	})
 
 	t.Run("store failure wraps internal error", func(t *testing.T) {
 		service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil,
-			&fakeMachineLookup{err: errors.New("db is down")})
+			&fakeHostLookup{err: errors.New("db is down")})
 
-		_, err := service.systemctlUserScope("machine")
+		_, err := service.systemctlUserScope("host")
 		require.ErrorIs(t, err, appErrors.ErrInternalError)
 	})
 }

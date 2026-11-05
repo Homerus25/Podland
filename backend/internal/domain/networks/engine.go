@@ -9,13 +9,13 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
-// NetworkEngine is the networks domain's view of one machine's podman:
+// NetworkEngine is the networks domain's view of one host's podman:
 // the exact set of network operations the service performs, in domain
 // vocabulary (single names, plain types) and without a context parameter
 // — the connection context lives only inside the production adapter
 // below.
 type NetworkEngine interface {
-	// List returns every network podman reports on the machine —
+	// List returns every network podman reports on the host —
 	// including the default bridge network; no filtering.
 	List() ([]types.Network, error)
 	// Create creates a network by name with podman's defaults (bridge
@@ -31,11 +31,11 @@ type NetworkEngine interface {
 }
 
 // NetworkEngineProvider is the networks domain's slice of the connection
-// seam: it hands a closure one machine's NetworkEngine. It delegates to
+// seam: it hands a closure one host's NetworkEngine. It delegates to
 // connections.Manager.WithConnection, which owns acquisition, the
 // warn-and-502-sentinel failure contract, and the op tag.
 type NetworkEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e NetworkEngine) error) error
+	WithEngine(ctx context.Context, userID, hostID, op string, fn func(e NetworkEngine) error) error
 }
 
 // NewNetworkEngineProvider returns the production provider: it wraps the
@@ -51,8 +51,8 @@ type connectionEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e NetworkEngine) error) error {
-	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+func (p connectionEngines) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e NetworkEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, hostID, op, func(connCtx context.Context) error {
 		return fn(&podmanNetworkEngine{ctx: connCtx})
 	})
 }

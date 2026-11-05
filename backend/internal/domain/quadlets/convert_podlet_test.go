@@ -43,7 +43,7 @@ const unsupportedOptionCompose = `services:
 // adapter, the real service, and the handler over HTTP (spec #336): the
 // sample compose converts to the expected entries, and the
 // unsupported-option compose answers 400 VALIDATION_FAILED carrying
-// podlet's stderr. It needs no machine or test host; it skips when podlet
+// podlet's stderr. It needs no host or test host; it skips when podlet
 // is not on PATH.
 func TestConvertCompose_PodletEndToEnd(t *testing.T) {
 	if _, err := exec.LookPath("podlet"); err != nil {

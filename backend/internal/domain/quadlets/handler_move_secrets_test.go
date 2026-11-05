@@ -19,14 +19,14 @@ import (
 // the below-admin 403 envelope. The semantics live in the service tests.
 
 // newMoveSecretTestHandler builds the handler over both quadlet modules
-// with per-machine fake engines, the given access store, and per-machine
+// with per-host fake engines, the given access store, and per-host
 // fake secret stores — the wiring the secret surface exercises. The real
-// lean service (SSH exec and machine lookup wired for the seam crossings)
+// lean service (SSH exec and host lookup wired for the seam crossings)
 // is passed to the transfer service as its lifecycle seam.
 func newMoveSecretTestHandler(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, secrets map[string]moveSecretEngine) *QuadletHandler {
 	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
-		"machine-a": sourceEngine,
-		"machine-b": targetEngine,
+		"host-a": sourceEngine,
+		"host-b": targetEngine,
 	}}
 	service := NewQuadletService(provider, testutils.NewMockSSHExec(), lookupForUser("core"))
 	transfer := NewQuadletTransferService(provider, fakeSecretEngineProvider{engines: secrets}, access, 0, service)
@@ -41,12 +41,12 @@ func TestQuadletHandler_MovePreview_RendersSecretsArray(t *testing.T) {
 	handler := newMoveSecretTestHandler(sourceEngine, targetEngine,
 		&fakeAccessRepo{getPermissionFn: allowTargetRead},
 		map[string]moveSecretEngine{
-			"machine-a": secretStoreFixture("token1"),
-			"machine-b": secretStoreFixture("token1"),
+			"host-a": secretStoreFixture("token1"),
+			"host-b": secretStoreFixture("token1"),
 		})
 
-	req := movePreviewRequest("/api/machines/machine-a/quadlets/web.container/move-preview?targetMachineId=machine-b",
-		"user123", "machine-a", "web.container")
+	req := movePreviewRequest("/api/hosts/host-a/quadlets/web.container/move-preview?targetHostId=host-b",
+		"user123", "host-a", "web.container")
 
 	rr := httptest.NewRecorder()
 	handler.MovePreview(rr, req)
@@ -76,11 +76,11 @@ func TestQuadletHandler_Move_TransferSecretsRidesThroughToTheBlock(t *testing.T)
 		targetEngine,
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		map[string]moveSecretEngine{
-			"machine-a": sourceStore,
-			"machine-b": targetStore,
+			"host-a": sourceStore,
+			"host-b": targetStore,
 		})
 
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy","transferSecrets":true}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"copy","transferSecrets":true}`)
 
 	rr := httptest.NewRecorder()
 	handler.Move(rr, req)
@@ -119,11 +119,11 @@ func TestQuadletHandler_Move_TransferSecretsBelowAdminIs403Envelope(t *testing.T
 		targetEngine,
 		&fakeAccessRepo{getPermissionFn: writeBoth},
 		map[string]moveSecretEngine{
-			"machine-a": &recordingSecretStore{values: map[string]string{"dbpass": "s3cret-value"}, created: map[string]string{}},
-			"machine-b": targetStore,
+			"host-a": &recordingSecretStore{values: map[string]string{"dbpass": "s3cret-value"}, created: map[string]string{}},
+			"host-b": targetStore,
 		})
 
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy","transferSecrets":true}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"copy","transferSecrets":true}`)
 
 	rr := httptest.NewRecorder()
 	handler.Move(rr, req)

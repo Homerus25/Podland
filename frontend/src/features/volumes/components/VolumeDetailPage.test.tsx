@@ -14,18 +14,18 @@ import { server } from "@/test/server";
 function mockVolumeDetail(
 	responder: () => ReturnType<typeof HttpResponse.json>,
 ) {
-	server.use(http.get("*/api/machines/m-1/volumes/app-data", responder));
+	server.use(http.get("*/api/hosts/m-1/volumes/app-data", responder));
 }
 
-// The page reads its route params (machineId, volumeName) and the shared
-// layout reads machineId for the back button, so every render goes through
+// The page reads its route params (hostId, volumeName) and the shared
+// layout reads hostId for the back button, so every render goes through
 // a matching route inside the harness's MemoryRouter.
 function renderDetailPage(ui: ReactElement = <VolumeDetailPage />) {
 	return renderWithQuery(
 		<Routes>
-			<Route path="/machines/:machineId/volumes/:volumeName" element={ui} />
+			<Route path="/hosts/:hostId/volumes/:volumeName" element={ui} />
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/volumes/app-data"] } },
+		{ router: { initialEntries: ["/hosts/m-1/volumes/app-data"] } },
 	);
 }
 
@@ -122,14 +122,14 @@ describe("VolumeDetailPage", () => {
 		);
 	});
 
-	it("links the back button to the machine's volumes tab", async () => {
+	it("links the back button to the host's volumes tab", async () => {
 		mockVolumeDetail(() => HttpResponse.json(volumeFixture()));
 		renderDetailPage();
 
 		await screen.findByTestId("volume-detail-overview");
 		expect(screen.getByTestId("detail-back-button")).toHaveAttribute(
 			"href",
-			"/machines/m-1?tab=volumes",
+			"/hosts/m-1?tab=volumes",
 		);
 	});
 
@@ -137,7 +137,7 @@ describe("VolumeDetailPage", () => {
 		const volume = volumeFixture({ labels: { team: "platform" } });
 		let requests = 0;
 		server.use(
-			http.get("*/api/machines/m-1/volumes/app-data", () => {
+			http.get("*/api/hosts/m-1/volumes/app-data", () => {
 				requests++;
 				return HttpResponse.json(volume);
 			}),
@@ -170,7 +170,7 @@ describe("VolumeDetailPage", () => {
 			errorResponse(
 				403,
 				"ACCESS_DENIED",
-				"You do not have access to this machine",
+				"You do not have access to this host",
 				"r-2",
 			),
 		);
@@ -178,7 +178,7 @@ describe("VolumeDetailPage", () => {
 
 		const alert = await screen.findByTestId("detail-page-error");
 		expect(alert).toHaveTextContent("ACCESS_DENIED");
-		expect(alert).toHaveTextContent("You do not have access to this machine");
+		expect(alert).toHaveTextContent("You do not have access to this host");
 		expect(
 			screen.queryByTestId("volume-detail-overview"),
 		).not.toBeInTheDocument();
@@ -193,7 +193,7 @@ describe("VolumeDetailPage", () => {
 		);
 		const listRequests: string[] = [];
 		server.use(
-			http.get("*/api/machines/m-1/volumes", ({ request }) => {
+			http.get("*/api/hosts/m-1/volumes", ({ request }) => {
 				listRequests.push(new URL(request.url).pathname);
 				return HttpResponse.json([]);
 			}),

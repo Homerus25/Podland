@@ -10,20 +10,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeGetter stands in for the machine-access repository: it answers
+// fakeGetter stands in for the host-access repository: it answers
 // every lookup with the armed level (or error).
 type fakeGetter struct {
 	level string
 	err   error
 }
 
-func (f fakeGetter) GetPermission(machineID, userID string) (string, error) {
+func (f fakeGetter) GetPermission(hostID, userID string) (string, error) {
 	return f.level, f.err
 }
 
 // TestRequireLevel_LevelLadder pins the gate's decision table once, as
 // literals: a held level at or above the required one passes (nil);
-// anything below it — an empty row (no machine_access row at all) and
+// anything below it — an empty row (no host_access row at all) and
 // an unknown level included — is denied with 403 ACCESS_DENIED, never
 // a silent allow/deny guess.
 func TestRequireLevel_LevelLadder(t *testing.T) {
@@ -56,7 +56,7 @@ func TestRequireLevel_LevelLadder(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := RequireLevel(fakeGetter{level: tc.held}, "machine-1", "user-1", tc.required)
+			err := RequireLevel(fakeGetter{level: tc.held}, "host-1", "user-1", tc.required)
 
 			if tc.want == nil {
 				assert.NoError(t, err, "a satisfied level must pass the gate")
@@ -72,7 +72,7 @@ func TestRequireLevel_LevelLadder(t *testing.T) {
 // the contract: a failing permission lookup is 500 INTERNAL_ERROR,
 // never a silent allow/deny guess.
 func TestRequireLevel_LookupErrorIsInternalError(t *testing.T) {
-	err := RequireLevel(fakeGetter{err: errors.New("db down")}, "machine-1", "user-1", models.PermissionRead)
+	err := RequireLevel(fakeGetter{err: errors.New("db down")}, "host-1", "user-1", models.PermissionRead)
 
 	require.Error(t, err, "a failing lookup must not pass the gate")
 	assert.ErrorIs(t, err, appErrors.ErrInternalError, "the lookup failure must surface as the bare INTERNAL_ERROR sentinel")

@@ -5,13 +5,13 @@ import type {
 	ContainerStatsListResult,
 	ContainerSummary,
 } from "@features/containers/services/containersApi";
+import type { HostVersion } from "@features/hosts/services/hostsApi";
 import type {
 	ImageCopyPreview,
 	ImageCopyResult,
 	ImageDetail,
 	ImageSummary,
 } from "@features/images/services/imagesApi";
-import type { MachineVersion } from "@features/machines/services/machinesApi";
 import type {
 	NetworkDetail,
 	NetworkSummary,
@@ -40,7 +40,7 @@ import type {
 	VolumeMoveResult,
 	VolumeSummary,
 } from "@features/volumes/services/volumesApi";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 
 // Shared test fixture factories: one authoritative shape per DTO, imported
 // by any test that needs a valid object with `Partial` overrides. Keep
@@ -240,7 +240,7 @@ export function quadletImportEntryFixture(
 	};
 }
 
-// Response of POST /api/machines/{id}/quadlets/import -> 201
+// Response of POST /api/hosts/{id}/quadlets/import -> 201
 // (backend QuadletImportResponse; spec #336): one imported entry by
 // default; tests override `imported`/`failed` per scenario.
 export function quadletImportResponseFixture(
@@ -327,7 +327,7 @@ export function quadletMoveDataVolumeFixture(
 
 // One companion .volume preview entry (issue 217): the source names the
 // same-named quadlet file and the preview labels how that file sits on the
-// target machine. Companion references resolve to podman's `systemd-<name>`
+// target host. Companion references resolve to podman's `systemd-<name>`
 // default unless the file sets VolumeName= (issue 214), so the entry carries
 // the resolved name and the always-present data fields too.
 export function quadletMoveCompanionVolumeFixture(
@@ -355,8 +355,8 @@ export function quadletMoveResultFixture(
 		name: "web",
 		resource: "container",
 		status: "moved",
-		sourceMachineId: "m-1",
-		targetMachineId: "m-2",
+		sourceHostId: "m-1",
+		targetHostId: "m-2",
 		...overrides,
 	};
 }
@@ -496,8 +496,8 @@ export function secretMoveResultFixture(
 	return {
 		name: "db-password",
 		status: "moved",
-		sourceMachineId: "m-1",
-		targetMachineId: "m-2",
+		sourceHostId: "m-1",
+		targetHostId: "m-2",
 		...overrides,
 	};
 }
@@ -526,8 +526,8 @@ export function volumeMoveResultFixture(
 	return {
 		name: "app-data",
 		status: "moved",
-		sourceMachineId: "m-1",
-		targetMachineId: "m-2",
+		sourceHostId: "m-1",
+		targetHostId: "m-2",
 		bytes: 2097152,
 		...overrides,
 	};
@@ -555,8 +555,8 @@ export function imageCopyResultFixture(
 	return {
 		id: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		status: "copied",
-		sourceMachineId: "m-1",
-		targetMachineId: "m-2",
+		sourceHostId: "m-1",
+		targetHostId: "m-2",
 		bytes: 2097152,
 		names: ["docker.io/library/nginx:1.27"],
 		...overrides,
@@ -578,7 +578,7 @@ export function imageCopyEventFixture(
 	return {
 		operationId: "op-1",
 		type: "image",
-		machineId: "m-1",
+		hostId: "m-1",
 		image:
 			"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		phase: "start",
@@ -592,7 +592,7 @@ export function imageCopyCompleteEventFixture(
 	return {
 		operationId: "op-1",
 		type: "complete",
-		machineId: "m-1",
+		hostId: "m-1",
 		result,
 	};
 }
@@ -604,7 +604,7 @@ export function imageCopyErrorEventFixture(
 	return {
 		operationId: "op-1",
 		type: "error",
-		machineId: "m-1",
+		hostId: "m-1",
 		error: { code, message },
 	};
 }
@@ -628,7 +628,7 @@ export function authStatusFixture(
 	};
 }
 
-export function machineFixture(overrides: Partial<Machine> = {}): Machine {
+export function hostFixture(overrides: Partial<Host> = {}): Host {
 	// Default shape: the owner's own view — the backend seeds the owner an
 	// admin access row and the list endpoint reports isOwner true. Grantee
 	// fixtures override `permission` and `isOwner` together.
@@ -670,12 +670,12 @@ export function rawInspectFixture(
 	};
 }
 
-// MachineVersion mirrors GET /api/machines/{id}/version: both fields are
+// HostVersion mirrors GET /api/hosts/{id}/version: both fields are
 // null when the remote Podman could not be asked (offline is a valid
 // answer, not an error).
-export function machineVersionFixture(
-	overrides: Partial<MachineVersion> = {},
-): MachineVersion {
+export function hostVersionFixture(
+	overrides: Partial<HostVersion> = {},
+): HostVersion {
 	return {
 		podmanVersion: "5.4.1",
 		apiVersion: "5.4.1",

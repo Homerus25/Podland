@@ -228,7 +228,7 @@ type ContainerCreateRequest struct {
 }
 
 // ContainerRenameRequest is the body of POST
-// /api/machines/{id}/containers/{containerId}/rename. The struct tags own
+// /api/hosts/{id}/containers/{containerId}/rename. The struct tags own
 // the wire-documented guards (an empty or over-long name answers 400
 // VALIDATION_FAILED through web.Decode); podman's own name regex is not
 // duplicated here — the engine is the validator of the name's shape, and
@@ -239,7 +239,7 @@ type ContainerRenameRequest struct {
 }
 
 // ContainerUpdateRequest is the body of POST
-// /api/machines/{id}/containers/{containerId}/update. The contract is
+// /api/hosts/{id}/containers/{containerId}/update. The contract is
 // patch semantics: omitted fields mean "unchanged", and only present
 // fields are forwarded to podman's container update. The wire guards
 // that can be struct tags live there (the positive-cpus guard, owned by
@@ -321,7 +321,7 @@ type VolumeRequest struct {
 
 // SecretRequest represents a secret to mount into the container
 type SecretRequest struct {
-	// Name of the secret on the machine (required)
+	// Name of the secret on the host (required)
 	Source string `json:"source" validate:"required,min=1"`
 	// Path inside the container to mount the secret at (optional,
 	// defaults to /run/secrets/<source>)

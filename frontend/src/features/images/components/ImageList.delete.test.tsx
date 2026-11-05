@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
-import { imageFixture, machineFixture } from "@/test/factories";
+import { hostFixture, imageFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -24,11 +24,11 @@ function resetCounters() {
 }
 
 function imagesHandler(images = imagesFixture) {
-	return http.get("*/api/machines/m-1/images", () => HttpResponse.json(images));
+	return http.get("*/api/hosts/m-1/images", () => HttpResponse.json(images));
 }
 
 function deleteHandler(status = 204, body?: Record<string, unknown>) {
-	return http.delete("*/api/machines/m-1/images/*", ({ request }) => {
+	return http.delete("*/api/hosts/m-1/images/*", ({ request }) => {
 		deleteRequests.count++;
 		deleteRequests.url = new URL(request.url);
 		if (status !== 204) return HttpResponse.json(body, { status });
@@ -37,8 +37,8 @@ function deleteHandler(status = 204, body?: Record<string, unknown>) {
 }
 
 async function renderImageList() {
-	renderWithQuery(<ImageList machine={machineFixture()} />, {
-		router: { initialEntries: ["/machines/m-1"] },
+	renderWithQuery(<ImageList host={hostFixture()} />, {
+		router: { initialEntries: ["/hosts/m-1"] },
 	});
 	await screen.findByText("docker.io/library/nginx:1.27");
 }
@@ -60,11 +60,11 @@ describe("ImageList delete", () => {
 		resetCounters();
 		let remaining = [...imagesFixture];
 		server.use(
-			http.get("*/api/machines/m-1/images", () => HttpResponse.json(remaining)),
+			http.get("*/api/hosts/m-1/images", () => HttpResponse.json(remaining)),
 			deleteHandler(204, undefined),
 		);
 		server.use(
-			http.delete("*/api/machines/m-1/images/*", ({ request }) => {
+			http.delete("*/api/hosts/m-1/images/*", ({ request }) => {
 				deleteRequests.count++;
 				deleteRequests.url = new URL(request.url);
 				remaining = [];
@@ -96,8 +96,8 @@ describe("ImageList delete", () => {
 		let forceRequested = false;
 		let remaining = [...imagesFixture];
 		server.use(
-			http.get("*/api/machines/m-1/images", () => HttpResponse.json(remaining)),
-			http.delete("*/api/machines/m-1/images/*", ({ request }) => {
+			http.get("*/api/hosts/m-1/images", () => HttpResponse.json(remaining)),
+			http.delete("*/api/hosts/m-1/images/*", ({ request }) => {
 				deleteRequests.count++;
 				deleteRequests.url = new URL(request.url);
 				forceRequested =

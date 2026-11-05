@@ -19,7 +19,7 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
-// QuadletEngine is the quadlets domain's view of one machine's podman: the
+// QuadletEngine is the quadlets domain's view of one host's podman: the
 // exact set of quadlet and managed-container operations the service
 // performs, in domain vocabulary (single names, plain flags, raw file
 // content) and without a context parameter — the connection context lives
@@ -52,7 +52,7 @@ type QuadletEngine interface {
 	// missing volume comes back as a nil report with a nil error (the same
 	// contract the volumes domain's engine sets). VolumeCreate is
 	// create-if-absent. Export/Import are the podman tar streams the
-	// machine-to-machine pipe splices.
+	// host-to-host pipe splices.
 	VolumeInspect(name string) (*QuadletVolumeInspect, error)
 	VolumeCreate(name string) error
 	VolumeExport(name string, w io.Writer) error
@@ -73,11 +73,11 @@ type QuadletVolumeInspect struct {
 }
 
 // QuadletEngineProvider is the quadlets domain's slice of the connection
-// seam: it hands a closure one machine's QuadletEngine. It delegates to
+// seam: it hands a closure one host's QuadletEngine. It delegates to
 // connections.Manager.WithConnection, which owns acquisition, the
 // warn-and-502-sentinel failure contract, and the op tag.
 type QuadletEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e QuadletEngine) error) error
+	WithEngine(ctx context.Context, userID, hostID, op string, fn func(e QuadletEngine) error) error
 }
 
 // NewQuadletEngineProvider returns the production provider: it wraps the
@@ -93,8 +93,8 @@ type connectionEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e QuadletEngine) error) error {
-	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+func (p connectionEngines) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e QuadletEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, hostID, op, func(connCtx context.Context) error {
 		return fn(&podmanQuadletEngine{
 			tunnelEngine: &tunnel.ContainerEngine{ClientCtx: connCtx},
 			ctx:          connCtx,
@@ -222,7 +222,7 @@ func (e *podmanQuadletEngine) VolumeImport(name string, r io.Reader) error {
 	return bindingsVolumes.Import(e.ctx, name, r)
 }
 
-// moveSecretEngine is the quadlets domain's view of one machine's podman
+// moveSecretEngine is the quadlets domain's view of one host's podman
 // secret store (issue 215): the exact set of secret operations the
 // move/copy preview and transfer perform, in domain vocabulary, without a
 // context parameter — the connection context lives only inside the
@@ -230,8 +230,8 @@ func (e *podmanQuadletEngine) VolumeImport(name string, r io.Reader) error {
 // domain's engine: no Remove (secrets are copy-only, any mode), no
 // metadata Inspect.
 type moveSecretEngine interface {
-	// Names lists the machine's podman secret names — the preview's
-	// existence read (both machines).
+	// Names lists the host's podman secret names — the preview's
+	// existence read (both hosts).
 	Names() ([]string, error)
 	// Has answers whether the store holds a secret of this name — the
 	// transfer's same-name check (target). A missing secret is a clean
@@ -247,9 +247,9 @@ type moveSecretEngine interface {
 
 // moveSecretEngineProvider is the quadlets domain's slice of the
 // connection seam for the secret surface (issue 215): it hands a closure
-// one machine's moveSecretEngine, delegating to connections.Manager.
+// one host's moveSecretEngine, delegating to connections.Manager.
 type moveSecretEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e moveSecretEngine) error) error
+	WithEngine(ctx context.Context, userID, hostID, op string, fn func(e moveSecretEngine) error) error
 }
 
 // NewQuadletSecretEngineProvider returns the production secret provider
@@ -265,8 +265,8 @@ type connectionSecretEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionSecretEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e moveSecretEngine) error) error {
-	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+func (p connectionSecretEngines) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e moveSecretEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, hostID, op, func(connCtx context.Context) error {
 		return fn(&podmanMoveSecretEngine{ctx: connCtx})
 	})
 }

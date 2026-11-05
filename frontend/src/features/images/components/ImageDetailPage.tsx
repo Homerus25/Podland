@@ -51,13 +51,13 @@ function ImageOverview({ image }: { image: ImageDetail }) {
 // lazy inspect query (enabled on first reveal), and hands the layout their
 // structural slices; the layout owns the whole render.
 export function ImageDetailPage() {
-	const { machineId, imageId } = useParams<{
-		machineId: string;
+	const { hostId, imageId } = useParams<{
+		hostId: string;
 		imageId: string;
 	}>();
 	const [revealed, setRevealed] = useState(false);
-	const { data: image, isPending, error } = useImage(machineId!, imageId!);
-	const inspectQuery = useImageInspect(machineId!, imageId!, {
+	const { data: image, isPending, error } = useImage(hostId!, imageId!);
+	const inspectQuery = useImageInspect(hostId!, imageId!, {
 		enabled: revealed,
 	});
 

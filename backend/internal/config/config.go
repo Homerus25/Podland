@@ -22,7 +22,7 @@ type Config struct {
 	AllowedOrigins []string
 	Log            LogConfig
 	Encryption     EncryptionConfig
-	Machines       MachineConfig
+	Hosts          HostConfig
 	Volumes        VolumeConfig
 	Images         ImageConfig
 
@@ -34,8 +34,8 @@ type Config struct {
 	HSTSMaxAgeSeconds int
 }
 
-// MachineConfig holds machine-registration configuration.
-type MachineConfig struct {
+// HostConfig holds host-registration configuration.
+type HostConfig struct {
 	// HostBlockPrivateRanges is the opt-in egress block on the
 	// registration/update probe target (pentest 2026-11-01 finding 1):
 	// when enabled, a hostname whose resolved IPs (or literal IP) fall
@@ -55,7 +55,7 @@ type VolumeConfig struct {
 
 // ImageConfig holds image configuration
 type ImageConfig struct {
-	// MaxTransferBytes bounds the cross-machine image copy's archive
+	// MaxTransferBytes bounds the cross-host image copy's archive
 	// stream (issue 375, §19), enforced by the transfer kit's counting
 	// reader. The default is the transfer kit's
 	// DefaultMaxImageTransferBytes — 10 GiB, larger than the volume
@@ -153,8 +153,8 @@ func Load() (*Config, error) {
 
 	// Connections
 	cfg.Connections.SSHIdleTimeoutSeconds = getEnvInt("SSH_IDLE_TIMEOUT_SECONDS", 900)
-	cfg.Connections.MaxConcurrent = getEnvInt("MAX_CONCURRENT_MACHINES", 100)
-	cfg.Connections.TestTimeoutSeconds = getEnvInt("MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS", 10)
+	cfg.Connections.MaxConcurrent = getEnvInt("MAX_CONCURRENT_HOSTS", 100)
+	cfg.Connections.TestTimeoutSeconds = getEnvInt("HOST_CONNECTION_TEST_TIMEOUT_SECONDS", 10)
 
 	// Rate Limiting
 	cfg.RateLimit.RequestsPerMinute = getEnvInt("RATE_LIMIT_REQUESTS_PER_USER_PER_MINUTE", 60)
@@ -177,18 +177,18 @@ func Load() (*Config, error) {
 	// Encryption
 	cfg.Encryption.Key = getEnv("ENCRYPTION_KEY", "")
 
-	// Machines
-	cfg.Machines.HostBlockPrivateRanges = getEnvBool("MACHINE_HOST_BLOCK_PRIVATE_RANGES", false)
+	// Hosts
+	cfg.Hosts.HostBlockPrivateRanges = getEnvBool("HOST_BLOCK_PRIVATE_RANGES", false)
 
 	// Volumes
 	// The default is the transfer kit's DefaultMaxVolumeUploadBytes —
-	// the same bound the cross-machine copy/move falls back to — so
+	// the same bound the cross-host copy/move falls back to — so
 	// the uploads cap and the transfer bound share one 2 GiB policy.
 	cfg.Volumes.MaxUploadBytes = getEnvInt64("VOLUME_UPLOAD_MAX_BYTES", transfer.DefaultMaxVolumeUploadBytes)
 
 	// Images
 	// The default is the transfer kit's DefaultMaxImageTransferBytes —
-	// the same bound the cross-machine image copy falls back to — so
+	// the same bound the cross-host image copy falls back to — so
 	// the config default and the transfer bound share one 10 GiB
 	// policy (the kit owns the default per §19).
 	cfg.Images.MaxTransferBytes = getEnvInt64("IMAGE_TRANSFER_MAX_BYTES", transfer.DefaultMaxImageTransferBytes)

@@ -15,7 +15,7 @@ import {
 	TransferReport,
 	transferProgressLabel,
 } from "@shared/transfers/transferPresentation";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 
 // The one refusal the dialog can make actionable (issue 376 over 375's
 // wire): the archive crossed the server's transfer bound. It rides the
@@ -44,21 +44,21 @@ function TransferProgress({ progress }: { progress: ImageCopyProgress }) {
 // already-present fact is information in the warnings slot, never a
 // block — the load is idempotent), the NDJSON transport, the report's
 // loaded names, and the too-large hint. A close mid-run aborts the
-// stream; the both-machines invalidation lives in the stream hook, not
+// stream; the both-hosts invalidation lives in the stream hook, not
 // here.
 export function CopyImageDialog({
-	machine,
+	host,
 	image,
 	onClose,
 }: {
-	machine: Machine;
+	host: Host;
 	image: ImageSummary;
 	onClose: () => void;
 }) {
-	const transfer = useTransferState(machine, "manage-images");
-	const copyStream = useImageCopyStream(machine.id);
+	const transfer = useTransferState(host, "manage-images");
+	const copyStream = useImageCopyStream(host.id);
 	const previewQuery = useImageCopyPreview(
-		machine.id,
+		host.id,
 		image.id,
 		transfer.targetId || null,
 	);
@@ -104,7 +104,7 @@ export function CopyImageDialog({
 
 	return (
 		<TransferDialog
-			machine={machine}
+			host={host}
 			transfer={transfer}
 			preview={preview}
 			pinnedMode="copy"
@@ -132,7 +132,7 @@ export function CopyImageDialog({
 				) : null
 			}
 			onConfirm={() =>
-				copyStream.run(image.id, { targetMachineId: transfer.targetId })
+				copyStream.run(image.id, { targetHostId: transfer.targetId })
 			}
 			onClose={onClose}
 		>

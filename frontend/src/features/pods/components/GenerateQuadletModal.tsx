@@ -23,13 +23,13 @@ import { useEffect } from "react";
 // detail page renders it conditionally (mount = open, unmount = close),
 // so reopening always starts clean: no leaked previous generation.
 export function GenerateQuadletModal({
-	machineId,
+	hostId,
 	podId,
 	podName,
 	canSave,
 	onClose,
 }: {
-	machineId: string;
+	hostId: string;
 	podId: string;
 	podName: string;
 	// Save posts to the write-gated quadlet create endpoint, so the page
@@ -38,8 +38,8 @@ export function GenerateQuadletModal({
 	canSave: boolean;
 	onClose: () => void;
 }) {
-	const generate = useGenerateQuadlet(machineId);
-	const save = useCreateQuadlet(machineId);
+	const generate = useGenerateQuadlet(hostId);
+	const save = useCreateQuadlet(hostId);
 	const { mutate: runGenerate } = generate;
 
 	// Mount = open: generation starts once per open, and the mutation's
@@ -53,7 +53,7 @@ export function GenerateQuadletModal({
 
 	// The generate answer forwards to the create endpoint verbatim — the
 	// pod's name, its resource type, and the generated content — so the
-	// saved file appears in the machine's quadlets list (the create
+	// saved file appears in the host's quadlets list (the create
 	// mutation invalidates it).
 	const runSave = () => {
 		if (!generated) return;
@@ -96,7 +96,7 @@ export function GenerateQuadletModal({
 								onClick={runSave}
 								data-testid="save-generated-quadlet-button"
 							>
-								Save to machine
+								Save to host
 							</Button>
 						) : null}
 						<Button
@@ -140,7 +140,7 @@ export function GenerateQuadletModal({
 					</Box>
 					{save.isSuccess ? (
 						<Text data-testid="generated-quadlet-saved" color="green.300">
-							Saved — the quadlet now appears in the machine's Quadlets tab.
+							Saved — the quadlet now appears in the host's Quadlets tab.
 						</Text>
 					) : null}
 					{save.error ? (

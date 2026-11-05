@@ -6,9 +6,9 @@ Part of the [API contract](description_api.md). See the main document for base U
 
 ## Quadlet Endpoints
 
-### GET /api/machines/{id}/quadlets
+### GET /api/hosts/{id}/quadlets
 
-List all quadlets (Podman systemd unit files) on a machine.
+List all quadlets (Podman systemd unit files) on a host.
 
 **Authentication:** Required
 
@@ -34,13 +34,13 @@ List all quadlets (Podman systemd unit files) on a machine.
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/quadlets/{quadletId}
+### GET /api/hosts/{id}/quadlets/{quadletId}
 
 Get details of a specific quadlet including its content.
 
@@ -65,15 +65,15 @@ Get details of a specific quadlet including its content.
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/quadlets
+### POST /api/hosts/{id}/quadlets
 
-Create a new quadlet on a machine.
+Create a new quadlet on a host.
 
 **Authentication:** Required
 
@@ -104,14 +104,14 @@ Create a new quadlet on a machine.
 - 400: `VALIDATION_FAILED`, `INVALID_REQUEST`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 409: `QUADLET_ALREADY_EXISTS`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### PUT /api/machines/{id}/quadlets/{quadletId}
+### PUT /api/hosts/{id}/quadlets/{quadletId}
 
 Update an existing quadlet's content.
 
@@ -125,21 +125,21 @@ Update an existing quadlet's content.
 ```
 
 **Response (Success - 200):**
-- Same as GET /api/machines/{id}/quadlets/{quadletId}
+- Same as GET /api/hosts/{id}/quadlets/{quadletId}
 
 **Response (Error):**
 - 400: `VALIDATION_FAILED`, `INVALID_REQUEST`
 - 401: `TOKEN_MISSING`, `TOKEN_AUTO_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### DELETE /api/machines/{id}/quadlets/{quadletId}
+### DELETE /api/hosts/{id}/quadlets/{quadletId}
 
-Remove a quadlet from a machine.
+Remove a quadlet from a host.
 
 **Authentication:** Required
 
@@ -159,13 +159,13 @@ Remove a quadlet from a machine.
 - 400: `QUADLET_RESOURCE_RUNNING` (if running and neither `force` nor `stop` is set)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/quadlets/{quadletId}/start
+### POST /api/hosts/{id}/quadlets/{quadletId}/start
 
 Start a stopped quadlet-managed resource.
 
@@ -184,13 +184,13 @@ Start a stopped quadlet-managed resource.
 - 400: `QUADLET_ALREADY_RUNNING`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/quadlets/{quadletId}/stop
+### POST /api/hosts/{id}/quadlets/{quadletId}/stop
 
 Stop a running quadlet-managed resource.
 
@@ -222,14 +222,14 @@ bounded by `timeout`; aggressive teardown stays with DELETE's `force`
 - 400: `QUADLET_NOT_RUNNING`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 - 504: `QUADLET_STOP_TIMED_OUT` (the timeout expired before the unit stopped)
 
 ---
 
-### POST /api/machines/{id}/quadlets/{quadletId}/restart
+### POST /api/hosts/{id}/quadlets/{quadletId}/restart
 
 Restart a quadlet-managed resource.
 
@@ -256,14 +256,14 @@ No `force` parameter — same ruling as stop.
 - 400: `QUADLET_NOT_RUNNING`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 - 504: `QUADLET_STOP_TIMED_OUT` (the timeout expired before the restart finished)
 
 ---
 
-### GET /api/machines/{id}/quadlets/{quadletId}/logs
+### GET /api/hosts/{id}/quadlets/{quadletId}/logs
 
 Get logs for a quadlet-managed resource.
 
@@ -300,7 +300,7 @@ The stream terminates with exactly one terminal event:
 - A clean stream end emits `{"level": "INFO", "message": "STREAM_ENDED"}`.
 - A failure emits an ERROR-level log-shaped event whose message embeds the
   error code, e.g. `"QUADLET_NOT_FOUND: Quadlet not found"` or
-  `"CONNECTION_FAILED: Failed to connect to machine"` — the same contract as
+  `"CONNECTION_FAILED: Failed to connect to host"` — the same contract as
   the containers log stream, so clients parse it with the shared
   `"CODE: message"` heuristic.
 - A client disconnect cancels the stream server-side and emits a WARN
@@ -310,16 +310,16 @@ The stream terminates with exactly one terminal event:
 - 400: `INVALID_SINCE_PARAM` / `INVALID_TAIL_PARAM` (malformed `since`/`tail`, message says "use RFC3339"; answered through the JSON envelope even when `follow=true`), `MISSING_QUADLET_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR` (also for a miswired route missing identity), `STREAMING_NOT_SUPPORTED`
 - 502: `CONNECTION_FAILED`
 - 504: `OPERATION_CANCELLED` (buffered fetch cancelled by a client disconnect; follow-mode cancellation is the WARN terminal event above)
 
 ---
 
-### GET /api/machines/{id}/quadlets/{quadletId}/move-preview
+### GET /api/hosts/{id}/quadlets/{quadletId}/move-preview
 
-Preview a quadlet move/copy to another machine (issue 207): everything the
+Preview a quadlet move/copy to another host (issue 207): everything the
 transfer dialog must show before confirming — the volumes the quadlet
 references (whose data follows the file only when the transfer opts into
 `migrateVolumeData`, issue 214), whether the target already has a quadlet
@@ -330,16 +330,16 @@ resource is running. Volume entries whose source references a companion
 
 **Authentication:** Required
 
-Read-level access on the source machine suffices (the endpoint mutates
+Read-level access on the source host suffices (the endpoint mutates
 nothing). The caller additionally needs **at least read access on the
-target machine**: the target's quadlet list is read server-side, and a
+target host**: the target's quadlet list is read server-side, and a
 caller without target access gets the standard `ACCESS_DENIED` error —
-never a preview. An unknown target machine ID answers `ACCESS_DENIED`
-the same way (no access row can exist for it); `MACHINE_NOT_FOUND` is
-reserved for the source machine in the path.
+never a preview. An unknown target host ID answers `ACCESS_DENIED`
+the same way (no access row can exist for it); `HOST_NOT_FOUND` is
+reserved for the source host in the path.
 
 **Query Parameters:**
-- `targetMachineId` (string, required): ID of the target machine the
+- `targetHostId` (string, required): ID of the target host the
   preview refers to.
 
 **Response (Success - 200):**
@@ -380,7 +380,7 @@ reserved for the source machine in the path.
   array.
 - `quadletFile` / `targetState` (companion fields, issue 217, present
   together or not at all): a source ending in `.volume` with no path
-  separator references the same-named quadlet FILE on the source machine —
+  separator references the same-named quadlet FILE on the source host —
   exact filename match, bare names never match, podman resolves only the
   suffix form (the quadlet-generated volume is `systemd-<name>` unless
   `VolumeName=` overrides). When such a file exists on the source,
@@ -393,7 +393,7 @@ reserved for the source machine in the path.
   reference with no matching source file is dangling and stays an ordinary
   entry, as do bare names and host paths.
 - `podmanVolume` (issue 214, volume-kind entries only): the podman volume
-  the reference resolves to on BOTH machines — a bare name is itself; a
+  the reference resolves to on BOTH hosts — a bare name is itself; a
   `.volume` reference resolves through its companion file's `VolumeName=`
   when the companion sets one, else podman's `systemd-<name>` default
   (dangling references still resolve the default). Host paths never
@@ -421,7 +421,7 @@ reserved for the source machine in the path.
   (`"secret"`), or an absolute path (`"hostPath"`) that podman reads off
   the host filesystem at run time and that no secret store ever holds.
   `existsOnSource` / `existsOnTarget` answer whether the respective
-  machine's podman secret store holds the name (the target's read goes
+  host's podman secret store holds the name (the target's read goes
   through the connection seam, like the collision check). Both booleans
   are always present but carry meaning only on secret-kind entries — a
   hostPath entry renders both `false`, the same no-claims shape as
@@ -429,23 +429,23 @@ reserved for the source machine in the path.
   from the source store is an honest dangling entry (`existsOnSource:
   false`), never an error — the same convention as dangling volume
   references.
-- `collision`: true exactly when the target machine already has a quadlet
+- `collision`: true exactly when the target host already has a quadlet
   of the same name and resource.
 - `running`: the source quadlet's live state.
 
 **Response (Error):**
-- 400: `MISSING_TARGET_MACHINE_ID`, `MISSING_QUADLET_ID`
+- 400: `MISSING_TARGET_HOST_ID`, `MISSING_QUADLET_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row on the source, or below-read level on the target)
-- 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED` (source or target unreachable)
 
 ---
 
-### POST /api/machines/{id}/quadlets/{quadletId}/move
+### POST /api/hosts/{id}/quadlets/{quadletId}/move
 
-Transfer a quadlet to another machine (issue 207). Two modes:
+Transfer a quadlet to another host (issue 207). Two modes:
 
 - **copy** (issue 210) installs the source quadlet's file — same name,
   resource, and content — on the target without overwriting and never
@@ -461,7 +461,7 @@ decision, exactly like creating a quadlet.
 
 **Companion `.volume` quadlets (issue 217):** a `Volume=` source ending in
 `.volume` with no path separator references the same-named quadlet file on
-the source machine (exact filename match; see the preview section's
+the source host (exact filename match; see the preview section's
 discovery rule). When such companion files exist, the transfer carries
 their definitions along and installs them on the target FIRST —
 dependencies before the dependent — then the main quadlet:
@@ -505,7 +505,7 @@ transfer into carrying the referenced podman volumes' DATA along:
   absent are skipped, never probed or refused), then the secret transfer
   when `transferSecrets` opts into it (issue 215, below), then a move's
   stop, then the data itself. A data failure therefore answers the
-  terminal error event with both machines' quadlet sets untouched.
+  terminal error event with both hosts' quadlet sets untouched.
 - **A migrating move stops before streaming**: a running source quadlet
   with `stop` (and not `force`) has its unit stopped BEFORE the data phase
   — exporting a volume under a live writer would capture torn state. The
@@ -521,7 +521,7 @@ transfer into carrying the referenced podman volumes' DATA along:
   each MiB (carrying `bytes`), `phase: "done"` when the import finished
   (carrying the total `bytes`), `phase: "skip"` when the reference carried
   no data (a dangling reference; `reason` says why). All events share one
-  `operationId`, the source `machineId`, and a `timestamp`.
+  `operationId`, the source `hostId`, and a `timestamp`.
 - **Terminal events**: on success one `type: "complete"` event carrying
   the transfer envelope in `result` — including the additive
   `volumeMigration` block (present even when every reference was skipped,
@@ -546,7 +546,7 @@ into carrying the referenced podman SECRETS — name and value — along:
   is revealed on the source and the secret is created on the target with
   the identical value. The value is never persisted by the backend and
   never logged; the audit trail records only that a named secret moved
-  between the two machines.
+  between the two hosts.
 - A secret-kind reference whose source secret does not exist (dangling),
   and a hostPath reference (read off the host filesystem at run time, no
   secret store involved), are **skipped and reported** in the response's
@@ -566,7 +566,7 @@ into carrying the referenced podman SECRETS — name and value — along:
   failure (a reveal or a create) aborts the transfer with 500
   `SECRET_TRANSFER_FAILED` (the message names the secret and the cause);
   a store-level failure answers the generic 500 — either way nothing is
-  installed, nothing stopped, and both machines' quadlet sets untouched.
+  installed, nothing stopped, and both hosts' quadlet sets untouched.
 - The transport does not change: secrets alone never switch the response
   to NDJSON streaming — only `migrateVolumeData` does (issue 214). With
   both flags set, the `secretTransfer` block rides the terminal
@@ -574,24 +574,24 @@ into carrying the referenced podman SECRETS — name and value — along:
 
 **Authentication:** Required
 
-**Write-level access on the source machine is required** (the transfer
+**Write-level access on the source host is required** (the transfer
 mutates remote state through it). The caller additionally needs **at least
-write access on the target machine**: route middleware only sees the source
-machine, so the target's level is checked server-side against the access
+write access on the target host**: route middleware only sees the source
+host, so the target's level is checked server-side against the access
 store BEFORE any install — a read-level grantee (or a caller with no target
 row) gets the standard `ACCESS_DENIED` and nothing is installed. An unknown
-target machine ID answers `ACCESS_DENIED` the same way (no access row can
-exist for it); `MACHINE_NOT_FOUND` is reserved for the source machine in
+target host ID answers `ACCESS_DENIED` the same way (no access row can
+exist for it); `HOST_NOT_FOUND` is reserved for the source host in
 the path.
 
 A `transferSecrets` request additionally requires **admin-level access on
-the SOURCE machine** (issue 215): moving secret values off a machine is a
+the SOURCE host** (issue 215): moving secret values off a host is a
 reveal, and the reveal gate owns value exposure — a below-admin caller
 gets 403 `ACCESS_DENIED` in preflight, before anything is transferred or
 installed. The target keeps its write-level requirement (a secret is
 created on it).
 
-A transfer onto the source's own machine is not special-cased: it collides
+A transfer onto the source's own host is not special-cased: it collides
 with the quadlet itself and answers 409 with nothing installed.
 
 **Move mode semantics:**
@@ -607,7 +607,7 @@ with the quadlet itself and answers 409 with nothing installed.
   error and leaves the source untouched.
 - A removal failure after a successful install answers 200 with the
   transfer envelope, `status: "partial"`, and the failure's detail in
-  `error`: the quadlet then exists on BOTH machines and the source side
+  `error`: the quadlet then exists on BOTH hosts and the source side
   must be cleaned up manually. There is no rollback of the target install.
 - A source quadlet that vanished between the install and the removal needs
   no removal — the answer is `status: "moved"`.
@@ -615,7 +615,7 @@ with the quadlet itself and answers 409 with nothing installed.
 **Request:**
 ```json
 {
-  "targetMachineId": "string (required)",
+  "targetHostId": "string (required)",
   "mode": "copy|move (required)",
   "stop": "boolean (optional, move mode only, default false)",
   "force": "boolean (optional, move mode only, default false)",
@@ -633,8 +633,8 @@ with the quadlet itself and answers 409 with nothing installed.
   "name": "string",
   "resource": "container|pod|image|volume|network",
   "status": "copied|moved|partial",
-  "sourceMachineId": "string",
-  "targetMachineId": "string",
+  "sourceHostId": "string",
+  "targetHostId": "string",
   "path": "string (optional, the installed file's path on the target)",
   "error": "string (optional, present only when status is \"partial\")",
   "volumeMigration": {
@@ -663,10 +663,10 @@ with the quadlet itself and answers 409 with nothing installed.
   keeps the source's file name verbatim.
 - `status`: `"copied"` for a completed copy, `"moved"` for a completed
   move, `"partial"` for a move whose target install succeeded but whose
-  source removal failed (the quadlet exists on both machines; see above).
+  source removal failed (the quadlet exists on both hosts; see above).
 - `error`: the removal failure's detail; present only with
-  `"partial"`. Clients must narrate the both-machines state from it.
-- After a successful install the target machine's systemd manager is
+  `"partial"`. Clients must narrate the both-hosts state from it.
+- After a successful install the target host's systemd manager is
   reloaded (same guarantee as quadlet create); a reload failure answers
   `CONNECTION_FAILED` even though the file is installed — in move mode
   this fires before the source is touched at all.
@@ -697,7 +697,7 @@ with the quadlet itself and answers 409 with nothing installed.
 
 **Response (Error):**
 - 400: `MISSING_QUADLET_ID`, `INVALID_REQUEST` (malformed body),
-  `VALIDATION_FAILED` (missing `targetMachineId`, or a `mode` other than
+  `VALIDATION_FAILED` (missing `targetHostId`, or a `mode` other than
   `"copy"` / `"move"`), `QUADLET_RESOURCE_RUNNING` (move mode: the source
   quadlet is running and neither `stop` nor `force` is set; nothing is
   installed)
@@ -706,7 +706,7 @@ with the quadlet itself and answers 409 with nothing installed.
   level on the target — checked before any install; issue 215: also a
   below-admin level on the source when `transferSecrets` is set — checked
   in preflight, before anything is transferred or installed)
-- 404: `MACHINE_NOT_FOUND`, `QUADLET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `QUADLET_NOT_FOUND`
 - 409: `QUADLET_ALREADY_EXISTS` (the target already holds a quadlet of the
   same name and resource; nothing is installed or overwritten — the
   collision is re-checked at execution time. Also the companion refusal:
@@ -736,7 +736,7 @@ before the stream begins).
 
 ---
 
-### POST /api/machines/{id}/quadlets/{quadletId}/generate
+### POST /api/hosts/{id}/quadlets/{quadletId}/generate
 
 Generate a quadlet file from an existing resource (container or pod).
 
@@ -768,13 +768,13 @@ Generate a quadlet file from an existing resource (container or pod).
 - 400: `INVALID_REQUEST`, `VALIDATION_FAILED`, `RESOURCE_NOT_FOUND`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`, `POD_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`, `POD_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/quadlets/import
+### POST /api/hosts/{id}/quadlets/import
 
 Import quadlets from uploaded content.
 
@@ -817,7 +817,7 @@ Import quadlets from uploaded content.
 - 400: `INVALID_REQUEST`, `VALIDATION_FAILED`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
@@ -827,18 +827,18 @@ Import quadlets from uploaded content.
 
 Convert compose file content into quadlet entries (spec #336).
 
-This endpoint is **global, not machine-scoped**: it sits outside the
-`/api/machines/{id}` subtree, so there is no machine ID and no machine
+This endpoint is **global, not host-scoped**: it sits outside the
+`/api/hosts/{id}` subtree, so there is no host ID and no host
 access check — any authenticated user may call it, because conversion
-touches no machine data. The response carries the import endpoint's entry
+touches no host data. The response carries the import endpoint's entry
 shape, so the frontend can forward the body to
-`POST /api/machines/{id}/quadlets/import` unchanged.
+`POST /api/hosts/{id}/quadlets/import` unchanged.
 
 Conversion runs `podlet compose` in default mode (no `--pod`/`--kube`) with
 the compose content piped via stdin; relative host paths are left
 untouched.
 
-**Authentication:** Required (any authenticated user; no machine access)
+**Authentication:** Required (any authenticated user; no host access)
 
 **Request:**
 ```json
@@ -869,9 +869,9 @@ request body, so the response can be forwarded unchanged.
 
 ---
 
-### POST /api/machines/{id}/quadlets/auto-update
+### POST /api/hosts/{id}/quadlets/auto-update
 
-Run `podman auto-update` on the machine's quadlet-managed containers, streaming
+Run `podman auto-update` on the host's quadlet-managed containers, streaming
 the remote output live as NDJSON and terminating with a parsed report.
 
 Only quadlets whose unit declares an update policy are visible to
@@ -901,13 +901,13 @@ one JSON event per line. Because registry pulls routinely exceed the global
 write timeout, this endpoint extends its own response write deadline to
 **10 minutes**; the stream stays open until the run finishes.
 
-**Event schema** (all events share `operationId`, `machineId`, `timestamp`).
+**Event schema** (all events share `operationId`, `hostId`, `timestamp`).
 The stream opens with one plan event; the pulling events are additive and
 interleave with the log events; the existing log, complete, and error
 events are unchanged:
 
 Plan event — the run's opening event, always exactly one, naming every
-participating unit (the machine's `.container` files carrying
+participating unit (the host's `.container` files carrying
 `AutoUpdate=registry`) with its image, narrowed to the filtered unit on a
 filtered run. A unit whose file is unreadable, or whose `Image=` is missing
 or unparsable, appears as a unit-only entry (no `image`): the unit still
@@ -916,7 +916,7 @@ shows up, it just cannot be matched mid-run:
 {
   "operationId": "uuid",
   "type": "plan",
-  "machineId": "machine uuid",
+  "hostId": "host uuid",
   "plan": [
     { "unit": "myapp.service", "image": "docker.io/library/myapp:latest" },
     { "unit": "other.service" }
@@ -938,7 +938,7 @@ own log event:
 {
   "operationId": "uuid",
   "type": "pulling",
-  "machineId": "machine uuid",
+  "hostId": "host uuid",
   "unit": "myapp.service",
   "image": "docker.io/library/myapp:latest",
   "timestamp": "2026-11-01T10:00:02Z"
@@ -950,7 +950,7 @@ Log event — one line of remote `podman auto-update` output as it arrives:
 {
   "operationId": "uuid",
   "type": "log",
-  "machineId": "machine uuid",
+  "hostId": "host uuid",
   "stream": "stdout|stderr",
   "line": "human-readable podman output line",
   "timestamp": "2026-08-30T10:00:00Z"
@@ -963,7 +963,7 @@ the parsed report:
 {
   "operationId": "uuid",
   "type": "complete",
-  "machineId": "machine uuid",
+  "hostId": "host uuid",
   "report": {
     "containers": [
       {
@@ -982,12 +982,12 @@ the parsed report:
 ```
 
 Error event — the terminal event when the run fails before/instead of a
-report (SSH failure, machine unreachable, or cancellation):
+report (SSH failure, host unreachable, or cancellation):
 ```json
 {
   "operationId": "uuid",
   "type": "error",
-  "machineId": "machine uuid",
+  "hostId": "host uuid",
   "error": {
     "code": "CONNECTION_FAILED|OPERATION_CANCELLED",
     "message": "human-readable message"
@@ -998,7 +998,7 @@ report (SSH failure, machine unreachable, or cancellation):
 
 **Cancellation semantics:** the run is bound to the request context — if the
 client disconnects, the remote `podman auto-update` is aborted and the
-machine connection released. (The terminal event for the aborted run is
+host connection released. (The terminal event for the aborted run is
 written to the already-closed connection, so clients observe cancellation
 simply as the stream ending.)
 

@@ -2,12 +2,12 @@
 
 ## Overview
 
-A full-stack web application for managing Podman on remote machines. This document consolidates all architectural decisions made during the grilling sessions.
+A full-stack web application for managing Podman on remote hosts. This document consolidates all architectural decisions made during the grilling sessions.
 
 **System Components:**
 - **Backend**: Go service using Podman's Service API
 - **Frontend**: React 18+ application with Chakra UI
-- **Database**: SQLite for storing machine metadata and user data
+- **Database**: SQLite for storing host metadata and user data
 - **Delivery**: One container — the Go backend serves the embedded frontend and the API on :8080
 
 ---
@@ -20,25 +20,25 @@ A full-stack web application for managing Podman on remote machines. This docume
 - **Connection Mechanism**: Uses `~/repos/podman/pkg/bindings/connection.go` for SSH tunneling
 - **No CLI integration** - only Go API usage via the connection package
 
-### 2. Remote Machine Access
-- Podman must be **pre-installed** on remote machines
+### 2. Remote Host Access
+- Podman must be **pre-installed** on remote hosts
 - **No deployment of Podman** - backend assumes it exists
-- Backend uses owner's SSH credentials to connect to remote machines
-- All users access a machine through the **owner's SSH connection**
+- Backend uses owner's SSH credentials to connect to remote hosts
+- All users access a host through the **owner's SSH connection**
 
 ### 3. Multi-User Model
-- Each machine is **registered by an owner** (user)
+- Each host is **registered by an owner** (user)
 - Owner's SSH private key is stored **encrypted in SQLite**
-- Machine can be **shared with other users** via permission table
+- Host can be **shared with other users** via permission table
 - Application-level permissions enforced: `read`, `write`, `admin`
-- **One connection per machine** (not per user) - cached and reused
+- **One connection per host** (not per user) - cached and reused
 
 ### 4. Concurrency & Performance
-- **One connection per machine**: Each machine has at most one active SSH connection, cached and reused
-- **Per-machine in-flight dial dedup**: concurrent cold acquisitions for the same machine share a single dial; dials to different machines never serialize behind a lock
-- **Global limit**: Maximum cached machine connections = 100 (configurable, `MAX_CONCURRENT_MACHINES`)
+- **One connection per host**: Each host has at most one active SSH connection, cached and reused
+- **Per-host in-flight dial dedup**: concurrent cold acquisitions for the same host share a single dial; dials to different hosts never serialize behind a lock
+- **Global limit**: Maximum cached host connections = 100 (configurable, `MAX_CONCURRENT_HOSTS`)
 - **LRU eviction**: When the cache is full, the least recently used idle connection is closed
-- **Real teardown**: LRU eviction, the idle-timeout cleanup (15 minutes), and machine removal genuinely close the SSH session; removal is graceful (in-flight calls finish first)
+- **Real teardown**: LRU eviction, the idle-timeout cleanup (15 minutes), and host removal genuinely close the SSH session; removal is graceful (in-flight calls finish first)
 - **Fail fast** on connection failures/timeouts (no retry logic, no request queue)
 - **React Query** for frontend state management and caching
 
@@ -107,11 +107,11 @@ A full-stack web application for managing Podman on remote machines. This docume
 ### 15. File Handling
 - **No file uploads** - container images pulled from registries only
 
-### 16. Machine Registration
-- Frontend uses dedicated endpoint to register machines
+### 16. Host Registration
+- Frontend uses dedicated endpoint to register hosts
 - **Synchronous connection test** during registration
 - Connection details stored encrypted in SQLite database
-- **Owner-based access**: Machine accessible by owner and shared users
+- **Owner-based access**: Host accessible by owner and shared users
 
 ---
 
@@ -150,19 +150,19 @@ A full-stack web application for managing Podman on remote machines. This docume
 ### Simplicity
 - Fail fast on errors (no retry logic)
 - Authorization: Bearer header for JWT (frontend manages token storage)
-- One connection per machine (not per user)
+- One connection per host (not per user)
 - Direct streaming with NDJSON (no buffering)
 
 ### Security
 - SSH keys encrypted at rest in SQLite
 - JWT tokens with RS256 asymmetric signing
 - Short-lived tokens transported via Authorization: Bearer header
-- Application-level permissions for machine sharing
+- Application-level permissions for host sharing
 
 ### Performance
 - Connection caching and reuse
 - LRU eviction for connection management
-- Per-machine dial dedup; fail fast when a connection cannot be acquired (no queuing)
+- Per-host dial dedup; fail fast when a connection cannot be acquired (no queuing)
 - React Query for efficient data fetching and caching
 
 ### User Experience
@@ -185,7 +185,7 @@ Podland/
 │   ├── description_frontend.md       # Frontend implementation guide
 │   ├── description_api.md            # API contract (shared conventions)
 │   ├── description_auth_api.md       # Auth endpoints
-│   ├── description_machines_api.md   # Machine + event endpoints
+│   ├── description_hosts_api.md      # Host + event endpoints
 │   ├── description_containers_api.md # Container endpoints
 │   ├── description_images_api.md     # Image endpoints
 │   └── description_quadlets_api.md   # Quadlet endpoints
@@ -195,7 +195,7 @@ Podland/
 │   │       └── main.go
 │   ├── internal/
 │   │   ├── domain/
-│   │   │   ├── machines/
+│   │   │   ├── hosts/
 │   │   │   ├── containers/
 │   │   │   ├── images/
 │   │   │   ├── auth/
@@ -212,7 +212,7 @@ Podland/
     └── src/
         ├── features/
         │   ├── auth/
-        │   ├── machines/
+        │   ├── hosts/
         │   ├── containers/
         │   ├── images/
         │   └── events/
@@ -239,11 +239,11 @@ Podland/
 ## Assumptions & Dependencies
 
 ### Assumptions
-- Podman is pre-installed on all remote machines
-- Podman Service API is accessible via Unix socket on remote machines
-- Users have SSH access to remote machines via owner's credentials
-- Backend runs in an environment with network access to remote machines
-- Each machine has a single owner with valid SSH credentials
+- Podman is pre-installed on all remote hosts
+- Podman Service API is accessible via Unix socket on remote hosts
+- Users have SSH access to remote hosts via owner's credentials
+- Backend runs in an environment with network access to remote hosts
+- Each host has a single owner with valid SSH credentials
 
 ### Dependencies
 - **Go**: 1.21+
@@ -267,10 +267,10 @@ Podland/
 
 | Term | Definition |
 |------|------------|
-| **Machine** | A remote server with Podman installed that can be managed through this application |
-| **Owner** | The user who registered a machine and provided its SSH credentials |
-| **Shared User** | A user who has been granted access to a machine by its owner |
-| **Connection Cache** | In-memory cache of SSH connections to remote machines |
+| **Host** | A remote server with Podman installed that can be managed through this application |
+| **Owner** | The user who registered a host and provided its SSH credentials |
+| **Shared User** | A user who has been granted access to a host by its owner |
+| **Connection Cache** | In-memory cache of SSH connections to remote hosts |
 | **Podman Service API** | The REST API provided by Podman for managing containers and images |
 | **SSE** | Server-Sent Events, a standard for push notifications from server to client |
 

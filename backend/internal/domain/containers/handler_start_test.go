@@ -16,14 +16,14 @@ import (
 )
 
 // startRequest serves POST
-// /api/machines/{id}/containers/{containerId}/start through the handler
+// /api/hosts/{id}/containers/{containerId}/start through the handler
 // with an authenticated test identity.
 func startRequest(handler http.HandlerFunc, containerID string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/containers/" + containerID + "/start",
+		Path:      "/api/hosts/test-host/containers/" + containerID + "/start",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+		URLParams: map[string]string{"id": "test-host", "containerId": containerID},
 	})
 }
 

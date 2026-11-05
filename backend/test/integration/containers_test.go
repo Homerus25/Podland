@@ -18,13 +18,13 @@ import (
 // Test_Integration_Containers_Lifecycle is the containers vertical slice
 // for the real-podman integration suite (PRD 080-03). It exercises the
 // full container-management request flow end-to-end against the
-// once-registered machine:
+// once-registered host:
 //
-//	POST   /api/machines/{id}/containers             → 201 created
-//	POST   /api/machines/{id}/containers/{cid}/start → running
-//	GET    /api/machines/{id}/containers/{cid}       → state transitions
-//	POST   /api/machines/{id}/containers/{cid}/stop  → no longer running
-//	DELETE /api/machines/{id}/containers/{cid}       → 204 removed
+//	POST   /api/hosts/{id}/containers             → 201 created
+//	POST   /api/hosts/{id}/containers/{cid}/start → running
+//	GET    /api/hosts/{id}/containers/{cid}       → state transitions
+//	POST   /api/hosts/{id}/containers/{cid}/stop  → no longer running
+//	DELETE /api/hosts/{id}/containers/{cid}       → 204 removed
 //
 // This proves create → start → stop → inspect → delete over the SSH
 // tunnel, on top of the harness shared with the tracer and images slices.
@@ -43,7 +43,7 @@ import (
 //     run-scoped container left over from an aborted test (panic,
 //     SIGINT before the per-test cleanup fired, …).
 //
-// Prerequisite: busybox must exist on the machine before ContainerCreate
+// Prerequisite: busybox must exist on the host before ContainerCreate
 // will succeed (podman does not auto-pull on create). The test ensures
 // this itself rather than depending on the images slice having run —
 // each test ensures its own prerequisites (PRD technical note).
@@ -51,7 +51,7 @@ func Test_Integration_Containers_Lifecycle(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerContainersSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// --- AC #1: ensure busybox exists (idempotent) -------------------
 	// Done over the same podman connection the backend uses, but via CLI
@@ -88,7 +88,7 @@ func Test_Integration_Containers_Lifecycle(t *testing.T) {
 
 	// --- AC #2: POST creates a run-scoped-named container; 201 --------
 	t.Run("CreateReturns201", func(t *testing.T) {
-		containerID = createContainer(t, machineID, createReq)
+		containerID = createContainer(t, hostID, createReq)
 		require.NotEmpty(t, containerID, "create must return a non-empty container id")
 		t.Logf("container created: id=%s name=%s", containerID, containerName)
 	})
@@ -106,12 +106,12 @@ func Test_Integration_Containers_Lifecycle(t *testing.T) {
 	// and would mask a transition that didn't actually happen.
 	t.Run("StartStopStateTransitions", func(t *testing.T) {
 		// created: the state immediately after create, before start.
-		waitForContainerState(t, machineID, containerID, "created",
+		waitForContainerState(t, hostID, containerID, "created",
 			"container must be in created state before start")
 
 		// running: after start.
-		startContainer(t, machineID, containerID)
-		waitForContainerState(t, machineID, containerID, "running",
+		startContainer(t, hostID, containerID)
+		waitForContainerState(t, hostID, containerID, "running",
 			"container must reach running state after start")
 
 		// exited: busybox `sleep` installs no SIGTERM handler, so podman's
@@ -121,8 +121,8 @@ func Test_Integration_Containers_Lifecycle(t *testing.T) {
 		// change makes the stop produce a clean exit (ExitCode==0, which
 		// the DTO maps to "created"), we want that surfaced here rather
 		// than masked by a looser "not running" assertion.
-		stopContainer(t, machineID, containerID)
-		waitForContainerState(t, machineID, containerID, "exited",
+		stopContainer(t, hostID, containerID)
+		waitForContainerState(t, hostID, containerID, "exited",
 			"container must reach exited state after stop")
 	})
 	if t.Failed() {
@@ -135,22 +135,22 @@ func Test_Integration_Containers_Lifecycle(t *testing.T) {
 		// always returns []) can't make the post-delete absence check pass
 		// vacuously. The container is stopped here, so all=true is
 		// required for it to appear (podman's list defaults to running).
-		requireContainerListed(t, machineID, containerName,
+		requireContainerListed(t, hostID, containerName,
 			"stopped container must appear in the all=true list before delete")
-		deleteContainer(t, machineID, containerID)
+		deleteContainer(t, hostID, containerID)
 		// Null the id so the per-test cleanup doesn't try to remove a
 		// container that's already gone (and would log a noisy error).
 		containerID = ""
-		requireContainerNotListed(t, machineID, containerName,
+		requireContainerNotListed(t, hostID, containerName,
 			"deleted container must not appear in the container list")
 	})
 }
 
 // ---------------------------------------------------------------------------
-// Prerequisite: ensure busybox exists on the machine (idempotent)
+// Prerequisite: ensure busybox exists on the host (idempotent)
 // ---------------------------------------------------------------------------
 
-// ensureBusyboxImage guarantees busybox:latest is present on the machine,
+// ensureBusyboxImage guarantees busybox:latest is present on the host,
 // pulling it (cheap when cached) if it isn't. `podman create` does NOT
 // auto-pull, so this must happen before the create call.
 //
@@ -162,7 +162,7 @@ func Test_Integration_Containers_Lifecycle(t *testing.T) {
 func ensureBusyboxImage(t *testing.T) {
 	t.Helper()
 	if _, err := podmanConnRun("image", "exists", "busybox:latest"); err == nil {
-		t.Log("pre-check: busybox:latest already present on machine")
+		t.Log("pre-check: busybox:latest already present on host")
 		return
 	}
 	t.Log("pre-check: busybox:latest missing, pulling (idempotent)")
@@ -206,12 +206,12 @@ type containerGetResponse struct {
 
 // createContainer POSTs /containers and returns the new container's ID.
 // Asserts 201 (handler writes StatusCreated on success) and a non-empty id.
-func createContainer(t *testing.T, machineID string, body containerCreateBody) string {
+func createContainer(t *testing.T, hostID string, body containerCreateBody) string {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/containers/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/containers/"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
 	require.NoError(t, err, "POST /containers must connect to the in-process server")
 	defer resp.Body.Close()
@@ -230,9 +230,9 @@ func createContainer(t *testing.T, machineID string, body containerCreateBody) s
 }
 
 // startContainer POSTs /containers/{cid}/start and asserts 200.
-func startContainer(t *testing.T, machineID, containerID string) {
+func startContainer(t *testing.T, hostID, containerID string) {
 	t.Helper()
-	url := suite.ServerURL + "/api/machines/" + machineID + "/containers/" + containerID + "/start"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/containers/" + containerID + "/start"
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	require.NoError(t, err)
 	resp, err := suite.AuthenticatedClient().Do(req)
@@ -244,9 +244,9 @@ func startContainer(t *testing.T, machineID, containerID string) {
 }
 
 // stopContainer POSTs /containers/{cid}/stop and asserts 200.
-func stopContainer(t *testing.T, machineID, containerID string) {
+func stopContainer(t *testing.T, hostID, containerID string) {
 	t.Helper()
-	url := suite.ServerURL + "/api/machines/" + machineID + "/containers/" + containerID + "/stop"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/containers/" + containerID + "/stop"
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	require.NoError(t, err)
 	resp, err := suite.AuthenticatedClient().Do(req)
@@ -262,9 +262,9 @@ func stopContainer(t *testing.T, machineID, containerID string) {
 // — the happy path mirrors what the AC describes (delete a stopped
 // container). The per-test t.Cleanup keeps CLI `rm -f` as the abort
 // backstop for a still-running container.
-func deleteContainer(t *testing.T, machineID, containerID string) {
+func deleteContainer(t *testing.T, hostID, containerID string) {
 	t.Helper()
-	url := suite.ServerURL + "/api/machines/" + machineID + "/containers/" + containerID + "/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/containers/" + containerID + "/"
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	require.NoError(t, err)
 	resp, err := suite.AuthenticatedClient().Do(req)
@@ -279,9 +279,9 @@ func deleteContainer(t *testing.T, machineID, containerID string) {
 // Used by the state-transition pollers to observe the real (inspect-backed)
 // state rather than the constant the start/stop handlers hardcode in their
 // response bodies.
-func getContainer(t *testing.T, machineID, containerID string) containerGetResponse {
+func getContainer(t *testing.T, hostID, containerID string) containerGetResponse {
 	t.Helper()
-	url := suite.ServerURL + "/api/machines/" + machineID + "/containers/" + containerID + "/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/containers/" + containerID + "/"
 	resp, err := suite.AuthenticatedClient().Get(url)
 	require.NoError(t, err, "GET /containers/{id}")
 	defer resp.Body.Close()
@@ -295,12 +295,12 @@ func getContainer(t *testing.T, machineID, containerID string) containerGetRespo
 }
 
 // listContainerNames GETs /containers/?all=true and returns every
-// container name on the machine. `all=true` is required because podman's
+// container name on the host. `all=true` is required because podman's
 // list defaults to running-only — a stopped or created container would
 // otherwise be invisible and break the "list excludes it" assertion.
-func listContainerNames(t *testing.T, machineID string) []string {
+func listContainerNames(t *testing.T, hostID string) []string {
 	t.Helper()
-	url := suite.ServerURL + "/api/machines/" + machineID + "/containers/?all=true"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/containers/?all=true"
 	resp, err := suite.AuthenticatedClient().Get(url)
 	require.NoError(t, err, "GET /containers/?all=true")
 	defer resp.Body.Close()
@@ -324,20 +324,20 @@ func listContainerNames(t *testing.T, machineID string) []string {
 	return names
 }
 
-// requireContainerListed asserts that name appears among the machine's
+// requireContainerListed asserts that name appears among the host's
 // containers. Proving presence before delete is what makes the post-delete
 // absence check meaningful (otherwise a list that always returns [] would
 // pass vacuously).
-func requireContainerListed(t *testing.T, machineID, name, msg string) {
+func requireContainerListed(t *testing.T, hostID, name, msg string) {
 	t.Helper()
-	require.Containsf(t, listContainerNames(t, machineID), name, "%s", msg)
+	require.Containsf(t, listContainerNames(t, hostID), name, "%s", msg)
 }
 
 // requireContainerNotListed asserts that name does NOT appear among the
-// machine's containers — i.e. the delete actually removed it.
-func requireContainerNotListed(t *testing.T, machineID, name, msg string) {
+// host's containers — i.e. the delete actually removed it.
+func requireContainerNotListed(t *testing.T, hostID, name, msg string) {
 	t.Helper()
-	require.NotContainsf(t, listContainerNames(t, machineID), name, "%s", msg)
+	require.NotContainsf(t, listContainerNames(t, hostID), name, "%s", msg)
 }
 
 // ---------------------------------------------------------------------------
@@ -354,12 +354,12 @@ const containerStatePollTimeout = 30 * time.Second
 // the timeout elapses. The inspect-backed GET is the source of truth for
 // the real container state; the start/stop response bodies hardcode their
 // state field and would mask a transition that didn't actually happen.
-func waitForContainerState(t *testing.T, machineID, containerID, want string, msg string) {
+func waitForContainerState(t *testing.T, hostID, containerID, want string, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(containerStatePollTimeout)
 	var last containerGetResponse
 	for time.Now().Before(deadline) {
-		last = getContainer(t, machineID, containerID)
+		last = getContainer(t, hostID, containerID)
 		if last.State == want {
 			t.Logf("container %s reached state=%q", containerID, want)
 			return
@@ -397,13 +397,13 @@ func registerContainersSweep() {
 	})
 }
 
-// sweepRunScopedContainers lists every container on the machine (all
+// sweepRunScopedContainers lists every container on the host (all
 // states) and force-removes any whose name mentions the runID. See
 // registerContainersSweep for the force/all-states rationale.
 func sweepRunScopedContainers(runID string) {
 	out, err := podmanConnRun("ps", "-a", "--format", "{{.Names}}")
 	if err != nil {
-		// Best-effort: a failed list (e.g. machine already stopped) is
+		// Best-effort: a failed list (e.g. host already stopped) is
 		// not a fatal teardown problem.
 		return
 	}

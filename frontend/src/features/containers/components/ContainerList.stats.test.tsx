@@ -1,5 +1,5 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
-import type { Machine, MachinePermission } from "@shared/types/api";
+import type { Host, HostPermission } from "@shared/types/api";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
@@ -8,14 +8,14 @@ import {
 	containerFixture,
 	containerStatsFixture,
 	containerStatsListFixture,
-	machineFixture,
+	hostFixture,
 } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function mockContainers() {
 	server.use(
-		http.get("*/api/machines/m-1/containers", () =>
+		http.get("*/api/hosts/m-1/containers", () =>
 			HttpResponse.json({
 				containers: [containerFixture()],
 				total: 1,
@@ -28,7 +28,7 @@ function mockContainers() {
 function mockAllStats() {
 	let requests = 0;
 	server.use(
-		http.get("*/api/machines/m-1/containers/stats", () => {
+		http.get("*/api/hosts/m-1/containers/stats", () => {
 			requests++;
 			return HttpResponse.json(
 				containerStatsListFixture([
@@ -42,14 +42,14 @@ function mockAllStats() {
 	};
 }
 
-function renderContainerList(machine: Machine = machineFixture()) {
-	return renderWithQuery(<ContainerList machine={machine} />, {
+function renderContainerList(host: Host = hostFixture()) {
+	return renderWithQuery(<ContainerList host={host} />, {
 		router: true,
 	});
 }
 
-function granteeWith(permission: MachinePermission): Machine {
-	return machineFixture({ permission, isOwner: false });
+function granteeWith(permission: HostPermission): Host {
+	return hostFixture({ permission, isOwner: false });
 }
 
 describe("ContainerList stats dialog wiring", () => {

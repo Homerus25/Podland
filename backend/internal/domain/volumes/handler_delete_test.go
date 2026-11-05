@@ -10,19 +10,19 @@ import (
 )
 
 // deleteRequest serves DELETE
-// /api/machines/{id}/volumes/{volumeName}{query} through the handler
+// /api/hosts/{id}/volumes/{volumeName}{query} through the handler
 // with an authenticated test identity.
 func deleteRequest(handler http.HandlerFunc, volumeName, query string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodDelete,
-		Path:      "/api/machines/test-machine/volumes/" + volumeName + query,
+		Path:      "/api/hosts/test-host/volumes/" + volumeName + query,
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "volumeName": volumeName},
+		URLParams: map[string]string{"id": "test-host", "volumeName": volumeName},
 	})
 }
 
 // TestVolumeHandler_Delete_Success pins the delete contract: 204 with an
-// empty body, and the force query flag forwarded to the machine parsed
+// empty body, and the force query flag forwarded to the host parsed
 // (default false).
 func TestVolumeHandler_Delete_Success(t *testing.T) {
 	for _, tc := range []struct {
@@ -50,7 +50,7 @@ func TestVolumeHandler_Delete_Success(t *testing.T) {
 			assert.Equal(t, 204, w.Code, "delete of an unused volume should return 204")
 			assert.Empty(t, w.Body.String(), "204 response must have an empty body")
 			assert.Equal(t, "my-volume", gotName)
-			assert.Equal(t, tc.wantForce, gotForce, "force flag must reach the machine parsed")
+			assert.Equal(t, tc.wantForce, gotForce, "force flag must reach the host parsed")
 		})
 	}
 }
@@ -71,5 +71,5 @@ func TestVolumeHandler_Delete_NonBooleanForceIsIgnored(t *testing.T) {
 	w := deleteRequest(newTestHandler(engine).Delete, "my-volume", "?force=yes")
 
 	assert.Equal(t, 204, w.Code, "a non-boolean force deletes as unforced, not as a client error")
-	assert.False(t, gotForce, "the non-boolean force must reach the machine as false")
+	assert.False(t, gotForce, "the non-boolean force must reach the host as false")
 }

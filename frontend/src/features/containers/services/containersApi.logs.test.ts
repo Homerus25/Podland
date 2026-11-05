@@ -15,7 +15,7 @@ describe("containerLogs", () => {
 			followQuery: URLSearchParams | null;
 		} = { tailQuery: null, followQuery: null };
 		server.use(
-			http.get("*/api/machines/m-1/containers/c-1/logs", ({ request }) => {
+			http.get("*/api/hosts/m-1/containers/c-1/logs", ({ request }) => {
 				const query = new URL(request.url).searchParams;
 				if (query.get("follow") === "true") {
 					captured.followQuery = query;

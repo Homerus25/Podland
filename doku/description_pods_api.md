@@ -2,19 +2,19 @@
 
 Part of the [API contract](description_api.md). See the main document for base URL, common headers, and the error response format.
 
-Pods live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. Listing, the per-pod detail endpoint, the raw inspect endpoint, and the pod's aggregated logs are available at `read` level; creating a pod, pruning, the lifecycle actions (start, stop, pause, unpause, kill, restart), and removing mutate remote state and gate at `write` level.
+Pods live only in the remote host's podman; the backend proxies podman's service API and persists nothing locally. Listing, the per-pod detail endpoint, the raw inspect endpoint, and the pod's aggregated logs are available at `read` level; creating a pod, pruning, the lifecycle actions (start, stop, pause, unpause, kill, restart), and removing mutate remote state and gate at `write` level.
 
 ---
 
 ## Pod Endpoints
 
-### GET /api/machines/{id}/pods
+### GET /api/hosts/{id}/pods
 
-List every pod on a machine — everything podman reports, including stopped pods. No filtering, no built-in marking; the list reflects the machine's real state.
+List every pod on a host — everything podman reports, including stopped pods. No filtering, no built-in marking; the list reflects the host's real state.
 
 **Authentication:** Required
 
-**Access:** Any user with a machine-access row for `{id}` (read level).
+**Access:** Any user with a host-access row for `{id}` (read level).
 
 **Response (Success - 200):**
 ```json
@@ -36,19 +36,19 @@ List every pod on a machine — everything podman reports, including stopped pod
 ```
 
 Notes:
-- `pods` is always present; it is `[]` when the machine has no pods.
+- `pods` is always present; it is `[]` when the host has no pods.
 - `networks` and `labels` are omitted when empty.
 
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### POST /api/machines/{id}/pods
+### POST /api/hosts/{id}/pods
 
-Create a pod on the machine. The body carries the pod's `name` (required), the networks its infra container joins, named volumes, bind mounts, and port mappings in the same shapes as the container create request, labels, and resource limits. The infra container stays at podman's default.
+Create a pod on the host. The body carries the pod's `name` (required), the networks its infra container joins, named volumes, bind mounts, and port mappings in the same shapes as the container create request, labels, and resource limits. The infra container stays at podman's default.
 
 **Authentication:** Required
 
@@ -109,13 +109,13 @@ Notes:
 - 400: `INVALID_REQUEST` (malformed body; podman-rejected names and other podman-side 4xx rejections, carrying podman's message), `VALIDATION_FAILED` (missing name; a mount with both `selinuxShared` and `selinuxPrivate`; an out-of-range port or unknown protocol in `portMappings`; unparseable `memory`)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### POST /api/machines/{id}/pods/prune
+### POST /api/hosts/{id}/pods/prune
 
-Remove all stopped pods on the machine in one call (podman's own selection). Running pods are untouched.
+Remove all stopped pods on the host in one call (podman's own selection). Running pods are untouched.
 
 **Authentication:** Required
 
@@ -134,17 +134,17 @@ Notes:
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### GET /api/machines/{id}/pods/{podId}
+### GET /api/hosts/{id}/pods/{podId}
 
 Return one pod's detail DTO — the fields the pod detail page renders, mapped from podman's inspect report: name, id, state, creation time, labels, restart policy, mounts as `--mount`-style strings, the pod's containers (id, name, state, ordered by container ID), and the networks on the infra container.
 
 **Authentication:** Required
 
-**Access:** Any user with a machine-access row for `{id}` (read level).
+**Access:** Any user with a host-access row for `{id}` (read level).
 
 **Response (Success - 200):**
 ```json
@@ -176,17 +176,17 @@ Notes:
 - 400: `MISSING_POD_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `POD_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `POD_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### GET /api/machines/{id}/pods/{podId}/inspect
+### GET /api/hosts/{id}/pods/{podId}/inspect
 
 Return one pod's raw podman inspect report — the full pod configuration podman holds (infra config, containers, mounts, networks, labels), marshaled as-is with no DTO mapping. The report is the top-level JSON body.
 
 **Authentication:** Required
 
-**Access:** Any user with a machine-access row for `{id}` (read level).
+**Access:** Any user with a host-access row for `{id}` (read level).
 
 **Response (Success - 200):** the raw pod inspect report as the top-level JSON body — podman's `PodInspectReport` shape, not the detail DTO.
 
@@ -194,11 +194,11 @@ Return one pod's raw podman inspect report — the full pod configuration podman
 - 400: `MISSING_POD_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `POD_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `POD_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### POST /api/machines/{id}/pods/{podId}/pause
+### POST /api/hosts/{id}/pods/{podId}/pause
 
 Pause every running container in the pod. Pausing an already-paused pod is refused by podman and surfaces as 409 `POD_STATE_CONFLICT`.
 
@@ -219,12 +219,12 @@ Pause every running container in the pod. Pausing an already-paused pod is refus
 - 400: `MISSING_POD_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
-- 404: `MACHINE_NOT_FOUND`, `POD_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `POD_NOT_FOUND`
 - 409: `POD_STATE_CONFLICT` (podman refuses the action for the pod's current state; the message carries podman's refusal text)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### POST /api/machines/{id}/pods/{podId}/unpause
+### POST /api/hosts/{id}/pods/{podId}/unpause
 
 Unpause every paused container in the pod.
 
@@ -236,7 +236,7 @@ Unpause every paused container in the pod.
 
 **Response (Error):** same as pause.
 
-### POST /api/machines/{id}/pods/{podId}/kill
+### POST /api/hosts/{id}/pods/{podId}/kill
 
 Send podman's default signal (SIGKILL) to the pod's running containers. Takes no signal parameter.
 
@@ -248,7 +248,7 @@ Send podman's default signal (SIGKILL) to the pod's running containers. Takes no
 
 **Response (Error):** same as pause.
 
-### POST /api/machines/{id}/pods/{podId}/restart
+### POST /api/hosts/{id}/pods/{podId}/restart
 
 Restart the pod's containers.
 
@@ -260,7 +260,7 @@ Restart the pod's containers.
 
 **Response (Error):** same as pause.
 
-### POST /api/machines/{id}/pods/{podId}/start
+### POST /api/hosts/{id}/pods/{podId}/start
 
 Start the pod's containers. Takes no timeout or force parameters — podman's defaults apply. Starting an already-running pod is refused by podman and surfaces as 409 `POD_STATE_CONFLICT`.
 
@@ -272,7 +272,7 @@ Start the pod's containers. Takes no timeout or force parameters — podman's de
 
 **Response (Error):** same as pause.
 
-### POST /api/machines/{id}/pods/{podId}/stop
+### POST /api/hosts/{id}/pods/{podId}/stop
 
 Stop the pod's containers. Takes no timeout or force parameters — podman's defaults apply. Stopping an already-stopped pod is refused by podman and surfaces as 409 `POD_STATE_CONFLICT`.
 
@@ -284,14 +284,14 @@ Stop the pod's containers. Takes no timeout or force parameters — podman's def
 
 **Response (Error):** same as pause.
 
-### GET /api/machines/{id}/pods/{podId}/logs
+### GET /api/hosts/{id}/pods/{podId}/logs
 
 Get the pod's aggregated logs — every container in the pod, infra
 included, as plain text with no per-container prefixing.
 
 **Authentication:** Required
 
-**Access:** Any user with a machine-access row for `{id}` (read level).
+**Access:** Any user with a host-access row for `{id}` (read level).
 
 **Query Parameters:**
 - `follow` (boolean, optional): Follow log output as an NDJSON stream
@@ -324,7 +324,7 @@ one terminal event:
 
 - A clean stream end (pod stopped, podman EOF) emits `{"level": "INFO", "message": "STREAM_ENDED"}`.
 - A failure emits an ERROR-level event whose message embeds the error code:
-  `"POD_NOT_FOUND: Pod not found"`, `"CONNECTION_FAILED: Failed to connect to machine"`, etc.
+  `"POD_NOT_FOUND: Pod not found"`, `"CONNECTION_FAILED: Failed to connect to host"`, etc.
 - A client disconnect cancels the stream server-side and emits a WARN
   `OPERATION_CANCELLED` event (to the already-closed connection).
 
@@ -332,12 +332,12 @@ one terminal event:
 - 400: `INVALID_SINCE_PARAM` / `INVALID_TAIL_PARAM` (malformed `since`/`tail`, message says "use RFC3339"; answered through the JSON envelope even when `follow=true`), `MISSING_POD_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `POD_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `POD_NOT_FOUND`
 - 500: `INTERNAL_ERROR` (also for a miswired route missing identity), `STREAMING_NOT_SUPPORTED`
 - 502: `CONNECTION_FAILED`
 - 504: `OPERATION_CANCELLED` (buffered fetch cancelled by a client disconnect; follow-mode cancellation is the WARN terminal event above)
 
-### DELETE /api/machines/{id}/pods/{podId}
+### DELETE /api/hosts/{id}/pods/{podId}
 
 Remove a pod. Running containers refuse the removal unless `force=true` is passed, mirroring the container delete.
 
@@ -354,7 +354,7 @@ Remove a pod. Running containers refuse the removal unless `force=true` is passe
 - 400: `MISSING_POD_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
-- 404: `MACHINE_NOT_FOUND`, `POD_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `POD_NOT_FOUND`
 - 409: `POD_STATE_CONFLICT` (removing a running pod without force; the message carries podman's refusal text)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`

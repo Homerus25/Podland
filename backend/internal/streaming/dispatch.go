@@ -25,11 +25,11 @@ type LogsDispatchOp[Response any] struct {
 	// Follow is the domain's follow-mode log service call. It receives
 	// the resolved target and the parsed window; events cross through
 	// onEvent.
-	Follow func(ctx context.Context, userID, machineID, target string, since time.Time, tail int64, onEvent func(LogEvent)) error
+	Follow func(ctx context.Context, userID, hostID, target string, since time.Time, tail int64, onEvent func(LogEvent)) error
 	// Buffered is the domain's buffered log service call. It receives
 	// the resolved target and the parsed window and returns the domain's
 	// own logs response type.
-	Buffered func(ctx context.Context, userID, machineID, target string, since time.Time, tail int64) (Response, error)
+	Buffered func(ctx context.Context, userID, hostID, target string, since time.Time, tail int64) (Response, error)
 }
 
 // HandleLogs is the one handler-side entry point for log endpoints, the
@@ -45,7 +45,7 @@ type LogsDispatchOp[Response any] struct {
 func HandleLogs[Response any](w http.ResponseWriter, r *http.Request, op LogsDispatchOp[Response]) {
 	since, tail, queryErr := ParseLogWindow(r)
 	if queryErr != nil {
-		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (struct{}, error) {
 			return struct{}{}, queryErr
 		})
 		return
@@ -58,18 +58,18 @@ func HandleLogs[Response any](w http.ResponseWriter, r *http.Request, op LogsDis
 		RunLogStream(w, r, LogStreamOp{
 			Since: since,
 			Tail:  tail,
-			Stream: func(ctx context.Context, userID, machineID string, onEvent func(LogEvent)) error {
-				return op.Follow(ctx, userID, machineID, target, since, tail, onEvent)
+			Stream: func(ctx context.Context, userID, hostID string, onEvent func(LogEvent)) error {
+				return op.Follow(ctx, userID, hostID, target, since, tail, onEvent)
 			},
 		})
 		return
 	}
 
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (Response, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (Response, error) {
 		if guard != nil {
 			var zero Response
 			return zero, guard
 		}
-		return op.Buffered(ctx, userID, machineID, target, since, tail)
+		return op.Buffered(ctx, userID, hostID, target, since, tail)
 	})
 }

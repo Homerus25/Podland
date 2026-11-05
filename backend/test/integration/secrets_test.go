@@ -20,10 +20,10 @@ import (
 // end-to-end against real podman, plus the permission tripwires that
 // complement the 160-00 level-aware access slice:
 //
-//	GET    /api/machines/{id}/secrets                 → 200 metadata list
-//	POST   /api/machines/{id}/secrets                 → 201 (write gate)
-//	GET    /api/machines/{id}/secrets/{secretId}      → 200 metadata | 200 reveal (admin only)
-//	DELETE /api/machines/{id}/secrets/{secretId}      → 204 (write gate)
+//	GET    /api/hosts/{id}/secrets                 → 200 metadata list
+//	POST   /api/hosts/{id}/secrets                 → 201 (write gate)
+//	GET    /api/hosts/{id}/secrets/{secretId}      → 200 metadata | 200 reveal (admin only)
+//	DELETE /api/hosts/{id}/secrets/{secretId}      → 204 (write gate)
 //
 // Redaction discipline is the point of the reveal tests: the value
 // travels exactly twice — in the create request and in an admin reveal
@@ -46,7 +46,7 @@ func Test_Integration_Secrets_CRUD(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerSecretsSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	secretName := "it-" + suite.RunID + "-crud"
 	// The whitespace and newlines are the secret: a service that trims
@@ -54,21 +54,21 @@ func Test_Integration_Secrets_CRUD(t *testing.T) {
 	secretValue := "  s3cr3t value\nwith embedded\nnewlines and trailing spaces   "
 
 	t.Cleanup(func() {
-		deleteSecretBestEffort(t, machineID, secretName)
+		deleteSecretBestEffort(t, hostID, secretName)
 	})
 
 	// --- Round trip: create → list → inspect → delete → gone ----------
 	t.Run("CreateReturns201WithIDOnly", func(t *testing.T) {
-		created := createSecret(t, machineID, secretCreateBody{Name: secretName, Value: secretValue})
+		created := createSecret(t, hostID, secretCreateBody{Name: secretName, Value: secretValue})
 		require.NotEmpty(t, created.ID, "create secret: response must carry the podman secret ID")
 	})
 
 	t.Run("ListReturnsCreatedSecretMetadata", func(t *testing.T) {
-		requireSecretListed(t, machineID, secretName, "created secret must appear in the secrets list")
+		requireSecretListed(t, hostID, secretName, "created secret must appear in the secrets list")
 	})
 
 	t.Run("InspectReturnsMetadataWithoutValue", func(t *testing.T) {
-		got := getSecret(t, machineID, secretName, false)
+		got := getSecret(t, hostID, secretName, false)
 		require.Equal(t, secretName, got.Name)
 		require.NotEmpty(t, got.ID, "inspect must report the podman secret ID")
 		require.NotEmpty(t, got.CreatedAt, "inspect must report createdAt")
@@ -83,9 +83,9 @@ func Test_Integration_Secrets_CRUD(t *testing.T) {
 	}
 
 	t.Run("AdminRevealReturnsByteIdenticalValue", func(t *testing.T) {
-		// The machine owner holds an admin access row (granted at
-		// machine registration), so the suite client is the admin here.
-		got := getSecret(t, machineID, secretName, true)
+		// The host owner holds an admin access row (granted at
+		// host registration), so the suite client is the admin here.
+		got := getSecret(t, hostID, secretName, true)
 		require.NotNil(t, got.SecretData, "admin reveal must include the secretData field")
 		require.Equal(t, secretValue, *got.SecretData,
 			"revealed value must be byte-identical to what was created, whitespace and newlines included")
@@ -94,8 +94,8 @@ func Test_Integration_Secrets_CRUD(t *testing.T) {
 	t.Run("RevealBySecretIDNotJustName", func(t *testing.T) {
 		// {secretId} accepts a name OR an ID; resolve the ID via the
 		// metadata inspect and reveal through it.
-		metadata := getSecret(t, machineID, secretName, false)
-		got := getSecret(t, machineID, metadata.ID, true)
+		metadata := getSecret(t, hostID, secretName, false)
+		got := getSecret(t, hostID, metadata.ID, true)
 		require.NotNil(t, got.SecretData, "admin reveal by ID must include the secretData field")
 		require.Equal(t, secretValue, *got.SecretData, "reveal by podman secret ID must return the value")
 	})
@@ -103,21 +103,21 @@ func Test_Integration_Secrets_CRUD(t *testing.T) {
 	t.Run("DeleteRemovesSecret", func(t *testing.T) {
 		// Prove presence first so a broken list endpoint can't make the
 		// post-delete absence check pass vacuously.
-		requireSecretListed(t, machineID, secretName, "secret must appear in the list before delete")
-		deleteSecret(t, machineID, secretName)
-		requireSecretNotListed(t, machineID, secretName, "deleted secret must not appear in the secrets list")
-		getSecretExpectError(t, machineID, secretName, false, http.StatusNotFound, "SECRET_NOT_FOUND")
+		requireSecretListed(t, hostID, secretName, "secret must appear in the list before delete")
+		deleteSecret(t, hostID, secretName)
+		requireSecretNotListed(t, hostID, secretName, "deleted secret must not appear in the secrets list")
+		getSecretExpectError(t, hostID, secretName, false, http.StatusNotFound, "SECRET_NOT_FOUND")
 	})
 
 	t.Run("DeleteMissingSecretReturns404", func(t *testing.T) {
-		deleteSecretExpectError(t, machineID, "it-"+suite.RunID+"-missing", http.StatusNotFound, "SECRET_NOT_FOUND")
+		deleteSecretExpectError(t, hostID, "it-"+suite.RunID+"-missing", http.StatusNotFound, "SECRET_NOT_FOUND")
 	})
 
 	t.Run("CreateDuplicateNameReturns409", func(t *testing.T) {
 		dup := "it-" + suite.RunID + "-dup"
-		t.Cleanup(func() { deleteSecretBestEffort(t, machineID, dup) })
-		createSecret(t, machineID, secretCreateBody{Name: dup, Value: "x"})
-		createSecretExpectError(t, machineID, secretCreateBody{Name: dup, Value: "x"},
+		t.Cleanup(func() { deleteSecretBestEffort(t, hostID, dup) })
+		createSecret(t, hostID, secretCreateBody{Name: dup, Value: "x"})
+		createSecretExpectError(t, hostID, secretCreateBody{Name: dup, Value: "x"},
 			http.StatusConflict, "SECRET_ALREADY_EXISTS")
 	})
 }
@@ -131,12 +131,12 @@ func Test_Integration_Secrets_RevealIsAdminOnly(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerSecretsSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 	secretName := "it-" + suite.RunID + "-reveal"
-	t.Cleanup(func() { deleteSecretBestEffort(t, machineID, secretName) })
-	createSecret(t, machineID, secretCreateBody{Name: secretName, Value: "reveal-me"})
+	t.Cleanup(func() { deleteSecretBestEffort(t, hostID, secretName) })
+	createSecret(t, hostID, secretCreateBody{Name: secretName, Value: "reveal-me"})
 
-	revealURL := suite.ServerURL + "/api/machines/" + machineID + "/secrets/" + url.PathEscape(secretName) + "?reveal=true"
+	revealURL := suite.ServerURL + "/api/hosts/" + hostID + "/secrets/" + url.PathEscape(secretName) + "?reveal=true"
 
 	t.Run("WriteUserDenied", func(t *testing.T) {
 		client := levelUserClient(t, models.PermissionWrite)
@@ -169,7 +169,7 @@ func Test_Integration_Secrets_RevealIsAdminOnly(t *testing.T) {
 		// control that the gate is on the VALUE, not the endpoint: a
 		// read-level caller keeps metadata inspect (no ?reveal param).
 		client := levelUserClient(t, models.PermissionRead)
-		resp, err := client.Get(suite.ServerURL + "/api/machines/" + machineID + "/secrets/" + url.PathEscape(secretName))
+		resp, err := client.Get(suite.ServerURL + "/api/hosts/" + hostID + "/secrets/" + url.PathEscape(secretName))
 		require.NoError(t, err)
 		defer resp.Body.Close()
 		raw, _ := io.ReadAll(resp.Body)
@@ -187,7 +187,7 @@ func Test_Integration_Secrets_RevealIsAdminOnly(t *testing.T) {
 func Test_Integration_Secrets_WriteGatedMutations(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
-	base := suite.ServerURL + "/api/machines/" + suite.MachineID
+	base := suite.ServerURL + "/api/hosts/" + suite.HostID
 	client := levelUserClient(t, models.PermissionRead)
 
 	t.Run("CreateSecretDenied", func(t *testing.T) {
@@ -238,17 +238,17 @@ type secretInspectResponse struct {
 	raw        string
 }
 
-func secretsBaseURL(machineID string) string {
-	return suite.ServerURL + "/api/machines/" + machineID + "/secrets/"
+func secretsBaseURL(hostID string) string {
+	return suite.ServerURL + "/api/hosts/" + hostID + "/secrets/"
 }
 
 // createSecret POSTs /secrets and asserts 201 with an ID-only body.
-func createSecret(t *testing.T, machineID string, body secretCreateBody) secretCreateResponse {
+func createSecret(t *testing.T, hostID string, body secretCreateBody) secretCreateResponse {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
 
-	resp, err := suite.AuthenticatedClient().Post(secretsBaseURL(machineID), "application/json", bytes.NewReader(payload))
+	resp, err := suite.AuthenticatedClient().Post(secretsBaseURL(hostID), "application/json", bytes.NewReader(payload))
 	require.NoError(t, err, "POST /secrets must connect to the in-process server")
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
@@ -264,12 +264,12 @@ func createSecret(t *testing.T, machineID string, body secretCreateBody) secretC
 
 // createSecretExpectError POSTs /secrets and asserts the structured
 // error status + code.
-func createSecretExpectError(t *testing.T, machineID string, body secretCreateBody, wantStatus int, wantCode string) {
+func createSecretExpectError(t *testing.T, hostID string, body secretCreateBody, wantStatus int, wantCode string) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
 
-	resp, err := suite.AuthenticatedClient().Post(secretsBaseURL(machineID), "application/json", bytes.NewReader(payload))
+	resp, err := suite.AuthenticatedClient().Post(secretsBaseURL(hostID), "application/json", bytes.NewReader(payload))
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
@@ -283,10 +283,10 @@ func createSecretExpectError(t *testing.T, machineID string, body secretCreateBo
 }
 
 // listSecrets GETs /secrets and returns every metadata entry on the
-// machine. Fails the test if any entry carries a secretData key.
-func listSecrets(t *testing.T, machineID string) []secretEntry {
+// host. Fails the test if any entry carries a secretData key.
+func listSecrets(t *testing.T, hostID string) []secretEntry {
 	t.Helper()
-	resp, err := suite.AuthenticatedClient().Get(secretsBaseURL(machineID))
+	resp, err := suite.AuthenticatedClient().Get(secretsBaseURL(hostID))
 	require.NoError(t, err, "GET /secrets")
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
@@ -301,19 +301,19 @@ func listSecrets(t *testing.T, machineID string) []secretEntry {
 	return result
 }
 
-func requireSecretListed(t *testing.T, machineID, name, msg string) {
+func requireSecretListed(t *testing.T, hostID, name, msg string) {
 	t.Helper()
-	for _, entry := range listSecrets(t, machineID) {
+	for _, entry := range listSecrets(t, hostID) {
 		if entry.Name == name {
 			return
 		}
 	}
-	t.Fatalf("%s (not found among the machine's secrets)", msg)
+	t.Fatalf("%s (not found among the host's secrets)", msg)
 }
 
-func requireSecretNotListed(t *testing.T, machineID, name, msg string) {
+func requireSecretNotListed(t *testing.T, hostID, name, msg string) {
 	t.Helper()
-	for _, entry := range listSecrets(t, machineID) {
+	for _, entry := range listSecrets(t, hostID) {
 		if entry.Name == name {
 			t.Fatalf("%s", msg)
 		}
@@ -321,9 +321,9 @@ func requireSecretNotListed(t *testing.T, machineID, name, msg string) {
 }
 
 // getSecret GETs /secrets/{secretId} and decodes the inspect response.
-func getSecret(t *testing.T, machineID, secretID string, reveal bool) secretInspectResponse {
+func getSecret(t *testing.T, hostID, secretID string, reveal bool) secretInspectResponse {
 	t.Helper()
-	u := secretsBaseURL(machineID) + url.PathEscape(secretID) + "/"
+	u := secretsBaseURL(hostID) + url.PathEscape(secretID) + "/"
 	if reveal {
 		u += "?reveal=true"
 	}
@@ -342,9 +342,9 @@ func getSecret(t *testing.T, machineID, secretID string, reveal bool) secretInsp
 
 // getSecretExpectError GETs /secrets/{secretId} and asserts the
 // structured error status + code.
-func getSecretExpectError(t *testing.T, machineID, secretID string, reveal bool, wantStatus int, wantCode string) {
+func getSecretExpectError(t *testing.T, hostID, secretID string, reveal bool, wantStatus int, wantCode string) {
 	t.Helper()
-	u := secretsBaseURL(machineID) + url.PathEscape(secretID) + "/"
+	u := secretsBaseURL(hostID) + url.PathEscape(secretID) + "/"
 	if reveal {
 		u += "?reveal=true"
 	}
@@ -362,9 +362,9 @@ func getSecretExpectError(t *testing.T, machineID, secretID string, reveal bool,
 
 // deleteSecret DELETEs /secrets/{secretId} and asserts 204 with an
 // empty body.
-func deleteSecret(t *testing.T, machineID, secretID string) {
+func deleteSecret(t *testing.T, hostID, secretID string) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodDelete, secretsBaseURL(machineID)+url.PathEscape(secretID)+"/", nil)
+	req, err := http.NewRequest(http.MethodDelete, secretsBaseURL(hostID)+url.PathEscape(secretID)+"/", nil)
 	require.NoError(t, err)
 	resp, err := suite.AuthenticatedClient().Do(req)
 	require.NoError(t, err, "DELETE /secrets/{id}")
@@ -377,9 +377,9 @@ func deleteSecret(t *testing.T, machineID, secretID string) {
 
 // deleteSecretExpectError DELETEs /secrets/{secretId} and asserts the
 // structured error status + code.
-func deleteSecretExpectError(t *testing.T, machineID, secretID string, wantStatus int, wantCode string) {
+func deleteSecretExpectError(t *testing.T, hostID, secretID string, wantStatus int, wantCode string) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodDelete, secretsBaseURL(machineID)+url.PathEscape(secretID)+"/", nil)
+	req, err := http.NewRequest(http.MethodDelete, secretsBaseURL(hostID)+url.PathEscape(secretID)+"/", nil)
 	require.NoError(t, err)
 	resp, err := suite.AuthenticatedClient().Do(req)
 	require.NoError(t, err)
@@ -395,9 +395,9 @@ func deleteSecretExpectError(t *testing.T, machineID, secretID string, wantStatu
 
 // deleteSecretBestEffort removes a secret if it exists; used by
 // t.Cleanup hooks after the test's own DELETE (404 is expected then).
-func deleteSecretBestEffort(t *testing.T, machineID, secretID string) {
+func deleteSecretBestEffort(t *testing.T, hostID, secretID string) {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodDelete, secretsBaseURL(machineID)+url.PathEscape(secretID)+"/", nil)
+	req, err := http.NewRequest(http.MethodDelete, secretsBaseURL(hostID)+url.PathEscape(secretID)+"/", nil)
 	require.NoError(t, err)
 	resp, err := suite.AuthenticatedClient().Do(req)
 	if err == nil {
@@ -417,19 +417,19 @@ var registerSecretsSweepOnce sync.Once
 func registerSecretsSweep() {
 	registerSecretsSweepOnce.Do(func() {
 		runID := suite.RunID
-		machineID := suite.MachineID
+		hostID := suite.HostID
 		suite.RegisterCleanup("sweep run-scoped secrets", func() error {
-			sweepRunScopedSecrets(runID, machineID)
+			sweepRunScopedSecrets(runID, hostID)
 			return nil
 		})
 	})
 }
 
-// sweepRunScopedSecrets lists the machine's secrets via the API and
+// sweepRunScopedSecrets lists the host's secrets via the API and
 // deletes those whose name carries the run tag.
-func sweepRunScopedSecrets(runID, machineID string) {
+func sweepRunScopedSecrets(runID, hostID string) {
 	client := suite.AuthenticatedClient()
-	resp, err := client.Get(secretsBaseURL(machineID))
+	resp, err := client.Get(secretsBaseURL(hostID))
 	if err != nil {
 		return
 	}
@@ -446,7 +446,7 @@ func sweepRunScopedSecrets(runID, machineID string) {
 			continue
 		}
 		req, err := http.NewRequest(http.MethodDelete,
-			secretsBaseURL(machineID)+url.PathEscape(entry.Name)+"/", nil)
+			secretsBaseURL(hostID)+url.PathEscape(entry.Name)+"/", nil)
 		if err != nil {
 			continue
 		}

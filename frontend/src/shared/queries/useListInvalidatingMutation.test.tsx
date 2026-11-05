@@ -1,4 +1,4 @@
-import type { MachineResource } from "@shared/queries/queryKeys";
+import type { HostResource } from "@shared/queries/queryKeys";
 import {
 	containersQueryKey,
 	imagesQueryKey,
@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderHookWithQuery } from "@/test/render";
 
 function renderMutation(
-	resources: MachineResource | MachineResource[],
+	resources: HostResource | HostResource[],
 	run: (input: string) => Promise<string>,
 ) {
 	// The sanctioned invalidation-spy suite: it owns its client so the spy

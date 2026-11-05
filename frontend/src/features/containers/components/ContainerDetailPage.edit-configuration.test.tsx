@@ -9,7 +9,7 @@ import { errorResponse } from "@/test/errors";
 import {
 	containerDetailFixture,
 	containerFixture,
-	machineFixture,
+	hostFixture,
 } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -26,8 +26,8 @@ interface Counters {
 // The sibling list the detail page does not render itself: mounting it
 // alongside the page is how the invalidation is observed through MSW
 // (feature tests assert refetch, never invalidation spies).
-function SiblingLists({ machineId }: { machineId: string }) {
-	useContainers(machineId);
+function SiblingLists({ hostId }: { hostId: string }) {
+	useContainers(hostId);
 	return null;
 }
 
@@ -46,12 +46,12 @@ function setup(
 	let updateBody: unknown;
 
 	server.use(
-		http.get("*/api/machines/m-1", () =>
+		http.get("*/api/hosts/m-1", () =>
 			HttpResponse.json(
-				machineFixture({ permission, isOwner: permission === "admin" }),
+				hostFixture({ permission, isOwner: permission === "admin" }),
 			),
 		),
-		http.get("*/api/machines/m-1/containers/c-1", () => {
+		http.get("*/api/hosts/m-1/containers/c-1", () => {
 			counters.detail++;
 			return HttpResponse.json(
 				containerDetailFixture(
@@ -59,7 +59,7 @@ function setup(
 				),
 			);
 		}),
-		http.get("*/api/machines/m-1/containers", () => {
+		http.get("*/api/hosts/m-1/containers", () => {
 			counters.containers++;
 			return HttpResponse.json({
 				containers: [containerFixture()],
@@ -67,18 +67,15 @@ function setup(
 				timestamp: "2026-08-20T10:00:00Z",
 			});
 		}),
-		http.post(
-			"*/api/machines/m-1/containers/c-1/update",
-			async ({ request }) => {
-				counters.update++;
-				updateBody = await request.json();
-				if (options.updateResponder) return options.updateResponder();
-				updated = true;
-				return HttpResponse.json(
-					containerDetailFixture({ limits: { cpus: 1.5, memory: "1g" } }),
-				);
-			},
-		),
+		http.post("*/api/hosts/m-1/containers/c-1/update", async ({ request }) => {
+			counters.update++;
+			updateBody = await request.json();
+			if (options.updateResponder) return options.updateResponder();
+			updated = true;
+			return HttpResponse.json(
+				containerDetailFixture({ limits: { cpus: 1.5, memory: "1g" } }),
+			);
+		}),
 	);
 
 	return {
@@ -91,16 +88,16 @@ function renderDetailPage() {
 	return renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId/containers/:containerId"
+				path="/hosts/:hostId/containers/:containerId"
 				element={
 					<>
 						<ContainerDetailPage />
-						<SiblingLists machineId="m-1" />
+						<SiblingLists hostId="m-1" />
 					</>
 				}
 			/>
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/containers/c-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1/containers/c-1"] } },
 	);
 }
 
@@ -122,8 +119,8 @@ describe("ContainerDetailPage edit configuration", () => {
 		).not.toBeInTheDocument();
 	});
 
-	it("renders no Edit configuration button while the machine query is pending", async () => {
-		// The machine query is the gate's only input: while it is in flight
+	it("renders no Edit configuration button while the host query is pending", async () => {
+		// The host query is the gate's only input: while it is in flight
 		// the caller's level is unknown, so the header must not flash the
 		// button at a read-only caller.
 		setup();
@@ -132,9 +129,9 @@ describe("ContainerDetailPage edit configuration", () => {
 			release = resolve;
 		});
 		server.use(
-			http.get("*/api/machines/m-1", async () => {
+			http.get("*/api/hosts/m-1", async () => {
 				await gate;
-				return HttpResponse.json(machineFixture({ permission: "write" }));
+				return HttpResponse.json(hostFixture({ permission: "write" }));
 			}),
 		);
 		renderDetailPage();

@@ -10,7 +10,7 @@ import { ndjsonResponse } from "@/test/stream";
 
 // The quadlet move stream's domain assertions: the request shape (the
 // surface's URL builder and transfer body) and the first-seen-order progress
-// fold. The ritual — the both-machines invalidation, the terminal handling,
+// fold. The ritual — the both-hosts invalidation, the terminal handling,
 // the malformed-event skip — is pinned once in the transfer-hooks module's
 // suite (shared/transfers/transferHooks.test.tsx).
 
@@ -29,7 +29,7 @@ function volumeEvent(overrides: Record<string, unknown> = {}): MoveStreamEvent {
 	return {
 		operationId: "op-1",
 		type: "volume",
-		machineId: "m-1",
+		hostId: "m-1",
 		ref: "pgdata",
 		podmanVolume: "pgdata",
 		phase: "start",
@@ -41,7 +41,7 @@ function completeEvent(result: QuadletMoveResult): MoveStreamEvent {
 	return {
 		operationId: "op-1",
 		type: "complete",
-		machineId: "m-1",
+		hostId: "m-1",
 		result,
 	};
 }
@@ -53,7 +53,7 @@ function streamResponse(events: MoveStreamEvent[]) {
 	);
 }
 
-const moveUrl = "*/api/machines/m-1/quadlets/web/move";
+const moveUrl = "*/api/hosts/m-1/quadlets/web/move";
 
 let requests: Request[] = [];
 
@@ -68,7 +68,7 @@ function mockMoveStream(handler: MoveHandler) {
 }
 
 const transferInput = {
-	targetMachineId: "m-2",
+	targetHostId: "m-2",
 	mode: "move" as const,
 	stop: true,
 	migrateVolumeData: true,
@@ -92,7 +92,7 @@ describe("useQuadletMoveStream", () => {
 		expect(requests).toHaveLength(1);
 		expect(requests[0].method).toBe("POST");
 		expect(new URL(requests[0].url).pathname).toBe(
-			"/api/machines/m-1/quadlets/web/move",
+			"/api/hosts/m-1/quadlets/web/move",
 		);
 		expect(requests[0].headers.get("Content-Type")).toBe("application/json");
 		await waitFor(() => expect(result.current.isRunning).toBe(false));

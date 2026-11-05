@@ -14,21 +14,21 @@ import (
 )
 
 // connectRequest serves POST
-// /api/machines/{id}/networks/{networkName}/connect with the given JSON
+// /api/hosts/{id}/networks/{networkName}/connect with the given JSON
 // body through the handler with an authenticated test identity.
 func connectRequest(connect http.HandlerFunc, networkName, body string) *httptest.ResponseRecorder {
 	return testutils.Perform(connect, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/networks/" + networkName + "/connect",
+		Path:      "/api/hosts/test-host/networks/" + networkName + "/connect",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "networkName": networkName},
+		URLParams: map[string]string{"id": "test-host", "networkName": networkName},
 		Body:      strings.NewReader(body),
 	})
 }
 
 // TestNetworkHandler_Connect_Success pins the connect contract: 200
 // with an empty body, and the URL-param network plus the body's
-// container reaching the machine.
+// container reaching the host.
 func TestNetworkHandler_Connect_Success(t *testing.T) {
 	networks := []types.Network{
 		networkFixture("frontend", "bridge", "2026-09-01T12:30:00Z", "10.89.0.0/16"),
@@ -48,8 +48,8 @@ func TestNetworkHandler_Connect_Success(t *testing.T) {
 	w := connectRequest(newTestHandler(engine).Connect, "frontend", `{"container":"ctr-a"}`)
 
 	assert.Equal(t, 200, w.Code, "connect should return 200")
-	assert.Equal(t, "frontend", connectedNetwork, "the URL-param network must reach the machine")
-	assert.Equal(t, "ctr-a", connectedContainer, "the decoded container must reach the machine")
+	assert.Equal(t, "frontend", connectedNetwork, "the URL-param network must reach the host")
+	assert.Equal(t, "ctr-a", connectedContainer, "the decoded container must reach the host")
 	assert.JSONEq(t, `{}`, strings.TrimSpace(w.Body.String()), "connect answers an empty body")
 }
 

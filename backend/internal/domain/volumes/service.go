@@ -14,20 +14,20 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
-// VolumeService provides business logic for volumes. Every machine-scoped
+// VolumeService provides business logic for volumes. Every host-scoped
 // podman call crosses the VolumeEngineProvider (the connection seam); the
 // service itself owns only domain mapping and composition.
 type VolumeService struct {
 	engines VolumeEngineProvider
-	// usageEngines resolves the in-use surface the cross-machine copy/move
+	// usageEngines resolves the in-use surface the cross-host copy/move
 	// (issue 238) derives its facts from: container mounts and quadlet
 	// files. Wired via WithUsageEngines; production wiring always sets it
 	// — calling a move path on a service without it is a wiring bug and
 	// panics at the seam.
 	usageEngines VolumeUsageEngineProvider
 	// accessRepo resolves the caller's permission level for the
-	// cross-machine copy/move (issue 238): route middleware only sees the
-	// route's machine, so the target machine's access is checked here,
+	// cross-host copy/move (issue 238): route middleware only sees the
+	// route's host, so the target host's access is checked here,
 	// against the store, before any podman call. Wired via WithAccessRepo.
 	accessRepo permission.PermissionGetter
 	// maxVolumeUploadBytes bounds the copy/move's data stream (issue 238,
@@ -45,7 +45,7 @@ func NewVolumeService(engines VolumeEngineProvider) *VolumeService {
 	}
 }
 
-// WithUsageEngines wires the in-use surface seam the cross-machine
+// WithUsageEngines wires the in-use surface seam the cross-host
 // copy/move (issue 238) reads and returns the service for chaining.
 // Production wiring always sets it; calling a move path on a service
 // without it is a wiring bug and panics at the seam.
@@ -54,8 +54,8 @@ func (s *VolumeService) WithUsageEngines(usageEngines VolumeUsageEngineProvider)
 	return s
 }
 
-// WithAccessRepo wires the machine-access store the cross-machine
-// copy/move (issue 238) gates the target machine on, and returns the
+// WithAccessRepo wires the host-access store the cross-host
+// copy/move (issue 238) gates the target host on, and returns the
 // service for chaining. Production wiring always sets it; calling a
 // move path on a service without it is a wiring bug and panics at the
 // gate.
@@ -82,10 +82,10 @@ func (s *VolumeService) volumeDataLimit() int64 {
 	return transfer.BoundOrDefault(s.maxVolumeUploadBytes)
 }
 
-// List returns every volume on the specified machine, named and anonymous
-func (s *VolumeService) List(ctx context.Context, userID, machineID string, opts entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
+// List returns every volume on the specified host, named and anonymous
+func (s *VolumeService) List(ctx context.Context, userID, hostID string, opts entities.VolumeListOptions) ([]*entities.VolumeListReport, error) {
 	var volumes []*entities.VolumeListReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "volumes.List", func(e VolumeEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "volumes.List", func(e VolumeEngine) error {
 		v, err := e.List(opts)
 		if err != nil {
 			return fmt.Errorf("failed to list volumes: %w", err)
@@ -97,9 +97,9 @@ func (s *VolumeService) List(ctx context.Context, userID, machineID string, opts
 }
 
 // Get returns the full configuration of a single volume by exact name
-func (s *VolumeService) Get(ctx context.Context, userID, machineID, volumeName string) (*entities.VolumeInspectReport, error) {
+func (s *VolumeService) Get(ctx context.Context, userID, hostID, volumeName string) (*entities.VolumeInspectReport, error) {
 	var report *entities.VolumeInspectReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "volumes.Get", func(e VolumeEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "volumes.Get", func(e VolumeEngine) error {
 		r, err := s.inspectVolume(e, volumeName)
 		if err != nil {
 			return err
@@ -126,14 +126,14 @@ func (s *VolumeService) inspectVolume(e VolumeEngine, volumeName string) (*entit
 	return report, nil
 }
 
-// Create makes a volume on the machine and returns its full config.
+// Create makes a volume on the host and returns its full config.
 // An empty request name yields an anonymous volume; the returned config
 // carries podman's generated name. Podman-side rejections (invalid name
 // format, driver errors, already-existing name) surface as 400
 // INVALID_REQUEST carrying podman's message, not 5xx.
-func (s *VolumeService) Create(ctx context.Context, userID, machineID string, req VolumeCreateRequest) (*entities.VolumeInspectReport, error) {
+func (s *VolumeService) Create(ctx context.Context, userID, hostID string, req VolumeCreateRequest) (*entities.VolumeInspectReport, error) {
 	var report *entities.VolumeInspectReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "volumes.Create", func(e VolumeEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "volumes.Create", func(e VolumeEngine) error {
 		created, err := e.Create(ToPodmanVolumeCreateOptions(req))
 		if err != nil {
 			if appErr := mapCreateError(err); appErr != nil {
@@ -167,8 +167,8 @@ func (s *VolumeService) Create(ctx context.Context, userID, machineID string, re
 // answers the same terminals (404 VOLUME_NOT_FOUND / 409 VOLUME_IN_USE)
 // instead of a wrapped unclassified error. The remove-and-classify
 // ritual itself rides internal/removal (issue 264).
-func (s *VolumeService) Delete(ctx context.Context, userID, machineID, volumeName string, force bool) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "volumes.Delete", func(e VolumeEngine) error {
+func (s *VolumeService) Delete(ctx context.Context, userID, hostID, volumeName string, force bool) error {
+	return s.engines.WithEngine(ctx, userID, hostID, "volumes.Delete", func(e VolumeEngine) error {
 		return removal.Run(func() error {
 			return e.Remove(volumeName, force)
 		}, removal.Terminals{
@@ -205,13 +205,13 @@ func mapCreateError(err error) *appErrors.AppError {
 // per-item reports stringify failures, so not-found classification is the
 // adapter's job: podmanerr.IsNotFound.)
 
-// Prune removes every unused volume on the machine in one call and
+// Prune removes every unused volume on the host in one call and
 // returns podman's per-volume reports. Volumes in use by containers are
 // untouched — podman's own semantics, which is the blast-radius
 // mitigation for this endpoint.
-func (s *VolumeService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
+func (s *VolumeService) Prune(ctx context.Context, userID, hostID string) ([]*reports.PruneReport, error) {
 	var prunes []*reports.PruneReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "volumes.Prune", func(e VolumeEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "volumes.Prune", func(e VolumeEngine) error {
 		p, err := e.Prune()
 		if err != nil {
 			return fmt.Errorf("failed to prune volumes: %w", err)
@@ -227,8 +227,8 @@ func (s *VolumeService) Prune(ctx context.Context, userID, machineID string) ([]
 // clean 404 before any byte is written — callers can still send error
 // responses when this returns an AppError. Bytes flow straight from the
 // remote podman into w with no server-side buffering.
-func (s *VolumeService) Export(ctx context.Context, userID, machineID, volumeName string, w io.Writer) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "volumes.Export", func(e VolumeEngine) error {
+func (s *VolumeService) Export(ctx context.Context, userID, hostID, volumeName string, w io.Writer) error {
+	return s.engines.WithEngine(ctx, userID, hostID, "volumes.Export", func(e VolumeEngine) error {
 		// Existence gate: fail before writing anything to w.
 		if _, err := s.inspectVolume(e, volumeName); err != nil {
 			return err
@@ -243,8 +243,8 @@ func (s *VolumeService) Export(ctx context.Context, userID, machineID, volumeNam
 // everything else in the volume is kept. There is no replace mode. The
 // volume's existence is resolved first, so a missing name fails with
 // the clean 404 before the archive is consumed.
-func (s *VolumeService) Import(ctx context.Context, userID, machineID, volumeName string, r io.Reader) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "volumes.Import", func(e VolumeEngine) error {
+func (s *VolumeService) Import(ctx context.Context, userID, hostID, volumeName string, r io.Reader) error {
+	return s.engines.WithEngine(ctx, userID, hostID, "volumes.Import", func(e VolumeEngine) error {
 		// Existence gate: fail before consuming the archive.
 		if _, err := s.inspectVolume(e, volumeName); err != nil {
 			return err

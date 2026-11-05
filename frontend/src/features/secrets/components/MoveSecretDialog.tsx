@@ -9,7 +9,7 @@ import {
 	useTransferState,
 } from "@shared/components/TransferDialog";
 import { TransferReport } from "@shared/transfers/transferPresentation";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 
 // The execution-time refusal the dialog can make actionable (issue 239):
@@ -26,21 +26,21 @@ const SECRET_ALREADY_EXISTS_CODE = "SECRET_ALREADY_EXISTS";
 // secret preview query, the plain-mutation transport (the endpoint answers
 // one JSON envelope — secret values are small, the NDJSON transport stays a
 // volume concern, so there is no progress stream), the envelope report, and
-// the SECRET_ALREADY_EXISTS hint. The both-machines invalidation lives in
+// the SECRET_ALREADY_EXISTS hint. The both-hosts invalidation lives in
 // the mutation hook, not here.
 export function MoveSecretDialog({
-	machine,
+	host,
 	secret,
 	onClose,
 }: {
-	machine: Machine;
+	host: Host;
 	secret: SecretSummary;
 	onClose: () => void;
 }) {
-	const transfer = useTransferState(machine, "manage-secrets");
-	const moveSecret = useMoveSecret(machine.id);
+	const transfer = useTransferState(host, "manage-secrets");
+	const moveSecret = useMoveSecret(host.id);
 	const preview = useSecretMovePreview(
-		machine.id,
+		host.id,
 		secret.name,
 		transfer.targetId || null,
 	);
@@ -48,8 +48,8 @@ export function MoveSecretDialog({
 	// The terminal report of a completed transfer (issue 239): the shared
 	// skeleton narrates the envelope's status in place — the dialog stays
 	// open on it, the stay-open-report pattern, because a "partial" result
-	// must keep the dialog open naming the both-machines state. The cause
-	// sentence is the secret domain's; the header shape, the both-machines
+	// must keep the dialog open naming the both-hosts state. The cause
+	// sentence is the secret domain's; the header shape, the both-hosts
 	// tail, and the error line are the skeleton's (candidate C8).
 	const report = moveSecret.data ? (
 		<TransferReport
@@ -72,7 +72,7 @@ export function MoveSecretDialog({
 
 	return (
 		<TransferDialog
-			machine={machine}
+			host={host}
 			transfer={transfer}
 			preview={preview}
 			noun="secret"
@@ -92,7 +92,7 @@ export function MoveSecretDialog({
 			onConfirm={() =>
 				moveSecret.mutate({
 					secretId: secret.name,
-					targetMachineId: transfer.targetId,
+					targetHostId: transfer.targetId,
 					mode: transfer.mode,
 				})
 			}

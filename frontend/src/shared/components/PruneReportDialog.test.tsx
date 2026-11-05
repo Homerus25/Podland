@@ -59,7 +59,7 @@ describe("PruneReportDialog confirm state", () => {
 		expect(screen.getByText("Prune unused images")).toBeInTheDocument();
 		expect(
 			screen.getByText(
-				"All unused images on this machine will be removed. This cannot be undone.",
+				"All unused images on this host will be removed. This cannot be undone.",
 			),
 		).toBeInTheDocument();
 		expect(
@@ -172,7 +172,7 @@ describe("PruneReportDialog report state", () => {
 		renderDialog(makeMutation({ data: [] }));
 
 		expect(screen.getByTestId("prune-report-empty")).toHaveTextContent(
-			"Nothing to prune: no unused images on this machine.",
+			"Nothing to prune: no unused images on this host.",
 		);
 		expect(screen.queryByTestId("prune-report")).not.toBeInTheDocument();
 	});
@@ -215,7 +215,7 @@ describe("PruneReportDialog noun-derived copy", () => {
 			/>,
 		);
 		expect(screen.getByTestId("prune-report-empty")).toHaveTextContent(
-			"Nothing to prune: no unused volumes on this machine.",
+			"Nothing to prune: no unused volumes on this host.",
 		);
 	});
 });

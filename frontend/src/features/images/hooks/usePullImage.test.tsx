@@ -13,7 +13,7 @@ type PullHandler = (request: Request) => PullResponse | Promise<PullResponse>;
 
 const { progressEvent, completeEvent, errorEvent } = streamFixtures;
 
-const pullUrl = "*/api/machines/:machineId/images/pull";
+const pullUrl = "*/api/hosts/:hostId/images/pull";
 
 let requests: Request[] = [];
 
@@ -59,7 +59,7 @@ describe("usePullImage", () => {
 		expect(requests).toHaveLength(1);
 		expect(requests[0].method).toBe("POST");
 		expect(new URL(requests[0].url).pathname).toBe(
-			"/api/machines/m-1/images/pull",
+			"/api/hosts/m-1/images/pull",
 		);
 		expect(await requests[0].json()).toEqual({ image: "nginx:latest" });
 		await waitFor(() => expect(result.current.isPulling).toBe(false));
@@ -100,9 +100,7 @@ describe("usePullImage", () => {
 	});
 
 	it("exposes non-2xx HTTP failures through the error envelope", async () => {
-		mockPull(() =>
-			errorResponse(404, "MACHINE_NOT_FOUND", "Machine not found"),
-		);
+		mockPull(() => errorResponse(404, "HOST_NOT_FOUND", "Host not found"));
 		const { result } = renderPullHook();
 
 		await act(async () => {
@@ -111,8 +109,8 @@ describe("usePullImage", () => {
 
 		await waitFor(() => expect(result.current.isPulling).toBe(false));
 		expect(result.current.error).toEqual({
-			code: "MACHINE_NOT_FOUND",
-			message: "Machine not found",
+			code: "HOST_NOT_FOUND",
+			message: "Host not found",
 		});
 	});
 });

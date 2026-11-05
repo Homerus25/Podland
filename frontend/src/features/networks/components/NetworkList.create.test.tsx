@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { errorJson, errorResponse } from "@/test/errors";
 import {
 	containerFixture,
-	machineFixture,
+	hostFixture,
 	networkFixture,
 } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
@@ -36,11 +36,11 @@ function mockLists(
 	containers: ContainerSummary[] = [runningWeb, runningDb, stoppedCache],
 ) {
 	return [
-		http.get("*/api/machines/m-1/networks", () => {
+		http.get("*/api/hosts/m-1/networks", () => {
 			networksGets++;
 			return HttpResponse.json([networkFixture()]);
 		}),
-		http.get("*/api/machines/m-1/containers", () => {
+		http.get("*/api/hosts/m-1/containers", () => {
 			containersGets++;
 			return HttpResponse.json({
 				containers,
@@ -52,7 +52,7 @@ function mockLists(
 }
 
 function createHandler(status = 201, body?: JsonBodyType) {
-	return http.post("*/api/machines/m-1/networks", async ({ request }) => {
+	return http.post("*/api/hosts/m-1/networks", async ({ request }) => {
 		createRequests.count++;
 		createRequests.body = await request.json();
 		if (status !== 201) return HttpResponse.json(body, { status });
@@ -63,7 +63,7 @@ function createHandler(status = 201, body?: JsonBodyType) {
 }
 
 async function openCreateDialog() {
-	renderWithQuery(<NetworkList machine={machineFixture()} />, {
+	renderWithQuery(<NetworkList host={hostFixture()} />, {
 		router: true,
 	});
 	await screen.findByTestId("network-row");
@@ -87,7 +87,7 @@ describe("NetworkList create", () => {
 		);
 	});
 
-	it("offers only the machine's running containers", async () => {
+	it("offers only the host's running containers", async () => {
 		resetCounters();
 		server.use(...mockLists(), createHandler());
 		const user = await openCreateDialog();
@@ -212,7 +212,7 @@ describe("NetworkList create", () => {
 		let attempts = 0;
 		server.use(
 			...mockLists(),
-			http.post("*/api/machines/m-1/networks", async ({ request }) => {
+			http.post("*/api/hosts/m-1/networks", async ({ request }) => {
 				createRequests.count++;
 				createRequests.body = await request.json();
 				attempts++;

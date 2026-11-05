@@ -5,7 +5,7 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import {
 	containerFixture,
-	machineFixture,
+	hostFixture,
 	networkFixture,
 } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
@@ -16,10 +16,10 @@ import { server } from "@/test/server";
 // pinned in ConnectDialog.test.tsx.
 function mockLists() {
 	return [
-		http.get("*/api/machines/m-1/networks", () =>
+		http.get("*/api/hosts/m-1/networks", () =>
 			HttpResponse.json([networkFixture()]),
 		),
-		http.get("*/api/machines/m-1/containers", () =>
+		http.get("*/api/hosts/m-1/containers", () =>
 			HttpResponse.json({
 				containers: [containerFixture()],
 				total: 1,
@@ -32,7 +32,7 @@ function mockLists() {
 describe("NetworkList connect", () => {
 	it("opens the connect dialog from the row button with the network fixed", async () => {
 		server.use(...mockLists());
-		renderWithQuery(<NetworkList machine={machineFixture()} />, {
+		renderWithQuery(<NetworkList host={hostFixture()} />, {
 			router: true,
 		});
 		const row = await screen.findByTestId("network-row");
@@ -51,7 +51,7 @@ describe("NetworkList connect", () => {
 		server.use(...mockLists());
 		renderWithQuery(
 			<NetworkList
-				machine={machineFixture({ permission: "read", isOwner: false })}
+				host={hostFixture({ permission: "read", isOwner: false })}
 			/>,
 			{ router: true },
 		);

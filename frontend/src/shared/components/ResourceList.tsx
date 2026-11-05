@@ -103,7 +103,7 @@ function pinRowCells(
 	return node;
 }
 
-// One owner for the machinery every feature list hand-rolled: the
+// One owner for the plumbing every feature list hand-rolled: the
 // toolbar-or-hint row, the table chrome, and the plural table testid.
 // The loading/error/empty triad is composed through ResourceStates, the
 // headless owner those states share with the non-table collection sites.

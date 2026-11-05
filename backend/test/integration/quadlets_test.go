@@ -16,13 +16,13 @@ import (
 
 // Test_Integration_Quadlets_CRUD is the quadlet CRUD vertical slice for the
 // real-podman integration suite (PRD 080-08). It exercises the full quadlet
-// management lifecycle end-to-end against the once-registered machine:
+// management lifecycle end-to-end against the once-registered host:
 //
-//	POST   /api/machines/{id}/quadlets             → 201 created
-//	GET    /api/machines/{id}/quadlets             → list (run-scoped filter)
-//	GET    /api/machines/{id}/quadlets/{quadletId} → 200 with content + metadata
-//	PUT    /api/machines/{id}/quadlets/{quadletId} → 200 with updated content
-//	DELETE /api/machines/{id}/quadlets/{quadletId} → 204 removed
+//	POST   /api/hosts/{id}/quadlets             → 201 created
+//	GET    /api/hosts/{id}/quadlets             → list (run-scoped filter)
+//	GET    /api/hosts/{id}/quadlets/{quadletId} → 200 with content + metadata
+//	PUT    /api/hosts/{id}/quadlets/{quadletId} → 200 with updated content
+//	DELETE /api/hosts/{id}/quadlets/{quadletId} → 204 removed
 //
 // This proves create → list → get → update → delete over the SSH tunnel,
 // on top of the harness shared with the tracer/images/containers slices.
@@ -40,7 +40,7 @@ import (
 //     run-scoped quadlet left over from an aborted test (panic, SIGINT
 //     before the per-test cleanup fired, …).
 //
-// Prerequisite: busybox must exist on the machine before quadlet create
+// Prerequisite: busybox must exist on the host before quadlet create
 // will succeed (podman does not auto-pull on quadlet start). The test
 // ensures this itself by reusing `ensureBusyboxImage` from the containers
 // slice — each test ensures its own prerequisites.
@@ -59,12 +59,12 @@ func Test_Integration_Quadlets_CRUD(t *testing.T) {
 	registerQuadletsSweep()
 
 	// Quadlet install/remove dial the user systemd over DBus on the
-	// machine (podman's own requirement), so the whole CRUD lifecycle
+	// host (podman's own requirement), so the whole CRUD lifecycle
 	// needs a user systemd manager. Hosts without one (the systemd-free
 	// container test host) skip here rather than fail on the 500s.
 	requireUserSystemd(t)
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// --- AC #1: ensure busybox exists (idempotent) -------------------
 	// Reuse the containers slice's helper; quadlet start will fail without
@@ -73,7 +73,7 @@ func Test_Integration_Quadlets_CRUD(t *testing.T) {
 	ensureBusyboxImage(t)
 
 	// Run-scoped name so list/count assertions and the suite sweep can
-	// find exactly what this run created. The filename on the remote machine
+	// find exactly what this run created. The filename on the remote host
 	// becomes `<name>.container`.
 	quadletName := "it-" + suite.RunID + "-crud"
 	createReq := quadletCreateBody{
@@ -91,12 +91,12 @@ func Test_Integration_Quadlets_CRUD(t *testing.T) {
 	// uses podman quadlet ls to find run-scoped quadlets and removes them
 	// via systemctl + rm.
 	t.Cleanup(func() {
-		deleteQuadlet(t, machineID, quadletName+".container")
+		deleteQuadlet(t, hostID, quadletName+".container")
 	})
 
 	// --- AC #2: POST creates a run-scoped-named quadlet; 201 -----------
 	t.Run("CreateReturns201", func(t *testing.T) {
-		createQuadlet(t, machineID, createReq)
+		createQuadlet(t, hostID, createReq)
 		t.Logf("quadlet created: name=%s", quadletName)
 	})
 	if t.Failed() {
@@ -105,7 +105,7 @@ func Test_Integration_Quadlets_CRUD(t *testing.T) {
 
 	// --- AC #3: GET /quadlets returns the created quadlet ------------
 	t.Run("ListReturnsCreatedQuadlet", func(t *testing.T) {
-		requireQuadletListed(t, machineID, quadletName+".container",
+		requireQuadletListed(t, hostID, quadletName+".container",
 			"created quadlet must appear in the quadlet list")
 	})
 	if t.Failed() {
@@ -115,7 +115,7 @@ func Test_Integration_Quadlets_CRUD(t *testing.T) {
 	// --- AC #4: GET /quadlets/{name} returns content + metadata ------
 	t.Run("GetReturnsContentAndMetadata", func(t *testing.T) {
 		// GET expects the full name with extension in the URL path
-		got := getQuadlet(t, machineID, quadletName+".container")
+		got := getQuadlet(t, hostID, quadletName+".container")
 		// The API returns the name with extension
 		require.Equal(t, quadletName+".container", got.Name, "quadlet name must match request (with extension)")
 		require.Equal(t, "container", got.Resource, "quadlet resource must be container")
@@ -135,10 +135,10 @@ Exec=sh -c "sleep 7200"
 	t.Run("UpdateReplacesContent", func(t *testing.T) {
 		// PUT expects the full name with extension (the service now correctly
 		// strips the existing extension before adding the new one)
-		updateQuadlet(t, machineID, quadletName+".container", quadletUpdateBody{
+		updateQuadlet(t, hostID, quadletName+".container", quadletUpdateBody{
 			Content: updatedContent,
 		})
-		got := getQuadlet(t, machineID, quadletName+".container")
+		got := getQuadlet(t, hostID, quadletName+".container")
 		require.Equal(t, updatedContent, got.Content,
 			"GET after PUT must return the updated content")
 	})
@@ -150,11 +150,11 @@ Exec=sh -c "sleep 7200"
 	t.Run("DeleteRemovesQuadlet", func(t *testing.T) {
 		// Prove presence first so a broken list endpoint can't make the
 		// post-delete absence check pass vacuously.
-		requireQuadletListed(t, machineID, quadletName+".container",
+		requireQuadletListed(t, hostID, quadletName+".container",
 			"quadlet must appear in the list before delete")
 		// DELETE expects the full name with extension in the URL path
-		deleteQuadlet(t, machineID, quadletName+".container")
-		requireQuadletNotListed(t, machineID, quadletName+".container",
+		deleteQuadlet(t, hostID, quadletName+".container")
+		requireQuadletNotListed(t, hostID, quadletName+".container",
 			"deleted quadlet must not appear in the quadlet list")
 	})
 
@@ -162,15 +162,15 @@ Exec=sh -c "sleep 7200"
 	t.Run("DeleteMissingQuadletReturns404", func(t *testing.T) {
 		missingName := "it-" + suite.RunID + "-missing"
 		// DELETE expects the full name with extension in the URL path
-		deleteQuadletExpectNotFound(t, machineID, missingName+".container")
+		deleteQuadletExpectNotFound(t, hostID, missingName+".container")
 	})
 
 	// --- AC #8: POST with a duplicate name returns 409 ---------------
 	t.Run("CreateDuplicateReturns409", func(t *testing.T) {
 		// Recreate the same quadlet we just deleted (same name).
-		createQuadlet(t, machineID, createReq)
+		createQuadlet(t, hostID, createReq)
 		// Attempting to create it again should fail with 409.
-		createQuadletExpectConflict(t, machineID, createReq)
+		createQuadletExpectConflict(t, hostID, createReq)
 	})
 }
 
@@ -181,7 +181,7 @@ Exec=sh -c "sleep 7200"
 // runnableContainerQuadletContent is the recipe every quadlet slice uses
 // when it needs a unit systemd can actually start: a busybox container
 // that sleeps long enough to outlive the test. `busybox` must already be
-// present on the machine — slices ensure this via ensureBusyboxImage.
+// present on the host — slices ensure this via ensureBusyboxImage.
 const runnableContainerQuadletContent = `[Container]
 Image=busybox
 Exec=sh -c "sleep 3600"
@@ -249,12 +249,12 @@ type quadletListResponse struct {
 }
 
 // createQuadlet POSTs /quadlets and asserts 201 with the expected shape.
-func createQuadlet(t *testing.T, machineID string, body quadletCreateBody) {
+func createQuadlet(t *testing.T, hostID string, body quadletCreateBody) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
 	require.NoError(t, err, "POST /quadlets must connect to the in-process server")
 	defer resp.Body.Close()
@@ -275,12 +275,12 @@ func createQuadlet(t *testing.T, machineID string, body quadletCreateBody) {
 }
 
 // createQuadletExpectConflict POSTs /quadlets and asserts 409 (duplicate).
-func createQuadletExpectConflict(t *testing.T, machineID string, body quadletCreateBody) {
+func createQuadletExpectConflict(t *testing.T, hostID string, body quadletCreateBody) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
 	require.NoError(t, err, "POST /quadlets must connect to the in-process server")
 	defer resp.Body.Close()
@@ -299,9 +299,9 @@ func createQuadletExpectConflict(t *testing.T, machineID string, body quadletCre
 // getQuadlet GETs /quadlets/{name} and returns the decoded response.
 // The name parameter should be the quadlet name without extension
 // (the handler internally adds the appropriate extension).
-func getQuadlet(t *testing.T, machineID, quadletName string) quadletGetResponse {
+func getQuadlet(t *testing.T, hostID, quadletName string) quadletGetResponse {
 	t.Helper()
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/" + quadletName + "/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/" + quadletName + "/"
 	resp, err := suite.AuthenticatedClient().Get(url)
 	require.NoError(t, err, "GET /quadlets/{id}")
 	defer resp.Body.Close()
@@ -315,9 +315,9 @@ func getQuadlet(t *testing.T, machineID, quadletName string) quadletGetResponse 
 }
 
 // getQuadletExpectNotFound GETs /quadlets/{name} and asserts 404.
-func getQuadletExpectNotFound(t *testing.T, machineID, quadletName string) {
+func getQuadletExpectNotFound(t *testing.T, hostID, quadletName string) {
 	t.Helper()
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/" + quadletName + "/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/" + quadletName + "/"
 	resp, err := suite.AuthenticatedClient().Get(url)
 	require.NoError(t, err, "GET /quadlets/{id}")
 	defer resp.Body.Close()
@@ -336,12 +336,12 @@ func getQuadletExpectNotFound(t *testing.T, machineID, quadletName string) {
 // The name parameter should be the quadlet name WITH extension
 // (the service internally strips the existing extension and appends
 // the correct one based on the existing quadlet's resource type).
-func updateQuadlet(t *testing.T, machineID, quadletName string, body quadletUpdateBody) {
+func updateQuadlet(t *testing.T, hostID, quadletName string, body quadletUpdateBody) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/" + quadletName + "/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/" + quadletName + "/"
 	req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -359,9 +359,9 @@ func updateQuadlet(t *testing.T, machineID, quadletName string, body quadletUpda
 }
 
 // deleteQuadlet DELETEs /quadlets/{name} and asserts 204.
-func deleteQuadlet(t *testing.T, machineID, quadletName string) {
+func deleteQuadlet(t *testing.T, hostID, quadletName string) {
 	t.Helper()
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/" + quadletName + "/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/" + quadletName + "/"
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	require.NoError(t, err)
 	resp, err := suite.AuthenticatedClient().Do(req)
@@ -378,9 +378,9 @@ func deleteQuadlet(t *testing.T, machineID, quadletName string) {
 }
 
 // deleteQuadletExpectNotFound DELETEs /quadlets/{name} and asserts 404.
-func deleteQuadletExpectNotFound(t *testing.T, machineID, quadletName string) {
+func deleteQuadletExpectNotFound(t *testing.T, hostID, quadletName string) {
 	t.Helper()
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/" + quadletName + "/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/" + quadletName + "/"
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	require.NoError(t, err)
 	resp, err := suite.AuthenticatedClient().Do(req)
@@ -398,10 +398,10 @@ func deleteQuadletExpectNotFound(t *testing.T, machineID, quadletName string) {
 }
 
 // listQuadletNames GETs /quadlets/ and returns every quadlet name on the
-// machine. Used by the presence/absence assertions.
-func listQuadletNames(t *testing.T, machineID string) []string {
+// host. Used by the presence/absence assertions.
+func listQuadletNames(t *testing.T, hostID string) []string {
 	t.Helper()
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/"
 	resp, err := suite.AuthenticatedClient().Get(url)
 	require.NoError(t, err, "GET /quadlets")
 	defer resp.Body.Close()
@@ -422,20 +422,20 @@ func listQuadletNames(t *testing.T, machineID string) []string {
 	return names
 }
 
-// requireQuadletListed asserts that name appears among the machine's
+// requireQuadletListed asserts that name appears among the host's
 // quadlets. Proving presence before delete is what makes the post-delete
 // absence check meaningful (otherwise a list that always returns [] would
 // pass vacuously).
-func requireQuadletListed(t *testing.T, machineID, name, msg string) {
+func requireQuadletListed(t *testing.T, hostID, name, msg string) {
 	t.Helper()
-	require.Containsf(t, listQuadletNames(t, machineID), name, "%s", msg)
+	require.Containsf(t, listQuadletNames(t, hostID), name, "%s", msg)
 }
 
 // requireQuadletNotListed asserts that name does NOT appear among the
-// machine's quadlets — i.e. the delete actually removed it.
-func requireQuadletNotListed(t *testing.T, machineID, name, msg string) {
+// host's quadlets — i.e. the delete actually removed it.
+func requireQuadletNotListed(t *testing.T, hostID, name, msg string) {
 	t.Helper()
-	require.NotContainsf(t, listQuadletNames(t, machineID), name, "%s", msg)
+	require.NotContainsf(t, listQuadletNames(t, hostID), name, "%s", msg)
 }
 
 // ---------------------------------------------------------------------------
@@ -465,7 +465,7 @@ func registerQuadletsSweep() {
 	})
 }
 
-// sweepRunScopedQuadlets lists every quadlet on the machine and removes
+// sweepRunScopedQuadlets lists every quadlet on the host and removes
 // any whose name mentions the runID. See registerQuadletsSweep for the
 // force rationale (stop-param gap).
 //
@@ -473,13 +473,13 @@ func registerQuadletsSweep() {
 // podmanConnRun only runs podman commands. This sweep is best-effort:
 // it lists run-scoped quadlets but cannot reliably remove them. The
 // quadlet lifecycle slice (080-09) will handle the running-quadlet
-// cleanup, and machine teardown will clean up the quadlet files.
+// cleanup, and host teardown will clean up the quadlet files.
 func sweepRunScopedQuadlets(runID string) {
 	// `podman quadlet ls` lists quadlets. The output format is JSON by
 	// default when --format=json is specified.
 	out, err := podmanConnRun("quadlet", "ls", "--format", "json")
 	if err != nil {
-		// Best-effort: a failed list (e.g. machine already stopped) is
+		// Best-effort: a failed list (e.g. host already stopped) is
 		// not a fatal teardown problem.
 		return
 	}
@@ -503,7 +503,7 @@ func sweepRunScopedQuadlets(runID string) {
 			continue
 		}
 		// Log the quadlet we would clean up — we cannot reliably remove it
-		// with the current CLI constraints. The machine teardown will handle it.
+		// with the current CLI constraints. The host teardown will handle it.
 		// Note: t.Logf is not available here; we'd need to pass a logger in.
 		// For now, this is a no-op sweep that just acknowledges the garbage.
 	}

@@ -1,6 +1,6 @@
-import { api, machineApiPath } from "@shared/utils/api";
+import { api, hostApiPath } from "@shared/utils/api";
 
-// Network as returned by GET /api/machines/{id}/networks
+// Network as returned by GET /api/hosts/{id}/networks
 // (backend/internal/domain/networks/dto.go NetworkResponse). The DTO
 // carries exactly the rendered fields — no id, labels, options, or flags.
 export interface NetworkSummary {
@@ -13,11 +13,9 @@ export interface NetworkSummary {
 	createdAt: string;
 }
 
-export async function listNetworks(
-	machineId: string,
-): Promise<NetworkSummary[]> {
+export async function listNetworks(hostId: string): Promise<NetworkSummary[]> {
 	const response = await api.get<NetworkSummary[]>(
-		machineApiPath(machineId, "networks"),
+		hostApiPath(hostId, "networks"),
 	);
 	return response.data;
 }
@@ -30,7 +28,7 @@ export interface NetworkContainerRef {
 	name: string;
 }
 
-// Network as returned by GET /api/machines/{id}/networks/{networkName}
+// Network as returned by GET /api/hosts/{id}/networks/{networkName}
 // (backend/internal/domain/networks/dto.go NetworkDetailResponse): the
 // fields the network detail page renders, mapped from the inspect report.
 export interface NetworkDetail {
@@ -47,32 +45,32 @@ export interface NetworkDetail {
 	containers: NetworkContainerRef[];
 }
 
-// GET /api/machines/{id}/networks/{networkName} -> 200 with the detail DTO
+// GET /api/hosts/{id}/networks/{networkName} -> 200 with the detail DTO
 // (backend/internal/domain/networks handler Get).
 export async function getNetwork(
-	machineId: string,
+	hostId: string,
 	networkName: string,
 ): Promise<NetworkDetail> {
 	const response = await api.get<NetworkDetail>(
-		machineApiPath(machineId, "networks", networkName),
+		hostApiPath(hostId, "networks", networkName),
 	);
 	return response.data;
 }
 
-// GET /api/machines/{id}/networks/{networkName}/inspect -> 200 with the
+// GET /api/hosts/{id}/networks/{networkName}/inspect -> 200 with the
 // raw podman inspect report as the top-level body. The report is deliberately
 // untyped on the client: no DTO is invented for it.
 export async function inspectNetwork(
-	machineId: string,
+	hostId: string,
 	networkName: string,
 ): Promise<Record<string, unknown>> {
 	const response = await api.get<Record<string, unknown>>(
-		machineApiPath(machineId, "networks", networkName, "inspect"),
+		hostApiPath(hostId, "networks", networkName, "inspect"),
 	);
 	return response.data;
 }
 
-// Body of POST /api/machines/{id}/networks
+// Body of POST /api/hosts/{id}/networks
 // (backend/internal/domain/networks/dto.go NetworkCreateRequest).
 export interface CreateNetworkInput {
 	name: string;
@@ -89,14 +87,14 @@ export interface ConnectContainerVariables {
 	containerId: string;
 }
 
-// POST /api/machines/{id}/networks -> 201 with the created network in the
+// POST /api/hosts/{id}/networks -> 201 with the created network in the
 // list DTO shape (backend/internal/domain/networks handler Create).
 export async function createNetwork(
-	machineId: string,
+	hostId: string,
 	input: CreateNetworkInput,
 ): Promise<NetworkSummary> {
 	const response = await api.post<NetworkSummary>(
-		machineApiPath(machineId, "networks"),
+		hostApiPath(hostId, "networks"),
 		input,
 	);
 	return response.data;
@@ -112,29 +110,26 @@ export interface NetworkPruneReport {
 	error?: string;
 }
 
-// POST /api/machines/{id}/networks/prune -> 200 with the per-network
+// POST /api/hosts/{id}/networks/prune -> 200 with the per-network
 // report, one entry per removed network, [] when nothing was removed.
 // Networks in use by a container are untouched.
 export async function pruneNetworks(
-	machineId: string,
+	hostId: string,
 ): Promise<NetworkPruneReport[]> {
 	const response = await api.post<NetworkPruneReport[]>(
-		machineApiPath(machineId, "networks", "prune"),
+		hostApiPath(hostId, "networks", "prune"),
 	);
 	return response.data;
 }
 
-// POST /api/machines/{id}/networks/{networkName}/connect -> 200, empty body
+// POST /api/hosts/{id}/networks/{networkName}/connect -> 200, empty body
 // (backend/internal/domain/networks handler Connect).
 export async function connectContainer(
-	machineId: string,
+	hostId: string,
 	networkName: string,
 	containerId: string,
 ): Promise<void> {
-	await api.post(
-		machineApiPath(machineId, "networks", networkName, "connect"),
-		{
-			container: containerId,
-		},
-	);
+	await api.post(hostApiPath(hostId, "networks", networkName, "connect"), {
+		container: containerId,
+	});
 }

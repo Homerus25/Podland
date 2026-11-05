@@ -22,14 +22,14 @@ import (
 // mapping is pinned as direct builder table tests (create_spec_test.go)
 // — no handler, no fake engine, no HTTP ride.
 
-// createRequest serves POST /api/machines/{id}/containers with the given
+// createRequest serves POST /api/hosts/{id}/containers with the given
 // JSON body through the handler with an authenticated test identity.
 func createRequest(create http.HandlerFunc, body string) *httptest.ResponseRecorder {
 	return testutils.Perform(create, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/containers",
+		Path:      "/api/hosts/test-host/containers",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 		Body:      strings.NewReader(body),
 	})
 }
@@ -62,7 +62,7 @@ func TestContainerHandler_Create_Success(t *testing.T) {
 }
 
 // TestContainerHandler_Create_MissingImage pins the validation guard: a
-// request without an image is refused with 400 before the machine is asked
+// request without an image is refused with 400 before the host is asked
 // (the engine stays unarmed and would panic on a call).
 func TestContainerHandler_Create_MissingImage(t *testing.T) {
 	engine := &fakeContainerEngine{}
@@ -116,7 +116,7 @@ func TestContainerHandler_Create_MissingImageAnswers404(t *testing.T) {
 
 // TestContainerHandler_Create_MountFlagsMutuallyExclusive pins the z+Z
 // guard: a mount carrying both selinuxShared and selinuxPrivate is
-// refused with 400 VALIDATION_FAILED before the machine is asked (the
+// refused with 400 VALIDATION_FAILED before the host is asked (the
 // engine stays unarmed and would panic on a call).
 func TestContainerHandler_Create_MountFlagsMutuallyExclusive(t *testing.T) {
 	engine := &fakeContainerEngine{}
@@ -158,7 +158,7 @@ func TestContainerHandler_Create_UnknownCapabilitySurfacesError(t *testing.T) {
 // the request fields: an invalid restart policy, a device or volume
 // missing a required sub-field, a secret without a source, an invalid
 // mode, and an out-of-range port are all refused with 400 before the
-// machine is asked (the engine stays unarmed and would panic on a call).
+// host is asked (the engine stays unarmed and would panic on a call).
 func TestContainerHandler_Create_Validation(t *testing.T) {
 	cases := map[string]string{
 		"invalid restart policy":        `{"image": "nginx:latest", "restartPolicy": "sometimes"}`,

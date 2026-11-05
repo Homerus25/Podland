@@ -1,10 +1,10 @@
-// Package sshexec runs commands on remote machines over SSH using each
-// machine's stored credentials (host, user, encrypted private key — all
-// already persisted at machine-registration time).
+// Package sshexec runs commands on remote hosts over SSH using each
+// host's stored credentials (host, user, encrypted private key — all
+// already persisted at host-registration time).
 //
 // The package defines SSHExecInterface and a production *Service
-// implementation. The underlying *ssh.Client is cached per machine by
-// internal/rescache (the one per-machine cache lifecycle, architecture review
+// implementation. The underlying *ssh.Client is cached per host by
+// internal/rescache (the one per-host cache lifecycle, architecture review
 // 2026-10-19 candidate C1; the podman Connection Cache in internal/connections
 // is its other adapter), and SSH failures fail fast (no retry, per
 // docs/architecture-decisions.md §4).
@@ -23,14 +23,14 @@ import (
 // Compile-time check that *Service satisfies SSHExecInterface.
 var _ SSHExecInterface = (*Service)(nil)
 
-// machineRepo is the narrow subset of *models.MachineRepository that the
+// hostRepo is the narrow subset of *models.HostRepository that the
 // SSH-exec dialer depends on. Defining it locally keeps the constructor
 // signature honest about what we actually need and lets tests supply a fake
 // without dragging in the SQL-backed concrete type.
 //
-// *models.MachineRepository satisfies this implicitly.
-type machineRepo interface {
-	GetByID(id string) (*models.Machine, error)
+// *models.HostRepository satisfies this implicitly.
+type hostRepo interface {
+	GetByID(id string) (*models.Host, error)
 }
 
 // encryptionSvc is the narrow subset of *encryption.EncryptionService that
@@ -40,8 +40,8 @@ type encryptionSvc interface {
 	Decrypt(data []byte) (string, error)
 }
 
-// Service runs commands on remote machines over SSH and caches the
-// underlying *ssh.Client per machine.
+// Service runs commands on remote hosts over SSH and caches the
+// underlying *ssh.Client per host.
 //
 // The actual SSH work is delegated to a dialer — a small internal seam that
 // keeps Exec testable without a live SSH server (the dialer and runner are
@@ -53,10 +53,10 @@ type Service struct {
 // Options configures a Service. Mirrors the Options-struct idiom used by
 // connections.ConnectionFactoryOptions.
 type Options struct {
-	MachineRepo *models.MachineRepository
-	Encryption  *encryption.EncryptionService
+	HostRepo   *models.HostRepository
+	Encryption *encryption.EncryptionService
 
-	// MaxClients caps the per-machine *ssh.Client cache (LRU-evicted when
+	// MaxClients caps the per-host *ssh.Client cache (LRU-evicted when
 	// full). Defaults to 100 when zero, matching the connection-cache
 	// default documented in docs/architecture-decisions.md §4.
 	MaxClients int
@@ -96,7 +96,7 @@ func NewService(opts Options) *Service {
 	}
 
 	d := newSSHDialer(sshDialerConfig{
-		machineRepo:     opts.MachineRepo,
+		hostRepo:        opts.HostRepo,
 		encryption:      opts.Encryption,
 		maxSize:         maxClients,
 		idleTimeout:     idleTimeout,
@@ -131,9 +131,9 @@ func (s *Service) Close() error {
 // codes themselves (e.g. systemctl's unit-not-loaded code).
 //
 // Fail-fast: on a real SSH/session failure (anything other than a non-zero
-// exit code), the cached *ssh.Client for this machine is invalidated so the
+// exit code), the cached *ssh.Client for this host is invalidated so the
 // next call re-dials, and the error is returned unwrapped-by-retry.
-func (s *Service) Exec(ctx context.Context, machineID, userID, command string, opts ExecOptions) (ExecResult, error) {
+func (s *Service) Exec(ctx context.Context, hostID, userID, command string, opts ExecOptions) (ExecResult, error) {
 	_ = userID // accepted for interface symmetry with the podman connection
 	// seam (connections.Manager); permission checks happen at the handler
 	// layer, matching that seam's posture (it also ignores userID beyond
@@ -141,9 +141,9 @@ func (s *Service) Exec(ctx context.Context, machineID, userID, command string, o
 
 	cmd := shellQuote(command, opts.Args)
 
-	runner, err := s.dialer.Dial(ctx, machineID)
+	runner, err := s.dialer.Dial(ctx, hostID)
 	if err != nil {
-		return ExecResult{}, fmt.Errorf("sshexec: failed to dial machine %q: %w", machineID, err)
+		return ExecResult{}, fmt.Errorf("sshexec: failed to dial host %q: %w", hostID, err)
 	}
 	defer runner.Close()
 
@@ -151,7 +151,7 @@ func (s *Service) Exec(ctx context.Context, machineID, userID, command string, o
 	if runErr != nil {
 		// A real failure (network drop, session closed, ...). The cached
 		// client is likely stale — drop it so the next call re-dials.
-		s.dialer.Invalidate(machineID)
+		s.dialer.Invalidate(hostID)
 		return ExecResult{}, runErr
 	}
 	return result, nil
@@ -180,14 +180,14 @@ func shellQuote(command string, args []string) string {
 	return b.String()
 }
 
-// RemoveMachine tears a machine out of the SSH-exec pool gracefully
-// (mirrors connections.Manager.RemoveMachine's vocabulary and contract):
-// the cached SSH client for machineID closes as soon as the last in-flight
-// exec releases it, and a later exec for the machine simply dials again.
-// Unknown machines are a no-op. Called by the machines module at deletion
-// time so no live SSH session outlives the machine row.
-func (s *Service) RemoveMachine(machineID string) {
-	s.dialer.RemoveMachine(machineID)
+// RemoveHost tears a host out of the SSH-exec pool gracefully
+// (mirrors connections.Manager.RemoveHost's vocabulary and contract):
+// the cached SSH client for hostID closes as soon as the last in-flight
+// exec releases it, and a later exec for the host simply dials again.
+// Unknown hosts are a no-op. Called by the hosts module at deletion
+// time so no live SSH session outlives the host row.
+func (s *Service) RemoveHost(hostID string) {
+	s.dialer.RemoveHost(hostID)
 }
 
 // (the real sshDialer / sessionRunner types live in dialer.go; the dialer

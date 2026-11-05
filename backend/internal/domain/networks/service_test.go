@@ -31,7 +31,7 @@ func TestNetworkService_List_ReturnsEngineNetworks(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.List(context.Background(), "user", "machine")
+	got, err := service.List(context.Background(), "user", "host")
 
 	require.NoError(t, err)
 	assert.Equal(t, networks, got)
@@ -45,7 +45,7 @@ func TestNetworkService_List_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.List(context.Background(), "user", "machine")
+	got, err := service.List(context.Background(), "user", "host")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -59,7 +59,7 @@ func TestNetworkService_List_WrapsEngineFailure(t *testing.T) {
 func TestNetworkService_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewNetworkService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	_, err := service.List(context.Background(), "user", "machine")
+	_, err := service.List(context.Background(), "user", "host")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	var appErr *appErrors.AppError
@@ -78,11 +78,11 @@ func TestNetworkService_Create_ReturnsCreatedNetwork(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{Name: "frontend"})
+	got, err := service.Create(context.Background(), "user", "host", NetworkCreateRequest{Name: "frontend"})
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	assert.Equal(t, "frontend", createdName, "the request's name must reach the machine")
+	assert.Equal(t, "frontend", createdName, "the request's name must reach the host")
 	assert.Equal(t, created, *got)
 }
 
@@ -101,7 +101,7 @@ func TestNetworkService_Create_AttachesListedContainers(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	_, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{
+	_, err := service.Create(context.Background(), "user", "host", NetworkCreateRequest{
 		Name:       "frontend",
 		Containers: []string{"ctr-a", "ctr-b"},
 	})
@@ -121,7 +121,7 @@ func TestNetworkService_Create_MapsDuplicateNameTo409(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{Name: "frontend"})
+	got, err := service.Create(context.Background(), "user", "host", NetworkCreateRequest{Name: "frontend"})
 
 	require.ErrorIs(t, err, appErrors.ErrNetworkAlreadyExists)
 	assert.Nil(t, got)
@@ -142,7 +142,7 @@ func TestNetworkService_Create_MapsClientErrorsToInvalidRequest(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{Name: "bad"})
+	got, err := service.Create(context.Background(), "user", "host", NetworkCreateRequest{Name: "bad"})
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -161,7 +161,7 @@ func TestNetworkService_Create_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{Name: "frontend"})
+	got, err := service.Create(context.Background(), "user", "host", NetworkCreateRequest{Name: "frontend"})
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -195,7 +195,7 @@ func TestNetworkService_Create_AttachFailureNamesContainerAndLeavesNetwork(t *te
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{
+	got, err := service.Create(context.Background(), "user", "host", NetworkCreateRequest{
 		Name:       "frontend",
 		Containers: []string{"good-ctr", "bad-ctr"},
 	})
@@ -227,7 +227,7 @@ func TestNetworkService_Create_AttachUnknownContainerMapsTo404(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	_, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{
+	_, err := service.Create(context.Background(), "user", "host", NetworkCreateRequest{
 		Name:       "frontend",
 		Containers: []string{"ghost-ctr"},
 	})
@@ -242,7 +242,7 @@ func TestNetworkService_Create_AttachUnknownContainerMapsTo404(t *testing.T) {
 func TestNetworkService_Create_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewNetworkService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	_, err := service.Create(context.Background(), "user", "machine", NetworkCreateRequest{Name: "frontend"})
+	_, err := service.Create(context.Background(), "user", "host", NetworkCreateRequest{Name: "frontend"})
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	var appErr *appErrors.AppError
@@ -268,7 +268,7 @@ func TestNetworkService_Connect_AttachesContainer(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	err := service.Connect(context.Background(), "user", "machine", "frontend", "ctr-a")
+	err := service.Connect(context.Background(), "user", "host", "frontend", "ctr-a")
 
 	require.NoError(t, err)
 	assert.Equal(t, "frontend", connectedNetwork)
@@ -288,7 +288,7 @@ func TestNetworkService_Connect_MapsUnknownNetworkTo404(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	err := service.Connect(context.Background(), "user", "machine", "ghost-net", "ctr-a")
+	err := service.Connect(context.Background(), "user", "host", "ghost-net", "ctr-a")
 
 	require.ErrorIs(t, err, appErrors.ErrNetworkNotFound)
 	var appErr *appErrors.AppError
@@ -314,7 +314,7 @@ func TestNetworkService_Connect_MapsUnknownContainerTo404(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	err := service.Connect(context.Background(), "user", "machine", "frontend", "ghost-ctr")
+	err := service.Connect(context.Background(), "user", "host", "frontend", "ghost-ctr")
 
 	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 	var appErr *appErrors.AppError
@@ -340,7 +340,7 @@ func TestNetworkService_Connect_MapsClientErrorsToInvalidRequest(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	err := service.Connect(context.Background(), "user", "machine", "frontend", "ctr-a")
+	err := service.Connect(context.Background(), "user", "host", "frontend", "ctr-a")
 
 	require.Error(t, err)
 	var appErr *appErrors.AppError
@@ -364,7 +364,7 @@ func TestNetworkService_Connect_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	err := service.Connect(context.Background(), "user", "machine", "frontend", "ctr-a")
+	err := service.Connect(context.Background(), "user", "host", "frontend", "ctr-a")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to connect container to network", "engine failures must be wrapped consistently")
@@ -379,7 +379,7 @@ func TestNetworkService_Connect_WrapsListFailure(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	err := service.Connect(context.Background(), "user", "machine", "frontend", "ctr-a")
+	err := service.Connect(context.Background(), "user", "host", "frontend", "ctr-a")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to list networks", "the resolution failure must be wrapped consistently")
@@ -388,7 +388,7 @@ func TestNetworkService_Connect_WrapsListFailure(t *testing.T) {
 func TestNetworkService_Connect_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewNetworkService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	err := service.Connect(context.Background(), "user", "machine", "frontend", "ctr-a")
+	err := service.Connect(context.Background(), "user", "host", "frontend", "ctr-a")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	var appErr *appErrors.AppError

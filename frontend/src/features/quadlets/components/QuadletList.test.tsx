@@ -5,18 +5,18 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { machineFixture, quadletFixture } from "@/test/factories";
+import { hostFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function mockQuadlets(quadlets: QuadletSummary[]) {
 	server.use(
-		http.get("*/api/machines/m-1/quadlets", () => HttpResponse.json(quadlets)),
+		http.get("*/api/hosts/m-1/quadlets", () => HttpResponse.json(quadlets)),
 	);
 }
 
 function renderQuadletList() {
-	return renderWithQuery(<QuadletList machine={machineFixture()} />, {
+	return renderWithQuery(<QuadletList host={hostFixture()} />, {
 		router: true,
 	});
 }
@@ -86,7 +86,7 @@ describe("QuadletList", () => {
 		expect(screen.getByText("network")).toBeInTheDocument();
 	});
 
-	it("caches quadlets under the per-machine query key hierarchy", async () => {
+	it("caches quadlets under the per-host query key hierarchy", async () => {
 		mockQuadlets([quadletFixture()]);
 		const { queryClient } = renderQuadletList();
 
@@ -110,7 +110,7 @@ describe("QuadletList", () => {
 
 	it("shows a loading state before quadlets arrive, with the toolbar still above it", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/quadlets", async () => {
+			http.get("*/api/hosts/m-1/quadlets", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
 				return HttpResponse.json([quadletFixture()]);
 			}),

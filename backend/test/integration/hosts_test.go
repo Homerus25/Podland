@@ -1,0 +1,732 @@
+//go:build integration
+
+package integration
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/Homerus25/podland/backend/internal/testutils"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// Test_Integration_Hosts_CRUDAccessTripwire is the hosts CRUD +
+// access-control vertical slice for the real-podman integration suite
+// (PRD 080-04). It registers a SECOND, throwaway host pointing at the
+// SAME reachable target as the shared good host and uses it to
+// exercise PUT, access grant/revoke/list, and DELETE — without
+// disturbing the shared good host registered during harness setup.
+//
+// Why a throwaway: every mutation in this slice (PUT, access, DELETE)
+// is a per-host DB row, not a podman operation. Running them against
+// the shared good host would change its name/hostname and leave
+// grantee rows behind, breaking the contract that subsequent slices
+// (containers, images, …) see the host as TestMain registered it.
+// The throwaway is the only host this slice mutates, and it is
+// deleted at the end of the run.
+//
+// Connection-test tripwire (issue 080-05, formerly gap #1): the slice
+// ALSO registers a host pointing at an unreachable target
+// (127.0.0.1:1) and asserts the registration is now rejected with
+// 400 CONNECTION_FAILED. Before 080-05, HostService.Create performed
+// no connection probe, so the bad-host entry registered with 201 and
+// the failure surfaced only at the first podman-touching call. 080-05
+// added the synchronous probe (description_backend.md §Host
+// Registration step 5), so bad-host registration now fails fast at the
+// API boundary and no host row is created. This slice pins that
+// behavior so a regression that re-introduces the gap fails loudly.
+//
+// Isolation model (per the master PRD's "run-scoped tag + per-test
+// cleanup + suite sweep" ruling):
+//
+//   - Both throwaway hosts are named with the run-scoped prefix
+//     (it-<runID>-…) so the suite sweep can find and delete any
+//     leftover if a test aborts before its own t.Cleanup fires.
+//   - t.Cleanup force-deletes the reachable throwaway via the API as
+//     the primary cleanup path. The sweep is the backstop. (The
+//     bad-host entry is never created — the probe rejects it — so
+//     there is nothing to clean up for it.)
+//   - No podman resources are created or mutated by this slice, so
+//     there is no run-tag labelling and no podman CLI sweep.
+func Test_Integration_Hosts_CRUDAccessTripwire(t *testing.T) {
+	suite.SkipIfUnavailable(t)
+	registerHostsSweep()
+
+	// --- Tripwire throwaway: the bad-host entry -------------------
+	//
+	// 127.0.0.1:1 is the canonical "nobody's listening" target: TCP
+	// connect refuses immediately (ECONNREFUSED), so the SSH dial
+	// inside the registration probe fails fast instead of hanging on a
+	// connect timeout. The SSH key is a freshly-generated RSA PEM —
+	// syntactically valid so HostService.Create's IsValidPEM check
+	// passes and the request reaches the connection probe, where the
+	// unreachable host is rejected. The bad-host entry is NEVER
+	// persisted, so there is no cleanup for it.
+	badHost := hostRegistration{
+		Name:    "it-" + suite.RunID + "-badhost",
+		Host:    "127.0.0.1",
+		Port:    1,
+		SSHUser: "nobody",
+		Socket:  "/run/podman/podman.sock",
+		SSHKey:  testutils.GenerateValidPEMKey(),
+	}
+
+	// --- CRUD/access/DELETE throwaway: a reachable host -----------
+	//
+	// The mutation subtests (PUT, access grant/revoke, DELETE) need a
+	// host that is actually registered, which — since 080-05 —
+	// means it must point at a host the registration probe can reach.
+	// Registering against the suite's discovered target (the same one
+	// the good host uses) sails through the probe. The throwaway is
+	// mutated and deleted by this slice; the good host is untouched.
+	var crudHostID string
+	crudHost := hostRegistration{
+		Name:    "it-" + suite.RunID + "-crud",
+		Host:    suite.goodHostRegistration.Host,
+		Port:    suite.goodHostRegistration.Port,
+		SSHUser: suite.goodHostRegistration.SSHUser,
+		Socket:  suite.goodHostRegistration.Socket,
+		SSHKey:  suite.goodHostRegistration.SSHKey,
+	}
+
+	// Snapshot the shared good host's fields BEFORE any mutation in
+	// this slice. The DeleteRemovesThrowawaySharedUntouched subtest
+	// compares against this snapshot so "untouched" means field-equal,
+	// not just "still listed" — which would mask a regression that
+	// mutated the shared host's name/hostname mid-test. Captured
+	// here (not inside the delete subtest) so the snapshot is taken
+	// before the PUT in updateHostCRUD runs, which is the earliest
+	// mutation this slice makes.
+	goodHostBefore := getHost(t, suite.HostID)
+
+	// Per-test cleanup: DELETE the reachable throwaway host via the
+	// API if it was created and not already deleted by the
+	// DeleteRemovesHost subtest. Best-effort; the sweep is the abort
+	// backstop. (No cleanup for the bad-host entry — it is never
+	// created, the probe rejects the registration.)
+	t.Cleanup(func() {
+		if crudHostID == "" {
+			return
+		}
+		delURL := suite.ServerURL + "/api/hosts/" + crudHostID + "/"
+		req, err := http.NewRequest(http.MethodDelete, delURL, nil)
+		if err != nil {
+			return
+		}
+		resp, err := suite.AuthenticatedClient().Do(req)
+		if err != nil {
+			t.Logf("cleanup: DELETE throwaway host best-effort failed: %v", err)
+			return
+		}
+		resp.Body.Close()
+	})
+
+	// --- AC #1 (connection-test, 080-05): bad-host registration -----
+	//
+	// Registering the bad-host entry must be rejected at the API
+	// boundary: 400 with the CONNECTION_FAILED code, and no host
+	// row created. Before 080-05 this returned 201 (gap #1) and the
+	// failure surfaced only at the first podman-touching call; the
+	// synchronous connection probe now closes that gap. Pinning both
+	// the status AND the parseable code is what "documents the
+	// behavior" means here — a bare `!= 201` would also pass on a 401
+	// or 500 and mask the real surface, and a future regression that
+	// re-introduces the gap (201 + silent persist) would slip a
+	// status-only check that didn't also assert the body code.
+	//
+	// The registerHost helper expects 201 and errors otherwise, so
+	// POST directly and inspect the response — matching the inline
+	// style of the self-revoke subtest further down.
+	t.Run("RegisterBadHostRejectedWith400_CONNECTION_FAILED", func(t *testing.T) {
+		body, err := json.Marshal(map[string]any{
+			"name":             badHost.Name,
+			"hostname":         badHost.Host,
+			"port":             badHost.Port,
+			"sshUsername":      badHost.SSHUser,
+			"podmanSocketPath": badHost.Socket,
+			"sshPrivateKey":    badHost.SSHKey,
+		})
+		require.NoError(t, err)
+
+		url := suite.ServerURL + "/api/hosts/"
+		req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		require.NoError(t, err)
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := suite.AuthenticatedClient().Do(req)
+		require.NoError(t, err, "POST /api/hosts must reach the in-process server")
+		defer resp.Body.Close()
+		respBody, _ := io.ReadAll(resp.Body)
+
+		assert.Equalf(t, http.StatusBadRequest, resp.StatusCode,
+			"bad-host registration must be rejected with 400 (connection probe failed). got %d. body=%s",
+			resp.StatusCode, string(respBody))
+		assert.Contains(t, string(respBody), "CONNECTION_FAILED",
+			"bad-host registration body must carry the CONNECTION_FAILED code. body=%s", string(respBody))
+
+		// The rejection must not have persisted anything: the bad-host
+		// host must not appear in the owner's list.
+		assert.False(t, hostListedByName(t, badHost.Name),
+			"bad-host entry must NOT be persisted after a rejected registration")
+	})
+	if t.Failed() {
+		return
+	}
+
+	// --- Register the reachable throwaway for the mutation subtests -
+	//
+	// This implicitly covers the 080-05 happy path: a host pointing
+	// at a reachable target still registers (201) and is persisted,
+	// because its connection probe succeeds. Doing it as a named
+	// subtest (rather than inline) surfaces the registration step
+	// explicitly in the test output and lets the slice bail cleanly if
+	// it fails.
+	t.Run("RegisterReachableThrowaway", func(t *testing.T) {
+		crudHostID = suite.RegisterReachableHost(t, crudHost.Name)
+		require.NotEmpty(t, crudHostID, "reachable throwaway must register and return an id")
+	})
+	if t.Failed() {
+		return
+	}
+
+	// --- AC #3: PUT updates name/description/hostname; GET reflects -
+	updateHostCRUD(t, crudHostID)
+	if t.Failed() {
+		return
+	}
+
+	// --- AC #4: access grant/list/revoke; self-revoke rejected ------
+	exerciseAccessCRUD(t, crudHostID)
+	if t.Failed() {
+		return
+	}
+
+	// --- AC #5: DELETE removes the throwaway; shared good host untouched
+	//
+	// Inlined (not factored out like updateHostCRUD/exerciseAccessCRUD)
+	// because this subtest needs three pieces of parent state — the
+	// throwaway ID, a writable handle to null after delete, and the
+	// good-host snapshot taken before any mutation in this slice.
+	// A helper signature for all three would be the data-clump smell
+	// the review caught; the containers slice inlines its delete
+	// subtest for the same reason.
+	t.Run("DeleteRemovesThrowawaySharedUntouched", func(t *testing.T) {
+		// Prove the shared good host is present BEFORE the delete,
+		// so the post-delete "still present" assertion can't pass
+		// vacuously (e.g. if list were broken and always returned []).
+		require.True(t, hostListed(t, suite.HostID),
+			"shared good host must be listed before delete (precondition)")
+
+		// Prove the throwaway is also present before delete, so the
+		// post-delete absence check is meaningful.
+		require.True(t, hostListed(t, crudHostID),
+			"reachable throwaway must appear in the owner's list")
+
+		// The list entry must carry the caller's permission; the owner
+		// implicitly holds admin via the host_access row Create grants.
+		entry, ok := findHostInList(t, crudHostID)
+		require.True(t, ok, "reachable throwaway must be findable in the list")
+		require.Equal(t, "admin", entry.Permission,
+			"owner's list entry must carry admin permission")
+
+		// DELETE the throwaway.
+		url := suite.ServerURL + "/api/hosts/" + crudHostID + "/"
+		req, err := http.NewRequest(http.MethodDelete, url, nil)
+		require.NoError(t, err)
+		resp, err := suite.AuthenticatedClient().Do(req)
+		require.NoError(t, err, "DELETE /api/hosts/{id} must reach the in-process server")
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		require.Equalf(t, http.StatusNoContent, resp.StatusCode,
+			"delete throwaway: expected 204, got %d. body: %s", resp.StatusCode, string(body))
+
+		// Null the caller's handle so t.Cleanup doesn't retry the
+		// delete on an already-removed host.
+		crudHostID = ""
+
+		// Throwaway is gone from the list…
+		assert.False(t, hostListed(t, crudHostID),
+			"throwaway host must not appear in the list after delete")
+
+		// …and the shared good host is still there, untouched.
+		assert.True(t, hostListed(t, suite.HostID),
+			"shared good host must still appear in the list after throwaway delete")
+		// Field-equal check against the snapshot taken at the top of
+		// the test — "untouched" means name/hostname/socket/etc. are
+		// byte-equal, not just "still resolvable". A regression that
+		// PUT the throwaway's fields onto the wrong row would slip a
+		// presence-only check.
+		good := getHost(t, suite.HostID)
+		assert.Equal(t, goodHostBefore, good,
+			"shared good host must be field-equal before vs after throwaway delete (name/hostname/etc. must not change)")
+	})
+}
+
+// ---------------------------------------------------------------------------
+// AC #3: PUT updates name/description/hostname
+// ---------------------------------------------------------------------------
+
+// updateHostCRUD PUTs a new name/description/hostname onto the
+// throwaway host and verifies each field round-trips through a
+// subsequent GET. Only the three AC-named fields are exercised — the
+// Update handler also accepts port/SSH user/key/socket, but touching
+// those here would obscure the "name/description/hostname" focus and
+// risk changing the SSH target mid-test (irrelevant to the bad-host
+// host, but a footgun if this slice is ever reused on a live one).
+//
+// The handler treats "" as "leave unchanged" for each string field, so
+// all three must be non-empty for the round-trip assertion to be
+// meaningful.
+func updateHostCRUD(t *testing.T, hostID string) {
+	t.Run("UpdateNameDescriptionHostname", func(t *testing.T) {
+		// Capture pre-update state so the assertion can prove the
+		// fields actually changed, not just that GET returns the new
+		// values. A test that doesn't compare against the prior state
+		// would pass vacuously if PUT were a no-op and GET returned
+		// whatever it was handed. The GET detail response carries the
+		// per-caller enrichment (issue 198): the owner caller reads
+		// their admin row and isOwner true.
+		before := getHost(t, hostID)
+		assert.Equal(t, "admin", before.Permission,
+			"the owner's GET detail response must carry the caller's permission")
+		assert.True(t, before.IsOwner,
+			"the owner's GET detail response must carry isOwner true")
+
+		req := updateHostRequest{
+			Name:        "it-" + suite.RunID + "-crud-renamed",
+			Description: "throwaway bad-host entry for 080-04 (updated)",
+			Hostname:    "192.0.2.123", // TEST-NET-1 — guaranteed unroutable
+			// Echo the SSH identity so the handler's non-empty checks
+			// for port/SSH user/key/socket don't fire; we are NOT
+			// changing them. Re-using the original values keeps the
+			// update focused on the three AC fields.
+			Port:             before.Port,
+			SSHUsername:      before.SSHUsername,
+			PodmanSocketPath: before.PodmanSocketPath,
+			// SSHPrivateKey intentionally omitted: passing the existing
+			// key would force a re-encrypt + fingerprint change, which
+			// the AC doesn't ask for and would couple this assertion
+			// to encryption internals.
+		}
+
+		updated := updateHost(t, hostID, req)
+
+		// Each field must match what we PUT AND differ from before —
+		// the "differs from before" half is what makes the assertion
+		// sensitive to a no-op PUT.
+		assert.Equal(t, req.Name, updated.Name, "PUT must change name")
+		assert.NotEqual(t, before.Name, updated.Name, "name must differ from before update")
+		assert.Equal(t, req.Description, updated.Description, "PUT must change description")
+		assert.NotEqual(t, before.Description, updated.Description, "description must differ from before update")
+		assert.Equal(t, req.Hostname, updated.Hostname, "PUT must change hostname")
+		assert.NotEqual(t, before.Hostname, updated.Hostname, "hostname must differ from before update")
+
+		// Re-GET to prove the update was persisted, not just echoed
+		// in the PUT response. The PUT body carries no per-caller
+		// facts, so they are cleared off the GET response before the
+		// field-equal comparison — the enrichment is pinned above.
+		refetched := getHost(t, hostID)
+		refetched.Permission = ""
+		refetched.IsOwner = false
+		assert.Equal(t, updated, refetched, "GET after PUT must reflect the persisted state")
+	})
+}
+
+// updateHostRequest mirrors the JSON-accepted fields of
+// hosts.CreateHostRequest. The Update handler reuses that request
+// type and treats "" / 0 as "leave unchanged" for each field. Kept as a
+// local type so the integration package stays decoupled from the
+// hosts domain package (matching the images/containers slice style).
+type updateHostRequest struct {
+	Name             string `json:"name,omitempty"`
+	Description      string `json:"description,omitempty"`
+	Hostname         string `json:"hostname,omitempty"`
+	Port             int    `json:"port,omitempty"`
+	SSHUsername      string `json:"sshUsername,omitempty"`
+	SSHPrivateKey    string `json:"sshPrivateKey,omitempty"`
+	PodmanSocketPath string `json:"podmanSocketPath,omitempty"`
+}
+
+// updateHost PUTs /api/hosts/{id}/ and returns the decoded
+// post-update host state. Asserts 200 (the Update handler writes
+// StatusOK implicitly by writing the body without an explicit code).
+func updateHost(t *testing.T, hostID string, req updateHostRequest) hostDTO {
+	t.Helper()
+	payload, err := json.Marshal(req)
+	require.NoError(t, err)
+
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/"
+	httpReq, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(payload))
+	require.NoError(t, err)
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := suite.AuthenticatedClient().Do(httpReq)
+	require.NoError(t, err, "PUT /api/hosts/{id} must reach the in-process server")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	require.Equalf(t, http.StatusOK, resp.StatusCode,
+		"update host: expected 200, got %d. body: %s", resp.StatusCode, string(body))
+	return decodeHost(t, body, "update host")
+}
+
+// ---------------------------------------------------------------------------
+// AC #4: access grant/list/revoke; self-revoke rejected
+// ---------------------------------------------------------------------------
+
+// accessResponse mirrors the JSON the GrantAccess/ListAccess handlers
+// emit. Both use the same shape, so one local type covers POST and GET.
+type accessResponse struct {
+	UserID     string `json:"userId"`
+	Permission string `json:"permission"`
+	GrantedAt  string `json:"grantedAt"`
+}
+
+// exerciseAccessCRUD walks the full grant → list → revoke lifecycle on
+// the throwaway host, plus the owner self-revoke rejection.
+//
+// All three permissions (read/write/admin) are exercised via
+// grant→list→revoke cycles on the same grantee. The handler's
+// "existingAccess" check means a grantee can hold only one permission
+// at a time, so we cycle: grant read, assert, revoke; grant write,
+// assert, revoke; grant admin, assert, revoke. This proves the endpoint
+// accepts each permission value — not just one — without needing three
+// different grantees.
+//
+// The grantee is suite.OtherUserID (a real user row seeded in TestMain
+// to satisfy the host_access.user_id FK). The owner is the suite's
+// authenticated user throughout — only the owner can grant/revoke.
+func exerciseAccessCRUD(t *testing.T, hostID string) {
+	t.Run("GrantListRevokeSelfRevokeRejected", func(t *testing.T) {
+		// Baseline: only the owner holds admin (created at host
+		// registration time). Establishing this up front makes the
+		// post-grant assertion ("now there are two") meaningful.
+		initial := listAccess(t, hostID)
+		require.Len(t, initial, 1,
+			"baseline access list must contain only the owner's admin grant. got: %+v", initial)
+		assert.Equal(t, suite.OwnerUserID, initial[0].UserID,
+			"baseline access list must be the owner")
+		assert.Equal(t, "admin", initial[0].Permission,
+			"baseline access list must be owner's admin grant")
+
+		// Cycle through all three permission values to prove the
+		// endpoint accepts each one (AC: "grants read/write/admin").
+		for _, perm := range []string{"read", "write", "admin"} {
+			t.Run("grant_"+perm, func(t *testing.T) {
+				grantAccess(t, hostID, suite.OtherUserID, perm)
+
+				granted := listAccess(t, hostID)
+				require.Len(t, granted, 2,
+					"after granting %s, access list must contain owner + grantee. got: %+v", perm, granted)
+				grantee := findAccess(granted, suite.OtherUserID)
+				require.NotNil(t, grantee,
+					"grantee must appear in access list after grant(%s). list: %+v", perm, granted)
+				assert.Equal(t, perm, grantee.Permission,
+					"granted permission must be %s. list: %+v", perm, granted)
+			})
+			if t.Failed() {
+				return
+			}
+
+			t.Run("revoke_after_"+perm, func(t *testing.T) {
+				revokeAccess(t, hostID, suite.OtherUserID)
+
+				after := listAccess(t, hostID)
+				require.Len(t, after, 1,
+					"after revoke, access list must contain only the owner again. got: %+v", after)
+				require.Nil(t, findAccess(after, suite.OtherUserID),
+					"grantee must not appear in access list after revoke. list: %+v", after)
+			})
+			if t.Failed() {
+				return
+			}
+		}
+
+		// Owner self-revoke is rejected. The handler returns 400 with
+		// code CANNOT_REVOKE_OWNER — pinning both the status and the
+		// parseable code so a future "200 + ignore" regression
+		// fails the test.
+		//
+		// "Self-revoke" means revoking the OWNER, not the grantee.
+		// We DELETE /access/{ownerID} directly — no prior grant is
+		// needed because the owner already holds admin from host
+		// registration. The handler's checks run in order: host
+		// exists → caller is owner → target is not the owner → delete.
+		// The third check is what we are exercising here.
+		t.Run("SelfRevokeRejected", func(t *testing.T) {
+			url := suite.ServerURL + "/api/hosts/" + hostID + "/access/" + suite.OwnerUserID
+			req, err := http.NewRequest(http.MethodDelete, url, nil)
+			require.NoError(t, err)
+			resp, err := suite.AuthenticatedClient().Do(req)
+			require.NoError(t, err, "DELETE /access/{owner} must reach the in-process server")
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			assert.Equalf(t, http.StatusBadRequest, resp.StatusCode,
+				"owner self-revoke must be rejected with 400. got %d. body: %s",
+				resp.StatusCode, string(body))
+			assert.Contains(t, string(body), "CANNOT_REVOKE_OWNER",
+				"owner self-revoke must surface the CANNOT_REVOKE_OWNER code. body: %s", string(body))
+
+			// Self-revoke must not have removed anything: the owner
+			// is still on the list.
+			after := listAccess(t, hostID)
+			require.NotNil(t, findAccess(after, suite.OwnerUserID),
+				"owner must still appear in access list after rejected self-revoke. list: %+v", after)
+		})
+	})
+}
+
+// grantAccess POSTs /access for (userID, permission) and asserts 201.
+// Used inside the per-permission cycle in exerciseAccessCRUD.
+func grantAccess(t *testing.T, hostID, userID, permission string) {
+	t.Helper()
+	payload, err := json.Marshal(map[string]string{
+		"userId":     userID,
+		"permission": permission,
+	})
+	require.NoError(t, err)
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/access"
+	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
+	require.NoError(t, err, "POST /access must reach the in-process server")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	require.Equalf(t, http.StatusCreated, resp.StatusCode,
+		"grant access(%s): expected 201, got %d. body: %s",
+		permission, resp.StatusCode, string(body))
+}
+
+// revokeAccess DELETEs /access/{userID} and asserts 204.
+func revokeAccess(t *testing.T, hostID, userID string) {
+	t.Helper()
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/access/" + userID
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	require.NoError(t, err)
+	resp, err := suite.AuthenticatedClient().Do(req)
+	require.NoError(t, err, "DELETE /access/{userId} must reach the in-process server")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	require.Equalf(t, http.StatusNoContent, resp.StatusCode,
+		"revoke access: expected 204, got %d. body: %s", resp.StatusCode, string(body))
+}
+
+// findAccess returns the access entry for userID, or nil if absent.
+// Used by the per-permission grant/revoke cycle to locate the grantee
+// without assuming list ordering (ListByHost orders by granted_at
+// DESC, but relying on that would couple the assertion to repo
+// internals).
+func findAccess(entries []accessResponse, userID string) *accessResponse {
+	for i := range entries {
+		if entries[i].UserID == userID {
+			return &entries[i]
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// HTTP helpers — shared across the subtests
+// ---------------------------------------------------------------------------
+
+// hostDTO mirrors the fields of the hosts endpoints' responses
+// that this slice consumes. Kept as a local type so the integration
+// package doesn't import the hosts domain package (matching the
+// images/containers slice style). Permission and IsOwner ride the list
+// and GET detail responses (the per-caller enrichment); the PUT
+// response stays bare.
+type hostDTO struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
+	Hostname          string `json:"hostname"`
+	Port              int    `json:"port"`
+	SSHUsername       string `json:"sshUsername"`
+	SSHKeyFingerprint string `json:"sshKeyFingerprint"`
+	PodmanSocketPath  string `json:"podmanSocketPath"`
+	OwnerID           string `json:"ownerId"`
+	Permission        string `json:"permission"`
+	IsOwner           bool   `json:"isOwner"`
+	CreatedAt         string `json:"createdAt"`
+	UpdatedAt         string `json:"updatedAt"`
+}
+
+// getHost GETs /api/hosts/{id}/ and returns the decoded host.
+// Asserts 200 (the Get handler writes StatusOK implicitly).
+func getHost(t *testing.T, hostID string) hostDTO {
+	t.Helper()
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/"
+	resp, err := suite.AuthenticatedClient().Get(url)
+	require.NoError(t, err, "GET /api/hosts/{id} must reach the in-process server")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	require.Equalf(t, http.StatusOK, resp.StatusCode,
+		"get host: expected 200, got %d. body: %s", resp.StatusCode, string(body))
+	return decodeHost(t, body, "get host")
+}
+
+// listHosts GETs /api/hosts/ and returns the decoded list. Used
+// by the post-delete presence/absence checks.
+func listHosts(t *testing.T) []hostDTO {
+	t.Helper()
+	url := suite.ServerURL + "/api/hosts/"
+	resp, err := suite.AuthenticatedClient().Get(url)
+	require.NoError(t, err, "GET /api/hosts/ must reach the in-process server")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	require.Equalf(t, http.StatusOK, resp.StatusCode,
+		"list hosts: expected 200, got %d. body: %s", resp.StatusCode, string(body))
+	var out []hostDTO
+	require.NoErrorf(t, json.Unmarshal(body, &out),
+		"list hosts: response must decode as a JSON array. body: %s", string(body))
+	return out
+}
+
+// hostListed reports whether the given host ID appears in the
+// owner's host list. Used to prove presence/absence without caring
+// about ordering or other entries.
+func hostListed(t *testing.T, hostID string) bool {
+	t.Helper()
+	_, listed := findHostInList(t, hostID)
+	return listed
+}
+
+// findHostInList returns the caller's host-list entry for the given
+// ID, proving presence and exposing the caller's permission.
+func findHostInList(t *testing.T, hostID string) (hostDTO, bool) {
+	t.Helper()
+	for _, m := range listHosts(t) {
+		if m.ID == hostID {
+			return m, true
+		}
+	}
+	return hostDTO{}, false
+}
+
+// hostListedByName reports whether any host with the given name
+// appears in the owner's list. Used by the bad-host tripwire to prove a
+// rejected registration left no row behind — the rejected request has no
+// host ID to look up, so presence is checked by the requested name.
+func hostListedByName(t *testing.T, name string) bool {
+	t.Helper()
+	for _, m := range listHosts(t) {
+		if m.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// listAccess GETs /api/hosts/{id}/access and returns the decoded
+// list of access entries.
+func listAccess(t *testing.T, hostID string) []accessResponse {
+	t.Helper()
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/access"
+	resp, err := suite.AuthenticatedClient().Get(url)
+	require.NoError(t, err, "GET /access must reach the in-process server")
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	require.Equalf(t, http.StatusOK, resp.StatusCode,
+		"list access: expected 200, got %d. body: %s", resp.StatusCode, string(body))
+	var out []accessResponse
+	require.NoErrorf(t, json.Unmarshal(body, &out),
+		"list access: response must decode as a JSON array. body: %s", string(body))
+	return out
+}
+
+// decodeHost unmarshals a host JSON object, attaching the given
+// label to the failure message so the caller's context (PUT vs GET)
+// shows up in the assertion error.
+func decodeHost(t *testing.T, body []byte, label string) hostDTO {
+	t.Helper()
+	var m hostDTO
+	require.NoErrorf(t, json.Unmarshal(body, &m),
+		"%s: response must decode as a HostResponse. body: %s", label, string(body))
+	if m.ID == "" {
+		t.Logf("warning: %s decoded a host with empty id. body: %s", label, string(body))
+	}
+	return m
+}
+
+// ---------------------------------------------------------------------------
+// Suite sweep (covers aborts)
+// ---------------------------------------------------------------------------
+
+// registerHostsSweepOnce ensures the hosts suite-sweep cleanup
+// is registered at most once per process. The sweep queries the
+// in-process backend for any host whose name mentions this run's
+// RunID — i.e. garbage a test left behind when its own t.Cleanup
+// didn't fire (panic, SIGINT before the per-test cleanup registered, …)
+// — and force-deletes it via the API.
+//
+// Registered at the top of the hosts test, so it is in place before
+// any garbage is created.
+//
+// We sweep via the API (not direct DB access) on purpose: the
+// integration package deliberately does NOT reach into App's *sql.DB
+// (see main_test.go), and the API path is the same one production
+// cleanups would use.
+//
+// Best-effort: failures are logged by runCleanups, never fatal.
+var registerHostsSweepOnce sync.Once
+
+func registerHostsSweep() {
+	registerHostsSweepOnce.Do(func() {
+		runID := suite.RunID
+		token := suite.Token
+		base := suite.ServerURL
+		suite.RegisterCleanup("sweep run-scoped hosts", func() error {
+			sweepRunScopedHosts(base, token, runID)
+			return nil
+		})
+	})
+}
+
+// sweepRunScopedHosts lists hosts via the API and deletes any
+// whose name mentions runID. Skips silently if the suite is
+// unavailable (base == "" — the bearerTransport would fail anyway, but
+// bailing here keeps teardown quiet on a setup that never booted).
+func sweepRunScopedHosts(base, token, runID string) {
+	if base == "" || token == "" {
+		return
+	}
+	url := base + "/api/hosts/"
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+	var ms []hostDTO
+	if err := json.NewDecoder(resp.Body).Decode(&ms); err != nil {
+		return
+	}
+	for _, m := range ms {
+		// Match by RunID substring rather than full name so the sweep
+		// also catches the renamed throwaway (UpdateNameDescriptionHostname
+		// changes the suffix but keeps the it-<runID>- prefix).
+		if m.ID == "" || !strings.Contains(m.Name, runID) {
+			continue
+		}
+		delReq, err := http.NewRequest(http.MethodDelete, base+"/api/hosts/"+m.ID+"/", nil)
+		if err != nil {
+			continue
+		}
+		delReq.Header.Set("Authorization", "Bearer "+token)
+		delResp, err := http.DefaultClient.Do(delReq)
+		if err != nil {
+			continue
+		}
+		delResp.Body.Close()
+	}
+}

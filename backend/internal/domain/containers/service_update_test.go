@@ -48,7 +48,7 @@ func TestContainerService_Update_ForwardsOptionsAndAnswersPostUpdateReport(t *te
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Update(context.Background(), "user", "machine", "container-123", ContainerUpdateRequest{
+	got, err := service.Update(context.Background(), "user", "host", "container-123", ContainerUpdateRequest{
 		CPUs:   1.5,
 		Memory: "512m",
 	})
@@ -91,7 +91,7 @@ func TestContainerService_Update_NoStateGate(t *testing.T) {
 			}
 			service := NewContainerService(fakeEngineProvider{engine: engine})
 
-			got, err := service.Update(context.Background(), "user", "machine", "container-123", ContainerUpdateRequest{Memory: "512m"})
+			got, err := service.Update(context.Background(), "user", "host", "container-123", ContainerUpdateRequest{Memory: "512m"})
 
 			require.NoError(t, err, "no state restriction applies to update")
 			require.NotNil(t, got)
@@ -111,7 +111,7 @@ func TestContainerService_Update_ValidationFailureNeverAcquiresTheLease(t *testi
 	}
 	service := NewContainerService(provider)
 
-	got, err := service.Update(context.Background(), "user", "machine", "container-123", ContainerUpdateRequest{Memory: "not-a-size"})
+	got, err := service.Update(context.Background(), "user", "host", "container-123", ContainerUpdateRequest{Memory: "not-a-size"})
 
 	var appErr *appErrors.AppError
 	require.ErrorAs(t, err, &appErr)
@@ -133,7 +133,7 @@ func TestContainerService_Update_MapsNotFoundTo404(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Update(context.Background(), "user", "machine", "container-123", ContainerUpdateRequest{Memory: "512m"})
+	got, err := service.Update(context.Background(), "user", "host", "container-123", ContainerUpdateRequest{Memory: "512m"})
 
 	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 	assert.Nil(t, got)
@@ -149,7 +149,7 @@ func TestContainerService_Update_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Update(context.Background(), "user", "machine", "container-123", ContainerUpdateRequest{Memory: "512m"})
+	got, err := service.Update(context.Background(), "user", "host", "container-123", ContainerUpdateRequest{Memory: "512m"})
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -163,7 +163,7 @@ func TestContainerService_Update_WrapsEngineFailure(t *testing.T) {
 func TestContainerService_Update_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewContainerService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	got, err := service.Update(context.Background(), "user", "machine", "container-123", ContainerUpdateRequest{Memory: "512m"})
+	got, err := service.Update(context.Background(), "user", "host", "container-123", ContainerUpdateRequest{Memory: "512m"})
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, got)
@@ -184,7 +184,7 @@ func TestContainerService_Update_PostUpdateInspectFailureSurfaces(t *testing.T) 
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Update(context.Background(), "user", "machine", "container-123", ContainerUpdateRequest{Memory: "512m"})
+	got, err := service.Update(context.Background(), "user", "host", "container-123", ContainerUpdateRequest{Memory: "512m"})
 
 	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 	assert.Nil(t, got)

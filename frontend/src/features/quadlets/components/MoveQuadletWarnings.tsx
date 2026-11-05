@@ -1,11 +1,11 @@
 import { Box, Checkbox, HStack, Text, VStack } from "@chakra-ui/react";
-import { can } from "@features/machines/permissions";
+import { can } from "@features/hosts/permissions";
 import type {
 	QuadletMovePreview,
 	QuadletMovePreviewSecret,
 	QuadletMovePreviewVolume,
 } from "@features/quadlets/services/quadletsApi";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { formatBytes } from "@shared/utils/format";
 
 // The warnings half of the quadlet transfer adapter (issue 331, architecture
@@ -103,16 +103,16 @@ export function movePreviewSecrets(
 }
 
 // The transfer checkbox exists only for a caller who is admin on the SOURCE
-// machine — the reveal gate's capability, read from the per-caller
+// host — the reveal gate's capability, read from the per-caller
 // permission the app already holds, no new preview field — and only when
 // the preview reports at least one transferable secret (kind secret,
 // present on the source).
 export function isSecretTransferOffered(
-	machine: Machine,
+	host: Host,
 	secrets: QuadletMovePreviewSecret[],
 ) {
 	return (
-		can(machine, "reveal-secrets") &&
+		can(host, "reveal-secrets") &&
 		secrets.some((secret) => secret.kind === "secret" && secret.existsOnSource)
 	);
 }
@@ -174,7 +174,7 @@ function SecretExistenceNotes({
 		<>
 			{!secret.existsOnSource ? (
 				<Text color="gray.500" data-testid="move-secret-source">
-					missing on this machine
+					missing on this host
 				</Text>
 			) : null}
 			<Text
@@ -209,7 +209,7 @@ export function MoveQuadletWarnings({
 	// adapter's confirm gating and the conflict warning here.
 	differsCompanions: MoveCompanionVolume[];
 	secrets: QuadletMovePreviewSecret[];
-	// The source machine's name, in the stranded-data copy.
+	// The source host's name, in the stranded-data copy.
 	sourceName: string;
 	// The selected target's name, in the companion-conflict copy.
 	targetName: string;

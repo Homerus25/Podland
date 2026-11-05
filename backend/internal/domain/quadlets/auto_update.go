@@ -52,7 +52,7 @@ type AutoUpdateError struct {
 
 // AutoUpdateEvent is one NDJSON event in the auto-update stream. The
 // service builds the plan, pulling, and log events unstamped (the
-// handler stamps the operation and machine identities on each, the move
+// handler stamps the operation and host identities on each, the move
 // stream's arrangement); the complete and error events are built
 // handler-side already stamped. The plan, unit, and image fields belong
 // to the plan and pulling events (issue 448) and stay absent on the
@@ -60,7 +60,7 @@ type AutoUpdateError struct {
 type AutoUpdateEvent struct {
 	OperationID string               `json:"operationId"`
 	Type        string               `json:"type"`
-	MachineID   string               `json:"machineId"`
+	HostID      string               `json:"hostId"`
 	Stream      string               `json:"stream,omitempty"`
 	Line        string               `json:"line,omitempty"`
 	Plan        []AutoUpdatePlanItem `json:"plan,omitempty"`
@@ -110,22 +110,22 @@ func newAutoUpdateLogEvent(line sshexec.OutputLine) AutoUpdateEvent {
 
 // NewAutoUpdateCompleteEvent builds the terminal complete event carrying the
 // parsed report.
-func NewAutoUpdateCompleteEvent(operationID, machineID string, report AutoUpdateReport) AutoUpdateEvent {
+func NewAutoUpdateCompleteEvent(operationID, hostID string, report AutoUpdateReport) AutoUpdateEvent {
 	return AutoUpdateEvent{
 		OperationID: operationID,
 		Type:        AutoUpdateEventTypeDone,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Report:      &report,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
 // NewAutoUpdateErrorEvent builds the terminal error event.
-func NewAutoUpdateErrorEvent(operationID, machineID, code, message string) AutoUpdateEvent {
+func NewAutoUpdateErrorEvent(operationID, hostID, code, message string) AutoUpdateEvent {
 	return AutoUpdateEvent{
 		OperationID: operationID,
 		Type:        AutoUpdateEventTypeError,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Error:       &AutoUpdateError{Code: code, Message: message},
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
@@ -140,7 +140,7 @@ type rawAutoUpdateItem struct {
 	Error         string `json:"Error"`
 }
 
-// AutoUpdate runs `podman auto-update --format json` on the machine through
+// AutoUpdate runs `podman auto-update --format json` on the host through
 // the streaming SSH seam, emitting the run's events as they occur: a plan
 // event naming every participating unit before the run starts, one log
 // event per remote output line, and a pulling event ahead of each log line
@@ -151,8 +151,8 @@ type rawAutoUpdateItem struct {
 // and narrows the plan to that unit; the value rides the exec args
 // unvalidated, so a bogus unit surfaces podman's own error through the
 // stream.
-func (s *QuadletService) AutoUpdate(ctx context.Context, userID, machineID string, dryRun bool, filter string, onEvent func(AutoUpdateEvent)) (AutoUpdateReport, error) {
-	plan := buildAutoUpdatePlan(s.collectAutoUpdatePlanSources(ctx, userID, machineID), filter)
+func (s *QuadletService) AutoUpdate(ctx context.Context, userID, hostID string, dryRun bool, filter string, onEvent func(AutoUpdateEvent)) (AutoUpdateReport, error) {
+	plan := buildAutoUpdatePlan(s.collectAutoUpdatePlanSources(ctx, userID, hostID), filter)
 	onEvent(newAutoUpdatePlanEvent(plan))
 
 	args := []string{"auto-update", "--format", "json"}
@@ -163,7 +163,7 @@ func (s *QuadletService) AutoUpdate(ctx context.Context, userID, machineID strin
 		args = append(args, filter)
 	}
 
-	result, err := s.sshExec.ExecStream(ctx, machineID, userID, "podman", sshexec.ExecOptions{Args: args}, func(line sshexec.OutputLine) {
+	result, err := s.sshExec.ExecStream(ctx, hostID, userID, "podman", sshexec.ExecOptions{Args: args}, func(line sshexec.OutputLine) {
 		if image, ok := pullImageFromLine(line.Text); ok {
 			if item, matched := matchPullingUnit(plan, image); matched {
 				onEvent(newAutoUpdatePullingEvent(item.Unit, image))
@@ -178,7 +178,7 @@ func (s *QuadletService) AutoUpdate(ctx context.Context, userID, machineID strin
 	return parseAutoUpdateReport(result.Stdout, result.ExitCode, dryRun), nil
 }
 
-// collectAutoUpdatePlanSources lists the machine's quadlet files and
+// collectAutoUpdatePlanSources lists the host's quadlet files and
 // prints each .container file, answering the plan's per-unit sources. An
 // unreadable file degrades to a unit-only source (the unit still appears,
 // it just cannot be matched mid-run); a file without AutoUpdate=registry
@@ -186,9 +186,9 @@ func (s *QuadletService) AutoUpdate(ctx context.Context, userID, machineID strin
 // list-level failure degrades to no sources rather than failing the run:
 // the run's own podman invocation is untouched and the report at the end
 // still tells the truth.
-func (s *QuadletService) collectAutoUpdatePlanSources(ctx context.Context, userID, machineID string) []autoUpdatePlanSource {
+func (s *QuadletService) collectAutoUpdatePlanSources(ctx context.Context, userID, hostID string) []autoUpdatePlanSource {
 	sources := []autoUpdatePlanSource{}
-	_ = s.engines.WithEngine(ctx, userID, machineID, "quadlets.AutoUpdatePlan", func(e QuadletEngine) error {
+	_ = s.engines.WithEngine(ctx, userID, hostID, "quadlets.AutoUpdatePlan", func(e QuadletEngine) error {
 		list, err := e.List(entities.QuadletListOptions{})
 		if err != nil {
 			return err
@@ -265,7 +265,7 @@ func parseAutoUpdateReport(stdout string, exitCode int, dryRun bool) AutoUpdateR
 
 // extractJSONReport finds the last JSON array in stdout and decodes it.
 // podman prints human-readable lines before the JSON report when the output
-// mixes both; the trailing array is the machine-readable report.
+// mixes both; the trailing array is the parseable report.
 func extractJSONReport(stdout string) []rawAutoUpdateItem {
 	start := strings.LastIndex(stdout, "[")
 	end := strings.LastIndex(stdout, "]")
@@ -348,7 +348,7 @@ func parseAutoUpdateQuadlet(content string) (participates bool, image string) {
 	return true, image
 }
 
-// buildAutoUpdatePlan narrows the machine's .container files to the run's
+// buildAutoUpdatePlan narrows the host's .container files to the run's
 // participating units, in file order: a readable file participates when
 // it carries AutoUpdate=registry; an unreadable file degrades to a
 // unit-only entry (it cannot be verified, so the unit still appears); a

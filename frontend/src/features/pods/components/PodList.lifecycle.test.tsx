@@ -6,12 +6,12 @@ import { HttpResponse, http } from "msw";
 import { Route, Routes, useParams } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { machineFixture, podFixture } from "@/test/factories";
+import { hostFixture, podFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function mockPods(pods: PodSummary[]) {
-	server.use(http.get("*/api/machines/m-1/pods", () => podsListResponse(pods)));
+	server.use(http.get("*/api/hosts/m-1/pods", () => podsListResponse(pods)));
 }
 
 function podsListResponse(pods: PodSummary[]) {
@@ -23,7 +23,7 @@ function podsListResponse(pods: PodSummary[]) {
 }
 
 function renderPodList(permission: "read" | "write" | "admin" = "admin") {
-	return renderWithQuery(<PodList machine={machineFixture({ permission })} />, {
+	return renderWithQuery(<PodList host={hostFixture({ permission })} />, {
 		router: true,
 	});
 }
@@ -52,14 +52,14 @@ describe("PodList lifecycle actions", () => {
 		const pauseRequests: string[] = [];
 		let listRequests = 0;
 		server.use(
-			http.get("*/api/machines/m-1/pods", () => {
+			http.get("*/api/hosts/m-1/pods", () => {
 				listRequests++;
 				return podsListResponse([
 					podFixture({ id: "p-1", state: "Running" }),
 					podFixture({ id: "p-2", name: "paused-pod", state: "Paused" }),
 				]);
 			}),
-			http.post("*/api/machines/m-1/pods/*/unpause", ({ request }) => {
+			http.post("*/api/hosts/m-1/pods/*/unpause", ({ request }) => {
 				pauseRequests.push(request.url);
 				return HttpResponse.json({
 					id: "p-2",
@@ -88,10 +88,8 @@ describe("PodList lifecycle actions", () => {
 		const killRequests: string[] = [];
 		const restartRequests: string[] = [];
 		server.use(
-			http.get("*/api/machines/m-1/pods", () =>
-				podsListResponse([podFixture()]),
-			),
-			http.post("*/api/machines/m-1/pods/*/kill", ({ request }) => {
+			http.get("*/api/hosts/m-1/pods", () => podsListResponse([podFixture()])),
+			http.post("*/api/hosts/m-1/pods/*/kill", ({ request }) => {
 				killRequests.push(request.url);
 				return HttpResponse.json({
 					id: "p-1",
@@ -99,7 +97,7 @@ describe("PodList lifecycle actions", () => {
 					timestamp: "2026-10-24T12:00:00Z",
 				});
 			}),
-			http.post("*/api/machines/m-1/pods/*/restart", ({ request }) => {
+			http.post("*/api/hosts/m-1/pods/*/restart", ({ request }) => {
 				restartRequests.push(request.url);
 				return HttpResponse.json({
 					id: "p-1",
@@ -139,11 +137,11 @@ describe("PodList lifecycle actions", () => {
 		const stopRequests: string[] = [];
 		let listRequests = 0;
 		server.use(
-			http.get("*/api/machines/m-1/pods", () => {
+			http.get("*/api/hosts/m-1/pods", () => {
 				listRequests++;
 				return podsListResponse([podFixture({ id: "p-1", state: "Running" })]);
 			}),
-			http.post("*/api/machines/m-1/pods/*/stop", ({ request }) => {
+			http.post("*/api/hosts/m-1/pods/*/stop", ({ request }) => {
 				stopRequests.push(request.url);
 				return HttpResponse.json({
 					id: "p-1",
@@ -170,10 +168,10 @@ describe("PodList lifecycle actions", () => {
 
 	it("shows the row-level error envelope when the action fails", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/pods", () =>
+			http.get("*/api/hosts/m-1/pods", () =>
 				podsListResponse([podFixture({ id: "p-1", state: "Running" })]),
 			),
-			http.post("*/api/machines/m-1/pods/p-1/stop", () =>
+			http.post("*/api/hosts/m-1/pods/p-1/stop", () =>
 				errorResponse(
 					409,
 					"POD_STATE_CONFLICT",
@@ -201,15 +199,12 @@ describe("PodList lifecycle actions", () => {
 		renderWithQuery(
 			<Routes>
 				<Route
-					path="/machines/:machineId"
-					element={<PodList machine={machineFixture()} />}
+					path="/hosts/:hostId"
+					element={<PodList host={hostFixture()} />}
 				/>
-				<Route
-					path="/machines/:machineId/pods/:podId"
-					element={<DetailProbe />}
-				/>
+				<Route path="/hosts/:hostId/pods/:podId" element={<DetailProbe />} />
 			</Routes>,
-			{ router: { initialEntries: ["/machines/m-1"] } },
+			{ router: { initialEntries: ["/hosts/m-1"] } },
 		);
 		const user = userEvent.setup();
 
@@ -220,13 +215,13 @@ describe("PodList lifecycle actions", () => {
 });
 
 function DetailProbe() {
-	const { machineId, podId } = useParams<{
-		machineId: string;
+	const { hostId, podId } = useParams<{
+		hostId: string;
 		podId: string;
 	}>();
 	return (
 		<div>
-			<span data-testid="probe-machine">{machineId}</span>
+			<span data-testid="probe-host">{hostId}</span>
 			<span data-testid="probe-pod">{podId}</span>
 		</div>
 	);

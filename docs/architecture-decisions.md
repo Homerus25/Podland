@@ -17,27 +17,27 @@ candidate number. API contracts live in `doku/`.
 - **Connection Mechanism**: Uses `~/repos/podman/pkg/bindings/connection.go` for SSH tunneling
 - **No CLI integration** - only Go API usage via the connection package
 
-### 2. Remote Machine Access
-- Podman must be **pre-installed** on remote machines
+### 2. Remote Host Access
+- Podman must be **pre-installed** on remote hosts
 - **No deployment of Podman** - backend assumes it exists
-- Backend uses owner's SSH credentials to connect to remote machines
-- All users access a machine through the **owner's SSH connection**
+- Backend uses owner's SSH credentials to connect to remote hosts
+- All users access a host through the **owner's SSH connection**
 
 ### 3. Multi-User Model
-- Each machine is **registered by an owner** (user)
+- Each host is **registered by an owner** (user)
 - Owner's SSH private key is stored **encrypted in SQLite**
-- Machine can be **shared with other users** via permission table
+- Host can be **shared with other users** via permission table
 - Application-level permissions enforced: `read`, `write`, `admin`
-- **One connection per machine** (not per user) - cached and reused
+- **One connection per host** (not per user) - cached and reused
 
 ### 4. Concurrency & Performance
-- **One connection per machine**: Each machine has at most one active SSH connection, cached and reused
-- **Per-machine in-flight dial dedup**: concurrent cold acquisitions for the same machine share a single dial; dials to different machines never serialize behind a lock
+- **One connection per host**: Each host has at most one active SSH connection, cached and reused
+- **Per-host in-flight dial dedup**: concurrent cold acquisitions for the same host share a single dial; dials to different hosts never serialize behind a lock
 - **Connection lifetime is the connection's, not the request's**: the cached connection context is detached from the request that dialed it, so an HTTP handler returning never kills the connection for later cache hits
 - **Engine handover at the connection seam**: each domain (volumes, secrets, containers, images, quadlets) declares a caller-width engine interface and a one-method provider that wraps `connections.Manager.WithConnection`; the production adapter constructs the podman engine inside the connection lease, so no domain service builds one inline
-- **Global limit**: Maximum cached machine connections = 100 (configurable, `MAX_CONCURRENT_MACHINES`)
+- **Global limit**: Maximum cached host connections = 100 (configurable, `MAX_CONCURRENT_HOSTS`)
 - **LRU eviction**: When the cache is full, the least recently used idle connection is closed
-- **Real teardown**: LRU eviction, the idle-timeout cleanup (15 minutes), and machine removal genuinely close the SSH session; removal is graceful (in-flight calls finish first)
+- **Real teardown**: LRU eviction, the idle-timeout cleanup (15 minutes), and host removal genuinely close the SSH session; removal is graceful (in-flight calls finish first)
 - **Fail fast** on connection failures/timeouts (no retry logic, no request queue)
 - **React Query** for frontend state management and caching
 
@@ -63,7 +63,7 @@ candidate number. API contracts live in `doku/`.
 - **Abortable operations** with progress tracking via HTTP streaming
 
 ### 7. Error Handling
-- **Endpoint envelope**: the uniform response contract every JSON endpoint speaks — machine-scoped routes cross `web.Handle`, user-scoped routes outside the machine subtree cross its twin `web.HandleUser` (context user ID passed through as-is, empty is a legal state) — failures as `{requestId, error{code, message}}`, successes as a DTO with an explicit status. Full ruling and reference implementations: `docs/backend-conventions.md`. _Avoid_: error wrapper, response helper
+- **Endpoint envelope**: the uniform response contract every JSON endpoint speaks — host-scoped routes cross `web.Handle`, user-scoped routes outside the host subtree cross its twin `web.HandleUser` (context user ID passed through as-is, empty is a legal state) — failures as `{requestId, error{code, message}}`, successes as a DTO with an explicit status. Full ruling and reference implementations: `docs/backend-conventions.md`. _Avoid_: error wrapper, response helper
 - **Frontend**:
   - Detailed error messages for client errors (4xx)
   - Generic error messages for server errors (5xx)
@@ -112,11 +112,11 @@ candidate number. API contracts live in `doku/`.
 ### 15. File Handling
 - **No file uploads** - container images pulled from registries only
 
-### 16. Machine Registration
-- Frontend uses dedicated endpoint to register machines
+### 16. Host Registration
+- Frontend uses dedicated endpoint to register hosts
 - **Synchronous connection test** during registration
 - Connection details stored encrypted in SQLite database
-- **Owner-based access**: Machine accessible by owner and shared users
+- **Owner-based access**: Host accessible by owner and shared users
 
 ### 17. First-Run Bootstrap
 - **Setup flow creates the first admin** — the only bootstrap path. A fresh
@@ -153,7 +153,7 @@ target:
 - **Phases run before anything is installed**: preflight (target emptiness
   → 409 `VOLUME_MIGRATION_TARGET_NOT_EMPTY` unless `overwriteVolumes`
   merges; size bound → 413) → a move's stop → the data itself. A data
-  failure therefore leaves both machines' quadlet sets untouched. A
+  failure therefore leaves both hosts' quadlet sets untouched. A
   migrating move stops the source's running unit BEFORE the data phase
   (exporting under a live writer would capture torn state); the
   non-migration path keeps the delete flow's stop inside the removal,
@@ -186,7 +186,7 @@ target:
   existence, sizes when an engine reports them) flag-independently. The
   same opt-in pattern carries `Secret=` references (issue 215): the value
   is revealed on the source and recreated on the target, gated by **admin
-  on the source** — a secret's value leaving a machine is a reveal, so
+  on the source** — a secret's value leaving a host is a reveal, so
   the secrets API's reveal gate owns it — with same-name skips before the
   reveal and copy-only semantics (a move never removes source secrets).
   Both projections — the preview's per-reference entries and the plan's
@@ -195,9 +195,9 @@ target:
   ruling (preview deduped by reference string, plan by resolved name) is
   the incident that requires it.
 
-### 19. One Transfer Kit Behind Every Cross-Machine Copy/Move (2026-10-05, issue 238)
+### 19. One Transfer Kit Behind Every Cross-Host Copy/Move (2026-10-05, issue 238)
 The export→import splice that issue 214 built inside the quadlet move
-is extracted into `internal/transfer`, and every cross-machine
+is extracted into `internal/transfer`, and every cross-host
 copy/move composes it instead of re-deriving it:
 - **The kit owns the splice, callers own the wire**: `transfer.CopyVolumeData`
   pipes the source engine's export into the target engine's import
@@ -268,7 +268,7 @@ through one entry point, `streaming.HandleProgress` — the streaming twin
 of `web.Handle` (architecture review 2026-10-08, candidate 3):
 - **The kit owns the ritual**: operationID minting, the operation slog
   line (assembled from the handler's operation name and attrs over the
-  kit's requestID/machineID/operationID base), the write-deadline
+  kit's requestID/hostID/operationID base), the write-deadline
   extension, the streaming envelope (headers, writer, identity), and the
   run loop. The deadline is one kit-level constant (10 minutes) applied
   to every progress stream — the operation-duration fact §18 ruled
@@ -276,7 +276,7 @@ of `web.Handle` (architecture review 2026-10-08, candidate 3):
   the images pull truncation under the server's 30-second WriteTimeout
   dies with the copy.
 - **The operation context rides every domain callback**: the kit mints
-  the operationID and passes `OperationContext{OperationID, MachineID,
+  the operationID and passes `OperationContext{OperationID, HostID,
   UserID}` into `Operation`, `CompleteEvent`, and `ErrorEvent`; domains
   stamp their events from it and never mint IDs themselves.
 - **The pre-stream ritual stays handler-side**: URL-param guards,
@@ -286,6 +286,85 @@ of `web.Handle` (architecture review 2026-10-08, candidate 3):
 - **The kit's external interface** is `HandleProgress`, `RunLogStream`,
   the query helpers, and the `LogEvent` vocabulary; `begin`/`run` and
   their configs stay in-package, pinned by the kit's own suite.
+
+### 21. The Vocabulary Is "Host", Not "Machine" (2026-11-05, issue 454)
+The domain term is **host**: a remote server with Podman installed that
+Podland manages. Code, API, database, docs, and wiki all said "machine";
+spec 454 renames it in one sweep and retires the old word rather than
+aliasing it.
+- **The rename is mechanical and case-preserving**: `machine` → `host`,
+  `machines` → `hosts`, `Machine` → `Host`, `MACHINE` → `HOST`, and every
+  camelCase/snake_case/kebab-case compound where `machine` is a *word
+  segment* (`machineId` → `hostId`, `machine_id` → `host_id`,
+  `cross-machine` → `cross-host`, `MAX_CONCURRENT_MACHINES` →
+  `MAX_CONCURRENT_HOSTS`). Word-boundary based, not substring: the English
+  word "machinery" is prose, not the domain term, and was reworded to
+  "plumbing"/"wiring" rather than mangled into "hostry" — the grep bar is
+  literal, so the retired string appears nowhere, not even inside an
+  unrelated word. "machine-readable" got the same treatment, reworded to
+  "parseable". Two edits are judgement rather than mechanical and are
+  recorded here so the sweep is not mistaken for pure substitution:
+  `MACHINE_HOST_BLOCK_PRIVATE_RANGES` becomes `HOST_BLOCK_PRIVATE_RANGES`,
+  dropping the doubled segment a literal `MACHINE_` → `HOST_` would have
+  produced (`HOST_HOST_…`); and the `ErrHostNotAllowed` comment's "machine
+  hostname" became "candidate hostname", because the mechanical result
+  ("host hostname") read as a stutter.
+- **The cutoff is deliberate and total**: old API paths
+  (`/api/machines/…`), JSON fields (`machineId`), error codes
+  (`MACHINE_NOT_FOUND`), environment variables
+  (`MAX_CONCURRENT_MACHINES`), and frontend routes (`/machines/…`) all
+  break at once. No compatibility aliases, no dual-read period, no
+  deprecation window: a client speaking the old vocabulary gets a 404 or a
+  400, not a translation. Aliases would have kept the retired word alive in
+  the codebase forever, which is the thing the rename exists to prevent.
+- **The database renames in place, on both paths**:
+  `001_initial_schema.sql` is left untouched and a new
+  `006_rename_machines_to_hosts.sql` does the renaming — `ALTER TABLE …
+  RENAME TO`, `RENAME COLUMN`, then drop-and-recreate the indexes and the
+  `updated_at` trigger under their new names, because SQLite keeps an
+  index's *name* through a table rename. A fresh database runs 001 then 006
+  and lands on the new schema; an existing deployment runs 006 against its
+  own data and keeps its hosts, its encrypted SSH keys, and its access
+  grants. Both paths walk the same migration, so there is no
+  fresh-versus-upgraded schema divergence to discover later.
+- **The grep bar has five deliberate exceptions, and this entry is a
+  sixth**: (1) `001_initial_schema.sql` keeps the historical schema
+  untouched, so fresh and existing databases walk the same path;
+  (2) `006_rename_machines_to_hosts.sql` must name what it renames —
+  `ALTER TABLE machines RENAME TO hosts` cannot be written without the old
+  word; (3) `migrations_test.go` proves the upgrade path, so it must name
+  the pre-006 objects it inserts into and then asserts gone; (4) `LICENSE`
+  is a legal document, not documentation — its PolyForm-derived "Machines"
+  section defines a licensing term of art ("any computer, server, virtual
+  machine, container host, or other computing system that is managed,
+  monitored, or controlled through the software"), deliberately broader
+  than this application's domain term and already naming "container host"
+  as one example, so renaming it would narrow the licence's scope and
+  change licensing obligations; (5) the README's licence summary quotes
+  that same term, because a summary that renamed it would misstate the
+  licence it summarises. This entry names the retired word for the same
+  reason the migration does: a record of a rename has to say what was
+  renamed. The point-in-time records — the pentest report and the research
+  notes — keep the word as well, and are out of scope by the spec's own
+  ruling rather than by exception. Everything else — `backend/`,
+  `frontend/src/`, `doku/`, the conventions docs, and every wiki page — is
+  clean under a case-insensitive search.
+- **The overloaded "host" vocabulary stays**: the rename does not claim the
+  word everywhere it appears. `HostPort`/`hostPort` in container port
+  bindings is podman's own vocabulary for the host side of a binding; the
+  `hostname` field is the host's own address; the registration probe's host
+  policy and its `HOST_NOT_ALLOWED` error already spoke "host" and are
+  untouched; and the integration test host helper keeps its name. These
+  were already correct, and rewriting them would have been churn dressed as
+  consistency.
+- **Landing order is backend, then frontend, then docs and wiki**: the
+  backend renames the API and the database, the frontend follows the API,
+  and the docs and wiki describe the end state both deliver. `master` is
+  red between the backend and frontend landings — the frontend still calls
+  `/api/machines/…` until its own ticket lands — and that is accepted: this
+  is a single-contributor repository, the window is one merge, and the
+  alternative (a compatibility shim keeping master green for an hour) is
+  exactly the alias this decision refuses.
 
 ## Technical Stack
 
@@ -335,7 +414,7 @@ Podland/
 │       ├── connections/     # cached SSH/podman connections (LRU)
 │       ├── contextutils/    # context helpers (user ID extraction)
 │       ├── domain/          # one package per resource: auth, containers,
-│       │                    #   images, machines, quadlets, secrets, users, volumes
+│       │                    #   images, hosts, quadlets, secrets, users, volumes
 │       ├── encryption/      # secret encryption at rest
 │       ├── errors/          # AppError + envelope error codes
 │       ├── middleware/      # auth, admin, permission, rate limiting
@@ -350,7 +429,7 @@ Podland/
 │       └── webui/           # serves the embedded SPA
 └── frontend/
     └── src/
-        ├── features/        # auth, containers, images, machines,
+        ├── features/        # auth, containers, images, hosts,
         │                    #   quadlets, secrets, volumes
         ├── shared/          # api client, components, queries, streaming, utils
         ├── pages/           # route-level pages
@@ -362,19 +441,19 @@ Podland/
 ### Simplicity
 - Fail fast on errors (no retry logic)
 - Authorization: Bearer header for JWT (frontend manages token storage)
-- One connection per machine (not per user)
+- One connection per host (not per user)
 - Direct streaming with NDJSON (no buffering)
 
 ### Security
 - SSH keys encrypted at rest in SQLite
 - JWT tokens with RS256 asymmetric signing
 - Short-lived tokens transported via Authorization: Bearer header
-- Application-level permissions for machine sharing
+- Application-level permissions for host sharing
 
 ### Performance
 - Connection caching and reuse
 - LRU eviction for connection management
-- Per-machine dial dedup; fail fast when a connection cannot be acquired (no queuing)
+- Per-host dial dedup; fail fast when a connection cannot be acquired (no queuing)
 - React Query for efficient data fetching and caching
 
 ### User Experience
@@ -396,11 +475,11 @@ Podland/
 ## Assumptions & Dependencies
 
 ### Assumptions
-- Podman is pre-installed on all remote machines
-- Podman Service API is accessible via Unix socket on remote machines
-- Users have SSH access to remote machines via owner's credentials
-- Backend runs in an environment with network access to remote machines
-- Each machine has a single owner with valid SSH credentials
+- Podman is pre-installed on all remote hosts
+- Podman Service API is accessible via Unix socket on remote hosts
+- Users have SSH access to remote hosts via owner's credentials
+- Backend runs in an environment with network access to remote hosts
+- Each host has a single owner with valid SSH credentials
 
 ### Dependencies
 - **Go**: 1.21+

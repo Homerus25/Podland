@@ -11,14 +11,14 @@ import (
 )
 
 // exportRequest serves GET
-// /api/machines/{id}/images/{imageId}/export through the handler with an
+// /api/hosts/{id}/images/{imageId}/export through the handler with an
 // authenticated test identity.
-func exportRequest(export http.HandlerFunc, machineID, imageID string) *httptest.ResponseRecorder {
+func exportRequest(export http.HandlerFunc, hostID, imageID string) *httptest.ResponseRecorder {
 	return testutils.Perform(export, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/" + machineID + "/images/" + imageID + "/export",
+		Path:      "/api/hosts/" + hostID + "/images/" + imageID + "/export",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": machineID, "imageId": imageID},
+		URLParams: map[string]string{"id": hostID, "imageId": imageID},
 	})
 }
 
@@ -60,7 +60,7 @@ func TestImageHandler_Export_Success(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := exportRequest(newTestHandler(exportEngine()).Export, "test-machine", tt.imageID)
+			w := exportRequest(newTestHandler(exportEngine()).Export, "test-host", tt.imageID)
 
 			assert.Equal(t, 200, w.Code)
 			assert.Equal(t, "application/x-tar", w.Header().Get("Content-Type"))
@@ -82,7 +82,7 @@ func TestImageHandler_Export_NotFound(t *testing.T) {
 		// missing image.
 	}
 
-	w := exportRequest(newTestHandler(engine).Export, "test-machine", "sha256:no-such-image")
+	w := exportRequest(newTestHandler(engine).Export, "test-host", "sha256:no-such-image")
 
 	assert.Equal(t, 404, w.Code)
 	assert.Contains(t, w.Body.String(), "IMAGE_NOT_FOUND")

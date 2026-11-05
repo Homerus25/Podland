@@ -18,23 +18,17 @@ export const bareApi = axios.create({
 	baseURL: apiBaseUrl,
 });
 
-// The single owner of machine-scoped URL construction: every path segment,
-// machineId first, is percent-encoded. Axios calls take the path form (the
+// The single owner of host-scoped URL construction: every path segment,
+// hostId first, is percent-encoded. Axios calls take the path form (the
 // shared instance prepends the base); fetch consumers (stream transport,
-// downloadFile) take machineApiUrl, the full form.
-export function machineApiPath(
-	machineId: string,
-	...segments: string[]
-): string {
-	const encoded = [machineId, ...segments].map(encodeURIComponent);
-	return `/machines/${encoded.join("/")}`;
+// downloadFile) take hostApiUrl, the full form.
+export function hostApiPath(hostId: string, ...segments: string[]): string {
+	const encoded = [hostId, ...segments].map(encodeURIComponent);
+	return `/hosts/${encoded.join("/")}`;
 }
 
-export function machineApiUrl(
-	machineId: string,
-	...segments: string[]
-): string {
-	return `${apiBaseUrl.replace(/\/$/, "")}${machineApiPath(machineId, ...segments)}`;
+export function hostApiUrl(hostId: string, ...segments: string[]): string {
+	return `${apiBaseUrl.replace(/\/$/, "")}${hostApiPath(hostId, ...segments)}`;
 }
 
 // The access token is held only in this module variable for the lifetime of

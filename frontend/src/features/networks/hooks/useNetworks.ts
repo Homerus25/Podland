@@ -10,7 +10,7 @@ import {
 	listNetworks,
 	pruneNetworks,
 } from "@features/networks/services/networksApi";
-import type { MachineResource } from "@shared/queries/queryKeys";
+import type { HostResource } from "@shared/queries/queryKeys";
 import {
 	networkInspectQueryKey,
 	networkQueryKey,
@@ -21,58 +21,58 @@ import {
 	useOneShotQuery,
 } from "@shared/queries/useFreshQuery";
 import {
-	invalidateMachineResources,
+	invalidateHostResources,
 	useListInvalidatingMutation,
 } from "@shared/queries/useListInvalidatingMutation";
 import type { ApiError } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-export function useNetworks(machineId: string) {
-	return useAlwaysRefetchListQuery(networksQueryKey(machineId), () =>
-		listNetworks(machineId),
+export function useNetworks(hostId: string) {
+	return useAlwaysRefetchListQuery(networksQueryKey(hostId), () =>
+		listNetworks(hostId),
 	);
 }
 
-export function useNetwork(machineId: string, networkName: string) {
-	return useOneShotQuery(networkQueryKey(machineId, networkName), () =>
-		getNetwork(machineId, networkName),
+export function useNetwork(hostId: string, networkName: string) {
+	return useOneShotQuery(networkQueryKey(hostId, networkName), () =>
+		getNetwork(hostId, networkName),
 	);
 }
 
 export function useNetworkInspect(
-	machineId: string,
+	hostId: string,
 	networkName: string,
 	options?: { enabled?: boolean },
 ) {
 	return useOneShotQuery(
-		networkInspectQueryKey(machineId, networkName),
-		() => inspectNetwork(machineId, networkName),
+		networkInspectQueryKey(hostId, networkName),
+		() => inspectNetwork(hostId, networkName),
 		options,
 	);
 }
 
 // Every network mutation invalidates both lists: the containers DTO carries
 // each container's networks, so an attach is visible from both tabs.
-const NETWORK_MUTATION_INVALIDATIONS: MachineResource[] = [
+const NETWORK_MUTATION_INVALIDATIONS: HostResource[] = [
 	"networks",
 	"containers",
 ];
 
-export function useCreateNetwork(machineId: string) {
+export function useCreateNetwork(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		NETWORK_MUTATION_INVALIDATIONS,
-		(input: CreateNetworkInput) => createNetwork(machineId, input),
+		(input: CreateNetworkInput) => createNetwork(hostId, input),
 	);
 }
 
 // A prune removes only unused networks — no container is attached to a
 // removed network, so the containers list is untouched and only the
 // networks list refetches on success.
-export function usePruneNetworks(machineId: string) {
-	return useListInvalidatingMutation(machineId, "networks", () =>
-		pruneNetworks(machineId),
+export function usePruneNetworks(hostId: string) {
+	return useListInvalidatingMutation(hostId, "networks", () =>
+		pruneNetworks(hostId),
 	);
 }
 
@@ -104,7 +104,7 @@ export class ConnectError extends Error {
 // the eligible options and failed ones remain for retry. Any failure
 // rejects the mutation with the aggregated ConnectError, which keeps the
 // dialog open; only an all-success batch resolves and closes it.
-export function useConnectContainers(machineId: string) {
+export function useConnectContainers(hostId: string) {
 	const queryClient = useQueryClient();
 	// TError is ConnectError exactly: the mutationFn's only throw is the
 	// aggregated batch error — individual request failures are captured by
@@ -113,7 +113,7 @@ export function useConnectContainers(machineId: string) {
 		mutationFn: async (pairs: ConnectContainerVariables[]) => {
 			const results = await Promise.allSettled(
 				pairs.map(({ networkName, containerId }) =>
-					connectContainer(machineId, networkName, containerId),
+					connectContainer(hostId, networkName, containerId),
 				),
 			);
 			const failures: ConnectFailure[] = [];
@@ -130,9 +130,9 @@ export function useConnectContainers(machineId: string) {
 			}
 		},
 		onSettled: () =>
-			invalidateMachineResources(
+			invalidateHostResources(
 				queryClient,
-				machineId,
+				hostId,
 				NETWORK_MUTATION_INVALIDATIONS,
 			),
 	});

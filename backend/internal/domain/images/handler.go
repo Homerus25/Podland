@@ -35,7 +35,7 @@ func NewImageHandler(service *ImageService) *ImageHandler {
 
 // List handles listing images
 func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]ImageListResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]ImageListResponse, error) {
 		opts := entities.ImageListOptions{}
 		opts.All = web.QueryBool(r, "all", false)
 
@@ -52,7 +52,7 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		images, err := h.service.List(ctx, userID, machineID, opts)
+		images, err := h.service.List(ctx, userID, hostID, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -85,29 +85,29 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 
 	streaming.HandleProgress(w, r, "pull", []slog.Attr{slog.Any("request", request)}, streaming.ProgressConfig[PullProgressEvent, *entities.ImagePullReport]{
 		Operation: func(pullCtx context.Context, op streaming.OperationContext, onProgress func(PullProgressEvent)) (*entities.ImagePullReport, error) {
-			return h.service.PullWithProgress(pullCtx, op.UserID, op.MachineID, request.Image, pullOpts, func(event PullProgressEvent) {
+			return h.service.PullWithProgress(pullCtx, op.UserID, op.HostID, request.Image, pullOpts, func(event PullProgressEvent) {
 				event.OperationID = op.OperationID
-				event.MachineID = op.MachineID
+				event.HostID = op.HostID
 				onProgress(event)
 			})
 		},
 		CompleteEvent: func(op streaming.OperationContext, _ *entities.ImagePullReport) any {
-			return NewCompleteEvent(op.OperationID, op.MachineID)
+			return NewCompleteEvent(op.OperationID, op.HostID)
 		},
 		ErrorDefault: errors.ErrImagePullFailed,
 		ErrorEvent: func(op streaming.OperationContext, code, message string, _ bool) any {
-			return NewErrorEvent(op.OperationID, op.MachineID, code, message)
+			return NewErrorEvent(op.OperationID, op.HostID, code, message)
 		},
 	})
 }
 
-// Prune handles removing all unused images on a machine. Route-level
-// RequireMachinePermission(write) (app.go) gates it at write; podman
+// Prune handles removing all unused images on a host. Route-level
+// RequireHostPermission(write) (app.go) gates it at write; podman
 // leaves in-use images alone. Returns 200 with one report entry per
 // removed image (id, reclaimed size, any per-image error).
 func (h *ImageHandler) Prune(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]ImagePruneResponse, error) {
-		prunes, err := h.service.Prune(ctx, userID, machineID)
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]ImagePruneResponse, error) {
+		prunes, err := h.service.Prune(ctx, userID, hostID)
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +118,7 @@ func (h *ImageHandler) Prune(w http.ResponseWriter, r *http.Request) {
 // Delete handles deleting an image. A malformed force flag is ignored
 // (deletes as unforced), matching the documented behavior.
 func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, hostID string) (struct{}, error) {
 		imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
 		if guard != nil {
 			return struct{}{}, guard
@@ -126,7 +126,7 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 		force := web.QueryBool(r, "force", false)
 
-		return struct{}{}, h.service.Delete(ctx, userID, machineID, imageID, force)
+		return struct{}{}, h.service.Delete(ctx, userID, hostID, imageID, force)
 	})
 }
 
@@ -134,13 +134,13 @@ func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // combined with the inspect report's config fields. Read level (app.go
 // mounts it without requireWrite).
 func (h *ImageHandler) Get(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ImageDetailResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (ImageDetailResponse, error) {
 		imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
 		if guard != nil {
 			return ImageDetailResponse{}, guard
 		}
 
-		return h.service.Get(ctx, userID, machineID, imageID)
+		return h.service.Get(ctx, userID, hostID, imageID)
 	})
 }
 
@@ -148,19 +148,19 @@ func (h *ImageHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Read level (app.go mounts it without requireWrite); the report crosses
 // the envelope as-is — no DTO mapping.
 func (h *ImageHandler) Inspect(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*entities.ImageInspectReport, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*entities.ImageInspectReport, error) {
 		imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		return h.service.Inspect(ctx, userID, machineID, imageID)
+		return h.service.Inspect(ctx, userID, hostID, imageID)
 	})
 }
 
 // Export handles streaming an image's tar archive as a download (issue
 // 401, the volume export's images twin). Read-level permission suffices
-// (subtree RequireMachineAccess): a download mutates nothing. It crosses
+// (subtree RequireHostAccess): a download mutates nothing. It crosses
 // the endpoint envelope's binary twin (web.HandleStream): identity
 // guards, AppError mapping, and the 500 fallback live there; the closure
 // is the tar headers plus the streaming service call. Headers are set
@@ -179,7 +179,7 @@ func (h *ImageHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 // after the first streamed byte the header is already flushed and the
 // drop is a no-op.
 func (h *ImageHandler) Export(w http.ResponseWriter, r *http.Request) {
-	web.HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+	web.HandleStream(w, r, func(ctx context.Context, userID, hostID string) error {
 		imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
 		if guard != nil {
 			return guard
@@ -188,7 +188,7 @@ func (h *ImageHandler) Export(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-tar")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", shortImageID(imageID)+".tar"))
 
-		if err := h.service.Export(ctx, userID, machineID, imageID, w); err != nil {
+		if err := h.service.Export(ctx, userID, hostID, imageID, w); err != nil {
 			w.Header().Del("Content-Disposition")
 			return err
 		}
@@ -209,29 +209,29 @@ func shortImageID(id string) string {
 }
 
 // CopyPreview answers the copy dialog's one fact (issue 375,
-// doku/description_images_api.md): whether the target machine already
-// holds the image by ID. Route-level RequireMachineAccess (app.go) gates
-// the subtree at read; the target machine's read access is enforced
+// doku/description_images_api.md): whether the target host already
+// holds the image by ID. Route-level RequireHostAccess (app.go) gates
+// the subtree at read; the target host's read access is enforced
 // inside the service against the access store.
 func (h *ImageHandler) CopyPreview(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ImageCopyPreviewResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*ImageCopyPreviewResponse, error) {
 		imageID, guard := web.URLParam(r, "imageId", "MISSING_IMAGE_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		targetMachineID, guard := web.QueryString(r, "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+		targetHostID, guard := web.QueryString(r, "targetHostId", "MISSING_TARGET_HOST_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		return h.service.CopyPreview(ctx, userID, machineID, imageID, targetMachineID)
+		return h.service.CopyPreview(ctx, userID, hostID, imageID, targetHostID)
 	})
 }
 
-// Copy handles the cross-machine copy of an image (issue 375,
+// Copy handles the cross-host copy of an image (issue 375,
 // doku/description_images_api.md). The route sits at the subtree's write
-// gate for the SOURCE machine; the target machine's write-level access
+// gate for the SOURCE host; the target host's write-level access
 // is enforced inside the service against the access store.
 //
 // Transport: ALWAYS NDJSON — no plain/stream fork — through the
@@ -258,20 +258,20 @@ func (h *ImageHandler) Copy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	streaming.HandleProgress(w, r, "Copy image across machines", []slog.Attr{slog.String("imageId", imageID)}, streaming.ProgressConfig[ImageCopyEvent, *ImageCopyResponse]{
+	streaming.HandleProgress(w, r, "Copy image across hosts", []slog.Attr{slog.String("imageId", imageID)}, streaming.ProgressConfig[ImageCopyEvent, *ImageCopyResponse]{
 		Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(ImageCopyEvent)) (*ImageCopyResponse, error) {
-			return h.service.Copy(ctx, op.UserID, op.MachineID, imageID, request.TargetMachineID, func(event ImageCopyEvent) {
+			return h.service.Copy(ctx, op.UserID, op.HostID, imageID, request.TargetHostID, func(event ImageCopyEvent) {
 				event.OperationID = op.OperationID
-				event.MachineID = op.MachineID
+				event.HostID = op.HostID
 				onProgress(event)
 			})
 		},
 		CompleteEvent: func(op streaming.OperationContext, response *ImageCopyResponse) any {
-			return NewImageCopyCompleteEvent(op.OperationID, op.MachineID, *response)
+			return NewImageCopyCompleteEvent(op.OperationID, op.HostID, *response)
 		},
 		ErrorDefault: errors.ErrConnectionFailed,
 		ErrorEvent: func(op streaming.OperationContext, code, message string, _ bool) any {
-			return NewImageCopyErrorEvent(op.OperationID, op.MachineID, code, message)
+			return NewImageCopyErrorEvent(op.OperationID, op.HostID, code, message)
 		},
 	})
 }

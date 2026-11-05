@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { axiosError } from "@/test/errors";
-import { machineFixture, volumeFixture } from "@/test/factories";
+import { hostFixture, volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -34,20 +34,19 @@ function resetCounters() {
 
 function installHandlers() {
 	server.use(
-		http.get("*/api/machines/m-1/volumes", () =>
+		http.get("*/api/hosts/m-1/volumes", () =>
 			HttpResponse.json([volumeFixture({ name: "app-config" })]),
 		),
-		http.post("*/api/machines/m-1/volumes/app-config/populate", () => {
+		http.post("*/api/hosts/m-1/volumes/app-config/populate", () => {
 			populateRequests.count += 1;
-			populateRequests.pathname =
-				"/api/machines/m-1/volumes/app-config/populate";
+			populateRequests.pathname = "/api/hosts/m-1/volumes/app-config/populate";
 			return new HttpResponse(null, { status: 204 });
 		}),
 	);
 }
 
 function renderVolumeList(permission: "read" | "write" | "admin" = "admin") {
-	renderWithQuery(<VolumeList machine={machineFixture({ permission })} />, {
+	renderWithQuery(<VolumeList host={hostFixture({ permission })} />, {
 		chakra: true,
 		router: true,
 	});
@@ -110,9 +109,9 @@ describe("VolumeList populate", () => {
 		await user.click(screen.getByTestId("confirm-populate-button"));
 
 		await waitFor(() => expect(populateVolumeMock).toHaveBeenCalledTimes(1));
-		const [machineId, volumeName, form, onProgress] =
+		const [hostId, volumeName, form, onProgress] =
 			populateVolumeMock.mock.calls[0];
-		expect(machineId).toBe("m-1");
+		expect(hostId).toBe("m-1");
 		expect(volumeName).toBe("app-config");
 		const parts = (form as FormData).getAll("files") as File[];
 		expect(parts.map((part) => part.name)).toEqual([

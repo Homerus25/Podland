@@ -5,14 +5,14 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { machineFixture, quadletFixture } from "@/test/factories";
+import { hostFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 const web = quadletFixture({ state: "stopped" });
 
 function quadletsHandler(quadlets: () => QuadletSummary[]) {
-	return http.get("*/api/machines/m-1/quadlets", () =>
+	return http.get("*/api/hosts/m-1/quadlets", () =>
 		HttpResponse.json(quadlets()),
 	);
 }
@@ -29,7 +29,7 @@ function resetRequests() {
 // for the pending-state tests.
 function captureLifecycle(action: "start" | "stop" | "restart", delayMs = 0) {
 	return http.post(
-		`*/api/machines/m-1/quadlets/:quadletId/${action}`,
+		`*/api/hosts/m-1/quadlets/:quadletId/${action}`,
 		async ({ request }) => {
 			if (delayMs > 0)
 				await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -44,7 +44,7 @@ function captureLifecycle(action: "start" | "stop" | "restart", delayMs = 0) {
 }
 
 function renderQuadletList() {
-	renderWithQuery(<QuadletList machine={machineFixture()} />, {
+	renderWithQuery(<QuadletList host={hostFixture()} />, {
 		router: true,
 	});
 }
@@ -103,7 +103,7 @@ describe("QuadletList lifecycle", () => {
 
 		await waitFor(() => expect(lifecycleRequests).toHaveLength(1));
 		expect(lifecycleRequests[0].pathname).toBe(
-			"/api/machines/m-1/quadlets/web/start",
+			"/api/hosts/m-1/quadlets/web/start",
 		);
 		expect(lifecycleRequests[0].search).toBe("");
 	});
@@ -136,7 +136,7 @@ describe("QuadletList lifecycle", () => {
 
 		await waitFor(() => expect(lifecycleRequests).toHaveLength(1));
 		expect(lifecycleRequests[0].pathname).toBe(
-			"/api/machines/m-1/quadlets/web/stop",
+			"/api/hosts/m-1/quadlets/web/stop",
 		);
 		expect(lifecycleRequests[0].search).toBe("");
 	});
@@ -169,7 +169,7 @@ describe("QuadletList lifecycle", () => {
 
 		await waitFor(() => expect(lifecycleRequests).toHaveLength(1));
 		expect(lifecycleRequests[0].pathname).toBe(
-			"/api/machines/m-1/quadlets/web/restart",
+			"/api/hosts/m-1/quadlets/web/restart",
 		);
 		expect(lifecycleRequests[0].searchParams.get("timeout")).toBe("45");
 	});
@@ -185,7 +185,7 @@ describe("QuadletList lifecycle", () => {
 
 		await waitFor(() => expect(lifecycleRequests).toHaveLength(1));
 		expect(lifecycleRequests[0].pathname).toBe(
-			"/api/machines/m-1/quadlets/web/restart",
+			"/api/hosts/m-1/quadlets/web/restart",
 		);
 		expect(lifecycleRequests[0].search).toBe("");
 	});
@@ -221,7 +221,7 @@ describe("QuadletList lifecycle", () => {
 			quadletsHandler(() => [
 				quadletFixture({ state: stopped ? "stopped" : "running" }),
 			]),
-			http.post("*/api/machines/m-1/quadlets/:quadletId/stop", () => {
+			http.post("*/api/hosts/m-1/quadlets/:quadletId/stop", () => {
 				stopped = true;
 				return HttpResponse.json({
 					id: "web",
@@ -247,7 +247,7 @@ describe("QuadletList lifecycle", () => {
 	it("shows the error envelope under the row when starting fails", async () => {
 		server.use(
 			quadletsHandler(() => [quadletFixture({ state: "stopped" })]),
-			http.post("*/api/machines/m-1/quadlets/:quadletId/start", () =>
+			http.post("*/api/hosts/m-1/quadlets/:quadletId/start", () =>
 				errorResponse(409, "QUADLET_START_FAILED", "Unit is masked", "req-61"),
 			),
 		);
@@ -266,7 +266,7 @@ describe("QuadletList lifecycle", () => {
 	it("keeps the options modal open with the error envelope when stopping fails", async () => {
 		server.use(
 			quadletsHandler(() => [quadletFixture()]),
-			http.post("*/api/machines/m-1/quadlets/:quadletId/stop", () =>
+			http.post("*/api/hosts/m-1/quadlets/:quadletId/stop", () =>
 				errorResponse(404, "QUADLET_NOT_FOUND", "Quadlet not found", "req-62"),
 			),
 		);
@@ -286,7 +286,7 @@ describe("QuadletList lifecycle", () => {
 	});
 
 	// Spec #402 ticket #406 acceptance: a .pod entry renders with its kind
-	// label and its lifecycle answers through the same row machinery —
+	// label and its lifecycle answers through the same row plumbing —
 	// the resource field changes no code path, so this is the verification
 	// the ticket asks for, not a new behavior.
 	it("serves a .pod quadlet: the pod kind label renders and Start posts to its endpoint", async () => {
@@ -313,7 +313,7 @@ describe("QuadletList lifecycle", () => {
 
 		await waitFor(() => expect(lifecycleRequests).toHaveLength(1));
 		expect(lifecycleRequests[0].pathname).toBe(
-			"/api/machines/m-1/quadlets/app-pod/start",
+			"/api/hosts/m-1/quadlets/app-pod/start",
 		);
 	});
 });

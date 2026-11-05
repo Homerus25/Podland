@@ -85,31 +85,31 @@ func (f *fakeImageEngine) Load(r io.Reader) ([]string, error) {
 type fakeEngineProvider struct {
 	engine ImageEngine
 	err    error
-	// engines serves per-machine engines keyed by machine ID — the shape
-	// the cross-machine copy exercises. When non-nil it takes precedence
+	// engines serves per-host engines keyed by host ID — the shape
+	// the cross-host copy exercises. When non-nil it takes precedence
 	// over engine; a lookup miss panics, so a closure crossing an
-	// unexpected machine fails the test loudly.
+	// unexpected host fails the test loudly.
 	engines map[string]ImageEngine
-	// engineErrs serves per-machine acquisition failures keyed by
-	// machine ID — the shape a target-lease failure (one machine
+	// engineErrs serves per-host acquisition failures keyed by
+	// host ID — the shape a target-lease failure (one host
 	// reachable, the other not) exercises. Checked before the engines
 	// lookup.
 	engineErrs map[string]error
 }
 
-func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e ImageEngine) error) error {
+func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e ImageEngine) error) error {
 	if p.err != nil {
 		return p.err
 	}
 	if p.engineErrs != nil {
-		if err, ok := p.engineErrs[machineID]; ok {
+		if err, ok := p.engineErrs[hostID]; ok {
 			return err
 		}
 	}
 	if p.engines != nil {
-		e, ok := p.engines[machineID]
+		e, ok := p.engines[hostID]
 		if !ok {
-			panic("unexpected WithEngine machine: " + machineID)
+			panic("unexpected WithEngine host: " + hostID)
 		}
 		return fn(e)
 	}

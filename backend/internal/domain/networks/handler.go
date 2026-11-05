@@ -20,12 +20,12 @@ func NewNetworkHandler(service *NetworkService) *NetworkHandler {
 	}
 }
 
-// List handles listing networks on a machine. Route-level
-// RequireMachineAccess (app.go) gates the subtree; the endpoint
+// List handles listing networks on a host. Route-level
+// RequireHostAccess (app.go) gates the subtree; the endpoint
 // envelope owns extraction, error mapping, and encoding.
 func (h *NetworkHandler) List(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]NetworkResponse, error) {
-		networks, err := h.service.List(ctx, userID, machineID)
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]NetworkResponse, error) {
+		networks, err := h.service.List(ctx, userID, hostID)
 		if err != nil {
 			return nil, err
 		}
@@ -33,19 +33,19 @@ func (h *NetworkHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Create handles creating a network on a machine. Route-level
-// RequireMachinePermission(write) (app.go) gates it at write. The body
+// Create handles creating a network on a host. Route-level
+// RequireHostPermission(write) (app.go) gates it at write. The body
 // carries the network's name (required) and optionally the IDs of
 // containers to attach after the create; an attach failure names the
 // failing container and the network stays created (no rollback).
 func (h *NetworkHandler) Create(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (NetworkResponse, error) {
+	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, hostID string) (NetworkResponse, error) {
 		var request NetworkCreateRequest
 		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return NetworkResponse{}, appErr
 		}
 
-		network, err := h.service.Create(ctx, userID, machineID, request)
+		network, err := h.service.Create(ctx, userID, hostID, request)
 		if err != nil {
 			return NetworkResponse{}, err
 		}
@@ -53,13 +53,13 @@ func (h *NetworkHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Connect handles attaching a container to a network on a machine.
-// Route-level RequireMachinePermission(write) (app.go) gates it at
+// Connect handles attaching a container to a network on a host.
+// Route-level RequireHostPermission(write) (app.go) gates it at
 // write. Answers 200 with an empty JSON object ({}): the envelope
 // encodes the handler's struct{} result, so the body is {} rather than
 // empty.
 func (h *NetworkHandler) Connect(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (struct{}, error) {
 		networkName, guard := web.URLParam(r, "networkName", "MISSING_NETWORK_NAME")
 		if guard != nil {
 			return struct{}{}, guard
@@ -70,18 +70,18 @@ func (h *NetworkHandler) Connect(w http.ResponseWriter, r *http.Request) {
 			return struct{}{}, appErr
 		}
 
-		return struct{}{}, h.service.Connect(ctx, userID, machineID, networkName, request.Container)
+		return struct{}{}, h.service.Connect(ctx, userID, hostID, networkName, request.Container)
 	})
 }
 
-// Prune handles removing all unused networks on a machine. Route-level
-// RequireMachinePermission(write) (app.go) gates it at write; podman
+// Prune handles removing all unused networks on a host. Route-level
+// RequireHostPermission(write) (app.go) gates it at write; podman
 // leaves in-use networks alone. Returns 200 with one report entry per
 // removed network (name, any per-network error; podman's network
 // prune report carries no size).
 func (h *NetworkHandler) Prune(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]NetworkPruneResponse, error) {
-		prunes, err := h.service.Prune(ctx, userID, machineID)
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]NetworkPruneResponse, error) {
+		prunes, err := h.service.Prune(ctx, userID, hostID)
 		if err != nil {
 			return nil, err
 		}
@@ -89,34 +89,34 @@ func (h *NetworkHandler) Prune(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Get handles returning one network's detail DTO on a machine. Route-level
-// RequireMachineAccess (app.go) gates the subtree at read; the endpoint
+// Get handles returning one network's detail DTO on a host. Route-level
+// RequireHostAccess (app.go) gates the subtree at read; the endpoint
 // envelope owns extraction, error mapping, and encoding. The DTO is
 // mapped from podman's inspect report: name, id, driver, createdAt,
 // subnets, and the attached containers.
 func (h *NetworkHandler) Get(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (NetworkDetailResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (NetworkDetailResponse, error) {
 		networkName, guard := web.URLParam(r, "networkName", "MISSING_NETWORK_NAME")
 		if guard != nil {
 			return NetworkDetailResponse{}, guard
 		}
 
-		return h.service.Get(ctx, userID, machineID, networkName)
+		return h.service.Get(ctx, userID, hostID, networkName)
 	})
 }
 
 // Inspect handles returning one network's raw podman inspect report on
-// a machine. Route-level RequireMachineAccess (app.go) gates the
+// a host. Route-level RequireHostAccess (app.go) gates the
 // subtree at read; the endpoint envelope owns extraction, error
 // mapping, and encoding. The report is returned unmapped: the body is
 // podman's raw inspect JSON.
 func (h *NetworkHandler) Inspect(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (entities.NetworkInspectReport, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (entities.NetworkInspectReport, error) {
 		networkName, guard := web.URLParam(r, "networkName", "MISSING_NETWORK_NAME")
 		if guard != nil {
 			return entities.NetworkInspectReport{}, guard
 		}
 
-		return h.service.Inspect(ctx, userID, machineID, networkName)
+		return h.service.Inspect(ctx, userID, hostID, networkName)
 	})
 }

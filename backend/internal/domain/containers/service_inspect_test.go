@@ -23,7 +23,7 @@ func TestContainerService_Inspect_ReturnsRawReport(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "container-123")
+	got, err := service.Inspect(context.Background(), "user", "host", "container-123")
 
 	require.NoError(t, err)
 	assert.Same(t, report, got)
@@ -40,7 +40,7 @@ func TestContainerService_Inspect_MissingContainerIsAnError(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Inspect(context.Background(), "user", "machine", "container-123")
+		got, err := service.Inspect(context.Background(), "user", "host", "container-123")
 
 		require.Error(t, err)
 		assert.Nil(t, got)
@@ -55,7 +55,7 @@ func TestContainerService_Inspect_MissingContainerIsAnError(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Inspect(context.Background(), "user", "machine", "container-123")
+		got, err := service.Inspect(context.Background(), "user", "host", "container-123")
 
 		require.Error(t, err)
 		assert.Nil(t, got)
@@ -71,7 +71,7 @@ func TestContainerService_Inspect_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "container-123")
+	got, err := service.Inspect(context.Background(), "user", "host", "container-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -86,7 +86,7 @@ func TestContainerService_Inspect_ZeroReportsWithPerItemErrorWrapsCause(t *testi
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "container-123")
+	got, err := service.Inspect(context.Background(), "user", "host", "container-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -103,7 +103,7 @@ func TestContainerService_Inspect_ZeroReportsWithoutErrorsIsAnomaly(t *testing.T
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "container-123")
+	got, err := service.Inspect(context.Background(), "user", "host", "container-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -122,7 +122,7 @@ func TestContainerService_Inspect_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine, err: appErrors.ErrConnectionFailed})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "container-123")
+	got, err := service.Inspect(context.Background(), "user", "host", "container-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)

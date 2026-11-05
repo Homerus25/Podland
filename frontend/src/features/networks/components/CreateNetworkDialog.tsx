@@ -23,24 +23,24 @@ interface NetworkFormValues {
 }
 
 interface CreateNetworkDialogProps {
-	machineId: string;
+	hostId: string;
 	mutation: MutationSlice<CreateNetworkInput>;
 	onClose: () => void;
 }
 
 // Create-network dialog: a required name and an optional multi-select of
-// the machine's running containers to attach in the same call. This
+// the host's running containers to attach in the same call. This
 // component is the form owner, so it mounts with the dialog (fields start
 // empty on every open) and publishes its validity through the scope for the
 // module footer; a failure (409 duplicate, attach failure naming the
 // container) renders in the module's error region and keeps the dialog
 // open, success closes through it.
 export function CreateNetworkDialog({
-	machineId,
+	hostId,
 	mutation,
 	onClose,
 }: CreateNetworkDialogProps) {
-	const { data: containers } = useContainers(machineId);
+	const { data: containers } = useContainers(hostId);
 	const [selected, setSelected] = useState<string[]>([]);
 	const { register, handleSubmit, formState } = useForm<NetworkFormValues>({
 		defaultValues: { name: "" },

@@ -1,26 +1,26 @@
 import { NetworkList } from "@features/networks/components/NetworkList";
 import type { NetworkSummary } from "@features/networks/services/networksApi";
 import { networksQueryKey } from "@shared/queries/queryKeys";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { machineFixture, networkFixture } from "@/test/factories";
+import { hostFixture, networkFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function mockNetworks(networks: NetworkSummary[]) {
 	server.use(
-		http.get("*/api/machines/m-1/networks", () => HttpResponse.json(networks)),
+		http.get("*/api/hosts/m-1/networks", () => HttpResponse.json(networks)),
 	);
 }
 
-function renderNetworkList(machine: Machine = machineFixture()) {
+function renderNetworkList(host: Host = hostFixture()) {
 	// The row click navigates (spec 301), so the list renders inside a
 	// router.
-	return renderWithQuery(<NetworkList machine={machine} />, { router: true });
+	return renderWithQuery(<NetworkList host={host} />, { router: true });
 }
 
 afterEach(() => {
@@ -74,7 +74,7 @@ describe("NetworkList", () => {
 		).toBeInTheDocument();
 	});
 
-	it("caches networks under the per-machine query key hierarchy", async () => {
+	it("caches networks under the per-host query key hierarchy", async () => {
 		mockNetworks([networkFixture()]);
 		const { queryClient } = renderNetworkList();
 
@@ -88,7 +88,7 @@ describe("NetworkList", () => {
 
 	it("shows a loading state before networks arrive, with the toolbar above it", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/networks", async () => {
+			http.get("*/api/hosts/m-1/networks", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
 				return HttpResponse.json([networkFixture()]);
 			}),
@@ -99,7 +99,7 @@ describe("NetworkList", () => {
 		expect(screen.getByTestId("create-network-button")).toBeInTheDocument();
 	});
 
-	it("shows the empty state when the machine has no networks", async () => {
+	it("shows the empty state when the host has no networks", async () => {
 		mockNetworks([]);
 		renderNetworkList();
 
@@ -110,7 +110,7 @@ describe("NetworkList", () => {
 
 	it("shows the error state through the shared error display", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/networks", () =>
+			http.get("*/api/hosts/m-1/networks", () =>
 				errorResponse(403, "ACCESS_DENIED", "Access denied", "req-1"),
 			),
 		);
@@ -152,7 +152,7 @@ describe("NetworkList", () => {
 
 	it("renders the permission hint and no mutation controls at read level", async () => {
 		mockNetworks([networkFixture()]);
-		renderNetworkList(machineFixture({ permission: "read", isOwner: false }));
+		renderNetworkList(hostFixture({ permission: "read", isOwner: false }));
 
 		await screen.findByTestId("network-row");
 		expect(screen.getByTestId("networks-permission-hint")).toBeInTheDocument();

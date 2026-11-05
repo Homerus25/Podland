@@ -50,7 +50,7 @@ func TestVolumeService_List_ReturnsEngineVolumes(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	got, err := service.List(context.Background(), "user", "machine", entities.VolumeListOptions{})
+	got, err := service.List(context.Background(), "user", "host", entities.VolumeListOptions{})
 
 	require.NoError(t, err)
 	assert.Equal(t, volumes, got)
@@ -64,7 +64,7 @@ func TestVolumeService_List_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	got, err := service.List(context.Background(), "user", "machine", entities.VolumeListOptions{})
+	got, err := service.List(context.Background(), "user", "host", entities.VolumeListOptions{})
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -79,7 +79,7 @@ func TestVolumeService_Get_MapsMissingVolumeTo404(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "my-volume")
+	got, err := service.Get(context.Background(), "user", "host", "my-volume")
 
 	require.ErrorIs(t, err, appErrors.ErrVolumeNotFound)
 	assert.Nil(t, got)
@@ -93,7 +93,7 @@ func TestVolumeService_Get_MapsEmptyInspectTo404(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "my-volume")
+	got, err := service.Get(context.Background(), "user", "host", "my-volume")
 
 	require.ErrorIs(t, err, appErrors.ErrVolumeNotFound)
 	assert.Nil(t, got)
@@ -107,7 +107,7 @@ func TestVolumeService_Get_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "my-volume")
+	got, err := service.Get(context.Background(), "user", "host", "my-volume")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -127,7 +127,7 @@ func TestVolumeService_Create_InspectsFreshlyCreatedVolume(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine", VolumeCreateRequest{})
+	got, err := service.Create(context.Background(), "user", "host", VolumeCreateRequest{})
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -146,7 +146,7 @@ func TestVolumeService_Create_MapsClientErrorsToInvalidRequest(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine", VolumeCreateRequest{Name: "bad"})
+	got, err := service.Create(context.Background(), "user", "host", VolumeCreateRequest{Name: "bad"})
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -169,7 +169,7 @@ func TestVolumeService_Delete_MapsCallLevelNotFoundTo404(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	err := service.Delete(context.Background(), "user", "machine", "my-volume", false)
+	err := service.Delete(context.Background(), "user", "host", "my-volume", false)
 
 	require.ErrorIs(t, err, appErrors.ErrVolumeNotFound)
 }
@@ -185,7 +185,7 @@ func TestVolumeService_Delete_MapsInUseTo409(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	err := service.Delete(context.Background(), "user", "machine", "my-volume", false)
+	err := service.Delete(context.Background(), "user", "host", "my-volume", false)
 
 	var appErr *appErrors.AppError
 	require.ErrorAs(t, err, &appErr)
@@ -202,7 +202,7 @@ func TestVolumeService_Delete_PropagatesEngineFailure(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	err := service.Delete(context.Background(), "user", "machine", "my-volume", false)
+	err := service.Delete(context.Background(), "user", "host", "my-volume", false)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to remove volume")
@@ -217,7 +217,7 @@ func TestVolumeService_Prune_ReturnsEngineReports(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Prune(context.Background(), "user", "machine")
+	got, err := service.Prune(context.Background(), "user", "host")
 
 	require.NoError(t, err)
 	assert.Equal(t, prunes, got)
@@ -234,7 +234,7 @@ func TestVolumeService_Export_GatesOnExistence(t *testing.T) {
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 	var sink bytes.Buffer
 
-	err := service.Export(context.Background(), "user", "machine", "my-volume", &sink)
+	err := service.Export(context.Background(), "user", "host", "my-volume", &sink)
 
 	require.ErrorIs(t, err, appErrors.ErrVolumeNotFound)
 	assert.Zero(t, sink.Len(), "no byte may be written for a missing volume")
@@ -253,7 +253,7 @@ func TestVolumeService_Export_StreamsEngineBytesUnchanged(t *testing.T) {
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 	var sink bytes.Buffer
 
-	err := service.Export(context.Background(), "user", "machine", "my-volume", &sink)
+	err := service.Export(context.Background(), "user", "host", "my-volume", &sink)
 
 	require.NoError(t, err)
 	assert.Equal(t, "tar-bytes", sink.String())
@@ -269,7 +269,7 @@ func TestVolumeService_Import_GatesOnExistence(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	err := service.Import(context.Background(), "user", "machine", "my-volume", strings.NewReader("tar"))
+	err := service.Import(context.Background(), "user", "host", "my-volume", strings.NewReader("tar"))
 
 	require.ErrorIs(t, err, appErrors.ErrVolumeNotFound)
 }
@@ -288,7 +288,7 @@ func TestVolumeService_Import_FeedsArchiveToEngine(t *testing.T) {
 	}
 	service := NewVolumeService(fakeEngineProvider{engine: engine})
 
-	err := service.Import(context.Background(), "user", "machine", "my-volume", strings.NewReader("tar"))
+	err := service.Import(context.Background(), "user", "host", "my-volume", strings.NewReader("tar"))
 
 	require.NoError(t, err)
 	assert.Equal(t, "tar", consumed)
@@ -301,7 +301,7 @@ func TestVolumeService_Import_FeedsArchiveToEngine(t *testing.T) {
 func TestVolumeService_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewVolumeService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	_, err := service.List(context.Background(), "user", "machine", entities.VolumeListOptions{})
+	_, err := service.List(context.Background(), "user", "host", entities.VolumeListOptions{})
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	var appErr *appErrors.AppError

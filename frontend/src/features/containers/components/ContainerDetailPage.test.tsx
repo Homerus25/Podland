@@ -10,18 +10,18 @@ import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function mockDetail(responder: () => ReturnType<typeof HttpResponse.json>) {
-	server.use(http.get("*/api/machines/m-1/containers/c-1", responder));
+	server.use(http.get("*/api/hosts/m-1/containers/c-1", responder));
 }
 
 function renderDetailPage() {
 	return renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId/containers/:containerId"
+				path="/hosts/:hostId/containers/:containerId"
 				element={<ContainerDetailPage />}
 			/>
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/containers/c-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1/containers/c-1"] } },
 	);
 }
 
@@ -88,7 +88,7 @@ describe("ContainerDetailPage", () => {
 		// segment; the router decodes it on the far side.
 		expect(link).toHaveAttribute(
 			"href",
-			`/machines/m-1/images/${encodeURIComponent(detail.imageId!)}`,
+			`/hosts/m-1/images/${encodeURIComponent(detail.imageId!)}`,
 		);
 	});
 
@@ -121,10 +121,10 @@ describe("ContainerDetailPage", () => {
 
 		expect(
 			await screen.findByTestId("container-secret-link-db-password"),
-		).toHaveAttribute("href", "/machines/m-1/secrets/db-password");
+		).toHaveAttribute("href", "/hosts/m-1/secrets/db-password");
 		expect(
 			screen.getByTestId("container-secret-link-api-token"),
-		).toHaveAttribute("href", "/machines/m-1/secrets/api-token");
+		).toHaveAttribute("href", "/hosts/m-1/secrets/api-token");
 	});
 
 	it("links each volume name to the volume detail page, keeping the rest of the line plain text", async () => {
@@ -132,7 +132,7 @@ describe("ContainerDetailPage", () => {
 		renderDetailPage();
 
 		const link = await screen.findByTestId("container-volume-link-app-data");
-		expect(link).toHaveAttribute("href", "/machines/m-1/volumes/app-data");
+		expect(link).toHaveAttribute("href", "/hosts/m-1/volumes/app-data");
 		expect(link).toHaveTextContent("app-data");
 		// Only the name is the link: the source path, destination, and
 		// rw/ro suffix stay outside it.
@@ -153,7 +153,7 @@ describe("ContainerDetailPage", () => {
 		await screen.findByTestId("container-detail-name");
 		expect(screen.getByTestId("detail-back-button")).toHaveAttribute(
 			"href",
-			"/machines/m-1?tab=containers",
+			"/hosts/m-1?tab=containers",
 		);
 	});
 
@@ -161,7 +161,7 @@ describe("ContainerDetailPage", () => {
 		let inspectRequests = 0;
 		mockDetail(() => HttpResponse.json(containerDetailFixture()));
 		server.use(
-			http.get("*/api/machines/m-1/containers/c-1/inspect", () => {
+			http.get("*/api/hosts/m-1/containers/c-1/inspect", () => {
 				inspectRequests++;
 				return HttpResponse.json(rawInspectFixture());
 			}),
@@ -189,16 +189,16 @@ describe("ContainerDetailPage", () => {
 
 		expect(
 			await screen.findByTestId("detail-page-not-found"),
-		).toHaveTextContent("This item no longer exists on the machine.");
+		).toHaveTextContent("This item no longer exists on the host.");
 		expect(screen.queryByTestId("detail-page-error")).not.toBeInTheDocument();
 	});
 
-	it("renders the error state when the machine rejects the request", async () => {
+	it("renders the error state when the host rejects the request", async () => {
 		mockDetail(() =>
 			errorResponse(
 				403,
 				"ACCESS_DENIED",
-				"You do not have access to this machine",
+				"You do not have access to this host",
 				"r-2",
 			),
 		);
@@ -206,7 +206,7 @@ describe("ContainerDetailPage", () => {
 
 		const alert = await screen.findByTestId("detail-page-error");
 		expect(alert).toHaveTextContent("ACCESS_DENIED");
-		expect(alert).toHaveTextContent("You do not have access to this machine");
+		expect(alert).toHaveTextContent("You do not have access to this host");
 		expect(
 			screen.queryByTestId("detail-page-not-found"),
 		).not.toBeInTheDocument();

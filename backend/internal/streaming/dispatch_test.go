@@ -44,7 +44,7 @@ func (c *dispatchCapture) op() LogsDispatchOp[fakeLogsDTO] {
 	return LogsDispatchOp[fakeLogsDTO]{
 		ParamName: "thingId",
 		GuardCode: "MISSING_THING_ID",
-		Follow: func(ctx context.Context, userID, machineID, target string, since time.Time, tail int64, onEvent func(LogEvent)) error {
+		Follow: func(ctx context.Context, userID, hostID, target string, since time.Time, tail int64, onEvent func(LogEvent)) error {
 			c.followCalled = true
 			c.followTarget = target
 			c.followSince = since
@@ -52,7 +52,7 @@ func (c *dispatchCapture) op() LogsDispatchOp[fakeLogsDTO] {
 			onEvent(LogEvent{Timestamp: "2026-09-01T10:00:00Z", Level: "INFO", Message: "hello"})
 			return nil
 		},
-		Buffered: func(ctx context.Context, userID, machineID, target string, since time.Time, tail int64) (fakeLogsDTO, error) {
+		Buffered: func(ctx context.Context, userID, hostID, target string, since time.Time, tail int64) (fakeLogsDTO, error) {
 			c.bufferedCalled = true
 			c.bufferedTarget = target
 			c.bufferedSince = since
@@ -63,11 +63,11 @@ func (c *dispatchCapture) op() LogsDispatchOp[fakeLogsDTO] {
 }
 
 // performLogDispatch drives HandleLogs the way the router wires it: URL
-// params (the machine id and the domain's target param) plus the
+// params (the host id and the domain's target param) plus the
 // caller identity the subtree middleware already validated.
 func performLogDispatch(t *testing.T, capture *dispatchCapture, urlParams map[string]string, query string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/api/machines/test-machine/things/thing-123/logs"+query, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/hosts/test-host/things/thing-123/logs"+query, nil)
 	for key, value := range urlParams {
 		req.SetPathValue(key, value)
 	}
@@ -78,9 +78,9 @@ func performLogDispatch(t *testing.T, capture *dispatchCapture, urlParams map[st
 	return w
 }
 
-// dispatchParams is the fully-populated URL-param set: the machine id
+// dispatchParams is the fully-populated URL-param set: the host id
 // plus the domain's resolved target.
-var dispatchParams = map[string]string{"id": "test-machine", "thingId": "thing-123"}
+var dispatchParams = map[string]string{"id": "test-host", "thingId": "thing-123"}
 
 // TestHandleLogs_QueryErrorRidesJSONEnvelopeEvenWithFollow pins the
 // fallback: a query error answers the endpoint envelope even when
@@ -104,7 +104,7 @@ func TestHandleLogs_QueryErrorRidesJSONEnvelopeEvenWithFollow(t *testing.T) {
 func TestHandleLogs_MissingParamAnswersGuardCodeThroughBufferedEnvelope(t *testing.T) {
 	capture := &dispatchCapture{}
 
-	w := performLogDispatch(t, capture, map[string]string{"id": "test-machine"}, "?follow=true")
+	w := performLogDispatch(t, capture, map[string]string{"id": "test-host"}, "?follow=true")
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "a missing param must answer 400 through the buffered envelope")
 	assert.Contains(t, w.Body.String(), "MISSING_THING_ID", "the passed guard code must answer, not a kit-minted one")

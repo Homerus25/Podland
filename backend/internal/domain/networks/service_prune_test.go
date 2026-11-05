@@ -29,7 +29,7 @@ func TestNetworkService_Prune_ReturnsEngineReports(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Prune(context.Background(), "user", "machine")
+	got, err := service.Prune(context.Background(), "user", "host")
 
 	require.NoError(t, err)
 	assert.Equal(t, prunes, got, "the engine's reports must pass through untouched")
@@ -43,7 +43,7 @@ func TestNetworkService_Prune_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Prune(context.Background(), "user", "machine")
+	got, err := service.Prune(context.Background(), "user", "host")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -53,7 +53,7 @@ func TestNetworkService_Prune_WrapsEngineFailure(t *testing.T) {
 func TestNetworkService_Prune_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewNetworkService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	_, err := service.Prune(context.Background(), "user", "machine")
+	_, err := service.Prune(context.Background(), "user", "host")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	var appErr *appErrors.AppError

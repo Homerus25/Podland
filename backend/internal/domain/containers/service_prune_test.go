@@ -21,7 +21,7 @@ func TestContainerService_Prune_ReturnsEngineReports(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Prune(context.Background(), "user", "machine")
+	got, err := service.Prune(context.Background(), "user", "host")
 
 	require.NoError(t, err)
 	assert.Equal(t, prunes, got)
@@ -35,7 +35,7 @@ func TestContainerService_Prune_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Prune(context.Background(), "user", "machine")
+	got, err := service.Prune(context.Background(), "user", "host")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -45,7 +45,7 @@ func TestContainerService_Prune_WrapsEngineFailure(t *testing.T) {
 func TestContainerService_Prune_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewContainerService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	_, err := service.Prune(context.Background(), "user", "machine")
+	_, err := service.Prune(context.Background(), "user", "host")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	var appErr *appErrors.AppError

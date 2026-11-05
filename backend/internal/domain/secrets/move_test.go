@@ -15,53 +15,53 @@ import (
 )
 
 // fakeAccessRepo is the function-field fake for the
-// permission.PermissionGetter seam — the access store the cross-machine
-// copy/move gates the source reveal and the target machine on. An
+// permission.PermissionGetter seam — the access store the cross-host
+// copy/move gates the source reveal and the target host on. An
 // unarmed lookup panics, so an unexpected gate check fails the test
 // loudly.
 type fakeAccessRepo struct {
-	getPermissionFn func(machineID, userID string) (string, error)
+	getPermissionFn func(hostID, userID string) (string, error)
 }
 
-func (f *fakeAccessRepo) GetPermission(machineID, userID string) (string, error) {
+func (f *fakeAccessRepo) GetPermission(hostID, userID string) (string, error) {
 	if f.getPermissionFn == nil {
 		panic("unexpected PermissionGetter.GetPermission call")
 	}
-	return f.getPermissionFn(machineID, userID)
+	return f.getPermissionFn(hostID, userID)
 }
 
-// allowSourceAdminTargetWrite answers admin on the source machine and
+// allowSourceAdminTargetWrite answers admin on the source host and
 // write on the target — the minimum the transfer requires of both.
-func allowSourceAdminTargetWrite(machineID, userID string) (string, error) {
-	if machineID == "machine-b" {
+func allowSourceAdminTargetWrite(hostID, userID string) (string, error) {
+	if hostID == "host-b" {
 		return models.PermissionWrite, nil
 	}
 	return models.PermissionAdmin, nil
 }
 
-// allowSourceAdminTargetRead answers admin on the source machine and
+// allowSourceAdminTargetRead answers admin on the source host and
 // read on the target — the minimum the preview requires of the target.
-func allowSourceAdminTargetRead(machineID, userID string) (string, error) {
-	if machineID == "machine-b" {
+func allowSourceAdminTargetRead(hostID, userID string) (string, error) {
+	if hostID == "host-b" {
 		return models.PermissionRead, nil
 	}
 	return models.PermissionAdmin, nil
 }
 
-// newMoveTestService builds the service over per-machine fake engines
-// (the multi-lease shape the copy/move exercises), a source-machine
+// newMoveTestService builds the service over per-host fake engines
+// (the multi-lease shape the copy/move exercises), a source-host
 // usage fake, and the given access store.
 func newMoveTestService(sourceEngine, targetEngine *fakeSecretEngine, usage *fakeUsageEngine, access *fakeAccessRepo) *SecretService {
 	return NewSecretService(fakeEngineProvider{engines: map[string]SecretEngine{
-		"machine-a": sourceEngine,
-		"machine-b": targetEngine,
+		"host-a": sourceEngine,
+		"host-b": targetEngine,
 	}}, access).
 		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]transfer.QuadletReader{
-			"machine-a": usage,
+			"host-a": usage,
 		}})
 }
 
-// moveSourceFixture is the source machine's engine: the db-password
+// moveSourceFixture is the source host's engine: the db-password
 // secret exists, reveals its value on the admin-gated inspect, and
 // removes cleanly.
 func moveSourceFixture() *fakeSecretEngine {
@@ -81,7 +81,7 @@ func moveSourceFixture() *fakeSecretEngine {
 	}
 }
 
-// emptyTargetFixture is the target machine's engine: no secrets yet (the
+// emptyTargetFixture is the target host's engine: no secrets yet (the
 // transfer's same-name check inspects and finds nothing), creates succeed
 // and record what they installed.
 func emptyTargetFixture() *fakeSecretEngine {
@@ -128,7 +128,7 @@ func TestSecretService_MovePreview_ReportsFacts(t *testing.T) {
 	}
 	service := newMoveTestService(moveSourceFixture(), emptyTargetFixture(), usage, &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetRead})
 
-	preview, err := service.MovePreview(context.Background(), "user", "machine-a", "db-password", "machine-b")
+	preview, err := service.MovePreview(context.Background(), "user", "host-a", "db-password", "host-b")
 
 	require.NoError(t, err)
 	assert.False(t, preview.Collision, "the target holds no secret of this name")
@@ -145,7 +145,7 @@ func TestSecretService_MovePreview_Collision(t *testing.T) {
 	}
 	service := newMoveTestService(moveSourceFixture(), target, idleUsageFixture(), &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetRead})
 
-	preview, err := service.MovePreview(context.Background(), "user", "machine-a", "db-password", "machine-b")
+	preview, err := service.MovePreview(context.Background(), "user", "host-a", "db-password", "host-b")
 
 	require.NoError(t, err)
 	assert.True(t, preview.Collision, "a same-named target secret is a collision")
@@ -154,7 +154,7 @@ func TestSecretService_MovePreview_Collision(t *testing.T) {
 func TestSecretService_MovePreview_MissingSourceSecretIs404(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(), emptyTargetFixture(), idleUsageFixture(), &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetRead})
 
-	preview, err := service.MovePreview(context.Background(), "user", "machine-a", "no-such-secret", "machine-b")
+	preview, err := service.MovePreview(context.Background(), "user", "host-a", "no-such-secret", "host-b")
 
 	assert.ErrorIs(t, err, appErrors.ErrSecretNotFound)
 	assert.Nil(t, preview)
@@ -162,14 +162,14 @@ func TestSecretService_MovePreview_MissingSourceSecretIs404(t *testing.T) {
 
 func TestSecretService_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(), emptyTargetFixture(), idleUsageFixture(),
-		&fakeAccessRepo{getPermissionFn: func(machineID, userID string) (string, error) {
-			if machineID == "machine-b" {
+		&fakeAccessRepo{getPermissionFn: func(hostID, userID string) (string, error) {
+			if hostID == "host-b" {
 				return "", nil // no access row on the target
 			}
 			return models.PermissionAdmin, nil
 		}})
 
-	preview, err := service.MovePreview(context.Background(), "user", "machine-a", "db-password", "machine-b")
+	preview, err := service.MovePreview(context.Background(), "user", "host-a", "db-password", "host-b")
 
 	assert.ErrorIs(t, err, appErrors.ErrAccessDenied)
 	assert.Nil(t, preview)
@@ -179,7 +179,7 @@ func TestSecretService_MovePreview_SourceUnreachableIsConnectionFailed(t *testin
 	service := NewSecretService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}, &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetRead}).
 		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]transfer.QuadletReader{}})
 
-	preview, err := service.MovePreview(context.Background(), "user", "machine-a", "db-password", "machine-b")
+	preview, err := service.MovePreview(context.Background(), "user", "host-a", "db-password", "host-b")
 
 	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, preview)
@@ -205,14 +205,14 @@ func TestSecretService_Move_CopyRevealsAndCreates(t *testing.T) {
 	}
 	service := newMoveTestService(source, target, idleUsageFixture(), &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetWrite})
 
-	response, err := service.Move(context.Background(), "user", "machine-a", "db-password",
-		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeCopy})
+	response, err := service.Move(context.Background(), "user", "host-a", "db-password",
+		SecretMoveRequest{TargetHostID: "host-b", Mode: SecretMoveModeCopy})
 
 	require.NoError(t, err)
 	assert.Equal(t, SecretMoveStatusCopied, response.Status)
 	assert.Equal(t, "db-password", response.Name)
-	assert.Equal(t, "machine-a", response.SourceMachineID)
-	assert.Equal(t, "machine-b", response.TargetMachineID)
+	assert.Equal(t, "host-a", response.SourceHostID)
+	assert.Equal(t, "host-b", response.TargetHostID)
 	assert.True(t, revealed, "the transfer must reveal the value on the source")
 	assert.Equal(t, "db-password", createdName, "the name is preserved")
 	assert.Equal(t, "hunter2\n", createdValue, "the value must cross byte-identical")
@@ -227,8 +227,8 @@ func TestSecretService_Move_MoveRemovesSourceAfterInstall(t *testing.T) {
 	}
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(), &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetWrite})
 
-	response, err := service.Move(context.Background(), "user", "machine-a", "db-password",
-		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeMove})
+	response, err := service.Move(context.Background(), "user", "host-a", "db-password",
+		SecretMoveRequest{TargetHostID: "host-b", Mode: SecretMoveModeMove})
 
 	require.NoError(t, err)
 	assert.Equal(t, SecretMoveStatusMoved, response.Status)
@@ -249,8 +249,8 @@ func TestSecretService_Move_CollisionIs409(t *testing.T) {
 	}
 	service := newMoveTestService(source, target, idleUsageFixture(), &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetWrite})
 
-	response, err := service.Move(context.Background(), "user", "machine-a", "db-password",
-		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeCopy})
+	response, err := service.Move(context.Background(), "user", "host-a", "db-password",
+		SecretMoveRequest{TargetHostID: "host-b", Mode: SecretMoveModeCopy})
 
 	assert.ErrorIs(t, err, appErrors.ErrSecretAlreadyExists)
 	assert.Nil(t, response)
@@ -260,8 +260,8 @@ func TestSecretService_Move_CollisionIs409(t *testing.T) {
 func TestSecretService_Move_MissingSourceSecretIs404(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(), emptyTargetFixture(), idleUsageFixture(), &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetWrite})
 
-	response, err := service.Move(context.Background(), "user", "machine-a", "no-such-secret",
-		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeCopy})
+	response, err := service.Move(context.Background(), "user", "host-a", "no-such-secret",
+		SecretMoveRequest{TargetHostID: "host-b", Mode: SecretMoveModeCopy})
 
 	assert.ErrorIs(t, err, appErrors.ErrSecretNotFound)
 	assert.Nil(t, response)
@@ -271,12 +271,12 @@ func TestSecretService_Move_BelowAdminSourceIs403(t *testing.T) {
 	// The engines stay unarmed: a below-admin caller must be refused
 	// before any connection lease, so any engine call panics the test.
 	service := newMoveTestService(&fakeSecretEngine{}, &fakeSecretEngine{}, &fakeUsageEngine{},
-		&fakeAccessRepo{getPermissionFn: func(machineID, userID string) (string, error) {
+		&fakeAccessRepo{getPermissionFn: func(hostID, userID string) (string, error) {
 			return models.PermissionWrite, nil
 		}})
 
-	response, err := service.Move(context.Background(), "user", "machine-a", "db-password",
-		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeCopy})
+	response, err := service.Move(context.Background(), "user", "host-a", "db-password",
+		SecretMoveRequest{TargetHostID: "host-b", Mode: SecretMoveModeCopy})
 
 	assert.ErrorIs(t, err, appErrors.ErrAccessDenied)
 	assert.Nil(t, response)
@@ -284,15 +284,15 @@ func TestSecretService_Move_BelowAdminSourceIs403(t *testing.T) {
 
 func TestSecretService_Move_TargetAccessDeniedIs403(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(), emptyTargetFixture(), idleUsageFixture(),
-		&fakeAccessRepo{getPermissionFn: func(machineID, userID string) (string, error) {
-			if machineID == "machine-b" {
+		&fakeAccessRepo{getPermissionFn: func(hostID, userID string) (string, error) {
+			if hostID == "host-b" {
 				return models.PermissionRead, nil
 			}
 			return models.PermissionAdmin, nil
 		}})
 
-	response, err := service.Move(context.Background(), "user", "machine-a", "db-password",
-		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeCopy})
+	response, err := service.Move(context.Background(), "user", "host-a", "db-password",
+		SecretMoveRequest{TargetHostID: "host-b", Mode: SecretMoveModeCopy})
 
 	assert.ErrorIs(t, err, appErrors.ErrAccessDenied)
 	assert.Nil(t, response)
@@ -308,8 +308,8 @@ func TestSecretService_Move_RevealFailureIsTransferFailed(t *testing.T) {
 	}
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(), &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetWrite})
 
-	response, err := service.Move(context.Background(), "user", "machine-a", "db-password",
-		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeCopy})
+	response, err := service.Move(context.Background(), "user", "host-a", "db-password",
+		SecretMoveRequest{TargetHostID: "host-b", Mode: SecretMoveModeCopy})
 
 	appErr, ok := err.(*appErrors.AppError)
 	require.True(t, ok)
@@ -325,8 +325,8 @@ func TestSecretService_Move_RemoveFailureIsPartial(t *testing.T) {
 	}
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(), &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetWrite})
 
-	response, err := service.Move(context.Background(), "user", "machine-a", "db-password",
-		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeMove})
+	response, err := service.Move(context.Background(), "user", "host-a", "db-password",
+		SecretMoveRequest{TargetHostID: "host-b", Mode: SecretMoveModeMove})
 
 	require.NoError(t, err, "a failed source removal does not fail the request")
 	assert.Equal(t, SecretMoveStatusPartial, response.Status)
@@ -340,8 +340,8 @@ func TestSecretService_Move_VanishedSourceIsMoved(t *testing.T) {
 	}
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(), &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetWrite})
 
-	response, err := service.Move(context.Background(), "user", "machine-a", "db-password",
-		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeMove})
+	response, err := service.Move(context.Background(), "user", "host-a", "db-password",
+		SecretMoveRequest{TargetHostID: "host-b", Mode: SecretMoveModeMove})
 
 	require.NoError(t, err)
 	assert.Equal(t, SecretMoveStatusMoved, response.Status,
@@ -353,8 +353,8 @@ func TestSecretService_Move_SourceUnreachableIsConnectionFailed(t *testing.T) {
 	service := NewSecretService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}, &fakeAccessRepo{getPermissionFn: allowSourceAdminTargetWrite}).
 		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]transfer.QuadletReader{}})
 
-	response, err := service.Move(context.Background(), "user", "machine-a", "db-password",
-		SecretMoveRequest{TargetMachineID: "machine-b", Mode: SecretMoveModeCopy})
+	response, err := service.Move(context.Background(), "user", "host-a", "db-password",
+		SecretMoveRequest{TargetHostID: "host-b", Mode: SecretMoveModeCopy})
 
 	assert.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, response)

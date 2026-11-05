@@ -16,14 +16,14 @@ import (
 	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
-// getRequest serves GET /api/machines/{id}/pods/{podId} through the
+// getRequest serves GET /api/hosts/{id}/pods/{podId} through the
 // handler with an authenticated test identity.
 func getRequest(get http.HandlerFunc, podID string) *httptest.ResponseRecorder {
 	return testutils.Perform(get, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/pods/" + podID,
+		Path:      "/api/hosts/test-host/pods/" + podID,
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "podId": podID},
+		URLParams: map[string]string{"id": "test-host", "podId": podID},
 	})
 }
 
@@ -45,7 +45,7 @@ func TestPodHandler_Get_Success(t *testing.T) {
 	w := getRequest(newTestHandler(engine).Get, "web")
 
 	require.Equal(t, http.StatusOK, w.Code, "get should return 200")
-	assert.Equal(t, "web", inspectedName, "the URL-param pod must reach the machine")
+	assert.Equal(t, "web", inspectedName, "the URL-param pod must reach the host")
 
 	var body PodDetailResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), "the top-level body must be the detail DTO")
@@ -96,9 +96,9 @@ func TestPodHandler_Get_MissingPodID(t *testing.T) {
 
 	w := testutils.Perform(newTestHandler(engine).Get, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/pods/",
+		Path:      "/api/hosts/test-host/pods/",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -106,14 +106,14 @@ func TestPodHandler_Get_MissingPodID(t *testing.T) {
 }
 
 // inspectRequest serves GET
-// /api/machines/{id}/pods/{podId}/inspect through the handler with an
+// /api/hosts/{id}/pods/{podId}/inspect through the handler with an
 // authenticated test identity.
 func inspectRequest(inspect http.HandlerFunc, podID string) *httptest.ResponseRecorder {
 	return testutils.Perform(inspect, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/pods/" + podID + "/inspect",
+		Path:      "/api/hosts/test-host/pods/" + podID + "/inspect",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "podId": podID},
+		URLParams: map[string]string{"id": "test-host", "podId": podID},
 	})
 }
 

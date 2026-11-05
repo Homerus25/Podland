@@ -23,11 +23,11 @@ import (
 
 // Test_Integration_Volumes_List is the volumes list vertical slice
 // (200-01). It creates a run-scoped named volume via the podman CLI over
-// the machine connection (scaffolding, not the SUT), then proves the
+// the host connection (scaffolding, not the SUT), then proves the
 // backend lists it — plus an anonymous volume — through
-// GET /api/machines/{id}/volumes:
+// GET /api/hosts/{id}/volumes:
 //
-//	GET /api/machines/{id}/volumes → 200, JSON array
+//	GET /api/hosts/{id}/volumes → 200, JSON array
 //
 // Assertions pin the DTO contract: name, driver, createdAt, anonymous,
 // labels, options, mountpoint. Isolation follows the house model:
@@ -36,7 +36,7 @@ func Test_Integration_Volumes_List(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerVolumesSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 	volumeName := "it-" + suite.RunID + "-vol"
 
 	t.Cleanup(func() {
@@ -55,7 +55,7 @@ func Test_Integration_Volumes_List(t *testing.T) {
 
 	// --- AC: list returns 200 with a JSON array containing the volume --
 	t.Run("NamedVolumeAppearsInList", func(t *testing.T) {
-		volumes := listVolumes(t, machineID)
+		volumes := listVolumes(t, hostID)
 
 		var found *volumeDTO
 		for i := range volumes {
@@ -76,7 +76,7 @@ func Test_Integration_Volumes_List(t *testing.T) {
 	// --- AC: anonymous volumes are included alongside named ones ------
 	t.Run("AnonymousVolumesIncluded", func(t *testing.T) {
 		// Fixture: an anonymous volume (no name given to podman), so the
-		// assertion can't depend on pre-existing machine state.
+		// assertion can't depend on pre-existing host state.
 		out, err := podmanConnRun("volume", "create")
 		require.NoError(t, err, "anonymous volume create must succeed: %s", strings.TrimSpace(out))
 		anonName := strings.TrimSpace(out)
@@ -86,7 +86,7 @@ func Test_Integration_Volumes_List(t *testing.T) {
 			}
 		})
 
-		volumes := listVolumes(t, machineID)
+		volumes := listVolumes(t, hostID)
 
 		var found *volumeDTO
 		for i := range volumes {
@@ -97,7 +97,7 @@ func Test_Integration_Volumes_List(t *testing.T) {
 		}
 		// Inclusion is the contract here: an anonymous volume must appear
 		// in the list alongside named ones. The boolean flag is asserted
-		// only when the machine's podman server reports it — some server
+		// only when the host's podman server reports it — some server
 		// versions omit the Anonymous field in /volumes/json output.
 		if found == nil {
 			require.Fail(t, "just-created anonymous volume must be listed", "name=%q", anonName)
@@ -116,15 +116,15 @@ func Test_Integration_Volumes_List(t *testing.T) {
 // Test_Integration_Volumes_Inspect is the volume inspect vertical slice
 // (200-02). It creates a run-scoped named volume via the podman CLI,
 // then proves the backend resolves it by exact name through
-// GET /api/machines/{id}/volumes/{volumeName}:
+// GET /api/hosts/{id}/volumes/{volumeName}:
 //
-//	GET /api/machines/{id}/volumes/{volumeName} → 200, full config
+//	GET /api/hosts/{id}/volumes/{volumeName} → 200, full config
 //	GET .../volumes/{unknown}                   → 404 VOLUME_NOT_FOUND
 func Test_Integration_Volumes_Inspect(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerVolumesSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 	volumeName := "it-" + suite.RunID + "-inspect"
 
 	t.Cleanup(func() {
@@ -142,7 +142,7 @@ func Test_Integration_Volumes_Inspect(t *testing.T) {
 	// --- AC: inspect returns 200 with the volume's full config --------
 	t.Run("HappyPath", func(t *testing.T) {
 		resp, err := suite.AuthenticatedClient().Get(
-			suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + volumeName)
+			suite.ServerURL + "/api/hosts/" + hostID + "/volumes/" + volumeName)
 		require.NoError(t, err, "GET volume inspect must connect to the in-process server")
 		defer resp.Body.Close()
 		body, err := io.ReadAll(resp.Body)
@@ -164,15 +164,15 @@ func Test_Integration_Volumes_Inspect(t *testing.T) {
 	// --- AC: unknown volume name returns 404 VOLUME_NOT_FOUND ---------
 	t.Run("UnknownNameGets404", func(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/it-"+suite.RunID+"-no-such-volume",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/it-"+suite.RunID+"-no-such-volume",
 			"", http.StatusNotFound, "VOLUME_NOT_FOUND")
 	})
 }
 
 // --- Access-control behavior (middleware, shared with all downstream
-// families): volumes rides the same RequireMachineAccess subtree, so a
-// no-access user gets 403 ACCESS_DENIED and an unknown machine ID gets
-// 404 MACHINE_NOT_FOUND, both with the standard error envelope.
+// families): volumes rides the same RequireHostAccess subtree, so a
+// no-access user gets 403 ACCESS_DENIED and an unknown host ID gets
+// 404 HOST_NOT_FOUND, both with the standard error envelope.
 func Test_Integration_Volumes_AccessControl(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
@@ -180,14 +180,14 @@ func Test_Integration_Volumes_AccessControl(t *testing.T) {
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		expectAPIError(t, client, http.MethodGet,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/volumes",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
-	t.Run("UnknownMachineGets404", func(t *testing.T) {
+	t.Run("UnknownHostGets404", func(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
-			suite.ServerURL+"/api/machines/00000000-0000-0000-0000-000000000000/volumes",
-			"", http.StatusNotFound, "MACHINE_NOT_FOUND")
+			suite.ServerURL+"/api/hosts/00000000-0000-0000-0000-000000000000/volumes",
+			"", http.StatusNotFound, "HOST_NOT_FOUND")
 	})
 }
 
@@ -203,7 +203,7 @@ type volumeDTO struct {
 	Size       *int64            `json:"size"`
 }
 
-// serverReportsAnonymous reports whether the machine's podman server
+// serverReportsAnonymous reports whether the host's podman server
 // populated the Anonymous flag on any listed volume; when the server
 // omits the field entirely, flag fidelity can't be asserted.
 func serverReportsAnonymous(volumes []volumeDTO) bool {
@@ -215,11 +215,11 @@ func serverReportsAnonymous(volumes []volumeDTO) bool {
 	return false
 }
 
-// listVolumes GETs /api/machines/{id}/volumes and decodes the JSON array.
-func listVolumes(t *testing.T, machineID string) []volumeDTO {
+// listVolumes GETs /api/hosts/{id}/volumes and decodes the JSON array.
+func listVolumes(t *testing.T, hostID string) []volumeDTO {
 	t.Helper()
 
-	resp, err := suite.AuthenticatedClient().Get(suite.ServerURL + "/api/machines/" + machineID + "/volumes")
+	resp, err := suite.AuthenticatedClient().Get(suite.ServerURL + "/api/hosts/" + hostID + "/volumes")
 	require.NoError(t, err, "GET /volumes must connect to the in-process server")
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -256,17 +256,17 @@ func registerVolumesSweep() {
 }
 
 // Test_Integration_Volumes_Create is the volume create vertical slice
-// (200-03) against POST /api/machines/{id}/volumes:
+// (200-03) against POST /api/hosts/{id}/volumes:
 //
-//	POST /api/machines/{id}/volumes (named)    → 201, full config
-//	POST /api/machines/{id}/volumes (anonymous)→ 201, generated name
+//	POST /api/hosts/{id}/volumes (named)    → 201, full config
+//	POST /api/hosts/{id}/volumes (anonymous)→ 201, generated name
 //	POST .../volumes (malformed body)          → 400 INVALID_REQUEST
 //	POST .../volumes as read-level user        → 403
 func Test_Integration_Volumes_Create(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerVolumesSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// --- AC: named create returns 201 with the created volume's config,
 	// and labels/driver options round-trip through inspect --------------
@@ -279,7 +279,7 @@ func Test_Integration_Volumes_Create(t *testing.T) {
 		})
 
 		body := `{"name":"` + volumeName + `","labels":{"podland-it":"` + suite.RunID + `"},"options":{"type":"tmpfs"}}`
-		resp := postJSON(t, "/api/machines/"+machineID+"/volumes", body)
+		resp := postJSON(t, "/api/hosts/"+hostID+"/volumes", body)
 		defer resp.Body.Close()
 		raw, err := io.ReadAll(resp.Body)
 		require.NoError(t, err, "read create response body")
@@ -296,7 +296,7 @@ func Test_Integration_Volumes_Create(t *testing.T) {
 
 		// Round-trip: the same facts come back through inspect.
 		resp2, err := suite.AuthenticatedClient().Get(
-			suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + volumeName)
+			suite.ServerURL + "/api/hosts/" + hostID + "/volumes/" + volumeName)
 		require.NoError(t, err, "GET inspect must connect")
 		defer resp2.Body.Close()
 		require.Equal(t, http.StatusOK, resp2.StatusCode, "created volume must be inspectable")
@@ -310,7 +310,7 @@ func Test_Integration_Volumes_Create(t *testing.T) {
 	// --- AC: omitting the name creates an anonymous volume and the
 	// generated name is present in the response -------------------------
 	t.Run("AnonymousCreate", func(t *testing.T) {
-		resp := postJSON(t, "/api/machines/"+machineID+"/volumes", `{}`)
+		resp := postJSON(t, "/api/hosts/"+hostID+"/volumes", `{}`)
 		defer resp.Body.Close()
 		raw, err := io.ReadAll(resp.Body)
 		require.NoError(t, err, "read anonymous create response body")
@@ -329,7 +329,7 @@ func Test_Integration_Volumes_Create(t *testing.T) {
 	// --- AC: podman-rejected names map to client errors, not 5xx -------
 	t.Run("PodmanRejectedNameGets400", func(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes",
 			`{"name":"it-`+suite.RunID+`-bad name"}`, http.StatusBadRequest, "INVALID_REQUEST")
 	})
 
@@ -337,34 +337,34 @@ func Test_Integration_Volumes_Create(t *testing.T) {
 	// error response ------------------------------------------------------
 	t.Run("MalformedBodyGets400", func(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes",
 			`{"labels": 42}`, http.StatusBadRequest, "INVALID_REQUEST")
 	})
 }
 
 // Test_Integration_Volumes_Create_AccessControl pins the write gate on the
 // create route: read-level grantees and no-access users get 403, unknown
-// machine gets 404.
+// host gets 404.
 func Test_Integration_Volumes_Create_AccessControl(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
 	t.Run("ReadLevelUserGets403", func(t *testing.T) {
 		client := levelUserClient(t, models.PermissionRead)
 		expectAPIError(t, client, http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/volumes",
 			`{}`, http.StatusForbidden, "ACCESS_DENIED")
 	})
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		expectAPIError(t, noAccessUserClient(t), http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/volumes",
 			`{}`, http.StatusForbidden, "ACCESS_DENIED")
 	})
 
-	t.Run("UnknownMachineGets404", func(t *testing.T) {
+	t.Run("UnknownHostGets404", func(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
-			suite.ServerURL+"/api/machines/00000000-0000-0000-0000-000000000000/volumes",
-			`{}`, http.StatusNotFound, "MACHINE_NOT_FOUND")
+			suite.ServerURL+"/api/hosts/00000000-0000-0000-0000-000000000000/volumes",
+			`{}`, http.StatusNotFound, "HOST_NOT_FOUND")
 	})
 }
 
@@ -378,7 +378,7 @@ func postJSON(t *testing.T, path, body string) *http.Response {
 }
 
 // Test_Integration_Volumes_Delete is the volume delete vertical slice
-// (200-04) against DELETE /api/machines/{id}/volumes/{volumeName}?force=:
+// (200-04) against DELETE /api/hosts/{id}/volumes/{volumeName}?force=:
 //
 //	DELETE unused volume            → 204, gone from the list
 //	DELETE in-use volume            → 409 VOLUME_IN_USE
@@ -389,7 +389,7 @@ func Test_Integration_Volumes_Delete(t *testing.T) {
 	registerVolumesSweep()
 	registerContainersSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// --- AC: unused volume deletes with 204 -----------------------------
 	t.Run("UnusedVolumeDeletes204", func(t *testing.T) {
@@ -400,9 +400,9 @@ func Test_Integration_Volumes_Delete(t *testing.T) {
 			_, _ = podmanConnRun("volume", "rm", "-f", volumeName)
 		})
 
-		deleteVolume(t, machineID, volumeName, "", http.StatusNoContent)
+		deleteVolume(t, hostID, volumeName, "", http.StatusNoContent)
 
-		assert.NotContains(t, listVolumeNames(t, machineID), volumeName,
+		assert.NotContains(t, listVolumeNames(t, hostID), volumeName,
 			"deleted volume must disappear from the list")
 	})
 
@@ -426,13 +426,13 @@ func Test_Integration_Volumes_Delete(t *testing.T) {
 		require.NotEmpty(t, strings.TrimSpace(out), "fixture container must print an id")
 
 		// Without force: podman refuses → 409 with the distinct code.
-		body := deleteVolume(t, machineID, volumeName, "", http.StatusConflict)
+		body := deleteVolume(t, hostID, volumeName, "", http.StatusConflict)
 		assert.Contains(t, body, "VOLUME_IN_USE", "in-use refusal must carry the distinct error code")
 
 		// With force: podman stops the container and removes the volume.
-		deleteVolume(t, machineID, volumeName, "?force=true", http.StatusNoContent)
+		deleteVolume(t, hostID, volumeName, "?force=true", http.StatusNoContent)
 
-		assert.NotContains(t, listVolumeNames(t, machineID), volumeName,
+		assert.NotContains(t, listVolumeNames(t, hostID), volumeName,
 			"force-deleted volume must be gone from the list")
 		state := containerStateByName(t, containerName)
 		assert.NotEqual(t, "running", state, "podman must have stopped the dependent container")
@@ -441,17 +441,17 @@ func Test_Integration_Volumes_Delete(t *testing.T) {
 	// --- AC: unknown volume name returns the clean 404 ------------------
 	t.Run("UnknownNameGets404", func(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodDelete,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/it-"+suite.RunID+"-no-such-volume",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/it-"+suite.RunID+"-no-such-volume",
 			"", http.StatusNotFound, "VOLUME_NOT_FOUND")
 	})
 }
 
 // deleteVolume DELETEs a volume with an optional raw query string and
 // asserts the expected status; it returns the response body text.
-func deleteVolume(t *testing.T, machineID, volumeName, query string, wantStatus int) string {
+func deleteVolume(t *testing.T, hostID, volumeName, query string, wantStatus int) string {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodDelete,
-		suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+query, nil)
+		suite.ServerURL+"/api/hosts/"+hostID+"/volumes/"+volumeName+query, nil)
 	require.NoError(t, err)
 	resp, err := suite.AuthenticatedClient().Do(req)
 	require.NoError(t, err, "DELETE volume must connect to the in-process server")
@@ -464,9 +464,9 @@ func deleteVolume(t *testing.T, machineID, volumeName, query string, wantStatus 
 }
 
 // listVolumeNames lists volumes and returns just their names.
-func listVolumeNames(t *testing.T, machineID string) []string {
+func listVolumeNames(t *testing.T, hostID string) []string {
 	t.Helper()
-	volumes := listVolumes(t, machineID)
+	volumes := listVolumes(t, hostID)
 	names := make([]string, 0, len(volumes))
 	for _, v := range volumes {
 		names = append(names, v.Name)
@@ -478,7 +478,7 @@ func listVolumeNames(t *testing.T, machineID string) []string {
 func containerStateByName(t *testing.T, name string) string {
 	t.Helper()
 	resp, err := suite.AuthenticatedClient().Get(
-		suite.ServerURL + "/api/machines/" + suite.MachineID + "/containers/" + name)
+		suite.ServerURL + "/api/hosts/" + suite.HostID + "/containers/" + name)
 	require.NoError(t, err, "GET container inspect must connect")
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
@@ -494,42 +494,42 @@ func containerStateByName(t *testing.T, name string) string {
 
 // Test_Integration_Volumes_Delete_AccessControl pins the write gate on
 // the delete route: read-level grantees and no-access users get 403,
-// unknown machine gets 404.
+// unknown host gets 404.
 func Test_Integration_Volumes_Delete_AccessControl(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
 	t.Run("ReadLevelUserGets403", func(t *testing.T) {
 		client := levelUserClient(t, models.PermissionRead)
 		expectAPIError(t, client, http.MethodDelete,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes/it-"+suite.RunID+"-whatever",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/volumes/it-"+suite.RunID+"-whatever",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		expectAPIError(t, noAccessUserClient(t), http.MethodDelete,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes/it-"+suite.RunID+"-whatever",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/volumes/it-"+suite.RunID+"-whatever",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
-	t.Run("UnknownMachineGets404", func(t *testing.T) {
+	t.Run("UnknownHostGets404", func(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodDelete,
-			suite.ServerURL+"/api/machines/00000000-0000-0000-0000-000000000000/volumes/whatever",
-			"", http.StatusNotFound, "MACHINE_NOT_FOUND")
+			suite.ServerURL+"/api/hosts/00000000-0000-0000-0000-000000000000/volumes/whatever",
+			"", http.StatusNotFound, "HOST_NOT_FOUND")
 	})
 }
 
 // Test_Integration_Volumes_Prune is the volume prune vertical slice
-// (200-05) against POST /api/machines/{id}/volumes/prune. It seeds two
+// (200-05) against POST /api/hosts/{id}/volumes/prune. It seeds two
 // unused volumes plus one in-use volume (mounted by a running container),
 // prunes, and verifies the reports and survival via the list endpoint:
 //
-//	POST /api/machines/{id}/volumes/prune → 200, entry per removed volume
+//	POST /api/hosts/{id}/volumes/prune → 200, entry per removed volume
 func Test_Integration_Volumes_Prune(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerVolumesSweep()
 	registerContainersSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	unusedA := "it-" + suite.RunID + "-prune-a"
 	unusedB := "it-" + suite.RunID + "-prune-b"
@@ -555,7 +555,7 @@ func Test_Integration_Volumes_Prune(t *testing.T) {
 
 	// --- AC: prune returns 200 with a report entry per removed volume --
 	resp, err := suite.AuthenticatedClient().Post(
-		suite.ServerURL+"/api/machines/"+machineID+"/volumes/prune", "application/json", nil)
+		suite.ServerURL+"/api/hosts/"+hostID+"/volumes/prune", "application/json", nil)
 	require.NoError(t, err, "POST prune must connect to the in-process server")
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
@@ -577,7 +577,7 @@ func Test_Integration_Volumes_Prune(t *testing.T) {
 	assert.False(t, reported[inUse], "in-use volume must not be reported as removed")
 
 	// --- AC: unused volumes are gone; the in-use volume survives -------
-	names := listVolumeNames(t, machineID)
+	names := listVolumeNames(t, hostID)
 	assert.NotContains(t, names, unusedA, "pruned unused volume must be gone")
 	assert.NotContains(t, names, unusedB, "pruned unused volume must be gone")
 	assert.Contains(t, names, inUse, "in-use volume must survive the prune")
@@ -598,30 +598,30 @@ func Test_Integration_Volumes_Prune_AccessControl(t *testing.T) {
 	t.Run("ReadLevelUserGets403", func(t *testing.T) {
 		client := levelUserClient(t, models.PermissionRead)
 		expectAPIError(t, client, http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes/prune",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/volumes/prune",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		expectAPIError(t, noAccessUserClient(t), http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes/prune",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/volumes/prune",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 }
 
 // Test_Integration_Volumes_Export is the volume export vertical slice
-// (200-06) against GET /api/machines/{id}/volumes/{volumeName}/export.
+// (200-06) against GET /api/hosts/{id}/volumes/{volumeName}/export.
 // It seeds a volume with known files (tar piped through the CLI's
 // volume import, the same tar contract the bindings' Import uses),
 // exports it through the API, and untars the response body to verify
 // the file contents byte-for-byte:
 //
-//	GET /api/machines/{id}/volumes/{volumeName}/export → 200, x-tar
+//	GET /api/hosts/{id}/volumes/{volumeName}/export → 200, x-tar
 func Test_Integration_Volumes_Export(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerVolumesSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 	volumeName := "it-" + suite.RunID + "-export"
 
 	t.Cleanup(func() {
@@ -655,7 +655,7 @@ func Test_Integration_Volumes_Export(t *testing.T) {
 
 	// --- AC: export streams a valid tar with the right headers ---------
 	resp, err := suite.AuthenticatedClient().Get(
-		suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + volumeName + "/export")
+		suite.ServerURL + "/api/hosts/" + hostID + "/volumes/" + volumeName + "/export")
 	require.NoError(t, err, "GET export must connect to the in-process server")
 	defer resp.Body.Close()
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "export volume: expected 200")
@@ -689,7 +689,7 @@ func Test_Integration_Volumes_Export(t *testing.T) {
 // unknown volume names get 404.
 func Test_Integration_Volumes_Export_AccessControl(t *testing.T) {
 	suite.SkipIfUnavailable(t)
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	t.Run("ReadLevelUserCanExport", func(t *testing.T) {
 		volumeName := "it-" + suite.RunID + "-export-read"
@@ -698,7 +698,7 @@ func Test_Integration_Volumes_Export_AccessControl(t *testing.T) {
 		t.Cleanup(func() { _, _ = podmanConnRun("volume", "rm", "-f", volumeName) })
 
 		client := levelUserClient(t, models.PermissionRead)
-		resp, err := client.Get(suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + volumeName + "/export")
+		resp, err := client.Get(suite.ServerURL + "/api/hosts/" + hostID + "/volumes/" + volumeName + "/export")
 		require.NoError(t, err, "read-level export must connect")
 		defer resp.Body.Close()
 		require.Equal(t, http.StatusOK, resp.StatusCode, "read-level users can export (grilling ruling)")
@@ -706,29 +706,29 @@ func Test_Integration_Volumes_Export_AccessControl(t *testing.T) {
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		expectAPIError(t, noAccessUserClient(t), http.MethodGet,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/some-volume/export",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/some-volume/export",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
 	t.Run("UnknownVolumeGets404", func(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/it-"+suite.RunID+"-no-such-volume/export",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/it-"+suite.RunID+"-no-such-volume/export",
 			"", http.StatusNotFound, "VOLUME_NOT_FOUND")
 	})
 }
 
 // Test_Integration_Volumes_Populate is the volume populate vertical
-// slice (200-07) against POST /api/machines/{id}/volumes/{name}/populate.
+// slice (200-07) against POST /api/hosts/{id}/volumes/{name}/populate.
 // Both shapes are exercised, contents are verified through the export
 // endpoint (untar and compare), and the merge case proves a pre-existing
 // file at an untouched path survives:
 //
-//	POST /api/machines/{id}/volumes/{name}/populate → 204 (merge)
+//	POST /api/hosts/{id}/volumes/{name}/populate → 204 (merge)
 func Test_Integration_Volumes_Populate(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerVolumesSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	seed := func(name string, files map[string][]byte) string {
 		t.Helper()
@@ -756,7 +756,7 @@ func Test_Integration_Volumes_Populate(t *testing.T) {
 	volumeContents := func(t *testing.T, name string) map[string][]byte {
 		t.Helper()
 		resp, err := suite.AuthenticatedClient().Get(
-			suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + name + "/export")
+			suite.ServerURL + "/api/hosts/" + hostID + "/volumes/" + name + "/export")
 		require.NoError(t, err, "export for verification must connect")
 		defer resp.Body.Close()
 		require.Equal(t, http.StatusOK, resp.StatusCode, "export must succeed")
@@ -798,7 +798,7 @@ func Test_Integration_Volumes_Populate(t *testing.T) {
 		require.NoError(t, mw.Close())
 
 		resp, err := suite.AuthenticatedClient().Post(
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/populate",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/"+volumeName+"/populate",
 			mw.FormDataContentType(), bytes.NewReader(body.Bytes()))
 		require.NoError(t, err, "populate must connect")
 		defer resp.Body.Close()
@@ -834,7 +834,7 @@ func Test_Integration_Volumes_Populate(t *testing.T) {
 		require.NoError(t, mw.Close())
 
 		resp, err := suite.AuthenticatedClient().Post(
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/populate",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/"+volumeName+"/populate",
 			mw.FormDataContentType(), bytes.NewReader(body.Bytes()))
 		require.NoError(t, err, "populate must connect")
 		defer resp.Body.Close()
@@ -862,7 +862,7 @@ func Test_Integration_Volumes_Populate(t *testing.T) {
 		require.NoError(t, mw.Close())
 
 		resp, err := suite.AuthenticatedClient().Post(
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/populate",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/"+volumeName+"/populate",
 			mw.FormDataContentType(), bytes.NewReader(body.Bytes()))
 		require.NoError(t, err, "populate must connect")
 		defer resp.Body.Close()
@@ -891,7 +891,7 @@ func Test_Integration_Volumes_Populate(t *testing.T) {
 		require.NoError(t, mw.Close())
 
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/populate",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/"+volumeName+"/populate",
 			"", http.StatusBadRequest, "INVALID_REQUEST")
 		_ = body
 
@@ -899,7 +899,7 @@ func Test_Integration_Volumes_Populate(t *testing.T) {
 		emptyMw := multipart.NewWriter(empty)
 		require.NoError(t, emptyMw.Close())
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/populate",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/"+volumeName+"/populate",
 			"", http.StatusBadRequest, "INVALID_REQUEST")
 	})
 
@@ -907,11 +907,11 @@ func Test_Integration_Volumes_Populate(t *testing.T) {
 	t.Run("AccessControl", func(t *testing.T) {
 		readClient := levelUserClient(t, models.PermissionRead)
 		expectAPIError(t, readClient, http.MethodPost,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/some-volume/populate",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/some-volume/populate",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 
 		expectAPIError(t, noAccessUserClient(t), http.MethodPost,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/some-volume/populate",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/some-volume/populate",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 
 		// The existence gate runs after the body is parsed, so the 404
@@ -924,7 +924,7 @@ func Test_Integration_Volumes_Populate(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, populateMw.Close())
 		req, err := http.NewRequest(http.MethodPost,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/it-"+suite.RunID+"-no-such-volume/populate",
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/it-"+suite.RunID+"-no-such-volume/populate",
 			bytes.NewReader(populateBody.Bytes()))
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", populateMw.FormDataContentType())

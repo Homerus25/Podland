@@ -11,7 +11,7 @@ import {
 	TransferReport,
 	transferProgressLabel,
 } from "@shared/transfers/transferPresentation";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { useState } from "react";
 
 // The two execution-time refusals the dialog can make actionable (issue
@@ -42,21 +42,21 @@ function TransferProgress({ progress }: { progress: VolumeMoveProgress }) {
 // volume preview query, the NDJSON transport (progress in flight, the
 // envelope narrated on success), the in-use warning with the delete flow's
 // force checkbox (move mode only), and the two refusal hints. A close
-// mid-run aborts the stream; the both-machines invalidation lives in the
+// mid-run aborts the stream; the both-hosts invalidation lives in the
 // stream hook, not here.
 export function MoveVolumeDialog({
-	machine,
+	host,
 	volume,
 	onClose,
 }: {
-	machine: Machine;
+	host: Host;
 	volume: VolumeSummary;
 	onClose: () => void;
 }) {
-	const transfer = useTransferState(machine, "manage-volumes");
-	const moveStream = useVolumeMoveStream(machine.id);
+	const transfer = useTransferState(host, "manage-volumes");
+	const moveStream = useVolumeMoveStream(host.id);
 	const preview = useVolumeMovePreview(
-		machine.id,
+		host.id,
 		volume.name,
 		transfer.targetId || null,
 	);
@@ -72,7 +72,7 @@ export function MoveVolumeDialog({
 	// dialog stays open on it, the stay-open-report pattern, because the byte
 	// count is the answer's point and the caller may want to read it before
 	// closing. The cause sentence is the volume domain's; the header shape,
-	// the both-machines tail, and the error line are the skeleton's
+	// the both-hosts tail, and the error line are the skeleton's
 	// (candidate C8).
 	const report = moveStream.result ? (
 		<TransferReport
@@ -96,7 +96,7 @@ export function MoveVolumeDialog({
 
 	return (
 		<TransferDialog
-			machine={machine}
+			host={host}
 			transfer={transfer}
 			preview={preview}
 			noun="volume"
@@ -125,7 +125,7 @@ export function MoveVolumeDialog({
 				transfer.mode === "move" && (preview.data?.inUse || inUseRefusal) ? (
 					<Box data-testid="move-inuse-warning">
 						<Text color="orange.500">
-							A container on this machine is using this volume. The move refuses
+							A container on this host is using this volume. The move refuses
 							without force.
 						</Text>
 						<Checkbox
@@ -141,7 +141,7 @@ export function MoveVolumeDialog({
 			}
 			onConfirm={() =>
 				moveStream.run(volume.name, {
-					targetMachineId: transfer.targetId,
+					targetHostId: transfer.targetId,
 					mode: transfer.mode,
 					// Force is move-mode vocabulary (the delete flow's flag): copy
 					// never removes anything and omits it entirely.

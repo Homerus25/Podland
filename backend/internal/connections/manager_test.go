@@ -19,17 +19,17 @@ import (
 // Manager is the seam: the concrete manager must satisfy it.
 var _ Manager = (*ConnectionManager)(nil)
 
-// The cache-lifecycle contract (dial dedup, no cross-machine serialization,
-// LRU-idle eviction, idle cleanup, the RemoveMachine races, Stop) is pinned
+// The cache-lifecycle contract (dial dedup, no cross-host serialization,
+// LRU-idle eviction, idle cleanup, the RemoveHost races, Stop) is pinned
 // once in internal/rescache's suite; this file keeps the adapter-local
 // tests — the WithConnection error mapping and the context detachment — the
-// adapter's projections of the lifecycle wiring (RemoveMachine graceful, Stop),
+// adapter's projections of the lifecycle wiring (RemoveHost graceful, Stop),
 // and the probe tests in manager_probe_test.go.
 
 // --- fake dialer (the sshexec dialer test pattern: inject the dial, no live SSH) ---
 
 // countingDial is a scriptable dial seam. It counts dials and close-handle
-// calls per machine and can be told to fail specific machines. Tests that
+// calls per host and can be told to fail specific hosts. Tests that
 // need blocking dials or custom contexts build inline closures instead.
 type countingDial struct {
 	mu        sync.Mutex
@@ -47,38 +47,38 @@ func newCountingDial() *countingDial {
 }
 
 func (d *countingDial) dialFunc() dialFunc {
-	return func(ctx context.Context, machineID string) (context.Context, bindings.CloseFunc, error) {
+	return func(ctx context.Context, hostID string) (context.Context, bindings.CloseFunc, error) {
 		d.mu.Lock()
-		d.dialCount[machineID]++
-		fail := d.fail[machineID]
+		d.dialCount[hostID]++
+		fail := d.fail[hostID]
 		d.mu.Unlock()
 		if fail != nil {
 			return nil, nil, fail
 		}
 		return context.Background(), func() {
 			d.mu.Lock()
-			d.closes[machineID]++
+			d.closes[hostID]++
 			d.mu.Unlock()
 		}, nil
 	}
 }
 
-func (d *countingDial) dialsOf(machineID string) int {
+func (d *countingDial) dialsOf(hostID string) int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.dialCount[machineID]
+	return d.dialCount[hostID]
 }
 
-func (d *countingDial) closesOf(machineID string) int {
+func (d *countingDial) closesOf(hostID string) int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.closes[machineID]
+	return d.closes[hostID]
 }
 
-func (d *countingDial) failMachine(machineID string, err error) {
+func (d *countingDial) failHost(hostID string, err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.fail[machineID] = err
+	d.fail[hostID] = err
 }
 
 // newTestManager wires a manager with a fake dial seam and tight timeouts.
@@ -94,18 +94,18 @@ func newTestManager(maxSize int, dial dialFunc, idleTimeout, cleanupInterval tim
 	})
 }
 
-// --- WithConnection: the seam every machine-scoped podman call crosses ---
+// --- WithConnection: the seam every host-scoped podman call crosses ---
 
 func TestWithConnection_RunsFnWithDialValuesAndReleasesOnReturn(t *testing.T) {
 	type ctxKey struct{}
 	marker := context.WithValue(context.Background(), ctxKey{}, "live-connection")
 	closes := atomic.Int32{}
-	mgr := newTestManager(10, func(ctx context.Context, machineID string) (context.Context, bindings.CloseFunc, error) {
+	mgr := newTestManager(10, func(ctx context.Context, hostID string) (context.Context, bindings.CloseFunc, error) {
 		return marker, func() { closes.Add(1) }, nil
 	}, 20*time.Millisecond, 10*time.Millisecond)
 
 	var got context.Context
-	err := mgr.WithConnection(context.Background(), "user-1", "machine-1", "test.op", func(connCtx context.Context) error {
+	err := mgr.WithConnection(context.Background(), "user-1", "host-1", "test.op", func(connCtx context.Context) error {
 		got = connCtx
 		return nil
 	})
@@ -127,12 +127,12 @@ func TestWithConnection_PropagatesFnErrorUntouched(t *testing.T) {
 	dial := newCountingDial()
 	mgr := newTestManager(10, dial.dialFunc(), time.Minute, 0)
 
-	err := mgr.WithConnection(context.Background(), "user-1", "machine-1", "test.op", func(context.Context) error {
+	err := mgr.WithConnection(context.Background(), "user-1", "host-1", "test.op", func(context.Context) error {
 		return fnErr
 	})
 
 	require.Error(t, err)
-	require.Equal(t, 1, dial.dialsOf("machine-1"), "exactly one dial must back the call")
+	require.Equal(t, 1, dial.dialsOf("host-1"), "exactly one dial must back the call")
 	assert.Equal(t, fnErr, err, "fn's error must cross untouched — no 502 rewrite, no wrapping")
 }
 
@@ -141,11 +141,11 @@ func TestWithConnection_DialFailureLogsCauseAndReturns502(t *testing.T) {
 	capture := slogtest.CaptureDefault(t)
 
 	dial := newCountingDial()
-	dial.failMachine("machine-1", dialErr)
+	dial.failHost("host-1", dialErr)
 	mgr := newTestManager(10, dial.dialFunc(), time.Minute, 0)
 
 	fnRan := false
-	err := mgr.WithConnection(context.Background(), "user-1", "machine-1", "containers.list", func(context.Context) error {
+	err := mgr.WithConnection(context.Background(), "user-1", "host-1", "containers.list", func(context.Context) error {
 		fnRan = true
 		return nil
 	})
@@ -156,9 +156,9 @@ func TestWithConnection_DialFailureLogsCauseAndReturns502(t *testing.T) {
 	assert.False(t, fnRan, "fn must not run without a live connection")
 
 	warns := capture.Attrs(t, slog.LevelWarn)
-	require.Len(t, warns, 1, "exactly one warn line with op+machineID+userID+cause")
+	require.Len(t, warns, 1, "exactly one warn line with op+hostID+userID+cause")
 	assert.Equal(t, "containers.list", warns[0]["op"])
-	assert.Equal(t, "machine-1", warns[0]["machineID"])
+	assert.Equal(t, "host-1", warns[0]["hostID"])
 	assert.Equal(t, "user-1", warns[0]["userID"])
 	assert.Contains(t, warns[0]["cause"], dialErr.Error(), "the cause must be logged")
 }
@@ -173,7 +173,7 @@ func TestWithConnection_CanceledWaitIsNotA502(t *testing.T) {
 	}, time.Minute, 0)
 
 	go func() {
-		_ = mgr.WithConnection(context.Background(), "user-1", "machine-1", "test.op", func(context.Context) error {
+		_ = mgr.WithConnection(context.Background(), "user-1", "host-1", "test.op", func(context.Context) error {
 			return nil
 		})
 	}()
@@ -181,13 +181,13 @@ func TestWithConnection_CanceledWaitIsNotA502(t *testing.T) {
 
 	canceled, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := mgr.WithConnection(canceled, "user-1", "machine-1", "test.op", func(context.Context) error {
+	err := mgr.WithConnection(canceled, "user-1", "host-1", "test.op", func(context.Context) error {
 		return errors.New("must not run")
 	})
 	close(release)
 
 	assert.ErrorIs(t, err, context.Canceled, "the caller's own cancellation crosses as-is")
-	assert.NotErrorIs(t, err, appErrors.ErrConnectionFailed, "a canceled wait is not a machine-side connection failure")
+	assert.NotErrorIs(t, err, appErrors.ErrConnectionFailed, "a canceled wait is not a host-side connection failure")
 }
 
 // --- the cached context must outlive the dialing request ---
@@ -203,7 +203,7 @@ func TestWithConnection_CachedContextOutlivesDialingRequest(t *testing.T) {
 		// was handed.
 		return context.WithValue(ctx, connKey{}, "podman-client"), func() {}, nil
 	}, time.Minute, 0)
-	require.NoError(t, mgr.WithConnection(callerCtx, "user-1", "machine-1", "test.op", func(connCtx context.Context) error {
+	require.NoError(t, mgr.WithConnection(callerCtx, "user-1", "host-1", "test.op", func(connCtx context.Context) error {
 		coldCtx = connCtx
 		return nil
 	}))
@@ -218,7 +218,7 @@ func TestWithConnection_CachedContextOutlivesDialingRequest(t *testing.T) {
 		"even the cold call's served context is detached: its lifetime is the connection's, not the request's")
 
 	var warmCtx context.Context
-	require.NoError(t, mgr.WithConnection(context.Background(), "user-1", "machine-1", "test.op", func(connCtx context.Context) error {
+	require.NoError(t, mgr.WithConnection(context.Background(), "user-1", "host-1", "test.op", func(connCtx context.Context) error {
 		warmCtx = connCtx
 		return nil
 	}))
@@ -240,7 +240,7 @@ func TestWithConnection_CanceledCallerAbortsSlowDial(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- mgr.WithConnection(callerCtx, "user-1", "machine-1", "test.op", func(context.Context) error {
+		errCh <- mgr.WithConnection(callerCtx, "user-1", "host-1", "test.op", func(context.Context) error {
 			return errors.New("must not run")
 		})
 	}()
@@ -251,7 +251,7 @@ func TestWithConnection_CanceledCallerAbortsSlowDial(t *testing.T) {
 	case err := <-errCh:
 		assert.ErrorIs(t, err, context.Canceled, "a canceled caller cancels the slow dial and the wait")
 		assert.NotErrorIs(t, err, appErrors.ErrConnectionFailed,
-			"the caller's own cancellation is not a machine-side connection failure")
+			"the caller's own cancellation is not a host-side connection failure")
 	case <-time.After(2 * time.Second):
 		t.Fatal("canceling the caller did not abort the slow dial")
 	}
@@ -260,10 +260,10 @@ func TestWithConnection_CanceledCallerAbortsSlowDial(t *testing.T) {
 // --- adapter projections of the cache lifecycle ---
 //
 // The lifecycle itself is pinned in internal/rescache's suite; these pin the
-// adapter's wiring — that RemoveMachine projects onto the cache's graceful
+// adapter's wiring — that RemoveHost projects onto the cache's graceful
 // Remove (not fail-fast Invalidate) and that Stop projects onto cache.Stop.
 
-func TestRemoveMachine_IsGraceful_InFlightCallFinishesFirst(t *testing.T) {
+func TestRemoveHost_IsGraceful_InFlightCallFinishesFirst(t *testing.T) {
 	dial := newCountingDial()
 	mgr := newTestManager(10, dial.dialFunc(), time.Minute, 0)
 
@@ -271,7 +271,7 @@ func TestRemoveMachine_IsGraceful_InFlightCallFinishesFirst(t *testing.T) {
 	releaseFn := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- mgr.WithConnection(context.Background(), "user-1", "machine-1", "test.op", func(context.Context) error {
+		done <- mgr.WithConnection(context.Background(), "user-1", "host-1", "test.op", func(context.Context) error {
 			close(fnStarted)
 			<-releaseFn
 			return nil
@@ -279,14 +279,14 @@ func TestRemoveMachine_IsGraceful_InFlightCallFinishesFirst(t *testing.T) {
 	}()
 	<-fnStarted
 
-	mgr.RemoveMachine("machine-1")
+	mgr.RemoveHost("host-1")
 
-	assert.Zero(t, dial.closesOf("machine-1"),
-		"RemoveMachine must project onto the graceful Remove: the handle stays open while a call is in flight (fail-fast Invalidate would close it)")
+	assert.Zero(t, dial.closesOf("host-1"),
+		"RemoveHost must project onto the graceful Remove: the handle stays open while a call is in flight (fail-fast Invalidate would close it)")
 
 	close(releaseFn)
 	require.NoError(t, <-done)
-	require.Eventually(t, func() bool { return dial.closesOf("machine-1") == 1 },
+	require.Eventually(t, func() bool { return dial.closesOf("host-1") == 1 },
 		2*time.Second, 5*time.Millisecond,
 		"the handle closes once the last in-flight call returns")
 }

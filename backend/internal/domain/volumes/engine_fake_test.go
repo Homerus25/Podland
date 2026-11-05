@@ -77,21 +77,21 @@ func (f *fakeVolumeEngine) Import(name string, r io.Reader) error {
 type fakeEngineProvider struct {
 	engine VolumeEngine
 	err    error
-	// engines serves per-machine engines keyed by machine ID — the shape
-	// the cross-machine copy/move exercises. When non-nil it takes
+	// engines serves per-host engines keyed by host ID — the shape
+	// the cross-host copy/move exercises. When non-nil it takes
 	// precedence over engine; a lookup miss panics, so a closure crossing
-	// an unexpected machine fails the test loudly.
+	// an unexpected host fails the test loudly.
 	engines map[string]VolumeEngine
 }
 
-func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e VolumeEngine) error) error {
+func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e VolumeEngine) error) error {
 	if p.err != nil {
 		return p.err
 	}
 	if p.engines != nil {
-		e, ok := p.engines[machineID]
+		e, ok := p.engines[hostID]
 		if !ok {
-			panic("unexpected WithEngine machine: " + machineID)
+			panic("unexpected WithEngine host: " + hostID)
 		}
 		return fn(e)
 	}
@@ -129,21 +129,21 @@ func (f *fakeUsageEngine) PrintQuadlet(name string) (string, error) {
 	return f.printQuadletFn(name)
 }
 
-// fakeUsageEngineProvider serves per-machine usage engines keyed by
-// machine ID; a lookup miss panics, so a closure crossing an unexpected
-// machine fails the test loudly.
+// fakeUsageEngineProvider serves per-host usage engines keyed by
+// host ID; a lookup miss panics, so a closure crossing an unexpected
+// host fails the test loudly.
 type fakeUsageEngineProvider struct {
 	engines map[string]VolumeUsageEngine
 	err     error
 }
 
-func (p fakeUsageEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e VolumeUsageEngine) error) error {
+func (p fakeUsageEngineProvider) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e VolumeUsageEngine) error) error {
 	if p.err != nil {
 		return p.err
 	}
-	e, ok := p.engines[machineID]
+	e, ok := p.engines[hostID]
 	if !ok {
-		panic("unexpected usage WithEngine machine: " + machineID)
+		panic("unexpected usage WithEngine host: " + hostID)
 	}
 	return fn(e)
 }

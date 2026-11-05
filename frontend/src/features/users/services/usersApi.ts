@@ -14,8 +14,8 @@ export interface UserSummary {
 }
 
 // Lists the Podland users, ordered by username. Available to any
-// authenticated caller; machine owners use it to resolve grant user ids
-// to usernames when sharing a machine.
+// authenticated caller; host owners use it to resolve grant user ids
+// to usernames when sharing a host.
 export async function listUsers(): Promise<UserSummary[]> {
 	const response = await api.get<UserSummary[]>("/users");
 	return response.data;

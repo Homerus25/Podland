@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// decodeErrorCode reads the machine-readable code out of an already-read
+// decodeErrorCode reads the parseable code out of an already-read
 // error envelope body.
 func decodeErrorCode(t *testing.T, raw []byte) string {
 	t.Helper()

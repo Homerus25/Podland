@@ -4,14 +4,14 @@ import type {
 	SecretMoveResult,
 	SecretSummary,
 } from "@features/secrets/services/secretsApi";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
 import {
-	machineFixture,
+	hostFixture,
 	secretFixture,
 	secretMovePreviewFixture,
 	secretMoveResultFixture,
@@ -21,10 +21,10 @@ import { server } from "@/test/server";
 
 const dbPassword = secretFixture();
 
-const source = machineFixture();
-const staging = machineFixture({ id: "m-2", name: "staging-01" });
-const backup = machineFixture({ id: "m-4", name: "backup-01" });
-const readOnly = machineFixture({
+const source = hostFixture();
+const staging = hostFixture({ id: "m-2", name: "staging-01" });
+const backup = hostFixture({ id: "m-4", name: "backup-01" });
+const readOnly = hostFixture({
 	id: "m-3",
 	name: "laptop-01",
 	permission: "read",
@@ -45,22 +45,22 @@ function resetCounters() {
 }
 
 function secretsHandler(secrets: () => SecretSummary[]) {
-	return http.get("*/api/machines/m-1/secrets", () => {
+	return http.get("*/api/hosts/m-1/secrets", () => {
 		secretFetches++;
 		return HttpResponse.json(secrets());
 	});
 }
 
-function machinesHandler(machines: Machine[]) {
-	return http.get("*/api/machines", () => HttpResponse.json(machines));
+function hostsHandler(hosts: Host[]) {
+	return http.get("*/api/hosts", () => HttpResponse.json(hosts));
 }
 
 function previewHandler(overrides: Partial<SecretMovePreview> = {}) {
 	return http.get(
-		"*/api/machines/m-1/secrets/db-password/move-preview",
+		"*/api/hosts/m-1/secrets/db-password/move-preview",
 		({ request }) => {
 			previewTargets.push(
-				new URL(request.url).searchParams.get("targetMachineId") ?? "",
+				new URL(request.url).searchParams.get("targetHostId") ?? "",
 			);
 			return HttpResponse.json(secretMovePreviewFixture(overrides));
 		},
@@ -71,7 +71,7 @@ function previewHandler(overrides: Partial<SecretMovePreview> = {}) {
 // the volume pair.
 function moveHandler(result: () => SecretMoveResult) {
 	return http.post(
-		"*/api/machines/m-1/secrets/db-password/move",
+		"*/api/hosts/m-1/secrets/db-password/move",
 		async ({ request }) => {
 			moveRequests.count++;
 			moveRequests.body = (await request.json()) as Record<string, unknown>;
@@ -85,11 +85,11 @@ async function openMoveDialog(
 ) {
 	server.use(
 		secretsHandler(() => [dbPassword]),
-		machinesHandler([source, staging, readOnly, backup]),
+		hostsHandler([source, staging, readOnly, backup]),
 		previewHandler(previewOverrides),
 		moveHandler(() => secretMoveResultFixture()),
 	);
-	renderWithQuery(<SecretList machine={source} />, {
+	renderWithQuery(<SecretList host={source} />, {
 		chakra: true,
 		// The row navigates on click, so the list renders inside a router.
 		router: true,
@@ -123,14 +123,14 @@ describe("SecretList move/copy", () => {
 	it("hides the Move/Copy action below the reveal-secrets capability (admin)", async () => {
 		server.use(
 			secretsHandler(() => [dbPassword]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 		);
 		// Write on the source: the manage cell renders (delete shows), but
 		// the transfer's source gate is admin — the value leaving the
-		// machine is a reveal — so Move/Copy must not.
+		// host is a reveal — so Move/Copy must not.
 		renderWithQuery(
 			<SecretList
-				machine={machineFixture({ permission: "write", isOwner: false })}
+				host={hostFixture({ permission: "write", isOwner: false })}
 			/>,
 			// The row navigates on click, so the list renders inside a router.
 			{ chakra: true, router: true },
@@ -145,7 +145,7 @@ describe("SecretList move/copy", () => {
 		).toBeInTheDocument();
 	});
 
-	it("offers one dialog listing only manageable machines, source excluded", async () => {
+	it("offers one dialog listing only manageable hosts, source excluded", async () => {
 		await openMoveDialog();
 
 		const select = screen.getByTestId("move-target-select");
@@ -171,7 +171,7 @@ describe("SecretList move/copy", () => {
 		await user.click(screen.getByTestId("confirm-move-button"));
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 		});
 
@@ -185,7 +185,7 @@ describe("SecretList move/copy", () => {
 		);
 		expect(await screen.findByTestId("modal")).toBeInTheDocument();
 		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's secret)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's secret)" }),
 		);
 		await waitFor(() =>
 			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
@@ -193,7 +193,7 @@ describe("SecretList move/copy", () => {
 		await user.click(screen.getByTestId("confirm-move-button"));
 		await waitFor(() => expect(moveRequests.count).toBe(2));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "copy",
 		});
 	});
@@ -211,13 +211,13 @@ describe("SecretList move/copy", () => {
 	it("keeps confirm disabled while the preview is pending", async () => {
 		server.use(
 			secretsHandler(() => [dbPassword]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			http.get(
-				"*/api/machines/m-1/secrets/db-password/move-preview",
+				"*/api/hosts/m-1/secrets/db-password/move-preview",
 				() => new Promise<Response>(() => {}),
 			),
 		);
-		renderWithQuery(<SecretList machine={source} />, {
+		renderWithQuery(<SecretList host={source} />, {
 			chakra: true,
 			// The row navigates on click, so the list renders inside a router.
 			router: true,
@@ -236,15 +236,15 @@ describe("SecretList move/copy", () => {
 	it("shows a failed preview and keeps confirm disabled", async () => {
 		server.use(
 			secretsHandler(() => [dbPassword]),
-			machinesHandler([source, staging, readOnly, backup]),
-			http.get("*/api/machines/m-1/secrets/db-password/move-preview", () =>
+			hostsHandler([source, staging, readOnly, backup]),
+			http.get("*/api/hosts/m-1/secrets/db-password/move-preview", () =>
 				HttpResponse.json(
 					errorJson("ACCESS_DENIED", "Access denied", "req-71"),
 					{ status: 403 },
 				),
 			),
 		);
-		renderWithQuery(<SecretList machine={source} />, {
+		renderWithQuery(<SecretList host={source} />, {
 			chakra: true,
 			// The row navigates on click, so the list renders inside a router.
 			router: true,
@@ -273,7 +273,7 @@ describe("SecretList move/copy", () => {
 		expect(warning).toHaveTextContent("references dangle");
 
 		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's secret)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's secret)" }),
 		);
 		expect(
 			screen.getByTestId("move-referencing-warning"),
@@ -283,11 +283,11 @@ describe("SecretList move/copy", () => {
 	it("runs the transfer, narrates the envelope in place, and refetches the source list", async () => {
 		server.use(
 			secretsHandler(() => [dbPassword]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(),
 			moveHandler(() => secretMoveResultFixture()),
 		);
-		renderWithQuery(<SecretList machine={source} />, {
+		renderWithQuery(<SecretList host={source} />, {
 			chakra: true,
 			// The row navigates on click, so the list renders inside a router.
 			router: true,
@@ -305,7 +305,7 @@ describe("SecretList move/copy", () => {
 
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 		});
 
@@ -324,7 +324,7 @@ describe("SecretList move/copy", () => {
 		);
 	});
 
-	it("keeps the dialog open on a partial result, naming the both-machines state", async () => {
+	it("keeps the dialog open on a partial result, naming the both-hosts state", async () => {
 		const user = await openMoveDialogReadyToConfirm();
 		server.use(
 			moveHandler(() =>
@@ -338,7 +338,7 @@ describe("SecretList move/copy", () => {
 		await user.click(screen.getByTestId("confirm-move-button"));
 
 		const message = await screen.findByTestId("move-partial-message");
-		expect(message).toHaveTextContent("both machines");
+		expect(message).toHaveTextContent("both hosts");
 		expect(message).toHaveTextContent("failed to delete secret");
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
@@ -352,7 +352,7 @@ describe("SecretList move/copy", () => {
 	it("maps a SECRET_ALREADY_EXISTS refusal to the collision hint", async () => {
 		const user = await openMoveDialogReadyToConfirm();
 		server.use(
-			http.post("*/api/machines/m-1/secrets/db-password/move", () =>
+			http.post("*/api/hosts/m-1/secrets/db-password/move", () =>
 				HttpResponse.json(
 					errorJson(
 						"SECRET_ALREADY_EXISTS",

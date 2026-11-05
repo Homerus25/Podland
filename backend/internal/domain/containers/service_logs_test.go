@@ -29,7 +29,7 @@ func TestContainerService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.GetLogs(context.Background(), "user", "machine", "container-123", time.Time{}, 0)
+	got, err := service.GetLogs(context.Background(), "user", "host", "container-123", time.Time{}, 0)
 
 	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 	assert.Nil(t, got)
@@ -43,7 +43,7 @@ func TestContainerService_GetLogsWithStream_MapsMissingContainerTo404(t *testing
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	err := service.GetLogsWithStream(context.Background(), "user", "machine", "container-123", time.Time{}, 0,
+	err := service.GetLogsWithStream(context.Background(), "user", "host", "container-123", time.Time{}, 0,
 		func(streaming.LogEvent) {})
 
 	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
@@ -66,7 +66,7 @@ func TestContainerService_GetLogsWithStream_ReturnsPromptlyOnCancel(t *testing.T
 
 	testutils.RequirePromptReturnOnCancel(t, "GetLogsWithStream", started,
 		func(ctx context.Context) error {
-			return service.GetLogsWithStream(ctx, "user", "machine", "container-123", time.Time{}, 0,
+			return service.GetLogsWithStream(ctx, "user", "host", "container-123", time.Time{}, 0,
 				func(streaming.LogEvent) {})
 		})
 }

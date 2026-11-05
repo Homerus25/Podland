@@ -8,7 +8,7 @@ import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
 import {
-	machineFixture,
+	hostFixture,
 	rawInspectFixture,
 	secretFixture,
 } from "@/test/factories";
@@ -19,7 +19,7 @@ import { server } from "@/test/server";
 // (the admin reveal mutation) additionally carries the value.
 function mockSecret(secret: SecretInspect) {
 	server.use(
-		http.get("*/api/machines/m-1/secrets/db-password", ({ request }) =>
+		http.get("*/api/hosts/m-1/secrets/db-password", ({ request }) =>
 			HttpResponse.json(
 				request.url.includes("reveal=true")
 					? { ...secret, secretData: "s3cr3t-value" }
@@ -29,12 +29,12 @@ function mockSecret(secret: SecretInspect) {
 	);
 }
 
-// The page reads the machine's per-caller facts for the reveal gate.
-function mockMachine(permission: "read" | "write" | "admin" = "admin") {
+// The page reads the host's per-caller facts for the reveal gate.
+function mockHost(permission: "read" | "write" | "admin" = "admin") {
 	server.use(
-		http.get("*/api/machines/m-1", () =>
+		http.get("*/api/hosts/m-1", () =>
 			HttpResponse.json(
-				machineFixture({ permission, isOwner: permission === "admin" }),
+				hostFixture({ permission, isOwner: permission === "admin" }),
 			),
 		),
 	);
@@ -44,17 +44,17 @@ function renderDetailPage() {
 	return renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId/secrets/:secretId"
+				path="/hosts/:hostId/secrets/:secretId"
 				element={<SecretDetailPage />}
 			/>
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/secrets/db-password"] } },
+		{ router: { initialEntries: ["/hosts/m-1/secrets/db-password"] } },
 	);
 }
 
 describe("SecretDetailPage overview", () => {
 	it("renders all overview attributes", async () => {
-		mockMachine("admin");
+		mockHost("admin");
 		mockSecret(
 			secretFixture({
 				updatedAt: "2026-08-21T10:00:00Z",
@@ -87,7 +87,7 @@ describe("SecretDetailPage overview", () => {
 	});
 
 	it("hides the labels row when the secret has no labels", async () => {
-		mockMachine("admin");
+		mockHost("admin");
 		mockSecret(secretFixture());
 		renderDetailPage();
 
@@ -97,22 +97,22 @@ describe("SecretDetailPage overview", () => {
 		).not.toBeInTheDocument();
 	});
 
-	it("links the back button to the machine's secrets tab", async () => {
-		mockMachine("admin");
+	it("links the back button to the host's secrets tab", async () => {
+		mockHost("admin");
 		mockSecret(secretFixture());
 		renderDetailPage();
 
 		await screen.findByTestId("secret-detail-id");
 		expect(screen.getByTestId("detail-back-button")).toHaveAttribute(
 			"href",
-			"/machines/m-1?tab=secrets",
+			"/hosts/m-1?tab=secrets",
 		);
 	});
 
 	it("renders the loading state while the detail is pending", async () => {
-		mockMachine("admin");
+		mockHost("admin");
 		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password", async () => {
+			http.get("*/api/hosts/m-1/secrets/db-password", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
 				return HttpResponse.json(secretFixture());
 			}),
@@ -124,9 +124,9 @@ describe("SecretDetailPage overview", () => {
 	});
 
 	it("renders the error state when the detail request fails", async () => {
-		mockMachine("admin");
+		mockHost("admin");
 		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password", () =>
+			http.get("*/api/hosts/m-1/secrets/db-password", () =>
 				errorResponse(403, "ACCESS_DENIED", "Admin access required", "req-7"),
 			),
 		);
@@ -138,9 +138,9 @@ describe("SecretDetailPage overview", () => {
 	});
 
 	it("renders the not-found state when the secret no longer exists", async () => {
-		mockMachine("admin");
+		mockHost("admin");
 		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password", () =>
+			http.get("*/api/hosts/m-1/secrets/db-password", () =>
 				errorResponse(404, "SECRET_NOT_FOUND", "Secret not found", "req-9"),
 			),
 		);
@@ -148,17 +148,17 @@ describe("SecretDetailPage overview", () => {
 
 		expect(
 			await screen.findByTestId("detail-page-not-found"),
-		).toHaveTextContent("This item no longer exists on the machine.");
+		).toHaveTextContent("This item no longer exists on the host.");
 		expect(screen.queryByTestId("detail-page-error")).not.toBeInTheDocument();
 	});
 });
 
 describe("SecretDetailPage reveal value", () => {
 	it("reveals the value masked until the eye toggle is used", async () => {
-		mockMachine("admin");
+		mockHost("admin");
 		let requestedUrl = "";
 		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password", ({ request }) => {
+			http.get("*/api/hosts/m-1/secrets/db-password", ({ request }) => {
 				requestedUrl = request.url;
 				return HttpResponse.json(
 					request.url.includes("reveal=true")
@@ -196,7 +196,7 @@ describe("SecretDetailPage reveal value", () => {
 	it.each(["read", "write"] as const)(
 		"shows a hint instead of a reveal button for %s users",
 		async (permission) => {
-			mockMachine(permission);
+			mockHost(permission);
 			mockSecret(secretFixture());
 			renderDetailPage();
 
@@ -209,21 +209,21 @@ describe("SecretDetailPage reveal value", () => {
 		},
 	);
 
-	it("renders neither the reveal button nor the hint while the machine query is pending", async () => {
-		// The machine query is the gate's only input: while it is in flight
+	it("renders neither the reveal button nor the hint while the host query is pending", async () => {
+		// The host query is the gate's only input: while it is in flight
 		// the caller's level is unknown, so the page must not flash the
 		// admin hint at an admin caller.
-		mockMachine("admin");
+		mockHost("admin");
 		mockSecret(secretFixture());
 		let release: () => void = () => {};
 		const gate = new Promise<void>((resolve) => {
 			release = resolve;
 		});
 		server.use(
-			http.get("*/api/machines/m-1", async () => {
+			http.get("*/api/hosts/m-1", async () => {
 				await gate;
 				return HttpResponse.json(
-					machineFixture({ permission: "admin", isOwner: true }),
+					hostFixture({ permission: "admin", isOwner: true }),
 				);
 			}),
 		);
@@ -241,14 +241,14 @@ describe("SecretDetailPage reveal value", () => {
 		await screen.findByTestId("reveal-secret-button");
 	});
 
-	it("renders the admin hint when the machine query fails", async () => {
-		// A failed machine query leaves the caller's level unknown — the
+	it("renders the admin hint when the host query fails", async () => {
+		// A failed host query leaves the caller's level unknown — the
 		// hint renders rather than a bare gap, so a non-admin never reads
 		// the missing control as "this secret has no reveal".
 		mockSecret(secretFixture());
 		server.use(
-			http.get("*/api/machines/m-1", () =>
-				errorResponse(500, "MACHINE_UNREACHABLE", "Machine unreachable"),
+			http.get("*/api/hosts/m-1", () =>
+				errorResponse(500, "HOST_UNREACHABLE", "Host unreachable"),
 			),
 		);
 		renderDetailPage();
@@ -263,9 +263,9 @@ describe("SecretDetailPage reveal value", () => {
 	});
 
 	it("renders a 403 reveal error through the shared error display", async () => {
-		mockMachine("admin");
+		mockHost("admin");
 		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password", ({ request }) => {
+			http.get("*/api/hosts/m-1/secrets/db-password", ({ request }) => {
 				if (request.url.includes("reveal=true")) {
 					return errorResponse(
 						403,
@@ -290,11 +290,11 @@ describe("SecretDetailPage reveal value", () => {
 
 describe("SecretDetailPage inspect JSON", () => {
 	it("fetches the inspect JSON lazily on first reveal and pretty-prints it", async () => {
-		mockMachine("admin");
+		mockHost("admin");
 		mockSecret(secretFixture());
 		let inspectRequests = 0;
 		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password/inspect", () => {
+			http.get("*/api/hosts/m-1/secrets/db-password/inspect", () => {
 				inspectRequests++;
 				return HttpResponse.json(rawInspectFixture());
 			}),
@@ -315,10 +315,10 @@ describe("SecretDetailPage inspect JSON", () => {
 	});
 
 	it("never includes the revealed value in the inspect JSON", async () => {
-		mockMachine("admin");
+		mockHost("admin");
 		mockSecret(secretFixture());
 		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password/inspect", () =>
+			http.get("*/api/hosts/m-1/secrets/db-password/inspect", () =>
 				HttpResponse.json(rawInspectFixture()),
 			),
 		);

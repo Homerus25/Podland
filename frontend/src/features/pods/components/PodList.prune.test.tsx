@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { machineFixture, podFixture } from "@/test/factories";
+import { hostFixture, podFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -18,7 +18,7 @@ function podsListResponse(pods: PodSummary[]) {
 }
 
 function renderPodList(permission: "read" | "write" | "admin" = "admin") {
-	return renderWithQuery(<PodList machine={machineFixture({ permission })} />, {
+	return renderWithQuery(<PodList host={hostFixture({ permission })} />, {
 		router: true,
 	});
 }
@@ -33,11 +33,11 @@ describe("PodList prune", () => {
 		const pruneRequests: string[] = [];
 		let listRequests = 0;
 		server.use(
-			http.get("*/api/machines/m-1/pods", () => {
+			http.get("*/api/hosts/m-1/pods", () => {
 				listRequests++;
 				return podsListResponse([podFixture()]);
 			}),
-			http.post("*/api/machines/m-1/pods/prune", ({ request }) => {
+			http.post("*/api/hosts/m-1/pods/prune", ({ request }) => {
 				pruneRequests.push(request.url);
 				return HttpResponse.json([
 					{ id: "p-1" },
@@ -70,10 +70,8 @@ describe("PodList prune", () => {
 
 	it("reports an empty prune result", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/pods", () =>
-				podsListResponse([podFixture()]),
-			),
-			http.post("*/api/machines/m-1/pods/prune", () => HttpResponse.json([])),
+			http.get("*/api/hosts/m-1/pods", () => podsListResponse([podFixture()])),
+			http.post("*/api/hosts/m-1/pods/prune", () => HttpResponse.json([])),
 		);
 		renderPodList();
 		const user = userEvent.setup();
@@ -87,12 +85,10 @@ describe("PodList prune", () => {
 
 	it("surfaces a prune failure in the dialog's error region", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/pods", () =>
-				podsListResponse([podFixture()]),
-			),
+			http.get("*/api/hosts/m-1/pods", () => podsListResponse([podFixture()])),
 			// 5xx collapses to the generic message (getApiError), so the
 			// domain-observable failure is a 4xx envelope code.
-			http.post("*/api/machines/m-1/pods/prune", () =>
+			http.post("*/api/hosts/m-1/pods/prune", () =>
 				errorResponse(409, "POD_STATE_CONFLICT", "pod is in use"),
 			),
 		);

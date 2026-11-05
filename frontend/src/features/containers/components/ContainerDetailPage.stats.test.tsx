@@ -13,7 +13,7 @@ import { server } from "@/test/server";
 
 function mockDetail() {
 	server.use(
-		http.get("*/api/machines/m-1/containers/c-1", () =>
+		http.get("*/api/hosts/m-1/containers/c-1", () =>
 			HttpResponse.json(containerDetailFixture()),
 		),
 	);
@@ -22,7 +22,7 @@ function mockDetail() {
 function mockContainerStats() {
 	let requests = 0;
 	server.use(
-		http.get("*/api/machines/m-1/containers/c-1/stats", () => {
+		http.get("*/api/hosts/m-1/containers/c-1/stats", () => {
 			requests++;
 			return HttpResponse.json(containerStatsFixture());
 		}),
@@ -36,11 +36,11 @@ function renderDetailPage() {
 	return renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId/containers/:containerId"
+				path="/hosts/:hostId/containers/:containerId"
 				element={<ContainerDetailPage />}
 			/>
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/containers/c-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1/containers/c-1"] } },
 	);
 }
 

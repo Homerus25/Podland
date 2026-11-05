@@ -16,38 +16,38 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// Cross-machine volume copy/move (issue 238, architecture-decisions §19):
+// Cross-host volume copy/move (issue 238, architecture-decisions §19):
 // the shared transfer kit owns the export→import splice; this file owns
 // the volumes domain's composition around it — the preview's facts
 // (collision, in-use, referencing quadlets), the transfer's create →
 // splice → remove order, and the mapping onto the wire vocabulary. The
-// name is preserved on both machines; there is no rename and no
+// name is preserved on both hosts; there is no rename and no
 // overwrite.
 
 // MovePreview answers everything the copy/move dialog must show before
-// confirming (issue 238): whether the target machine already holds a
-// same-named volume, whether a container on the source machine uses the
+// confirming (issue 238): whether the target host already holds a
+// same-named volume, whether a container on the source host uses the
 // volume, and which source quadlets reference it. See
 // doku/description_volumes_api.md.
 //
 // Access: the route's subtree middleware already proved the caller holds
-// an access row on the source machine — read level suffices, this
-// endpoint mutates nothing. The target machine is a service-side gate
-// (route middleware only sees the route's machine): the caller's stored
+// an access row on the source host — read level suffices, this
+// endpoint mutates nothing. The target host is a service-side gate
+// (route middleware only sees the route's host): the caller's stored
 // level must be at least read, checked against the access store BEFORE
 // any podman call, so a caller without target access gets the standard
 // 403 ACCESS_DENIED and never a false preview.
-func (s *VolumeService) MovePreview(ctx context.Context, userID, machineID, volumeName, targetMachineID string) (*VolumeMovePreviewResponse, error) {
+func (s *VolumeService) MovePreview(ctx context.Context, userID, hostID, volumeName, targetHostID string) (*VolumeMovePreviewResponse, error) {
 	// The target gate fires before the connection lease (the quadlet
 	// move-preview's shape): a lookup failure is 500, a level below read
 	// — an absent row included — is 403, per permission.RequireLevel's
 	// single-owner contract.
-	if err := permission.RequireLevel(s.accessRepo, targetMachineID, userID, models.PermissionRead); err != nil {
+	if err := permission.RequireLevel(s.accessRepo, targetHostID, userID, models.PermissionRead); err != nil {
 		return nil, err
 	}
 
 	// Source lease: the volume must exist (404) before any scan.
-	exists, err := s.volumeExists(ctx, userID, machineID, volumeName)
+	exists, err := s.volumeExists(ctx, userID, hostID, volumeName)
 	if err != nil {
 		return nil, err
 	}
@@ -56,16 +56,16 @@ func (s *VolumeService) MovePreview(ctx context.Context, userID, machineID, volu
 	}
 
 	// Usage lease: the in-use scan — container mounts and referencing
-	// quadlets, both read through the usage seam on the source machine.
+	// quadlets, both read through the usage seam on the source host.
 	var inUse bool
 	var referencing []VolumeMoveQuadletRef
-	err = s.usageEngines.WithEngine(ctx, userID, machineID, "volumes.MovePreviewSource", func(e VolumeUsageEngine) error {
+	err = s.usageEngines.WithEngine(ctx, userID, hostID, "volumes.MovePreviewSource", func(e VolumeUsageEngine) error {
 		inUse, err = volumeInUse(e, volumeName)
 		if err != nil {
 			return err
 		}
 		// The referencing-quadlets warning rides the shared transfer
-		// kit's machine-wide quadlet scan (§19, issue 259): the usage
+		// kit's host-wide quadlet scan (§19, issue 259): the usage
 		// engine satisfies the kit's QuadletReader structurally, so it
 		// is handed over directly — no adapter. The kit's error rides
 		// untouched: the envelope's 500 fallback answers the generic
@@ -85,7 +85,7 @@ func (s *VolumeService) MovePreview(ctx context.Context, userID, machineID, volu
 	// exact name. The transfer re-checks at execution time; this flag
 	// only drives the dialog's confirm gate.
 	var collision bool
-	err = s.engines.WithEngine(ctx, userID, targetMachineID, "volumes.MovePreviewTarget", func(e VolumeEngine) error {
+	err = s.engines.WithEngine(ctx, userID, targetHostID, "volumes.MovePreviewTarget", func(e VolumeEngine) error {
 		inspected, err := e.Inspect(volumeName)
 		if err != nil {
 			return fmt.Errorf("failed to inspect target volume: %w", err)
@@ -104,7 +104,7 @@ func (s *VolumeService) MovePreview(ctx context.Context, userID, machineID, volu
 	}, nil
 }
 
-// Move transfers a volume to another machine (issue 238, §19).
+// Move transfers a volume to another host (issue 238, §19).
 //
 // Copy mode creates the target volume and streams the source's data into
 // it — always, there is no metadata-only option — and never touches the
@@ -113,7 +113,7 @@ func (s *VolumeService) MovePreview(ctx context.Context, userID, machineID, volu
 // source refuses the move with ErrVolumeInUse unless force is set —
 // the delete flow's checkbox and hint — and a failed source removal
 // answers the transfer envelope with status "partial" plus the failure's
-// detail in Error: the volume then exists on both machines and the
+// detail in Error: the volume then exists on both hosts and the
 // source side must be cleaned up manually. A source volume that vanished
 // between the data phase and the removal needs no removal — the answer
 // is "moved".
@@ -126,26 +126,26 @@ func (s *VolumeService) MovePreview(ctx context.Context, userID, machineID, volu
 // block a retry with a false collision.
 //
 // Access: the route's write-level middleware proved the caller may
-// mutate the SOURCE machine; the TARGET machine is a service-side gate
-// (route middleware only sees the route's machine): the caller's stored
+// mutate the SOURCE host; the TARGET host is a service-side gate
+// (route middleware only sees the route's host): the caller's stored
 // level must be at least write, checked against the access store BEFORE
 // any podman call.
 //
 // Move answers through the NDJSON stream (the handler always streams);
 // onProgress is the transport's feed.
-func (s *VolumeService) Move(ctx context.Context, userID, machineID, volumeName string, req VolumeMoveRequest, onProgress func(VolumeMoveEvent)) (*VolumeMoveResponse, error) {
+func (s *VolumeService) Move(ctx context.Context, userID, hostID, volumeName string, req VolumeMoveRequest, onProgress func(VolumeMoveEvent)) (*VolumeMoveResponse, error) {
 	// The target gate fires before any connection lease (the quadlet
 	// move's shape, one level up from MovePreview's read gate): a lookup
 	// failure is 500, a level below write — an absent row included — is
 	// 403, per permission.RequireLevel's single-owner contract.
-	if err := permission.RequireLevel(s.accessRepo, req.TargetMachineID, userID, models.PermissionWrite); err != nil {
+	if err := permission.RequireLevel(s.accessRepo, req.TargetHostID, userID, models.PermissionWrite); err != nil {
 		return nil, err
 	}
 
 	// Source lease: the volume must exist (404), and a move without
 	// force refuses an in-use source up front — the delete flow's
 	// refusal, before anything is created on the target.
-	exists, err := s.volumeExists(ctx, userID, machineID, volumeName)
+	exists, err := s.volumeExists(ctx, userID, hostID, volumeName)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func (s *VolumeService) Move(ctx context.Context, userID, machineID, volumeName 
 		return nil, appErrors.ErrVolumeNotFound
 	}
 	if req.Mode == VolumeMoveModeMove && !req.Force {
-		err = s.usageEngines.WithEngine(ctx, userID, machineID, "volumes.MoveSourceUsage", func(u VolumeUsageEngine) error {
+		err = s.usageEngines.WithEngine(ctx, userID, hostID, "volumes.MoveSourceUsage", func(u VolumeUsageEngine) error {
 			inUse, err := volumeInUse(u, volumeName)
 			if err != nil {
 				return err
@@ -169,23 +169,23 @@ func (s *VolumeService) Move(ctx context.Context, userID, machineID, volumeName 
 	}
 
 	// Data phase (§19): two connection leases stand open at once — the
-	// export reads the source machine while the import writes the target
+	// export reads the source host while the import writes the target
 	// — so the nested WithEngine is deliberate, the quadlet data
 	// phase's arrangement. The target volume is created if absent
 	// (collision re-checked first), then the shared transfer kit's
 	// splice streams the data across; a failure after the creation
 	// rolls the half-populated volume back.
-	bytes, err := s.copyVolumeData(ctx, userID, machineID, req.TargetMachineID, volumeName, onProgress)
+	bytes, err := s.copyVolumeData(ctx, userID, hostID, req.TargetHostID, volumeName, onProgress)
 	if err != nil {
 		return nil, err
 	}
 
 	response := &VolumeMoveResponse{
-		Name:            volumeName,
-		Status:          VolumeMoveStatusCopied,
-		SourceMachineID: machineID,
-		TargetMachineID: req.TargetMachineID,
-		Bytes:           bytes,
+		Name:         volumeName,
+		Status:       VolumeMoveStatusCopied,
+		SourceHostID: hostID,
+		TargetHostID: req.TargetHostID,
+		Bytes:        bytes,
 	}
 	if req.Mode == VolumeMoveModeMove {
 		response.Status = VolumeMoveStatusMoved
@@ -193,10 +193,10 @@ func (s *VolumeService) Move(ctx context.Context, userID, machineID, volumeName 
 
 	// Move mode's source half, only now that the target holds the data.
 	// A removal failure does not fail the request: the volume exists on
-	// both machines, and the envelope says so with status "partial" plus
+	// both hosts, and the envelope says so with status "partial" plus
 	// the failure's detail.
 	if req.Mode == VolumeMoveModeMove {
-		if err := s.removeSourceAfterCopy(ctx, userID, machineID, volumeName, req.Force); err != nil {
+		if err := s.removeSourceAfterCopy(ctx, userID, hostID, volumeName, req.Force); err != nil {
 			response.Status = VolumeMoveStatusPartial
 			response.Error = err.Error()
 		}
@@ -215,18 +215,18 @@ func (s *VolumeService) Move(ctx context.Context, userID, machineID, volumeName 
 // ran — except on a cancelled context, where no narration could reach
 // the wire (the streaming kit's cancelled-wins rule; the ctx.Err()
 // branch says so). Progress flows through onProgress (nil emits nothing).
-func (s *VolumeService) copyVolumeData(ctx context.Context, userID, sourceMachineID, targetMachineID, volumeName string, onProgress func(VolumeMoveEvent)) (int64, error) {
+func (s *VolumeService) copyVolumeData(ctx context.Context, userID, sourceHostID, targetHostID, volumeName string, onProgress func(VolumeMoveEvent)) (int64, error) {
 	emit := func(phase string, bytes int64) {
 		if onProgress != nil {
 			// OperationID stays empty: the streaming handler stamps its
 			// own (the quadlet move's arrangement).
-			onProgress(NewVolumeMoveProgressEvent("", sourceMachineID, volumeName, phase, bytes))
+			onProgress(NewVolumeMoveProgressEvent("", sourceHostID, volumeName, phase, bytes))
 		}
 	}
 
 	var streamed int64
-	err := s.engines.WithEngine(ctx, userID, sourceMachineID, "volumes.MoveDataSource", func(src VolumeEngine) error {
-		return s.engines.WithEngine(ctx, userID, targetMachineID, "volumes.MoveDataTarget", func(tgt VolumeEngine) error {
+	err := s.engines.WithEngine(ctx, userID, sourceHostID, "volumes.MoveDataSource", func(src VolumeEngine) error {
+		return s.engines.WithEngine(ctx, userID, targetHostID, "volumes.MoveDataTarget", func(tgt VolumeEngine) error {
 			// The collision re-check: the preview's flag is stale the
 			// moment it answered. An existing target volume is a 409 —
 			// the transfer never overwrites or merges (§18's
@@ -303,7 +303,7 @@ func (s *VolumeService) copyVolumeData(ctx context.Context, userID, sourceMachin
 // the target holds the data: the delete flow's remove with force passed
 // through. A vanished source volume answers nil — the transfer's goal is
 // met and a "partial" would falsely claim the volume exists on both
-// machines. Its error is the "partial" detail, never a request failure —
+// hosts. Its error is the "partial" detail, never a request failure —
 // the data phase it follows cannot be rolled back.
 //
 // The classification covers the remove call's own failure too (issue
@@ -312,11 +312,11 @@ func (s *VolumeService) copyVolumeData(ctx context.Context, userID, sourceMachin
 // the vanished-source success, and an in-use refusal answers the 409
 // detail, exactly like the delete flow. The remove-and-classify ritual
 // rides internal/removal (issue 264).
-func (s *VolumeService) removeSourceAfterCopy(ctx context.Context, userID, machineID, volumeName string, force bool) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "volumes.MoveSourceRemove", func(e VolumeEngine) error {
+func (s *VolumeService) removeSourceAfterCopy(ctx context.Context, userID, hostID, volumeName string, force bool) error {
+	return s.engines.WithEngine(ctx, userID, hostID, "volumes.MoveSourceRemove", func(e VolumeEngine) error {
 		// A vanished source answers nil — the transfer's goal is met and
 		// a "partial" would falsely claim the volume exists on both
-		// machines (the nil-legal missing terminal).
+		// hosts (the nil-legal missing terminal).
 		return removal.Run(func() error {
 			return e.Remove(volumeName, force)
 		}, removal.Terminals{
@@ -329,11 +329,11 @@ func (s *VolumeService) removeSourceAfterCopy(ctx context.Context, userID, machi
 	})
 }
 
-// volumeExists answers whether the volume exists on the machine through
+// volumeExists answers whether the volume exists on the host through
 // the volume engine seam.
-func (s *VolumeService) volumeExists(ctx context.Context, userID, machineID, volumeName string) (bool, error) {
+func (s *VolumeService) volumeExists(ctx context.Context, userID, hostID, volumeName string) (bool, error) {
 	exists := false
-	err := s.engines.WithEngine(ctx, userID, machineID, "volumes.VolumeExists", func(e VolumeEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "volumes.VolumeExists", func(e VolumeEngine) error {
 		inspected, err := e.Inspect(volumeName)
 		if err != nil {
 			return fmt.Errorf("failed to inspect volume: %w", err)
@@ -344,7 +344,7 @@ func (s *VolumeService) volumeExists(ctx context.Context, userID, machineID, vol
 	return exists, err
 }
 
-// volumeInUse answers whether any container on the machine mounts the
+// volumeInUse answers whether any container on the host mounts the
 // volume (issue 238). Podman's Service API reports no in-use flag on
 // volume inspect and no volume filter on container list, so in-use is
 // derived: every container's user-declared mounts, each scanned for the

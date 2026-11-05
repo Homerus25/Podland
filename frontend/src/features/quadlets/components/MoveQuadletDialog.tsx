@@ -25,7 +25,7 @@ import {
 	TransferDialog,
 	useTransferState,
 } from "@shared/components/TransferDialog";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { useEffect, useState } from "react";
 
@@ -62,7 +62,7 @@ const SECRET_TRANSFER_FAILED_CODE = "SECRET_TRANSFER_FAILED";
 // report precedence this adapter's close-on-success effect consumes.
 //
 // The success behavior is mixed — a file-only copied/moved closes, while a
-// "partial" result must keep the dialog open narrating the both-machines
+// "partial" result must keep the dialog open narrating the both-hosts
 // state and a migrating transfer narrates its data outcomes in place —
 // which the MutationDialog core's unconditional close-on-success cannot
 // express; the preset's stay-open report carries it. The reset invariant
@@ -70,19 +70,19 @@ const SECRET_TRANSFER_FAILED_CODE = "SECRET_TRANSFER_FAILED";
 // outlives the dialog): reset() on mount and unmount always starts clean,
 // and the migrating transport lives in this component for the same reason
 // — mount is open, unmount is close, and a close mid-run aborts the stream.
-// The both-machines invalidation lives in the hooks, not here.
+// The both-hosts invalidation lives in the hooks, not here.
 export function MoveQuadletDialog({
-	machine,
+	host,
 	quadlet,
 	moveQuadlet,
 	onClose,
 }: {
-	machine: Machine;
+	host: Host;
 	quadlet: QuadletSummary;
 	moveQuadlet: ReturnType<typeof useMoveQuadlet>;
 	onClose: () => void;
 }) {
-	const transfer = useTransferState(machine, "manage-quadlets");
+	const transfer = useTransferState(host, "manage-quadlets");
 	const { targetId, targetName, mode } = transfer;
 
 	const [stopFirst, setStopFirst] = useState(true);
@@ -101,19 +101,15 @@ export function MoveQuadletDialog({
 	const [migrate, setMigrate] = useState(false);
 	const [overwrite, setOverwrite] = useState(false);
 	// Secret value transfer (issue 222): opt-in, default off — the heavy,
-	// consequential act of moving values off the machine.
+	// consequential act of moving values off the host.
 	const [transferSecrets, setTransferSecrets] = useState(false);
 
 	// The migrating half of the transfer (issue 214): checked migration
 	// switches the response to an NDJSON operation, so the same endpoint is
 	// driven through the stream transport and its terminal event lands here.
-	const moveStream = useQuadletMoveStream(machine.id);
+	const moveStream = useQuadletMoveStream(host.id);
 
-	const preview = useQuadletMovePreview(
-		machine.id,
-		quadlet.id,
-		targetId || null,
-	);
+	const preview = useQuadletMovePreview(host.id, quadlet.id, targetId || null);
 
 	// The preview projections live in the warnings module as exported
 	// functions; the adapter computes none of them inline.
@@ -124,7 +120,7 @@ export function MoveQuadletDialog({
 	const migratable = hasMigratableVolume(volumes);
 	const anyExistsOnTarget = anyVolumeExistsOnTarget(volumes);
 	const secrets = movePreviewSecrets(preview.data);
-	const secretTransferOffered = isSecretTransferOffered(machine, secrets);
+	const secretTransferOffered = isSecretTransferOffered(host, secrets);
 
 	// copied/moved close the dialog — the plain transport only; a migrating
 	// transfer narrates its outcomes in place below, and so does a plain
@@ -155,7 +151,7 @@ export function MoveQuadletDialog({
 		// migration switches the transport.
 		const { input, stream } = buildMoveInput(
 			{
-				targetMachineId: targetId,
+				targetHostId: targetId,
 				companions: companions.length > 0,
 				migratable,
 				anyExistsOnTarget,
@@ -186,19 +182,19 @@ export function MoveQuadletDialog({
 		<MoveQuadletReport
 			selection={selection}
 			quadletName={quadlet.name}
-			sourceName={machine.name}
+			sourceName={host.name}
 			targetName={targetName}
 		/>
 	) : null;
 
 	return (
 		<TransferDialog
-			machine={machine}
+			host={host}
 			transfer={transfer}
 			preview={preview}
 			noun="quadlet"
 			itemName={quadlet.name}
-			noTargetsMessage="No other machine you can write to."
+			noTargetsMessage="No other host you can write to."
 			isPending={moveQuadlet.isPending || moveStream.isRunning}
 			// A differing companion fails the transfer with 409 (issue 217), so
 			// it blocks confirm exactly like a collision; so does an
@@ -233,7 +229,7 @@ export function MoveQuadletDialog({
 					volumes={volumes}
 					differsCompanions={differsCompanions}
 					secrets={secrets}
-					sourceName={machine.name}
+					sourceName={host.name}
 					targetName={targetName}
 					transferCompanions={transferCompanions}
 					volumesAcknowledged={volumesAcknowledged}

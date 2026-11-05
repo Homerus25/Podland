@@ -111,7 +111,7 @@ func randomBytes(t *testing.T, n int) []byte {
 // entire wiring chain (DB → migrations → encryption → auth → repos →
 // connection manager + goroutine → sshexec service + cleanup goroutine →
 // services → handlers → middleware → router) is reachable without a real
-// Podman machine.
+// Podman host.
 func TestApp_New_BuildsAllWiring(t *testing.T) {
 	cfg := newTestConfig(t)
 
@@ -125,7 +125,7 @@ func TestApp_New_BuildsAllWiring(t *testing.T) {
 // TestApp_Handler_HealthRouteWorks verifies that Handler returns an
 // http.Handler wired exactly as today's main() wires it, by hitting the
 // /api/health endpoint (the only route that doesn't require auth or a live
-// Podman machine) through httptest.NewServer. If the wiring changes — e.g.
+// Podman host) through httptest.NewServer. If the wiring changes — e.g.
 // a middleware gets dropped — this test will fail.
 func TestApp_Handler_HealthRouteWorks(t *testing.T) {
 	cfg := newTestConfig(t)
@@ -196,8 +196,8 @@ func TestApp_Handler_SPARidesUnderAPI(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, apiMiss.StatusCode,
 		"unknown /api paths must stay API-shaped (404), never fall back to the SPA")
 
-	spa, err := http.Get(srv.URL + "/machines/xyz")
-	require.NoError(t, err, "GET /machines/xyz must connect")
+	spa, err := http.Get(srv.URL + "/hosts/xyz")
+	require.NoError(t, err, "GET /hosts/xyz must connect")
 	defer spa.Body.Close()
 	assert.Equal(t, http.StatusOK, spa.StatusCode,
 		"non-API client-side routes fall back to index.html with 200")
@@ -205,10 +205,10 @@ func TestApp_Handler_SPARidesUnderAPI(t *testing.T) {
 }
 
 // TestApp_Handler_ServeMuxCanonicalization pins the URL-shape promises of
-// the ServeMux router (issue #451): the slashless /api/machines serves (it
+// the ServeMux router (issue #451): the slashless /api/hosts serves (it
 // reaches the JWT middleware: 401, not a route miss), while the slashed
-// /api/machines/ — the one form that would otherwise reach
-// RequireMachineAccess with an empty {id} — answers the API's JSON 404
+// /api/hosts/ — the one form that would otherwise reach
+// RequireHostAccess with an empty {id} — answers the API's JSON 404
 // envelope (code NOT_FOUND), as does every other unknown /api path; none
 // of them ever falls back to the SPA shell.
 func TestApp_Handler_ServeMuxCanonicalization(t *testing.T) {
@@ -221,13 +221,13 @@ func TestApp_Handler_ServeMuxCanonicalization(t *testing.T) {
 	srv := httptest.NewServer(a.Handler())
 	t.Cleanup(srv.Close)
 
-	slashless, err := http.Get(srv.URL + "/api/machines")
-	require.NoError(t, err, "GET /api/machines must connect")
+	slashless, err := http.Get(srv.URL + "/api/hosts")
+	require.NoError(t, err, "GET /api/hosts must connect")
 	defer slashless.Body.Close()
 	assert.Equal(t, http.StatusUnauthorized, slashless.StatusCode,
 		"the slashless form serves: it must reach the JWT middleware (401), not miss the route (404)")
 
-	for _, target := range []string{"/api/machines/", "/api/nonexistent"} {
+	for _, target := range []string{"/api/hosts/", "/api/nonexistent"} {
 		resp, err := http.Get(srv.URL + target)
 		require.NoError(t, err, "GET %s must connect", target)
 		defer resp.Body.Close()
@@ -291,10 +291,10 @@ func TestApp_Close_ReleasesBackgroundGoroutines(t *testing.T) {
 }
 
 // TestApp_Handler_SecretsRouteIsProtected pins the 160-01 wiring: GET
-// /api/machines/{id}/secrets must exist behind the JWT middleware, so an
+// /api/hosts/{id}/secrets must exist behind the JWT middleware, so an
 // anonymous caller gets 401 (not 404). If the route is dropped or
 // registered outside the protected group, this fails. The deeper gates
-// (404 unknown machine / 403 no-access via RequireMachineAccess, which
+// (404 unknown host / 403 no-access via RequireHostAccess, which
 // runs only for authenticated callers) are covered by the domain-level
 // wiring tests in internal/domain/secrets.
 func TestApp_Handler_SecretsRouteIsProtected(t *testing.T) {
@@ -307,12 +307,12 @@ func TestApp_Handler_SecretsRouteIsProtected(t *testing.T) {
 	srv := httptest.NewServer(a.Handler())
 	t.Cleanup(srv.Close)
 
-	resp, err := http.Get(srv.URL + "/api/machines/some-machine/secrets")
-	require.NoError(t, err, "GET /api/machines/{id}/secrets must connect")
+	resp, err := http.Get(srv.URL + "/api/hosts/some-host/secrets")
+	require.NoError(t, err, "GET /api/hosts/{id}/secrets must connect")
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
-		"GET /api/machines/{id}/secrets must sit behind the JWT middleware (401, not 404)")
+		"GET /api/hosts/{id}/secrets must sit behind the JWT middleware (401, not 404)")
 }
 
 func TestApp_Handler_NetworksRouteIsProtected(t *testing.T) {
@@ -325,10 +325,10 @@ func TestApp_Handler_NetworksRouteIsProtected(t *testing.T) {
 	srv := httptest.NewServer(a.Handler())
 	t.Cleanup(srv.Close)
 
-	resp, err := http.Get(srv.URL + "/api/machines/some-machine/networks")
-	require.NoError(t, err, "GET /api/machines/{id}/networks must connect")
+	resp, err := http.Get(srv.URL + "/api/hosts/some-host/networks")
+	require.NoError(t, err, "GET /api/hosts/{id}/networks must connect")
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode,
-		"GET /api/machines/{id}/networks must sit behind the JWT middleware (401, not 404)")
+		"GET /api/hosts/{id}/networks must sit behind the JWT middleware (401, not 404)")
 }

@@ -7,7 +7,7 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, it, vi } from "vitest";
 import { errorResponse } from "@/test/errors";
 import {
-	machineFixture,
+	hostFixture,
 	quadletFixture,
 	quadletImportEntryFixture,
 	quadletImportResponseFixture,
@@ -31,7 +31,7 @@ function convertHandler(entries: QuadletImportEntry[]) {
 }
 
 function renderModal(onClose = vi.fn()) {
-	renderWithQuery(<ImportComposeModal machineId="m-1" onClose={onClose} />, {
+	renderWithQuery(<ImportComposeModal hostId="m-1" onClose={onClose} />, {
 		router: true,
 	});
 	return onClose;
@@ -50,7 +50,7 @@ describe("ImportComposeModal", () => {
 				bodies.push(await request.json());
 				return HttpResponse.json({ quadlets: [webEntry, dbdataEntry] });
 			}),
-			http.post("*/api/machines/m-1/quadlets/import", async ({ request }) => {
+			http.post("*/api/hosts/m-1/quadlets/import", async ({ request }) => {
 				bodies.push(await request.json());
 				return HttpResponse.json(
 					quadletImportResponseFixture({
@@ -166,7 +166,7 @@ describe("ImportComposeModal", () => {
 		let importCalls = 0;
 		server.use(
 			convertHandler([webEntry]),
-			http.post("*/api/machines/m-1/quadlets/import", () => {
+			http.post("*/api/hosts/m-1/quadlets/import", () => {
 				importCalls++;
 				return HttpResponse.json(quadletImportResponseFixture(), {
 					status: 201,
@@ -187,8 +187,8 @@ describe("ImportComposeModal", () => {
 	it("renders an install failure in the modal and stays in the preview phase", async () => {
 		server.use(
 			convertHandler([webEntry]),
-			http.post("*/api/machines/m-1/quadlets/import", () =>
-				errorResponse(404, "MACHINE_NOT_FOUND", "machine not found"),
+			http.post("*/api/hosts/m-1/quadlets/import", () =>
+				errorResponse(404, "HOST_NOT_FOUND", "host not found"),
 			),
 		);
 		renderModal();
@@ -199,8 +199,8 @@ describe("ImportComposeModal", () => {
 		await user.click(screen.getByTestId("install-quadlets-button"));
 
 		const error = await screen.findByTestId("import-install-error");
-		expect(error).toHaveTextContent("MACHINE_NOT_FOUND");
-		expect(error).toHaveTextContent("machine not found");
+		expect(error).toHaveTextContent("HOST_NOT_FOUND");
+		expect(error).toHaveTextContent("host not found");
 		// Still in the preview phase: the files render and install can retry.
 		expect(screen.getByTestId("import-preview-file-web")).toBeInTheDocument();
 		expect(screen.getByTestId("install-quadlets-button")).toBeEnabled();
@@ -208,12 +208,12 @@ describe("ImportComposeModal", () => {
 
 	it("starts clean when reopened — no leaked previous conversion", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/quadlets", () =>
+			http.get("*/api/hosts/m-1/quadlets", () =>
 				HttpResponse.json([quadletFixture()]),
 			),
 			convertHandler([webEntry]),
 		);
-		renderWithQuery(<QuadletList machine={machineFixture()} />, {
+		renderWithQuery(<QuadletList host={hostFixture()} />, {
 			router: true,
 		});
 		const user = userEvent.setup();
@@ -238,16 +238,16 @@ describe("ImportComposeModal", () => {
 	it("refreshes the quadlets list after a successful install", async () => {
 		let listCalls = 0;
 		server.use(
-			http.get("*/api/machines/m-1/quadlets", () => {
+			http.get("*/api/hosts/m-1/quadlets", () => {
 				listCalls++;
 				return HttpResponse.json([quadletFixture()]);
 			}),
 			convertHandler([webEntry]),
-			http.post("*/api/machines/m-1/quadlets/import", () =>
+			http.post("*/api/hosts/m-1/quadlets/import", () =>
 				HttpResponse.json(quadletImportResponseFixture(), { status: 201 }),
 			),
 		);
-		renderWithQuery(<QuadletList machine={machineFixture()} />, {
+		renderWithQuery(<QuadletList host={hostFixture()} />, {
 			router: true,
 		});
 		const user = userEvent.setup();

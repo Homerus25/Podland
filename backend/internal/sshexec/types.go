@@ -22,8 +22,8 @@ type ExecResult struct {
 	ExitCode int
 }
 
-// SSHExecInterface defines the ability to run a command on a remote machine
-// over SSH using that machine's stored credentials.
+// SSHExecInterface defines the ability to run a command on a remote host
+// over SSH using that host's stored credentials.
 //
 // This interface is intentionally SEPARATE from the podman connection seam
 // (internal/connections): the domain services depend on connections.Manager
@@ -31,15 +31,15 @@ type ExecResult struct {
 // is needed. The first consumer is the quadlet lifecycle service (070-06),
 // which runs `systemctl` over SSH.
 //
-// (It lives here rather than in a domain package because the machines tests
+// (It lives here rather than in a domain package because the hosts tests
 // already import internal/testutils and MockSSHExec needs to reference these
 // types; a domain home would create a testutils→domain→testutils import
 // cycle.)
 type SSHExecInterface interface {
-	Exec(ctx context.Context, machineID, userID, command string, opts ExecOptions) (ExecResult, error)
+	Exec(ctx context.Context, hostID, userID, command string, opts ExecOptions) (ExecResult, error)
 	// ExecStream is the streaming variant of Exec: it invokes onLine for
 	// each output line as it arrives, tagged with the stream it came from
 	// (OutputLine.Stream), while still returning the fully captured result
 	// so callers can interpret the exit code as with Exec.
-	ExecStream(ctx context.Context, machineID, userID, command string, opts ExecOptions, onLine func(OutputLine)) (ExecResult, error)
+	ExecStream(ctx context.Context, hostID, userID, command string, opts ExecOptions, onLine func(OutputLine)) (ExecResult, error)
 }

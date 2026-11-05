@@ -6,7 +6,7 @@ import { Route, Routes, useParams } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import {
 	containerFixture,
-	machineFixture,
+	hostFixture,
 	networkFixture,
 } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
@@ -19,13 +19,13 @@ import { server } from "@/test/server";
 // The navigation target: a stub standing in for the network detail page,
 // rendering the route params so the test pins the exact URL navigated to.
 function NetworkDetailStub() {
-	const { machineId, networkName } = useParams<{
-		machineId: string;
+	const { hostId, networkName } = useParams<{
+		hostId: string;
 		networkName: string;
 	}>();
 	return (
 		<div data-testid="network-detail-page">
-			{machineId}/{networkName}
+			{hostId}/{networkName}
 		</div>
 	);
 }
@@ -34,24 +34,24 @@ function renderNetworkList() {
 	renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId"
-				element={<NetworkList machine={machineFixture()} />}
+				path="/hosts/:hostId"
+				element={<NetworkList host={hostFixture()} />}
 			/>
 			<Route
-				path="/machines/:machineId/networks/:networkName"
+				path="/hosts/:hostId/networks/:networkName"
 				element={<NetworkDetailStub />}
 			/>
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1"] } },
 	);
 }
 
 function mockLists() {
 	return [
-		http.get("*/api/machines/m-1/networks", () =>
+		http.get("*/api/hosts/m-1/networks", () =>
 			HttpResponse.json([networkFixture()]),
 		),
-		http.get("*/api/machines/m-1/containers", () =>
+		http.get("*/api/hosts/m-1/containers", () =>
 			HttpResponse.json({
 				containers: [containerFixture()],
 				total: 1,

@@ -16,11 +16,11 @@ import (
 
 func importRequest(t *testing.T, body string) *http.Request {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/quadlets/import", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequest(http.MethodPost, "/api/hosts/host-1/quadlets/import", bytes.NewReader([]byte(body)))
 	ctx := contextutils.SetUserID(context.Background(), "user-1")
 	ctx = contextutils.SetRequestID(ctx, "test-request-id")
 	req = req.WithContext(ctx)
-	req.SetPathValue("id", "machine-1")
+	req.SetPathValue("id", "host-1")
 	return req
 }
 
@@ -70,7 +70,7 @@ func TestHandlerImport_EmptyQuadletsList(t *testing.T) {
 
 // TestHandlerImport_PartialFailure pins that a per-entry install failure is
 // data in the response (201 with a Failed entry), not a failed request — the
-// other entries still land on the machine.
+// other entries still land on the host.
 func TestHandlerImport_PartialFailure(t *testing.T) {
 	t.Parallel()
 

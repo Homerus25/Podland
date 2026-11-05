@@ -19,49 +19,49 @@ import (
 )
 
 // fakeAccessRepo is the function-field fake for the permission.PermissionGetter
-// seam — the access store the cross-machine copy/move gates the target
-// machine on. An unarmed lookup panics, so an unexpected gate check fails
+// seam — the access store the cross-host copy/move gates the target
+// host on. An unarmed lookup panics, so an unexpected gate check fails
 // the test loudly.
 type fakeAccessRepo struct {
-	getPermissionFn func(machineID, userID string) (string, error)
+	getPermissionFn func(hostID, userID string) (string, error)
 }
 
-func (f *fakeAccessRepo) GetPermission(machineID, userID string) (string, error) {
+func (f *fakeAccessRepo) GetPermission(hostID, userID string) (string, error) {
 	if f.getPermissionFn == nil {
 		panic("unexpected PermissionGetter.GetPermission call")
 	}
-	return f.getPermissionFn(machineID, userID)
+	return f.getPermissionFn(hostID, userID)
 }
 
-// allowTargetRead answers read on the target machine — the minimum the
+// allowTargetRead answers read on the target host — the minimum the
 // preview requires.
-func allowTargetRead(machineID, userID string) (string, error) {
-	if machineID == "machine-b" {
+func allowTargetRead(hostID, userID string) (string, error) {
+	if hostID == "host-b" {
 		return models.PermissionRead, nil
 	}
 	return models.PermissionAdmin, nil
 }
 
-// allowTargetWrite answers write on the target machine — the minimum the
+// allowTargetWrite answers write on the target host — the minimum the
 // transfer requires.
-func allowTargetWrite(machineID, userID string) (string, error) {
-	if machineID == "machine-b" {
+func allowTargetWrite(hostID, userID string) (string, error) {
+	if hostID == "host-b" {
 		return models.PermissionWrite, nil
 	}
 	return models.PermissionAdmin, nil
 }
 
-// newMoveTestService builds the service over per-machine fake engines (the
-// multi-lease shape the copy/move exercises), a source-machine usage fake,
+// newMoveTestService builds the service over per-host fake engines (the
+// multi-lease shape the copy/move exercises), a source-host usage fake,
 // and the given access store.
 func newMoveTestService(sourceEngine, targetEngine *fakeVolumeEngine, usage *fakeUsageEngine, access *fakeAccessRepo) *VolumeService {
 	return NewVolumeService(fakeEngineProvider{engines: map[string]VolumeEngine{
-		"machine-a": sourceEngine,
-		"machine-b": targetEngine,
+		"host-a": sourceEngine,
+		"host-b": targetEngine,
 	}}).
 		WithAccessRepo(access).
 		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]VolumeUsageEngine{
-			"machine-a": usage,
+			"host-a": usage,
 		}})
 }
 
@@ -95,7 +95,7 @@ func volumeInspectFixture(name string) *entities.VolumeInspectReport {
 	}}
 }
 
-// moveSourceFixture is the source machine's engine: the pgdata volume
+// moveSourceFixture is the source host's engine: the pgdata volume
 // exists and exports a small tar.
 func moveSourceFixture(t *testing.T) *fakeVolumeEngine {
 	payload := buildVolumeTar(t, map[string][]byte{"pgdata/PG_VERSION": []byte("17")})
@@ -113,7 +113,7 @@ func moveSourceFixture(t *testing.T) *fakeVolumeEngine {
 	}
 }
 
-// emptyTargetFixture is the target machine's engine: nothing exists yet,
+// emptyTargetFixture is the target host's engine: nothing exists yet,
 // creates succeed, imports consume.
 func emptyTargetFixture() *fakeVolumeEngine {
 	return &fakeVolumeEngine{
@@ -167,7 +167,7 @@ func TestVolumeService_MovePreview_ReportsFacts(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(t), emptyTargetFixture(), usage,
 		&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "pgdata", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "pgdata", "host-b")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -187,7 +187,7 @@ func TestVolumeService_MovePreview_Collision(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(t), target, idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "pgdata", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "pgdata", "host-b")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -201,7 +201,7 @@ func TestVolumeService_MovePreview_MissingSourceVolumeIs404(t *testing.T) {
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	_, err := service.MovePreview(context.Background(), "user", "machine-a", "gone", "machine-b")
+	_, err := service.MovePreview(context.Background(), "user", "host-a", "gone", "host-b")
 
 	require.Error(t, err)
 	assert.Equal(t, appErrors.ErrVolumeNotFound, err)
@@ -220,7 +220,7 @@ func TestVolumeService_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
 			return "", nil
 		}})
 
-	_, err := service.MovePreview(context.Background(), "user", "machine-a", "pgdata", "machine-b")
+	_, err := service.MovePreview(context.Background(), "user", "host-a", "pgdata", "host-b")
 
 	require.Error(t, err)
 	assert.Equal(t, appErrors.ErrAccessDenied, err)
@@ -230,7 +230,7 @@ func TestVolumeService_MovePreview_SourceUnreachableIsConnectionFailed(t *testin
 	service := NewVolumeService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}).
 		WithAccessRepo(&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	_, err := service.MovePreview(context.Background(), "user", "machine-a", "pgdata", "machine-b")
+	_, err := service.MovePreview(context.Background(), "user", "host-a", "pgdata", "host-b")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 }
@@ -255,16 +255,16 @@ func TestVolumeService_Move_CopyCreatesTargetAndCarriesData(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(t), target, usage,
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeCopy}, nil)
+	got, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeCopy}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, "pgdata", created, "the target volume carries the source's name")
 	assert.NotEmpty(t, imported, "the data crossed the splice")
 	assert.Equal(t, VolumeMoveStatusCopied, got.Status)
-	assert.Equal(t, "machine-a", got.SourceMachineID)
-	assert.Equal(t, "machine-b", got.TargetMachineID)
+	assert.Equal(t, "host-a", got.SourceHostID)
+	assert.Equal(t, "host-b", got.TargetHostID)
 	assert.Greater(t, got.Bytes, int64(0), "the envelope reports the bytes streamed")
 	assert.Empty(t, got.Error)
 }
@@ -280,8 +280,8 @@ func TestVolumeService_Move_CollisionIs409(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(t), target, idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	_, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeCopy}, nil)
+	_, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeCopy}, nil)
 
 	require.Error(t, err)
 	assert.Equal(t, appErrors.ErrVolumeAlreadyExists, err)
@@ -294,8 +294,8 @@ func TestVolumeService_Move_MissingSourceVolumeIs404(t *testing.T) {
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	_, err := service.Move(context.Background(), "user", "machine-a", "gone",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeCopy}, nil)
+	_, err := service.Move(context.Background(), "user", "host-a", "gone",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeCopy}, nil)
 
 	require.Error(t, err)
 	assert.Equal(t, appErrors.ErrVolumeNotFound, err)
@@ -313,8 +313,8 @@ func TestVolumeService_Move_TargetAccessDeniedIs403(t *testing.T) {
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	_, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeCopy}, nil)
+	_, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeCopy}, nil)
 
 	require.Error(t, err)
 	assert.Equal(t, appErrors.ErrAccessDenied, err)
@@ -324,8 +324,8 @@ func TestVolumeService_Move_SourceUnreachableIsConnectionFailed(t *testing.T) {
 	service := NewVolumeService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}).
 		WithAccessRepo(&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	_, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeCopy}, nil)
+	_, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeCopy}, nil)
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 }
@@ -347,8 +347,8 @@ func TestVolumeService_Move_ImportFailureRollsTargetBack(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(t), target, idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	_, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeCopy}, nil)
+	_, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeCopy}, nil)
 
 	require.Error(t, err)
 	assert.Equal(t, "pgdata", removed, "the half-populated target volume is removed")
@@ -372,17 +372,17 @@ func TestVolumeService_Move_BoundTripsAndRollsBack(t *testing.T) {
 		return nil
 	}
 	service := NewVolumeService(fakeEngineProvider{engines: map[string]VolumeEngine{
-		"machine-a": source,
-		"machine-b": target,
+		"host-a": source,
+		"host-b": target,
 	}}).
 		WithAccessRepo(&fakeAccessRepo{getPermissionFn: allowTargetWrite}).
 		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]VolumeUsageEngine{
-			"machine-a": idleUsageFixture(),
+			"host-a": idleUsageFixture(),
 		}}).
 		WithMaxVolumeUploadBytes(1 << 20)
 
-	_, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeCopy}, nil)
+	_, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeCopy}, nil)
 
 	require.Error(t, err)
 	appErr, ok := err.(*appErrors.AppError)
@@ -406,17 +406,17 @@ func TestVolumeService_Move_BoundWithFailedRollbackNamesBoth(t *testing.T) {
 		return errors.New("remove refused")
 	}
 	service := NewVolumeService(fakeEngineProvider{engines: map[string]VolumeEngine{
-		"machine-a": source,
-		"machine-b": target,
+		"host-a": source,
+		"host-b": target,
 	}}).
 		WithAccessRepo(&fakeAccessRepo{getPermissionFn: allowTargetWrite}).
 		WithUsageEngines(fakeUsageEngineProvider{engines: map[string]VolumeUsageEngine{
-			"machine-a": idleUsageFixture(),
+			"host-a": idleUsageFixture(),
 		}}).
 		WithMaxVolumeUploadBytes(1 << 20)
 
-	_, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeCopy}, nil)
+	_, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeCopy}, nil)
 
 	require.Error(t, err)
 	appErr, ok := err.(*appErrors.AppError)
@@ -454,8 +454,8 @@ func TestVolumeService_Move_CancelledContextRollsTargetBack(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(t), target, idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	_, err := service.Move(ctx, "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeCopy}, nil)
+	_, err := service.Move(ctx, "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeCopy}, nil)
 
 	require.Error(t, err)
 	assert.Equal(t, context.Canceled, err, "the cancellation rides bare — no narration wrapped")
@@ -483,8 +483,8 @@ func TestVolumeService_Move_MoveRemovesSourceAfterCopy(t *testing.T) {
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeMove}, nil)
+	got, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeMove}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -506,8 +506,8 @@ func TestVolumeService_Move_InUseSourceRefusesWithoutForce(t *testing.T) {
 	service := newMoveTestService(moveSourceFixture(t), target, usage,
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	_, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeMove}, nil)
+	_, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeMove}, nil)
 
 	require.Error(t, err)
 	assert.Equal(t, appErrors.ErrVolumeInUse, err)
@@ -522,8 +522,8 @@ func TestVolumeService_Move_InUseSourceForceProceeds(t *testing.T) {
 	service := newMoveTestService(movableSourceFixture(t), emptyTargetFixture(), usage,
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeMove, Force: true}, nil)
+	got, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeMove, Force: true}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -538,8 +538,8 @@ func TestVolumeService_Move_RemoveFailureIsPartial(t *testing.T) {
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeMove}, nil)
+	got, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeMove}, nil)
 
 	require.NoError(t, err, "a partial transfer is not a request failure")
 	require.NotNil(t, got)
@@ -564,8 +564,8 @@ func TestVolumeService_Move_InUseSourceRemovalIsPartial(t *testing.T) {
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeMove}, nil)
+	got, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeMove}, nil)
 
 	require.NoError(t, err, "a partial transfer is not a request failure")
 	require.NotNil(t, got)
@@ -585,8 +585,8 @@ func TestVolumeService_Move_VanishedSourceIsMoved(t *testing.T) {
 	service := newMoveTestService(source, emptyTargetFixture(), idleUsageFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "pgdata",
-		VolumeMoveRequest{TargetMachineID: "machine-b", Mode: VolumeMoveModeMove}, nil)
+	got, err := service.Move(context.Background(), "user", "host-a", "pgdata",
+		VolumeMoveRequest{TargetHostID: "host-b", Mode: VolumeMoveModeMove}, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, got)

@@ -6,7 +6,7 @@ import { HttpResponse, http } from "msw";
 import { Route, Routes, useParams } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import {
-	machineFixture,
+	hostFixture,
 	secretFixture,
 	secretMovePreviewFixture,
 } from "@/test/factories";
@@ -15,7 +15,7 @@ import { server } from "@/test/server";
 
 function mockSecrets(secrets: SecretSummary[]) {
 	server.use(
-		http.get("*/api/machines/m-1/secrets", () => HttpResponse.json(secrets)),
+		http.get("*/api/hosts/m-1/secrets", () => HttpResponse.json(secrets)),
 	);
 }
 
@@ -30,10 +30,10 @@ function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
 	return renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId"
+				path="/hosts/:hostId"
 				element={
 					<SecretList
-						machine={machineFixture({
+						host={hostFixture({
 							permission,
 							isOwner: permission === "admin",
 						})}
@@ -41,11 +41,11 @@ function renderSecretList(permission: "read" | "write" | "admin" = "admin") {
 				}
 			/>
 			<Route
-				path="/machines/:machineId/secrets/:secretId"
+				path="/hosts/:hostId/secrets/:secretId"
 				element={<SecretDetailStub />}
 			/>
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1"] } },
 	);
 }
 
@@ -99,10 +99,10 @@ describe("SecretList row navigation", () => {
 	it("does not navigate when the move/copy button is clicked", async () => {
 		mockSecrets([secretFixture()]);
 		server.use(
-			http.get("*/api/machines", () =>
-				HttpResponse.json([machineFixture({ id: "m-2", name: "staging-01" })]),
+			http.get("*/api/hosts", () =>
+				HttpResponse.json([hostFixture({ id: "m-2", name: "staging-01" })]),
 			),
-			http.get("*/api/machines/m-1/secrets/db-password/move-preview", () =>
+			http.get("*/api/hosts/m-1/secrets/db-password/move-preview", () =>
 				HttpResponse.json(secretMovePreviewFixture()),
 			),
 		);

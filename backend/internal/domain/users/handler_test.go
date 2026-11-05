@@ -252,7 +252,7 @@ func getUsersAs(t *testing.T, router http.Handler, authService *auth.AuthService
 
 // decodeUsersList decodes the response body as a bare JSON array of
 // user objects — the shape the envelope writes for list endpoints
-// (machines List is the precedent).
+// (hosts List is the precedent).
 func decodeUsersList(t *testing.T, w *httptest.ResponseRecorder) []map[string]any {
 	t.Helper()
 

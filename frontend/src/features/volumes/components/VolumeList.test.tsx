@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { useLocation } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-import { machineFixture, volumeFixture } from "@/test/factories";
+import { hostFixture, volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -20,7 +20,7 @@ const mockedDownload = vi.mocked(downloadFile);
 
 function mockVolumes(volumes: VolumeSummary[]) {
 	server.use(
-		http.get("*/api/machines/m-1/volumes", () => HttpResponse.json(volumes)),
+		http.get("*/api/hosts/m-1/volumes", () => HttpResponse.json(volumes)),
 	);
 }
 
@@ -35,9 +35,9 @@ function renderVolumeList(
 	return renderWithQuery(
 		<>
 			<LocationProbe />
-			<VolumeList machine={machineFixture({ permission })} />
+			<VolumeList host={hostFixture({ permission })} />
 		</>,
-		{ chakra: true, router: { initialEntries: ["/machines/m-1"] } },
+		{ chakra: true, router: { initialEntries: ["/hosts/m-1"] } },
 	);
 }
 
@@ -80,7 +80,7 @@ describe("VolumeList", () => {
 
 	it("shows a loading state before volumes arrive, with the toolbar still above it", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/volumes", async () => {
+			http.get("*/api/hosts/m-1/volumes", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
 				return HttpResponse.json([volumeFixture()]);
 			}),
@@ -100,15 +100,15 @@ describe("VolumeList", () => {
 		await user.click(await screen.findByTestId("volume-row"));
 
 		expect(screen.getByTestId("location").textContent).toBe(
-			"/machines/m-1/volumes/app-data",
+			"/hosts/m-1/volumes/app-data",
 		);
 	});
 
 	it("keeps the row's action buttons from triggering the navigation", async () => {
 		mockVolumes([volumeFixture()]);
-		// The machines endpoint for the move/copy dialog's target list.
+		// The hosts endpoint for the move/copy dialog's target list.
 		server.use(
-			http.get("*/api/machines", () => HttpResponse.json([machineFixture()])),
+			http.get("*/api/hosts", () => HttpResponse.json([hostFixture()])),
 		);
 		renderVolumeList();
 
@@ -120,7 +120,7 @@ describe("VolumeList", () => {
 			within(row).getByRole("button", { name: "Export app-data" }),
 		);
 		expect(mockedDownload).toHaveBeenCalledTimes(1);
-		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
 
 		// Populate — opens the populate dialog, not the detail page.
 		await user.click(
@@ -129,13 +129,13 @@ describe("VolumeList", () => {
 		expect(
 			await screen.findByTestId("confirm-populate-button"),
 		).toBeInTheDocument();
-		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
 
 		// Move/Copy — opens the transfer dialog, not the detail page.
 		await user.click(within(row).getByTestId("move-volume-button"));
 		expect(await screen.findByText(/move or copy/i)).toBeInTheDocument();
-		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
 
 		// Delete — opens the confirm dialog, not the detail page.
@@ -145,7 +145,7 @@ describe("VolumeList", () => {
 		expect(
 			await screen.findByTestId("confirm-delete-button"),
 		).toBeInTheDocument();
-		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
 	});
 
 	it("sorts rows when a column header is clicked", async () => {

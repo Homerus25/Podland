@@ -15,14 +15,14 @@ import (
 )
 
 // renameRequest serves POST
-// /api/machines/{id}/containers/{containerId}/rename through the handler
+// /api/hosts/{id}/containers/{containerId}/rename through the handler
 // with an authenticated test identity.
 func renameRequest(handler http.HandlerFunc, containerID, body string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/containers/" + containerID + "/rename",
+		Path:      "/api/hosts/test-host/containers/" + containerID + "/rename",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+		URLParams: map[string]string{"id": "test-host", "containerId": containerID},
 		Body:      strings.NewReader(body),
 	})
 }

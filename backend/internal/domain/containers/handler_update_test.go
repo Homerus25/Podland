@@ -16,14 +16,14 @@ import (
 )
 
 // updateRequest serves POST
-// /api/machines/{id}/containers/{containerId}/update through the handler
+// /api/hosts/{id}/containers/{containerId}/update through the handler
 // with an authenticated test identity.
 func updateRequest(handler http.HandlerFunc, containerID, body string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/containers/" + containerID + "/update",
+		Path:      "/api/hosts/test-host/containers/" + containerID + "/update",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+		URLParams: map[string]string{"id": "test-host", "containerId": containerID},
 		Body:      strings.NewReader(body),
 	})
 }

@@ -28,7 +28,7 @@ export interface QuadletMoveVolumeProgress {
 interface QuadletMoveStreamEvent {
 	operationId: string;
 	type: "volume" | "complete" | "error";
-	machineId: string;
+	hostId: string;
 	ref?: string;
 	podmanVolume?: string;
 	phase?: QuadletMoveVolumeProgress["phase"];
@@ -89,25 +89,25 @@ export interface UseQuadletMoveStreamResult {
 // endpoint, answered as an NDJSON operation because migrateVolumeData
 // switches the transport. The run/cancel lifecycle, reset-on-run, the
 // malformed-event and complete-without-envelope skips, the terminal
-// handling, and the both-machines invalidation are the shared transfer-hooks
+// handling, and the both-hosts invalidation are the shared transfer-hooks
 // module's (issue 273); this adapter keeps the quadlet domain — the event
 // vocabulary, shape guard, and first-seen-order progress fold — and supplies
 // the URL builder. The file-only path keeps riding the plain mutation — this
 // hook exists only for the checked checkbox.
 export function useQuadletMoveStream(
-	machineId: string,
+	hostId: string,
 ): UseQuadletMoveStreamResult {
 	const config = useMemo<
 		MoveStreamConfig<QuadletMoveStreamEvent, QuadletMoveVolumeProgress[]>
 	>(
 		() => ({
 			resource: "quadlets",
-			url: (quadletId) => moveQuadletStreamUrl(machineId, quadletId),
+			url: (quadletId) => moveQuadletStreamUrl(hostId, quadletId),
 			isEvent: isQuadletMoveStreamEvent,
 			foldProgress,
 			initialProgress: [],
 		}),
-		[machineId],
+		[hostId],
 	);
 	return useMoveStream<
 		QuadletMoveStreamEvent,

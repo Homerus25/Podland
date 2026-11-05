@@ -10,7 +10,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
 	{ label: "Dashboard", to: "/", end: true },
-	{ label: "Machines", to: "/machines" },
+	{ label: "Hosts", to: "/hosts" },
 ];
 
 // The users admin surface exists for admins only, so its nav entry

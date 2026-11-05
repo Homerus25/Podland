@@ -28,7 +28,7 @@ func secretTransferFailed(name string, err error) error {
 // transferSecrets runs the secrets phase (issue 215, §19): one outcome per
 // `Secret=` reference in the content, in file order, deduplicated by
 // resolved name (first reference wins). Two connection leases stand open
-// at once — the reveal reads the source machine's store while the create
+// at once — the reveal reads the source host's store while the create
 // writes the target's — so the nested WithEngine is deliberate, the same
 // arrangement the volume data phase uses.
 //
@@ -46,12 +46,12 @@ func secretTransferFailed(name string, err error) error {
 //
 // Any other failure fails the whole phase: nothing has been installed
 // yet, the caller returns the error and the transfer stays a no-op on
-// both machines' quadlet sets. Secrets delivered earlier in the phase
+// both hosts' quadlet sets. Secrets delivered earlier in the phase
 // stay on the target — inert, skipped on re-run by the same-name rule.
-func (s *QuadletTransferService) transferSecrets(ctx context.Context, userID, sourceMachineID, targetMachineID, content string) ([]QuadletMoveSecretOutcome, error) {
+func (s *QuadletTransferService) transferSecrets(ctx context.Context, userID, sourceHostID, targetHostID, content string) ([]QuadletMoveSecretOutcome, error) {
 	outcomes := []QuadletMoveSecretOutcome{}
-	err := s.secretEngines.WithEngine(ctx, userID, sourceMachineID, "quadlets.MoveSecretsSource", func(src moveSecretEngine) error {
-		return s.secretEngines.WithEngine(ctx, userID, targetMachineID, "quadlets.MoveSecretsTarget", func(tgt moveSecretEngine) error {
+	err := s.secretEngines.WithEngine(ctx, userID, sourceHostID, "quadlets.MoveSecretsSource", func(src moveSecretEngine) error {
+		return s.secretEngines.WithEngine(ctx, userID, targetHostID, "quadlets.MoveSecretsTarget", func(tgt moveSecretEngine) error {
 			refs := make([]transfer.SecretRef, 0)
 			for _, entry := range parseQuadletSecrets(content) {
 				refs = append(refs, transfer.SecretRef{
@@ -77,8 +77,8 @@ func (s *QuadletTransferService) transferSecrets(ctx context.Context, userID, so
 				// where, never the value itself (the reveal log's shape).
 				slog.InfoContext(ctx, "secret transferred",
 					slog.String("userID", userID),
-					slog.String("sourceMachineID", sourceMachineID),
-					slog.String("targetMachineID", targetMachineID),
+					slog.String("sourceHostID", sourceHostID),
+					slog.String("targetHostID", targetHostID),
 					slog.String("secretName", outcome.Name))
 			}
 			if err != nil {

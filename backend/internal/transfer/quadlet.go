@@ -86,7 +86,7 @@ func ParseQuadletVolumes(content string) []QuadletVolumeRef {
 
 // QuadletVolumeCandidate applies the companion discovery rule to one
 // parsed volume source: a source ending in ".volume" with no path
-// separator references the same-named quadlet FILE on the same machine —
+// separator references the same-named quadlet FILE on the same host —
 // podman resolves exactly the suffix form (the quadlet-generated volume
 // is systemd-<name> unless VolumeName= overrides), so bare names never
 // match and host paths are hostPath references, not quadlet references.
@@ -101,7 +101,7 @@ func QuadletVolumeCandidate(source string) string {
 }
 
 // ResolveQuadletVolumeName maps one `Volume=` source to the podman volume
-// it names. contents carries exactly the machine's quadlet files that
+// it names. contents carries exactly the host's quadlet files that
 // exist and printed — the caller's one fetch per lease (the companion
 // set, or every printable quadlet): membership IS the existence test, a
 // file missing from the map — absent, or listed but unprintable

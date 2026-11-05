@@ -24,14 +24,14 @@ type AutoUpdateEvent = Record<string, unknown> & {
 };
 
 function logEvent(line: string, stream = "stdout"): AutoUpdateEvent {
-	return { operationId: "op-1", type: "log", stream, line, machineId: "m-1" };
+	return { operationId: "op-1", type: "log", stream, line, hostId: "m-1" };
 }
 
 function report(overrides: Record<string, unknown> = {}): AutoUpdateEvent {
 	return {
 		operationId: "op-1",
 		type: "complete",
-		machineId: "m-1",
+		hostId: "m-1",
 		report: {
 			containers: [],
 			overall: "completed",
@@ -45,26 +45,26 @@ function errorEvent(code: string, message: string): AutoUpdateEvent {
 	return {
 		operationId: "op-1",
 		type: "error",
-		machineId: "m-1",
+		hostId: "m-1",
 		error: { code, message },
 	};
 }
 
 function planEvent(entries: Record<string, unknown>[]): AutoUpdateEvent {
-	return { operationId: "op-1", type: "plan", machineId: "m-1", plan: entries };
+	return { operationId: "op-1", type: "plan", hostId: "m-1", plan: entries };
 }
 
 function pullingEvent(unit: string, image?: string): AutoUpdateEvent {
 	return {
 		operationId: "op-1",
 		type: "pulling",
-		machineId: "m-1",
+		hostId: "m-1",
 		unit,
 		...(image !== undefined ? { image } : {}),
 	};
 }
 
-const autoUpdateUrl = "*/api/machines/:machineId/quadlets/auto-update";
+const autoUpdateUrl = "*/api/hosts/:hostId/quadlets/auto-update";
 
 let requests: Request[] = [];
 
@@ -107,7 +107,7 @@ describe("useQuadletAutoUpdate", () => {
 		expect(requests).toHaveLength(1);
 		expect(requests[0].method).toBe("POST");
 		expect(new URL(requests[0].url).pathname).toBe(
-			"/api/machines/m-1/quadlets/auto-update",
+			"/api/hosts/m-1/quadlets/auto-update",
 		);
 		expect(new URL(requests[0].url).searchParams.get("dryRun")).toBe("true");
 		expect(new URL(requests[0].url).searchParams.has("filter")).toBe(false);
@@ -413,8 +413,8 @@ describe("useQuadletAutoUpdate", () => {
 				// A plan event whose plan is not an array, and a pulling event
 				// without a string unit: both must be skipped, not crash the
 				// fold or poison the row list.
-				{ operationId: "op-1", type: "plan", machineId: "m-1", plan: "nope" },
-				{ operationId: "op-1", type: "pulling", machineId: "m-1", unit: 42 },
+				{ operationId: "op-1", type: "plan", hostId: "m-1", plan: "nope" },
+				{ operationId: "op-1", type: "pulling", hostId: "m-1", unit: 42 },
 				planEvent([{ unit: "web.service" }, { unit: 7 }]),
 				report(),
 			]),
@@ -546,7 +546,7 @@ describe("useQuadletAutoUpdate", () => {
 
 	it("surfaces a terminal error event as a connection error, not a report", async () => {
 		mockAutoUpdate(() =>
-			streamResponse([errorEvent("SSH_FAILED", "Machine unreachable")]),
+			streamResponse([errorEvent("SSH_FAILED", "Host unreachable")]),
 		);
 		const { result } = renderAutoUpdateHook();
 
@@ -557,7 +557,7 @@ describe("useQuadletAutoUpdate", () => {
 		await waitFor(() => expect(result.current.isRunning).toBe(false));
 		expect(result.current.connectionError).toEqual({
 			code: "SSH_FAILED",
-			message: "Machine unreachable",
+			message: "Host unreachable",
 		});
 		expect(result.current.report).toBeNull();
 	});

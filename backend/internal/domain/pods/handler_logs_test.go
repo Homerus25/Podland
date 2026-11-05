@@ -14,7 +14,7 @@ import (
 )
 
 // logsRequest serves GET
-// /api/machines/{id}/pods/{podId}/logs{query} through the handler with
+// /api/hosts/{id}/pods/{podId}/logs{query} through the handler with
 // an authenticated test identity.
 func logsRequest(handler http.HandlerFunc, podID, query string) *httptest.ResponseRecorder {
 	return logsRequestWithBase(handler, context.Background(), podID, query)
@@ -25,9 +25,9 @@ func logsRequest(handler http.HandlerFunc, podID, query string) *httptest.Respon
 func logsRequestWithBase(handler http.HandlerFunc, base context.Context, podID, query string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/pods/" + podID + "/logs" + query,
+		Path:      "/api/hosts/test-host/pods/" + podID + "/logs" + query,
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "podId": podID},
+		URLParams: map[string]string{"id": "test-host", "podId": podID},
 		Context:   base,
 	})
 }

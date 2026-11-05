@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { containerFixture, machineFixture } from "@/test/factories";
+import { containerFixture, hostFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -33,7 +33,7 @@ function resetCounters() {
 }
 
 function containersHandler(containers: () => ContainerSummary[]) {
-	return http.get("*/api/machines/m-1/containers", () =>
+	return http.get("*/api/hosts/m-1/containers", () =>
 		HttpResponse.json({
 			containers: containers(),
 			total: containers().length,
@@ -43,7 +43,7 @@ function containersHandler(containers: () => ContainerSummary[]) {
 }
 
 function deleteHandler(onSuccess?: () => void) {
-	return http.delete("*/api/machines/m-1/containers/*", ({ request }) => {
+	return http.delete("*/api/hosts/m-1/containers/*", ({ request }) => {
 		deleteRequests.count++;
 		deleteRequests.method = request.method;
 		const url = new URL(request.url);
@@ -55,7 +55,7 @@ function deleteHandler(onSuccess?: () => void) {
 }
 
 function renderContainerList() {
-	renderWithQuery(<ContainerList machine={machineFixture()} />, {
+	renderWithQuery(<ContainerList host={hostFixture()} />, {
 		router: true,
 	});
 }
@@ -96,7 +96,7 @@ describe("ContainerList delete", () => {
 
 		await waitFor(() => expect(deleteRequests.count).toBe(1));
 		expect(deleteRequests.method).toBe("DELETE");
-		expect(deleteRequests.pathname).toBe("/api/machines/m-1/containers/c-1");
+		expect(deleteRequests.pathname).toBe("/api/hosts/m-1/containers/c-1");
 		expect(deleteRequests.search).toBe("");
 		expect(await screen.findByText("survivor")).toBeInTheDocument();
 		await waitFor(() =>
@@ -108,7 +108,7 @@ describe("ContainerList delete", () => {
 		resetCounters();
 		server.use(
 			containersHandler(() => [first]),
-			http.delete("*/api/machines/m-1/containers/*", () =>
+			http.delete("*/api/hosts/m-1/containers/*", () =>
 				errorResponse(
 					409,
 					"CONTAINER_RUNNING",

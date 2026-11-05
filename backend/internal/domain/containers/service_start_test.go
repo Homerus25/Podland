@@ -32,7 +32,7 @@ func TestContainerService_Start_ResolvesContainerName(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Start(context.Background(), "user", "machine", "container-123")
+	got, err := service.Start(context.Background(), "user", "host", "container-123")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -62,7 +62,7 @@ func TestContainerService_Start_AlreadyRunningAnswers400(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Start(context.Background(), "user", "machine", "container-123")
+		got, err := service.Start(context.Background(), "user", "host", "container-123")
 
 		require.ErrorIs(t, err, appErrors.ErrContainerAlreadyRunning)
 		assert.Nil(t, got)
@@ -81,7 +81,7 @@ func TestContainerService_Start_AlreadyRunningAnswers400(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Start(context.Background(), "user", "machine", "container-123")
+		got, err := service.Start(context.Background(), "user", "host", "container-123")
 
 		require.ErrorIs(t, err, appErrors.ErrContainerAlreadyRunning)
 		assert.Nil(t, got)
@@ -99,7 +99,7 @@ func TestContainerService_Start_MapsNotFoundTo404(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Start(context.Background(), "user", "machine", "container-123")
+		got, err := service.Start(context.Background(), "user", "host", "container-123")
 
 		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 		assert.Nil(t, got)
@@ -115,7 +115,7 @@ func TestContainerService_Start_MapsNotFoundTo404(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Start(context.Background(), "user", "machine", "container-123")
+		got, err := service.Start(context.Background(), "user", "host", "container-123")
 
 		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 		assert.Nil(t, got)
@@ -128,7 +128,7 @@ func TestContainerService_Start_MapsNotFoundTo404(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Start(context.Background(), "user", "machine", "container-123")
+		got, err := service.Start(context.Background(), "user", "host", "container-123")
 
 		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 		assert.Nil(t, got)
@@ -142,7 +142,7 @@ func TestContainerService_Start_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Start(context.Background(), "user", "machine", "container-123")
+	got, err := service.Start(context.Background(), "user", "host", "container-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)

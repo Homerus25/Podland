@@ -8,12 +8,12 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
-// PodEngine is the pods domain's view of one machine's podman: the exact
+// PodEngine is the pods domain's view of one host's podman: the exact
 // set of pod operations the service performs, in domain vocabulary
 // (single names, plain flags) and without a context parameter — the
 // connection context lives only inside the production adapter below.
 type PodEngine interface {
-	// List returns every pod podman reports on the machine.
+	// List returns every pod podman reports on the host.
 	List(opts entities.PodPSOptions) ([]*entities.ListPodsReport, error)
 	// Create creates a pod from the spec and reports its ID.
 	Create(spec entities.PodSpec) (*entities.PodCreateReport, error)
@@ -44,11 +44,11 @@ type PodEngine interface {
 }
 
 // PodEngineProvider is the pods domain's slice of the connection seam:
-// it hands a closure one machine's PodEngine. It delegates to
+// it hands a closure one host's PodEngine. It delegates to
 // connections.Manager.WithConnection, which owns acquisition, the
 // warn-and-502-sentinel failure contract, and the op tag.
 type PodEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e PodEngine) error) error
+	WithEngine(ctx context.Context, userID, hostID, op string, fn func(e PodEngine) error) error
 }
 
 // NewPodEngineProvider returns the production provider: it wraps the
@@ -64,8 +64,8 @@ type connectionEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e PodEngine) error) error {
-	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+func (p connectionEngines) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e PodEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, hostID, op, func(connCtx context.Context) error {
 		return fn(&podmanPodEngine{ctx: connCtx})
 	})
 }

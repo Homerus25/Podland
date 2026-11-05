@@ -1,6 +1,6 @@
-import { api, machineApiPath } from "@shared/utils/api";
+import { api, hostApiPath } from "@shared/utils/api";
 
-// Secret as returned by GET /api/machines/{id}/secrets
+// Secret as returned by GET /api/hosts/{id}/secrets
 // (backend/internal/domain/secrets/dto.go SecretListResponse). The backend
 // deliberately omits the value: it only ever travels in the admin-only
 // reveal path (GET .../secrets/{id}?reveal=true), which this type does not
@@ -16,14 +16,14 @@ export interface SecretSummary {
 	labels?: Record<string, string>;
 }
 
-export async function listSecrets(machineId: string): Promise<SecretSummary[]> {
+export async function listSecrets(hostId: string): Promise<SecretSummary[]> {
 	const response = await api.get<SecretSummary[]>(
-		machineApiPath(machineId, "secrets"),
+		hostApiPath(hostId, "secrets"),
 	);
 	return response.data;
 }
 
-// Response of GET /api/machines/{id}/secrets/{secretId}
+// Response of GET /api/hosts/{id}/secrets/{secretId}
 // (backend SecretInspectResponse). secretData is present ONLY when the
 // request carried ?reveal=true and the caller is admin; the backend omits
 // the field entirely otherwise.
@@ -33,33 +33,33 @@ export interface SecretInspect extends SecretSummary {
 }
 
 export async function getSecret(
-	machineId: string,
+	hostId: string,
 	secretId: string,
 	reveal = false,
 ): Promise<SecretInspect> {
 	const response = await api.get<SecretInspect>(
-		machineApiPath(machineId, "secrets", secretId),
+		hostApiPath(hostId, "secrets", secretId),
 		{ params: reveal ? { reveal: "true" } : undefined },
 	);
 	return response.data;
 }
 
-// GET /api/machines/{id}/secrets/{secretId}/inspect -> 200 with the raw
+// GET /api/hosts/{id}/secrets/{secretId}/inspect -> 200 with the raw
 // podman inspect report as the top-level body. The report is deliberately
 // untyped on the client: no DTO is invented for it. Distinct from getSecret
 // above: this endpoint never carries the reveal param, so the value never
 // reaches the client through it.
 export async function inspectSecret(
-	machineId: string,
+	hostId: string,
 	secretId: string,
 ): Promise<Record<string, unknown>> {
 	const response = await api.get<Record<string, unknown>>(
-		machineApiPath(machineId, "secrets", secretId, "inspect"),
+		hostApiPath(hostId, "secrets", secretId, "inspect"),
 	);
 	return response.data;
 }
 
-// Body of POST /api/machines/{id}/secrets
+// Body of POST /api/hosts/{id}/secrets
 // (backend/internal/domain/secrets/dto.go SecretCreateRequest). The backend
 // trims the name; the value must arrive byte-identical — meaningful
 // whitespace is the whole point of the no-trim rule.
@@ -68,34 +68,34 @@ export interface CreateSecretInput {
 	value: string;
 }
 
-// Response of POST /api/machines/{id}/secrets -> 201
+// Response of POST /api/hosts/{id}/secrets -> 201
 // (backend SecretCreateResponse: entities.SecretCreateReport's ID).
 export interface SecretCreated {
 	id: string;
 }
 
 export async function createSecret(
-	machineId: string,
+	hostId: string,
 	input: CreateSecretInput,
 ): Promise<SecretCreated> {
 	const response = await api.post<SecretCreated>(
-		machineApiPath(machineId, "secrets"),
+		hostApiPath(hostId, "secrets"),
 		input,
 	);
 	return response.data;
 }
 
-// DELETE /api/machines/{id}/secrets/{secretId} -> 204. The list DTO's name
+// DELETE /api/hosts/{id}/secrets/{secretId} -> 204. The list DTO's name
 // is the natural row key, so the secret is addressed by name. The backend
 // rejects deletion with 409 SECRET_IN_USE when a container references it.
 export async function deleteSecret(
-	machineId: string,
+	hostId: string,
 	secretId: string,
 ): Promise<void> {
-	await api.delete(machineApiPath(machineId, "secrets", secretId));
+	await api.delete(hostApiPath(hostId, "secrets", secretId));
 }
 
-// Mode of POST /api/machines/{id}/secrets/{secretId}/move
+// Mode of POST /api/hosts/{id}/secrets/{secretId}/move
 // (backend/internal/domain/secrets/dto.go SecretMoveMode*): "copy" reveals
 // the value on the source (admin) and creates the secret on the target;
 // "move" additionally removes the source secret once the target holds it.
@@ -103,10 +103,10 @@ export type SecretMoveMode = "copy" | "move";
 
 // Body of the secret transfer endpoint
 // (backend/internal/domain/secrets/dto.go SecretMoveRequest). The name is
-// preserved on both machines; there is no rename and no overwrite flag —
+// preserved on both hosts; there is no rename and no overwrite flag —
 // a same-named target secret refuses the transfer with 409.
 export interface SecretMoveInput {
-	targetMachineId: string;
+	targetHostId: string;
 	mode: SecretMoveMode;
 }
 
@@ -114,10 +114,10 @@ export interface SecretMoveInput {
 // (backend/internal/domain/secrets/dto.go SecretMoveStatus*): "copied" for
 // a completed copy, "moved" for a completed move, "partial" when the target
 // install succeeded but the source removal failed — the secret then exists
-// on both machines.
+// on both hosts.
 export type SecretMoveStatus = "copied" | "moved" | "partial";
 
-// Response of POST /api/machines/{id}/secrets/{secretId}/move
+// Response of POST /api/hosts/{id}/secrets/{secretId}/move
 // (backend/internal/domain/secrets/dto.go SecretMoveResponse), a plain
 // JSON envelope — secret values are small, the NDJSON transport stays a
 // volume concern. error is the removal-failure detail, populated only when
@@ -125,23 +125,23 @@ export type SecretMoveStatus = "copied" | "moved" | "partial";
 export interface SecretMoveResult {
 	name: string;
 	status: SecretMoveStatus;
-	sourceMachineId: string;
-	targetMachineId: string;
+	sourceHostId: string;
+	targetHostId: string;
 	error?: string;
 }
 
-// One quadlet file on the source machine whose `Secret=` lines resolve to
+// One quadlet file on the source host whose `Secret=` lines resolve to
 // the secret (backend/internal/domain/secrets/dto.go
 // SecretMoveQuadletRef) — the preview's warning, never a block.
 export interface SecretMoveQuadletRef {
 	name: string;
 }
 
-// Response of GET /api/machines/{id}/secrets/{secretId}/move-preview
+// Response of GET /api/hosts/{id}/secrets/{secretId}/move-preview
 // (backend/internal/domain/secrets/dto.go SecretMovePreviewResponse): the
 // dialog's facts. collision: the target already holds a same-named secret
 // (the transfer refuses, never overwrites). referencingQuadlets: the
-// source machine's quadlet files referencing the secret — a warning in
+// source host's quadlet files referencing the secret — a warning in
 // move mode, moving breaks them.
 export interface SecretMovePreview {
 	collision: boolean;
@@ -149,27 +149,27 @@ export interface SecretMovePreview {
 }
 
 export async function getSecretMovePreview(
-	machineId: string,
+	hostId: string,
 	secretId: string,
-	targetMachineId: string,
+	targetHostId: string,
 ): Promise<SecretMovePreview> {
 	const response = await api.get<SecretMovePreview>(
-		machineApiPath(machineId, "secrets", secretId, "move-preview"),
-		{ params: { targetMachineId } },
+		hostApiPath(hostId, "secrets", secretId, "move-preview"),
+		{ params: { targetHostId } },
 	);
 	return response.data;
 }
 
-// POST /api/machines/{id}/secrets/{secretId}/move -> 200 with the plain
+// POST /api/hosts/{id}/secrets/{secretId}/move -> 200 with the plain
 // JSON transfer envelope. The secret is addressed by name, the row's key.
 // A same-named target secret surfaces as 409 SECRET_ALREADY_EXISTS.
 export async function moveSecret(
-	machineId: string,
+	hostId: string,
 	secretId: string,
 	input: SecretMoveInput,
 ): Promise<SecretMoveResult> {
 	const response = await api.post<SecretMoveResult>(
-		machineApiPath(machineId, "secrets", secretId, "move"),
+		hostApiPath(hostId, "secrets", secretId, "move"),
 		input,
 	);
 	return response.data;

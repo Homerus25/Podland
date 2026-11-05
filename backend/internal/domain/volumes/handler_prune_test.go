@@ -12,14 +12,14 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
-// pruneRequest serves POST /api/machines/{id}/volumes/prune through
+// pruneRequest serves POST /api/hosts/{id}/volumes/prune through
 // the handler with an authenticated test identity.
 func pruneRequest(prune http.HandlerFunc) *httptest.ResponseRecorder {
 	return testutils.Perform(prune, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/volumes/prune",
+		Path:      "/api/hosts/test-host/volumes/prune",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 }
 

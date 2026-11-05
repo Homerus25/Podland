@@ -16,7 +16,7 @@ import (
 // Test_Integration_Quadlets_Logs is the quadlet logs vertical slice for the
 // real-podman integration suite (PRD 080-10). It proves the quadlet→managed
 // container resolution plus the two log delivery modes of
-// GET /api/machines/{id}/quadlets/{quadletId}/logs:
+// GET /api/hosts/{id}/quadlets/{quadletId}/logs:
 //
 //	non-streaming (follow=false, default) → 200 {id, logs} multiline string
 //	streaming     (follow=true)            → NDJSON {timestamp, level, message} lines
@@ -35,7 +35,7 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerQuadletsSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// The logs path resolves the managed container through podman's
 	// QuadletList over the SSH tunnel — same transport preconditions as
@@ -46,7 +46,7 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 	// Quadlet start does not auto-pull; busybox must pre-exist.
 	ensureBusyboxImage(t)
 
-	// Run-scoped name: file on the remote machine becomes
+	// Run-scoped name: file on the remote host becomes
 	// `<name>.container` and the systemd unit `<name>.service` (both
 	// derived from the file name, unchanged by the content). The spawned
 	// container is named by the content's ContainerName — also run-scoped
@@ -61,23 +61,23 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 	// The CLI rm targets the EXPLICIT container name, like the lifecycle
 	// explicit-name slice (removeNamedContainer, not removeSpawnedContainer).
 	t.Cleanup(func() {
-		forceDeleteQuadlet(t, machineID, quadletID)
+		forceDeleteQuadlet(t, hostID, quadletID)
 		removeNamedContainer(t, explicitContainerName)
 	})
 
 	// --- Setup: create + start the logging quadlet -------------------
-	createQuadlet(t, machineID, quadletCreateBody{
+	createQuadlet(t, hostID, quadletCreateBody{
 		Name:     quadletName,
 		Resource: "container",
 		Content:  explicitNameLoggingQuadletContent(explicitContainerName),
 	})
-	startQuadlet(t, machineID, quadletID)
-	waitForQuadletRunning(t, machineID, quadletID,
+	startQuadlet(t, hostID, quadletID)
+	waitForQuadletRunning(t, hostID, quadletID,
 		"logs slice setup: quadlet must be running to have a managed container")
 
 	// --- AC: non-streaming GET .../logs returns 200 {id, logs} --------
 	t.Run("NonStreamingReturnsLogsWithId", func(t *testing.T) {
-		logs := waitForQuadletLogOutput(t, machineID, quadletID)
+		logs := waitForQuadletLogOutput(t, hostID, quadletID)
 		require.Equal(t, quadletID, logs.ID,
 			"logs response id must echo the quadlet id from the URL path")
 		require.Contains(t, logs.Logs, "hi",
@@ -88,11 +88,11 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 	t.Run("SinceAndTailParamsAccepted", func(t *testing.T) {
 		// since one hour ago: everything the container emitted qualifies.
 		since := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
-		all := getQuadletLogs(t, machineID, quadletID, "since="+url.QueryEscape(since))
+		all := getQuadletLogs(t, hostID, quadletID, "since="+url.QueryEscape(since))
 		require.Contains(t, all.Logs, "hi", "logs with since=<1h ago> must include the recipe's output")
 
 		// tail=1: podman keeps only the most recent line.
-		last := getQuadletLogs(t, machineID, quadletID, "tail=1")
+		last := getQuadletLogs(t, hostID, quadletID, "tail=1")
 		require.Equal(t, 1, len(strings.Split(strings.TrimSuffix(last.Logs, "\n"), "\n")),
 			"tail=1 must return exactly one log line. got: %q", last.Logs)
 		require.Equal(t, "hi", strings.TrimSuffix(last.Logs, "\n"),
@@ -101,7 +101,7 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 
 	// --- AC: follow=true streams NDJSON {timestamp, level, message} ----
 	t.Run("StreamingFollowReturnsNDJSONEvents", func(t *testing.T) {
-		resp, cancel := openQuadletLogStream(t, machineID, quadletID)
+		resp, cancel := openQuadletLogStream(t, hostID, quadletID)
 		defer cancel()
 		defer resp.Body.Close()
 
@@ -128,7 +128,7 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 
 	// --- AC: client disconnect during follow=true cancels the stream ---
 	t.Run("ClientDisconnectCancelsFollowStream", func(t *testing.T) {
-		resp, cancel := openQuadletLogStream(t, machineID, quadletID)
+		resp, cancel := openQuadletLogStream(t, hostID, quadletID)
 		defer cancel()
 
 		// Prove the stream is live before disconnecting.
@@ -139,7 +139,7 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 		// Disconnect: cancel the request context. Server-side the request
 		// context cancels, the handler emits its OPERATION_CANCELLED event
 		// to the dead connection, and GetLogsWithStream must return so the
-		// machine connection is released. That event is written to a
+		// host connection is released. That event is written to a
 		// connection the client has already dropped, so it is not directly
 		// observable from here — the behavioral proof is that reading the
 		// stream terminates promptly and the logs path stays fully usable
@@ -149,12 +149,12 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 			"reading a canceled follow stream must terminate promptly, not hang")
 		resp.Body.Close()
 
-		resp2, cancel2 := openQuadletLogStream(t, machineID, quadletID)
+		resp2, cancel2 := openQuadletLogStream(t, hostID, quadletID)
 		defer cancel2()
 		scanner2 := bufio.NewScanner(resp2.Body)
 		require.Truef(t, scanner2.Scan(),
 			"a new follow stream must work right after the disconnect — "+
-				"the canceled stream must have released the machine connection (err: %v)",
+				"the canceled stream must have released the host connection (err: %v)",
 			scanner2.Err())
 		cancel2()
 		resp2.Body.Close()
@@ -163,7 +163,7 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 	// --- AC: logs on a missing quadlet returns 404 QUADLET_NOT_FOUND ---
 	t.Run("MissingQuadletReturns404", func(t *testing.T) {
 		missing := "it-" + suite.RunID + "-missing.container"
-		status, raw := getQuadletLogsRaw(t, machineID, missing, "")
+		status, raw := getQuadletLogsRaw(t, hostID, missing, "")
 		requireQuadletLogs404(t, status, raw, "logs on a missing quadlet")
 	})
 
@@ -174,12 +174,12 @@ func Test_Integration_Quadlets_Logs_ExplicitName(t *testing.T) {
 	// exist" case. Runs last: it leaves the quadlet stopped (cleanup
 	// force-deletes it either way).
 	t.Run("StoppedQuadletManagedContainerGoneReturns404", func(t *testing.T) {
-		quadletLifecycleAction(t, machineID, quadletID, "stop",
+		quadletLifecycleAction(t, hostID, quadletID, "stop",
 			url.Values{"force": {"true"}})
-		waitForQuadletNotRunning(t, machineID, quadletID,
+		waitForQuadletNotRunning(t, hostID, quadletID,
 			"stop must transition the quadlet out of running before the logs 404 check")
 
-		status, raw := getQuadletLogsRaw(t, machineID, quadletID, "")
+		status, raw := getQuadletLogsRaw(t, hostID, quadletID, "")
 		requireQuadletLogs404(t, status, raw, "logs on a quadlet without a managed container")
 	})
 }

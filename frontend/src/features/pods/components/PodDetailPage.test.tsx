@@ -11,10 +11,10 @@ import { server } from "@/test/server";
 
 function mockPodDetail() {
 	server.use(
-		http.get("*/api/machines/m-1/pods/p-1", () =>
+		http.get("*/api/hosts/m-1/pods/p-1", () =>
 			HttpResponse.json(podDetailFixture()),
 		),
-		http.get("*/api/machines/m-1/pods/p-1/inspect", () =>
+		http.get("*/api/hosts/m-1/pods/p-1/inspect", () =>
 			HttpResponse.json(rawInspectFixture({ Id: "p-1", Name: "app-pod" })),
 		),
 	);
@@ -23,12 +23,9 @@ function mockPodDetail() {
 function renderPodDetailPage() {
 	return renderWithQuery(
 		<Routes>
-			<Route
-				path="/machines/:machineId/pods/:podId"
-				element={<PodDetailPage />}
-			/>
+			<Route path="/hosts/:hostId/pods/:podId" element={<PodDetailPage />} />
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/pods/p-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1/pods/p-1"] } },
 	);
 }
 
@@ -69,20 +66,17 @@ describe("PodDetailPage", () => {
 
 		const links = await screen.findAllByTestId("pod-detail-container-link");
 		expect(links).toHaveLength(2);
-		expect(links[0]).toHaveAttribute("href", "/machines/m-1/containers/c-1");
-		expect(links[1]).toHaveAttribute(
-			"href",
-			"/machines/m-1/containers/c-infra",
-		);
+		expect(links[0]).toHaveAttribute("href", "/hosts/m-1/containers/c-1");
+		expect(links[1]).toHaveAttribute("href", "/hosts/m-1/containers/c-infra");
 	});
 
 	it("fetches the raw inspect report lazily on the first reveal", async () => {
 		let inspectRequests = 0;
 		server.use(
-			http.get("*/api/machines/m-1/pods/p-1", () =>
+			http.get("*/api/hosts/m-1/pods/p-1", () =>
 				HttpResponse.json(podDetailFixture()),
 			),
-			http.get("*/api/machines/m-1/pods/p-1/inspect", () => {
+			http.get("*/api/hosts/m-1/pods/p-1/inspect", () => {
 				inspectRequests++;
 				return HttpResponse.json(rawInspectFixture({ Id: "p-1" }));
 			}),
@@ -103,14 +97,14 @@ describe("PodDetailPage", () => {
 
 	it("answers a missing pod with the not-found state", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/pods/p-1", () =>
+			http.get("*/api/hosts/m-1/pods/p-1", () =>
 				errorResponse(404, "POD_NOT_FOUND", "pod not found"),
 			),
 		);
 		renderPodDetailPage();
 
 		expect(
-			await screen.findByText("This item no longer exists on the machine."),
+			await screen.findByText("This item no longer exists on the host."),
 		).toBeInTheDocument();
 	});
 });

@@ -16,21 +16,21 @@ import (
 	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
-// createRequest serves POST /api/machines/{id}/pods with the given JSON
+// createRequest serves POST /api/hosts/{id}/pods with the given JSON
 // body through the handler with an authenticated test identity.
 func createRequest(create http.HandlerFunc, body string) *httptest.ResponseRecorder {
 	return testutils.Perform(create, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/pods",
+		Path:      "/api/hosts/test-host/pods",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 		Body:      strings.NewReader(body),
 	})
 }
 
 // TestPodHandler_Create_Success pins the create contract through the
 // real service: 201 with the created pod's ID, name, state, and
-// creation timestamp, and the request decoded into the machine's spec.
+// creation timestamp, and the request decoded into the host's spec.
 func TestPodHandler_Create_Success(t *testing.T) {
 	var gotSpec *specgen.PodSpecGenerator
 	engine := &fakePodEngine{
@@ -43,9 +43,9 @@ func TestPodHandler_Create_Success(t *testing.T) {
 	w := createRequest(newTestHandler(engine).Create, `{"name":"web-pod","networks":["podman"],"labels":{"app":"web"},"portMappings":[{"hostPort":8080,"containerPort":80}]}`)
 
 	require.Equal(t, http.StatusCreated, w.Code, "create should return 201")
-	require.NotNil(t, gotSpec, "the request must reach the machine's spec")
+	require.NotNil(t, gotSpec, "the request must reach the host's spec")
 	assert.Equal(t, "web-pod", gotSpec.Name)
-	require.Len(t, gotSpec.PortMappings, 1, "the requested port mappings must reach the machine's spec")
+	require.Len(t, gotSpec.PortMappings, 1, "the requested port mappings must reach the host's spec")
 	assert.Equal(t, netTypes.PortMapping{HostPort: 8080, ContainerPort: 80, Protocol: "tcp"}, gotSpec.PortMappings[0])
 
 	var body PodCreateResponse
@@ -57,7 +57,7 @@ func TestPodHandler_Create_Success(t *testing.T) {
 }
 
 // TestPodHandler_Create_MissingName pins the validation gate: a create
-// without a name is refused with 400 before the machine is asked (the
+// without a name is refused with 400 before the host is asked (the
 // engine stays unarmed and would panic on a call).
 func TestPodHandler_Create_MissingName(t *testing.T) {
 	engine := &fakePodEngine{}
@@ -70,7 +70,7 @@ func TestPodHandler_Create_MissingName(t *testing.T) {
 
 // TestPodHandler_Create_MountFlagsMutuallyExclusive pins the z+Z guard:
 // a mount carrying both selinuxShared and selinuxPrivate is refused
-// with 400 VALIDATION_FAILED before the machine is asked (the engine
+// with 400 VALIDATION_FAILED before the host is asked (the engine
 // stays unarmed and would panic on a call).
 func TestPodHandler_Create_MountFlagsMutuallyExclusive(t *testing.T) {
 	engine := &fakePodEngine{}
@@ -86,7 +86,7 @@ func TestPodHandler_Create_MountFlagsMutuallyExclusive(t *testing.T) {
 
 // TestPodHandler_Create_PortMappingValidation pins the port mapping
 // validation gate: an out-of-range port or an unknown protocol is
-// refused with 400 before the machine is asked (the engine stays
+// refused with 400 before the host is asked (the engine stays
 // unarmed and would panic on a call).
 func TestPodHandler_Create_PortMappingValidation(t *testing.T) {
 	cases := map[string]string{

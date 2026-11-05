@@ -7,7 +7,7 @@ import {
 	isNotFound,
 	KeyValueTable,
 } from "@shared/components/detailKit";
-import { invalidateMachineResources } from "@shared/queries/useListInvalidatingMutation";
+import { invalidateHostResources } from "@shared/queries/useListInvalidatingMutation";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -67,14 +67,14 @@ function VolumeOverview({ volume }: { volume: VolumeDetail }) {
 // rides the same hook with enabled: revealed — volumes have no raw /inspect
 // endpoint, so the typed DTO serialized as JSON is the inspect report.
 export function VolumeDetailPage() {
-	const { machineId, volumeName } = useParams<{
-		machineId: string;
+	const { hostId, volumeName } = useParams<{
+		hostId: string;
 		volumeName: string;
 	}>();
 	const queryClient = useQueryClient();
 	const [revealed, setRevealed] = useState(false);
-	const { data: volume, isPending, error } = useVolume(machineId!, volumeName!);
-	const inspectQuery = useVolume(machineId!, volumeName!, {
+	const { data: volume, isPending, error } = useVolume(hostId!, volumeName!);
+	const inspectQuery = useVolume(hostId!, volumeName!, {
 		enabled: revealed,
 	});
 
@@ -88,9 +88,9 @@ export function VolumeDetailPage() {
 	useEffect(() => {
 		if (isNotFound(error) && invalidatedRef.current !== volumeName) {
 			invalidatedRef.current = volumeName!;
-			invalidateMachineResources(queryClient, machineId!, "volumes");
+			invalidateHostResources(queryClient, hostId!, "volumes");
 		}
-	}, [volumeName, error, queryClient, machineId]);
+	}, [volumeName, error, queryClient, hostId]);
 
 	return (
 		<DetailPage

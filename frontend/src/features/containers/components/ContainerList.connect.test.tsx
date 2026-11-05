@@ -5,7 +5,7 @@ import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import {
 	containerFixture,
-	machineFixture,
+	hostFixture,
 	networkFixture,
 } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
@@ -23,14 +23,14 @@ const attached = containerFixture({
 // pinned in the networks feature's ConnectDialog.test.tsx.
 function mockLists() {
 	return [
-		http.get("*/api/machines/m-1/containers", () =>
+		http.get("*/api/hosts/m-1/containers", () =>
 			HttpResponse.json({
 				containers: [attached],
 				total: 1,
 				timestamp: "2026-08-26T00:00:00Z",
 			}),
 		),
-		http.get("*/api/machines/m-1/networks", () =>
+		http.get("*/api/hosts/m-1/networks", () =>
 			HttpResponse.json([
 				networkFixture(),
 				networkFixture({ name: "other-net", subnets: ["10.89.0.0/16"] }),
@@ -42,7 +42,7 @@ function mockLists() {
 describe("ContainerList connect to network", () => {
 	it("shows a Connect to network button per row at write level and opens the dialog with the container fixed", async () => {
 		server.use(...mockLists());
-		renderWithQuery(<ContainerList machine={machineFixture()} />, {
+		renderWithQuery(<ContainerList host={hostFixture()} />, {
 			router: true,
 		});
 
@@ -60,7 +60,7 @@ describe("ContainerList connect to network", () => {
 		server.use(...mockLists());
 		renderWithQuery(
 			<ContainerList
-				machine={machineFixture({ permission: "read", isOwner: false })}
+				host={hostFixture({ permission: "read", isOwner: false })}
 			/>,
 			{ router: true },
 		);

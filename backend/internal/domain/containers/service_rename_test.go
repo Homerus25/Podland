@@ -43,7 +43,7 @@ func TestContainerService_Rename_AnswersPostRenameReport(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Rename(context.Background(), "user", "machine", "container-123", "renamed")
+	got, err := service.Rename(context.Background(), "user", "host", "container-123", "renamed")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -77,7 +77,7 @@ func TestContainerService_Rename_NoStateGate(t *testing.T) {
 			}
 			service := NewContainerService(fakeEngineProvider{engine: engine})
 
-			got, err := service.Rename(context.Background(), "user", "machine", "container-123", "renamed")
+			got, err := service.Rename(context.Background(), "user", "host", "container-123", "renamed")
 
 			require.NoError(t, err, "no state restriction applies to rename")
 			require.NotNil(t, got)
@@ -97,7 +97,7 @@ func TestContainerService_Rename_MapsNotFoundTo404(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Rename(context.Background(), "user", "machine", "container-123", "renamed")
+	got, err := service.Rename(context.Background(), "user", "host", "container-123", "renamed")
 
 	require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 	assert.Nil(t, got)
@@ -120,7 +120,7 @@ func TestContainerService_Rename_MapsNameCollisionTo409(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Rename(context.Background(), "user", "machine", "container-123", "taken")
+	got, err := service.Rename(context.Background(), "user", "host", "container-123", "taken")
 
 	require.ErrorIs(t, err, appErrors.ErrContainerAlreadyExists)
 	assert.Nil(t, got)
@@ -138,7 +138,7 @@ func TestContainerService_Rename_MapsAlreadyExistsTo409(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Rename(context.Background(), "user", "machine", "container-123", "taken")
+	got, err := service.Rename(context.Background(), "user", "host", "container-123", "taken")
 
 	require.ErrorIs(t, err, appErrors.ErrContainerAlreadyExists)
 	assert.Nil(t, got)
@@ -156,7 +156,7 @@ func TestContainerService_Rename_MapsInvalidNameTo400(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Rename(context.Background(), "user", "machine", "container-123", "bad name!")
+	got, err := service.Rename(context.Background(), "user", "host", "container-123", "bad name!")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -173,7 +173,7 @@ func TestContainerService_Rename_MapsInvalidNameTo400(t *testing.T) {
 func TestContainerService_Rename_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewContainerService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	got, err := service.Rename(context.Background(), "user", "machine", "container-123", "renamed")
+	got, err := service.Rename(context.Background(), "user", "host", "container-123", "renamed")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, got)
@@ -192,7 +192,7 @@ func TestContainerService_Rename_SameNameSucceeds(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Rename(context.Background(), "user", "machine", "container-123", "same")
+	got, err := service.Rename(context.Background(), "user", "host", "container-123", "same")
 
 	require.NoError(t, err, "renaming a container to its own name is not a collision")
 	require.NotNil(t, got)
@@ -210,7 +210,7 @@ func TestContainerService_Rename_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Rename(context.Background(), "user", "machine", "container-123", "free")
+	got, err := service.Rename(context.Background(), "user", "host", "container-123", "free")
 
 	require.Error(t, err)
 	assert.Nil(t, got)

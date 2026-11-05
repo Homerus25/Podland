@@ -11,7 +11,7 @@ import { errorResponse } from "@/test/errors";
 import {
 	authStatusFixture,
 	containerFixture,
-	machineFixture,
+	hostFixture,
 } from "@/test/factories";
 import { server } from "@/test/server";
 
@@ -47,39 +47,39 @@ afterEach(() => {
 
 describe("app routing guard", () => {
 	it("redirects an unauthenticated deep link to /login without rendering protected content", async () => {
-		renderApp("/machines");
+		renderApp("/hosts");
 
 		expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
 		expect(
-			screen.queryByRole("heading", { name: "Machines" }),
+			screen.queryByRole("heading", { name: "Hosts" }),
 		).not.toBeInTheDocument();
 		expect(screen.getByTestId("location")).toHaveTextContent("/login");
 		expect(screen.getByTestId("auth-user")).toHaveTextContent("anonymous");
 	});
 
 	it("returns the user to the originally requested page after login", async () => {
-		renderApp("/machines?tab=running");
+		renderApp("/hosts?tab=running");
 
 		await screen.findByLabelText(/username/i);
 		await loginViaForm();
 
 		expect(
-			await screen.findByRole("heading", { name: "Machines" }),
+			await screen.findByRole("heading", { name: "Hosts" }),
 		).toBeInTheDocument();
 		expect(screen.getByTestId("location")).toHaveTextContent(
-			"/machines?tab=running",
+			"/hosts?tab=running",
 		);
 		expect(screen.getByTestId("auth-user")).toHaveTextContent("alice");
 	});
 
 	it("shows a full-page spinner while the initial auth state resolves, never the login form", async () => {
 		const resolution = deferred<User | null>();
-		renderApp("/machines", { resolveInitialState: () => resolution.promise });
+		renderApp("/hosts", { resolveInitialState: () => resolution.promise });
 
 		expect(screen.getByRole("status")).toBeInTheDocument();
 		expect(screen.queryByLabelText(/username/i)).not.toBeInTheDocument();
 		expect(
-			screen.queryByRole("heading", { name: "Machines" }),
+			screen.queryByRole("heading", { name: "Hosts" }),
 		).not.toBeInTheDocument();
 
 		await act(async () => {
@@ -94,7 +94,7 @@ describe("app routing guard", () => {
 		it("restores the session from the refresh cookie on reload and stays on the deep link", async () => {
 			const authHeaders: (string | null)[] = [];
 			server.use(
-				http.get("*/api/machines", ({ request }) => {
+				http.get("*/api/hosts", ({ request }) => {
 					authHeaders.push(request.headers.get("Authorization"));
 					return HttpResponse.json([]);
 				}),
@@ -106,12 +106,12 @@ describe("app routing guard", () => {
 					});
 				}),
 			);
-			renderApp("/machines");
+			renderApp("/hosts");
 
 			expect(
-				await screen.findByRole("heading", { name: "Machines" }),
+				await screen.findByRole("heading", { name: "Hosts" }),
 			).toBeInTheDocument();
-			expect(screen.getByTestId("location")).toHaveTextContent("/machines");
+			expect(screen.getByTestId("location")).toHaveTextContent("/hosts");
 			expect(screen.getByTestId("auth-user")).toHaveTextContent("alice");
 			expect(authHeaders[0]).toBe("Bearer refreshed-access-token");
 		});
@@ -122,7 +122,7 @@ describe("app routing guard", () => {
 					errorResponse(401, "AUTH_REFRESH_INVALID", "Refresh token invalid"),
 				),
 			);
-			renderApp("/machines");
+			renderApp("/hosts");
 
 			expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
 			expect(screen.getByTestId("location")).toHaveTextContent("/login");
@@ -190,7 +190,7 @@ describe("app routing guard", () => {
 			// the policy's once-latch for this module instance.
 			setBearerToken("mid-session-token");
 			server.use(
-				http.get("*/api/machines", () =>
+				http.get("*/api/hosts", () =>
 					errorResponse(401, "TOKEN_EXPIRED", "Token has expired"),
 				),
 				http.post("*/api/auth/refresh", () =>
@@ -209,7 +209,7 @@ describe("app routing guard", () => {
 				defaultOptions: { queries: { retry: false } },
 			});
 			queryClient.setQueryData(containersQueryKey("m-1"), [containerFixture()]);
-			renderApp("/machines", {
+			renderApp("/hosts", {
 				resolveInitialState: async () => ({ username: "alice", role: "user" }),
 				queryClient,
 			});
@@ -217,7 +217,7 @@ describe("app routing guard", () => {
 			expect(await screen.findByLabelText(/username/i)).toBeInTheDocument();
 			expect(screen.getByTestId("location")).toHaveTextContent("/login");
 			expect(
-				screen.queryByRole("heading", { name: "Machines" }),
+				screen.queryByRole("heading", { name: "Hosts" }),
 			).not.toBeInTheDocument();
 			expect(screen.getByTestId("auth-user")).toHaveTextContent("anonymous");
 			// The cache clear can race the dying page's final render, which
@@ -234,14 +234,14 @@ describe("app routing guard", () => {
 			// Logging back in returns to the originally requested page: the
 			// session-death redirect attached that location to /login's state.
 			server.use(
-				http.get("*/api/machines", () => HttpResponse.json([machineFixture()])),
+				http.get("*/api/hosts", () => HttpResponse.json([hostFixture()])),
 			);
 			await loginViaForm();
 
 			expect(
-				await screen.findByRole("heading", { name: "Machines" }),
+				await screen.findByRole("heading", { name: "Hosts" }),
 			).toBeInTheDocument();
-			expect(screen.getByTestId("location")).toHaveTextContent("/machines");
+			expect(screen.getByTestId("location")).toHaveTextContent("/hosts");
 			expect(screen.getByTestId("auth-user")).toHaveTextContent("alice");
 		});
 	});
@@ -261,7 +261,7 @@ describe("app routing guard", () => {
 
 		it("lands a logged-out deep link on setup when the instance is fresh", async () => {
 			server.use(freshInstanceHandler());
-			renderApp("/machines?tab=running");
+			renderApp("/hosts?tab=running");
 
 			expect(
 				await screen.findByText(
@@ -271,7 +271,7 @@ describe("app routing guard", () => {
 			expect(screen.getByTestId("location")).toHaveTextContent("/setup");
 			expect(screen.getByTestId("auth-user")).toHaveTextContent("anonymous");
 			expect(
-				screen.queryByRole("heading", { name: "Machines" }),
+				screen.queryByRole("heading", { name: "Hosts" }),
 			).not.toBeInTheDocument();
 		});
 

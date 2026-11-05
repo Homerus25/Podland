@@ -19,7 +19,7 @@ func TestRequestLogging_CapturesStatus(t *testing.T) {
 		w.Write([]byte("body"))
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/machines/m1/volumes", nil).
+	req := httptest.NewRequest(http.MethodGet, "/api/hosts/m1/volumes", nil).
 		WithContext(contextutils.SetRequestID(httptest.NewRequest(http.MethodGet, "/", nil).Context(), "req-1"))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)

@@ -25,7 +25,7 @@ export interface ImageCopyProgress {
 interface ImageCopyStreamEvent {
 	operationId: string;
 	type: "image" | "complete" | "error";
-	machineId: string;
+	hostId: string;
 	image?: string;
 	phase?: ImageCopyProgress["phase"];
 	bytes?: number;
@@ -68,28 +68,26 @@ export interface UseImageCopyStreamResult {
 	cancel: () => void;
 }
 
-// The cross-machine image copy (issue 376 over issue 375's endpoints): the
+// The cross-host image copy (issue 376 over issue 375's endpoints): the
 // endpoint always answers NDJSON, so the dialog drives it through the
 // stream transport. The run/cancel lifecycle, reset-on-run, the
 // malformed-event and complete-without-envelope skips, the terminal
-// handling, and the both-machines invalidation are the shared
+// handling, and the both-hosts invalidation are the shared
 // transfer-hooks module's (issue 273); this adapter keeps the images
 // domain — the event vocabulary, shape guard, and single-value progress
 // fold — and supplies the URL builder.
-export function useImageCopyStream(
-	machineId: string,
-): UseImageCopyStreamResult {
+export function useImageCopyStream(hostId: string): UseImageCopyStreamResult {
 	const config = useMemo<
 		MoveStreamConfig<ImageCopyStreamEvent, ImageCopyProgress | null>
 	>(
 		() => ({
 			resource: "images",
-			url: (imageId) => imageCopyStreamUrl(machineId, imageId),
+			url: (imageId) => imageCopyStreamUrl(hostId, imageId),
 			isEvent: isImageCopyStreamEvent,
 			foldProgress,
 			initialProgress: null,
 		}),
-		[machineId],
+		[hostId],
 	);
 	return useMoveStream<
 		ImageCopyStreamEvent,

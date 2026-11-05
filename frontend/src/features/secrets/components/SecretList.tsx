@@ -1,5 +1,5 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
-import { can } from "@features/machines/permissions";
+import { can } from "@features/hosts/permissions";
 import { CreateSecretDialog } from "@features/secrets/components/CreateSecretDialog";
 import { MoveSecretDialog } from "@features/secrets/components/MoveSecretDialog";
 import {
@@ -11,7 +11,7 @@ import type { SecretSummary } from "@features/secrets/services/secretsApi";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -26,19 +26,19 @@ import { useNavigate } from "react-router-dom";
 // detail page (spec 301), and every action inside it — the move/copy and
 // delete buttons — stops propagation so it never also fires the row action.
 function SecretRow({
-	machine,
+	host,
 	secret,
 	canDelete,
 	canMove,
 }: {
-	machine: Machine;
+	host: Host;
 	secret: SecretSummary;
 	canDelete: boolean;
 	canMove: boolean;
 }) {
-	const machineId = machine.id;
+	const hostId = host.id;
 	const navigate = useNavigate();
-	const deleteSecret = useDeleteSecret(machineId);
+	const deleteSecret = useDeleteSecret(hostId);
 	const [isDeleteOpen, setIsDeleteOpen] = useState(false);
 	const [isMoveOpen, setIsMoveOpen] = useState(false);
 
@@ -47,7 +47,7 @@ function SecretRow({
 			<Tr
 				data-testid="secret-row"
 				cursor="pointer"
-				onClick={() => navigate(detailPath(machineId, "secrets", secret.name))}
+				onClick={() => navigate(detailPath(hostId, "secrets", secret.name))}
 			>
 				<Td fontFamily="mono">{secret.name}</Td>
 				<Td>{secret.driver}</Td>
@@ -88,7 +88,7 @@ function SecretRow({
 			</Tr>
 			{isMoveOpen ? (
 				<MoveSecretDialog
-					machine={machine}
+					host={host}
 					secret={secret}
 					onClose={() => setIsMoveOpen(false)}
 				/>
@@ -108,21 +108,21 @@ function SecretRow({
 }
 
 // The Secrets tab body. Metadata is visible to any grantee (the backend's
-// read level); write affordances are gated on the machine's per-caller
-// facts. The toolbar/triad/table machinery and the hint swap are
+// read level); write affordances are gated on the host's per-caller
+// facts. The toolbar/triad/table plumbing and the hint swap are
 // ResourceList's; this adapter owns only the columns, the row, and the
 // create modal (below the manage capability, the hint replaces the
 // controls — never bait users with disabled buttons).
-export function SecretList({ machine }: { machine: Machine }) {
-	const machineId = machine.id;
-	const { data: secrets, isPending, error } = useSecrets(machineId);
-	const createSecret = useCreateSecret(machineId);
+export function SecretList({ host }: { host: Host }) {
+	const hostId = host.id;
+	const { data: secrets, isPending, error } = useSecrets(hostId);
+	const createSecret = useCreateSecret(hostId);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
-	const canManage = can(machine, "manage-secrets");
-	// The transfer's source gate is admin — the value leaving the machine is
+	const canManage = can(host, "manage-secrets");
+	// The transfer's source gate is admin — the value leaving the host is
 	// a reveal — so the row's Move/Copy affordance sits behind
 	// reveal-secrets (admin ⊆ write, so it lives in the manage cell).
-	const canMove = can(machine, "reveal-secrets");
+	const canMove = can(host, "reveal-secrets");
 
 	return (
 		<>
@@ -140,7 +140,7 @@ export function SecretList({ machine }: { machine: Machine }) {
 				renderRow={(secret) => (
 					<SecretRow
 						key={secret.id}
-						machine={machine}
+						host={host}
 						secret={secret}
 						canDelete={canManage}
 						canMove={canMove}

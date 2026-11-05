@@ -32,7 +32,7 @@ func TestContainerService_Stop_ResolvesContainerName(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Stop(context.Background(), "user", "machine", "container-123")
+	got, err := service.Stop(context.Background(), "user", "host", "container-123")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -55,7 +55,7 @@ func TestContainerService_Stop_NotRunningAnswers400(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Stop(context.Background(), "user", "machine", "container-123")
+		got, err := service.Stop(context.Background(), "user", "host", "container-123")
 
 		require.ErrorIs(t, err, appErrors.ErrContainerNotRunning)
 		assert.Nil(t, got)
@@ -74,7 +74,7 @@ func TestContainerService_Stop_NotRunningAnswers400(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Stop(context.Background(), "user", "machine", "container-123")
+		got, err := service.Stop(context.Background(), "user", "host", "container-123")
 
 		require.ErrorIs(t, err, appErrors.ErrContainerNotRunning)
 		assert.Nil(t, got)
@@ -92,7 +92,7 @@ func TestContainerService_Stop_MapsNotFoundTo404(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Stop(context.Background(), "user", "machine", "container-123")
+		got, err := service.Stop(context.Background(), "user", "host", "container-123")
 
 		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 		assert.Nil(t, got)
@@ -108,7 +108,7 @@ func TestContainerService_Stop_MapsNotFoundTo404(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Stop(context.Background(), "user", "machine", "container-123")
+		got, err := service.Stop(context.Background(), "user", "host", "container-123")
 
 		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 		assert.Nil(t, got)
@@ -121,7 +121,7 @@ func TestContainerService_Stop_MapsNotFoundTo404(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Stop(context.Background(), "user", "machine", "container-123")
+		got, err := service.Stop(context.Background(), "user", "host", "container-123")
 
 		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 		assert.Nil(t, got)
@@ -135,7 +135,7 @@ func TestContainerService_Stop_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Stop(context.Background(), "user", "machine", "container-123")
+	got, err := service.Stop(context.Background(), "user", "host", "container-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)

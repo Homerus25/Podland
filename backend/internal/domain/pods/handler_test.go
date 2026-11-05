@@ -14,14 +14,14 @@ import (
 	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
-// listRequest serves GET /api/machines/{id}/pods through the handler
+// listRequest serves GET /api/hosts/{id}/pods through the handler
 // with an authenticated test identity.
 func listRequest(list http.HandlerFunc) *httptest.ResponseRecorder {
 	return testutils.Perform(list, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/pods",
+		Path:      "/api/hosts/test-host/pods",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 }
 

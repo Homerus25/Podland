@@ -8,13 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The machine-wide quadlet scan (issue 259, §19): the list → print-each
+// The host-wide quadlet scan (issue 259, §19): the list → print-each
 // → match ritual that finds the referencing quadlets, pinned here once
 // against a fake reader. The volumes and secrets move previews ride
 // this seam — the secrets preview since issue 260, the volumes preview
 // since issue 261 — so the suite pins the ritual both domains consume.
 
-// fakeQuadletReader is the scan's fake machine: a fixed name→content
+// fakeQuadletReader is the scan's fake host: a fixed name→content
 // set, per-name print failures (a file that vanished mid-lease), a list
 // failure, and per-name counters so the suite can pin the one-list-call,
 // print-exactly-once ritual.
@@ -60,7 +60,7 @@ func (e *fakeListError) Error() string { return e.msg }
 // every listed name printed exactly once per scan.
 func assertSingleScan(t *testing.T, f *fakeQuadletReader) {
 	t.Helper()
-	assert.Equal(t, 1, f.listCalls, "the scan lists the machine exactly once")
+	assert.Equal(t, 1, f.listCalls, "the scan lists the host exactly once")
 	for _, name := range f.names {
 		assert.Equal(t, 1, f.prints[name], "quadlet %s must be printed exactly once per scan", name)
 	}
@@ -82,10 +82,10 @@ func assertListFailureWrappedOnce(t *testing.T, err error, cause *fakeListError)
 // TestQuadletContents pins the contents ritual: every listed quadlet
 // printed once into a name→content map; a listed-but-unprintable file
 // (it vanished mid-lease) skipped rather than failing the scan; an
-// empty machine an empty non-nil map; a list failure wrapped exactly
+// empty host an empty non-nil map; a list failure wrapped exactly
 // once.
 func TestQuadletContents(t *testing.T) {
-	t.Run("empty machine is an empty non-nil map", func(t *testing.T) {
+	t.Run("empty host is an empty non-nil map", func(t *testing.T) {
 		r := &fakeQuadletReader{contents: map[string]string{}}
 
 		got, err := QuadletContents(r)
@@ -253,7 +253,7 @@ func TestQuadletsReferencingVolume(t *testing.T) {
 		assertSingleScan(t, r)
 	})
 
-	t.Run("empty machine is an empty non-nil slice", func(t *testing.T) {
+	t.Run("empty host is an empty non-nil slice", func(t *testing.T) {
 		r := &fakeQuadletReader{contents: map[string]string{}}
 
 		got, err := QuadletsReferencingVolume(r, "pgdata")
@@ -379,7 +379,7 @@ func TestQuadletsReferencingSecret(t *testing.T) {
 		assertSingleScan(t, r)
 	})
 
-	t.Run("empty machine is an empty non-nil slice", func(t *testing.T) {
+	t.Run("empty host is an empty non-nil slice", func(t *testing.T) {
 		r := &fakeQuadletReader{contents: map[string]string{}}
 
 		got, err := QuadletsReferencingSecret(r, "token1")

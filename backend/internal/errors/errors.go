@@ -41,19 +41,19 @@ func NewAppError(code, message string, status int) *AppError {
 
 // Error codes for different domains
 
-// Machines
+// Hosts
 var (
-	ErrMachineNotFound      = NewAppError("MACHINE_NOT_FOUND", "Machine not found", http.StatusNotFound)
-	ErrMachineAlreadyExists = NewAppError("MACHINE_ALREADY_EXISTS", "Machine with this name already exists", http.StatusBadRequest)
+	ErrHostNotFound      = NewAppError("HOST_NOT_FOUND", "Host not found", http.StatusNotFound)
+	ErrHostAlreadyExists = NewAppError("HOST_ALREADY_EXISTS", "Host with this name already exists", http.StatusBadRequest)
 	// ErrConnectionFailed is the RUNTIME connection failure: a persisted
-	// machine's remote podman socket could not be reached during an
+	// host's remote podman socket could not be reached during an
 	// operation (containers/images/quadlets). It is a gateway error (502)
 	// because the backend acts as a gateway to the remote podman.
-	ErrConnectionFailed = NewAppError("CONNECTION_FAILED", "Failed to connect to machine", http.StatusBadGateway)
+	ErrConnectionFailed = NewAppError("CONNECTION_FAILED", "Failed to connect to host", http.StatusBadGateway)
 	// ErrConnectionTestFailed is the REGISTRATION connection failure: the
 	// credentials/target a client just submitted did not produce a working
 	// SSH+podman connection during the synchronous registration probe
-	// (description_backend.md §Machine Registration step 5). This is a
+	// (description_backend.md §Host Registration step 5). This is a
 	// client error (400) — the user supplied a bad host, bad credentials,
 	// or a wrong socket path — so it carries the same CONNECTION_FAILED
 	// code as the runtime case but the 4xx status the documented
@@ -72,19 +72,19 @@ var (
 	// pure timing oracle (fast-fail vs timeout) is accepted and
 	// documented in the doku.
 	ErrConnectionTestFailed = NewAppError("CONNECTION_FAILED",
-		"Failed to connect to machine during registration — check the hostname, port, SSH username, private key, and podman socket path",
+		"Failed to connect to host during registration — check the hostname, port, SSH username, private key, and podman socket path",
 		http.StatusBadRequest)
 	ErrConnectionTestTimeout = NewAppError("CONNECTION_TEST_TIMEOUT", "Connection test timed out", http.StatusBadRequest)
 	ErrInvalidSSHKey         = NewAppError("INVALID_SSH_KEY", "Invalid SSH private key format", http.StatusBadRequest)
 	ErrMissingRequiredFields = NewAppError("VALIDATION_FAILED", "Missing required fields", http.StatusBadRequest)
 	// ErrHostNotAllowed is the opt-in host policy's rejection (pentest
-	// 2026-11-01 finding 1, MACHINE_HOST_BLOCK_PRIVATE_RANGES): the
-	// machine hostname — an IP literal checked directly, or a hostname
+	// 2026-11-01 finding 1, HOST_BLOCK_PRIVATE_RANGES): the
+	// candidate hostname — an IP literal checked directly, or a hostname
 	// through its resolved IPs — falls in a blocked range (loopback,
 	// RFC1918, link-local, CGNAT, IPv6 ULA, unspecified), or could not
 	// be resolved while the block is enabled (fail closed). 400: the
 	// target the client described is not one this instance may probe.
-	ErrHostNotAllowed = NewAppError("HOST_NOT_ALLOWED", "Machine hostname is not allowed: this instance blocks private, loopback, link-local, CGNAT, and unspecified addresses", http.StatusBadRequest)
+	ErrHostNotAllowed = NewAppError("HOST_NOT_ALLOWED", "Host hostname is not allowed: this instance blocks private, loopback, link-local, CGNAT, and unspecified addresses", http.StatusBadRequest)
 )
 
 // Auth
@@ -170,7 +170,7 @@ var (
 	ErrContainerNotRunning     = NewAppError("CONTAINER_NOT_RUNNING", "Container is not running", http.StatusBadRequest)
 	ErrContainerCreationFailed = NewAppError("CONTAINER_CREATION_FAILED", "Failed to create container", http.StatusInternalServerError)
 	// ErrContainerAlreadyExists is 409: podman refused a rename because
-	// another container on the machine already carries the new name. The
+	// another container on the host already carries the new name. The
 	// containers domain's entry in the name-collision vocabulary the
 	// other domains already speak (QUADLET_ALREADY_EXISTS,
 	// SECRET_ALREADY_EXISTS, VOLUME_ALREADY_EXISTS,
@@ -193,12 +193,12 @@ var (
 	ErrImagePullFailed       = NewAppError("IMAGE_PULL_FAILED", "Failed to pull image", http.StatusInternalServerError)
 	ErrImageUsedByContainers = NewAppError("IMAGE_USED_BY_CONTAINERS", "Image is used by one or more containers", http.StatusBadRequest)
 	ErrOperationCancelled    = NewAppError("OPERATION_CANCELLED", "Operation was cancelled by the client", http.StatusGatewayTimeout)
-	// ErrImageTransferTooLarge is 413: a cross-machine image copy's
+	// ErrImageTransferTooLarge is 413: a cross-host image copy's
 	// archive crossed the transfer bound (issue 375, the kit's bound
 	// ritual with the images' own 10 GiB default). The bound is
 	// environment-configured (IMAGE_TRANSFER_MAX_BYTES).
 	ErrImageTransferTooLarge = NewAppError("IMAGE_TRANSFER_TOO_LARGE", "Image exceeds the maximum transfer size", http.StatusRequestEntityTooLarge)
-	// ErrImageTransferFailed is the cross-machine image copy's engine
+	// ErrImageTransferFailed is the cross-host image copy's engine
 	// answer (issue 375): the export/load stream or a podman engine
 	// failed mid-transfer. Callers carry the image reference and cause
 	// via WithMessage; the plain envelope rewrites 5xx messages, so the
@@ -222,7 +222,7 @@ var (
 	// the stop job may still complete in systemd after expiry.
 	ErrQuadletStopTimedOut = NewAppError("QUADLET_STOP_TIMED_OUT", "Timed out waiting for the quadlet to stop", http.StatusGatewayTimeout)
 	// ErrVolumeMigrationTargetNotEmpty is the move/copy data phase's refusal
-	// (issue 214): the target machine already holds a non-empty podman
+	// (issue 214): the target host already holds a non-empty podman
 	// volume the transfer would import into, and the request did not opt
 	// into merging with overwriteVolumes. Fires in the preflight, before
 	// anything is installed.
@@ -260,8 +260,8 @@ var (
 	// ErrVolumeUploadTooLarge is 413: a populate upload exceeded
 	// VOLUME_UPLOAD_MAX_BYTES while streaming to disk.
 	ErrVolumeUploadTooLarge = NewAppError("VOLUME_UPLOAD_TOO_LARGE", "Upload exceeds the maximum allowed size", http.StatusRequestEntityTooLarge)
-	// ErrVolumeAlreadyExists is 409: the cross-machine volume copy/move
-	// (issue 238) refuses to overwrite a target machine's same-named
+	// ErrVolumeAlreadyExists is 409: the cross-host volume copy/move
+	// (issue 238) refuses to overwrite a target host's same-named
 	// volume. Re-checked at execution time, so a preview that raced a
 	// concurrent create still answers honestly.
 	ErrVolumeAlreadyExists = NewAppError("VOLUME_ALREADY_EXISTS", "Volume with this name already exists", http.StatusConflict)
@@ -270,7 +270,7 @@ var (
 // Networks
 var (
 	// ErrNetworkNotFound is 404: the named network does not exist on the
-	// machine (connect's target resolution).
+	// host (connect's target resolution).
 	ErrNetworkNotFound = NewAppError("NETWORK_NOT_FOUND", "Network not found", http.StatusNotFound)
 	// ErrNetworkAlreadyExists is 409: podman refused the create because a
 	// network with the name already exists.
@@ -288,7 +288,7 @@ var (
 	ErrAccessDenied         = NewAppError("ACCESS_DENIED", "User does not have permission to access this resource", http.StatusForbidden)
 	ErrAccessAlreadyGranted = NewAppError("ACCESS_ALREADY_GRANTED", "Access already granted to this user", http.StatusBadRequest)
 	ErrAccessNotFound       = NewAppError("ACCESS_NOT_FOUND", "Access entry not found", http.StatusNotFound)
-	ErrCannotRevokeOwner    = NewAppError("CANNOT_REVOKE_OWNER", "Cannot revoke access from machine owner", http.StatusBadRequest)
+	ErrCannotRevokeOwner    = NewAppError("CANNOT_REVOKE_OWNER", "Cannot revoke access from host owner", http.StatusBadRequest)
 )
 
 // Generic

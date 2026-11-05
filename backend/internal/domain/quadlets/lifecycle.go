@@ -81,7 +81,7 @@ func (a lifecycleAction) buildResponse(name, unit string) *QuadletLifecycleRespo
 
 // start starts a stopped quadlet-managed resource by running
 // `systemctl [--user] start <unit>` over SSH (via SSHExecInterface from
-// 070-10) — scoped to the SSH user's manager unless the machine's
+// 070-10) — scoped to the SSH user's manager unless the host's
 // registered login is root.
 //
 // The flow (doku/description_quadlets_api.md:168-192):
@@ -97,13 +97,13 @@ func (a lifecycleAction) buildResponse(name, unit string) *QuadletLifecycleRespo
 //
 // Returns `{id, state: running, unit}` on success. Start has no force/timeout
 // options per the contract.
-func (s *QuadletService) Start(ctx context.Context, userID, machineID, name string) (*QuadletLifecycleResponse, error) {
-	return s.runLifecycle(ctx, userID, machineID, name, actionStart, LifecycleOptions{})
+func (s *QuadletService) Start(ctx context.Context, userID, hostID, name string) (*QuadletLifecycleResponse, error) {
+	return s.runLifecycle(ctx, userID, hostID, name, actionStart, LifecycleOptions{})
 }
 
 // Stop stops a running quadlet-managed resource by running
 // `systemctl [--user] stop <unit>` over SSH (user manager unless the
-// machine's SSH login is root)
+// host's SSH login is root)
 // (doku/description_quadlets_api.md:193-231).
 //
 // Honours the contract's `timeout` query param: it bounds the wait via the
@@ -112,13 +112,13 @@ func (s *QuadletService) Start(ctx context.Context, userID, machineID, name stri
 // non-running resource with QUADLET_NOT_RUNNING (400).
 //
 // Returns `{id, state: stopped, unit}` on success.
-func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-	return s.runLifecycle(ctx, userID, machineID, name, actionStop, opts)
+func (s *QuadletService) Stop(ctx context.Context, userID, hostID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
+	return s.runLifecycle(ctx, userID, hostID, name, actionStop, opts)
 }
 
 // Restart restarts a quadlet-managed resource by running
 // `systemctl [--user] restart <unit>` over SSH (user manager unless the
-// machine's SSH login is root)
+// host's SSH login is root)
 // (doku/description_quadlets_api.md:232-265).
 //
 // Supports the same `timeout` option as Stop — it bounds the wait for the
@@ -127,8 +127,8 @@ func (s *QuadletService) Stop(ctx context.Context, userID, machineID, name strin
 // QUADLET_NOT_RUNNING (400).
 //
 // Returns `{id, state: running, unit, restartedAt}` on success.
-func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-	return s.runLifecycle(ctx, userID, machineID, name, actionRestart, opts)
+func (s *QuadletService) Restart(ctx context.Context, userID, hostID, name string, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
+	return s.runLifecycle(ctx, userID, hostID, name, actionRestart, opts)
 }
 
 // runLifecycle is the three-step ritual every lifecycle action shares:
@@ -137,13 +137,13 @@ func (s *QuadletService) Restart(ctx context.Context, userID, machineID, name st
 // (applyUnitAction), then build the response (lifecycleAction.buildResponse).
 // The Start/Stop/Restart wrappers above keep the per-action contract
 // comments; the sequencing itself lives here and nowhere else.
-func (s *QuadletService) runLifecycle(ctx context.Context, userID, machineID, name string, action lifecycleAction, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
-	unit, err := s.resolveUnitNameForLifecycle(ctx, userID, machineID, name, action)
+func (s *QuadletService) runLifecycle(ctx context.Context, userID, hostID, name string, action lifecycleAction, opts LifecycleOptions) (*QuadletLifecycleResponse, error) {
+	unit, err := s.resolveUnitNameForLifecycle(ctx, userID, hostID, name, action)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.applyUnitAction(ctx, userID, machineID, action, unit, opts); err != nil {
+	if err := s.applyUnitAction(ctx, userID, hostID, action, unit, opts); err != nil {
 		return nil, err
 	}
 
@@ -158,9 +158,9 @@ func (s *QuadletService) runLifecycle(ctx context.Context, userID, machineID, na
 // The quadlet lookup goes through the domain's engine provider (the
 // connection seam) so the existence check and unit-name resolution are
 // consistent with the Get/Delete slices.
-func (s *QuadletService) resolveUnitNameForLifecycle(ctx context.Context, userID, machineID, name string, action lifecycleAction) (string, error) {
+func (s *QuadletService) resolveUnitNameForLifecycle(ctx context.Context, userID, hostID, name string, action lifecycleAction) (string, error) {
 	var unit string
-	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.Lifecycle", func(e QuadletEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "quadlets.Lifecycle", func(e QuadletEngine) error {
 		target, err := s.resolveTarget(e, name)
 		if err != nil {
 			return err
@@ -198,7 +198,7 @@ func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.
 //
 // The argv reads `systemctl [--user] <action> <unit>`: the action verb and
 // unit come last, and `--user` scopes the call to the SSH user's manager
-// unless the machine's registered login is root (root has no meaningful
+// unless the host's registered login is root (root has no meaningful
 // user manager; its units live in the system manager — systemctlUserScope).
 // There is no force flag in the vocabulary — systemd ignores --force
 // for stop/restart (issue 205; the full ruling lives on LifecycleOptions),
@@ -213,8 +213,8 @@ func (s *QuadletService) resolveTarget(e QuadletEngine, name string) (*entities.
 //
 // An SSH-layer failure (dial, session, network) maps to ErrConnectionFailed —
 // fail-fast, no retry, per docs/architecture-decisions.md §4.
-func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID string, action lifecycleAction, unit string, opts LifecycleOptions) error {
-	userScope, err := s.systemctlUserScope(machineID)
+func (s *QuadletService) applyUnitAction(ctx context.Context, userID, hostID string, action lifecycleAction, unit string, opts LifecycleOptions) error {
+	userScope, err := s.systemctlUserScope(hostID)
 	if err != nil {
 		return err
 	}
@@ -229,7 +229,7 @@ func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID 
 		args = append([]string{strconv.Itoa(opts.Timeout), "systemctl"}, args...)
 	}
 
-	result, err := s.execSystemctl(ctx, machineID, userID, command, args)
+	result, err := s.execSystemctl(ctx, hostID, userID, command, args)
 	if err != nil {
 		return err
 	}
@@ -251,14 +251,14 @@ func (s *QuadletService) applyUnitAction(ctx context.Context, userID, machineID 
 // SSHExecInterface. It owns the nil-check and the ErrConnectionFailed mapping
 // so every caller (the lifecycle actions and reloadUserSystemd) shares one
 // connection-failure contract.
-func (s *QuadletService) execSystemctl(ctx context.Context, machineID, userID, command string, args []string) (sshexec.ExecResult, error) {
+func (s *QuadletService) execSystemctl(ctx context.Context, hostID, userID, command string, args []string) (sshexec.ExecResult, error) {
 	if s.sshExec == nil {
 		// Defensive: production wiring always supplies an SSHExecInterface
 		// (cmd/server/main.go). A nil dependency is a programming error.
 		return sshexec.ExecResult{}, appErrors.ErrInternalError
 	}
 
-	result, err := s.sshExec.Exec(ctx, machineID, userID, command, sshexec.ExecOptions{
+	result, err := s.sshExec.Exec(ctx, hostID, userID, command, sshexec.ExecOptions{
 		Args: args,
 	})
 	if err != nil {
@@ -267,29 +267,29 @@ func (s *QuadletService) execSystemctl(ctx context.Context, machineID, userID, c
 	return result, nil
 }
 
-// systemctlUserScope resolves whether systemctl on the given machine must
-// address the user manager (`--user`): true unless the machine's registered
-// SSH login is root. A machine row that vanished (nil, nil from GetByID —
+// systemctlUserScope resolves whether systemctl on the given host must
+// address the user manager (`--user`): true unless the host's registered
+// SSH login is root. A host row that vanished (nil, nil from GetByID —
 // e.g. deleted concurrently with the request) is a 404, mirroring the
-// machines domain's mapping; a store failure is an internal error.
-func (s *QuadletService) systemctlUserScope(machineID string) (bool, error) {
-	if s.machines == nil {
-		// Defensive: production wiring always supplies the machine lookup
+// hosts domain's mapping; a store failure is an internal error.
+func (s *QuadletService) systemctlUserScope(hostID string) (bool, error) {
+	if s.hosts == nil {
+		// Defensive: production wiring always supplies the host lookup
 		// (internal/app). A nil dependency is a programming error.
 		return false, appErrors.ErrInternalError
 	}
 
-	machine, err := s.machines.GetByID(machineID)
+	host, err := s.hosts.GetByID(hostID)
 	if err != nil {
-		return false, fmt.Errorf("%w: failed to resolve machine %q for systemctl scoping: %v",
-			appErrors.ErrInternalError, machineID, err)
+		return false, fmt.Errorf("%w: failed to resolve host %q for systemctl scoping: %v",
+			appErrors.ErrInternalError, hostID, err)
 	}
-	if machine == nil {
-		return false, appErrors.ErrMachineNotFound
+	if host == nil {
+		return false, appErrors.ErrHostNotFound
 	}
 	// Trim + case-insensitive: registration never trims the username, and a
 	// uid-0 login spelled "Root" is still root.
-	return !strings.EqualFold(strings.TrimSpace(machine.SSHUsername), "root"), nil
+	return !strings.EqualFold(strings.TrimSpace(host.SSHUsername), "root"), nil
 }
 
 // reloadUserSystemd runs `systemctl daemon-reload` over the SSH seam,
@@ -310,8 +310,8 @@ func (s *QuadletService) systemctlUserScope(machineID string) (bool, error) {
 // An SSH-layer failure and a non-zero systemctl exit both map to
 // ErrConnectionFailed: either way the manager the lifecycle depends on
 // could not be reached.
-func (s *QuadletService) reloadUserSystemd(ctx context.Context, machineID, userID string) error {
-	userScope, err := s.systemctlUserScope(machineID)
+func (s *QuadletService) reloadUserSystemd(ctx context.Context, hostID, userID string) error {
+	userScope, err := s.systemctlUserScope(hostID)
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func (s *QuadletService) reloadUserSystemd(ctx context.Context, machineID, userI
 		cmd = "systemctl --user daemon-reload"
 	}
 
-	result, err := s.execSystemctl(ctx, machineID, userID, "systemctl", args)
+	result, err := s.execSystemctl(ctx, hostID, userID, "systemctl", args)
 	if err != nil {
 		return err
 	}

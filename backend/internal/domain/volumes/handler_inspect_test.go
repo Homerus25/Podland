@@ -12,14 +12,14 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// getRequest serves a GET /api/machines/{id}/volumes/{volumeName}
+// getRequest serves a GET /api/hosts/{id}/volumes/{volumeName}
 // through the handler with an authenticated test identity.
 func getRequest(get http.HandlerFunc, volumeName string) *httptest.ResponseRecorder {
 	return testutils.Perform(get, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/volumes/" + volumeName,
+		Path:      "/api/hosts/test-host/volumes/" + volumeName,
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "volumeName": volumeName},
+		URLParams: map[string]string{"id": "test-host", "volumeName": volumeName},
 	})
 }
 

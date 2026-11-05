@@ -48,7 +48,7 @@ func TestQuadletService_GetLogs_ResolvesSystemdContainerName(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
+	got, err := service.GetLogs(context.Background(), "user", "host", "web.container", time.Time{}, 0)
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -77,7 +77,7 @@ func TestQuadletService_GetLogs_ExplicitContainerNameWins(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	_, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
+	_, err := service.GetLogs(context.Background(), "user", "host", "web.container", time.Time{}, 0)
 
 	require.NoError(t, err)
 	assert.Equal(t, "my-explicit-container", loggedContainer)
@@ -102,7 +102,7 @@ func TestQuadletService_GetLogs_PodQuadletUsesPodContainer(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	_, err := service.GetLogs(context.Background(), "user", "machine", "stack.pod", time.Time{}, 0)
+	_, err := service.GetLogs(context.Background(), "user", "host", "stack.pod", time.Time{}, 0)
 
 	require.NoError(t, err)
 	assert.Equal(t, "stack-the-pod", loggedContainer)
@@ -114,11 +114,11 @@ func TestQuadletService_GetLogs_MissingQuadletIs404BeforeLogs(t *testing.T) {
 			return nil, nil
 		},
 		// printFn/logsFn stay unarmed: a missing quadlet must not touch
-		// the machine beyond the existence check.
+		// the host beyond the existence check.
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
+	got, err := service.GetLogs(context.Background(), "user", "host", "web.container", time.Time{}, 0)
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	assert.Nil(t, got)
@@ -138,7 +138,7 @@ func TestQuadletService_GetLogs_MapsMissingContainerTo404(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.GetLogs(context.Background(), "user", "machine", "web.container", time.Time{}, 0)
+	got, err := service.GetLogs(context.Background(), "user", "host", "web.container", time.Time{}, 0)
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	assert.Nil(t, got)
@@ -158,7 +158,7 @@ func TestQuadletService_GetLogsWithStream_MapsMissingContainerTo404(t *testing.T
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	err := service.GetLogsWithStream(context.Background(), "user", "machine", "web.container", time.Time{}, 0,
+	err := service.GetLogsWithStream(context.Background(), "user", "host", "web.container", time.Time{}, 0,
 		func(streaming.LogEvent) {})
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
@@ -187,7 +187,7 @@ func TestQuadletService_GetLogsWithStream_ReturnsPromptlyOnCancel(t *testing.T) 
 
 	testutils.RequirePromptReturnOnCancel(t, "GetLogsWithStream", started,
 		func(ctx context.Context) error {
-			return service.GetLogsWithStream(ctx, "user", "machine", "web.container", time.Time{}, 0,
+			return service.GetLogsWithStream(ctx, "user", "host", "web.container", time.Time{}, 0,
 				func(streaming.LogEvent) {})
 		})
 }

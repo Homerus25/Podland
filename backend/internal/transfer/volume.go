@@ -8,7 +8,7 @@ import (
 	"io"
 )
 
-// VolumeDataSource is the source machine's export width: podman's volume
+// VolumeDataSource is the source host's export width: podman's volume
 // export streaming the volume's content as a tar archive into w. The
 // method names match the quadlets domain's engine, so its engine
 // satisfies this structurally; other domains adapt.
@@ -16,7 +16,7 @@ type VolumeDataSource interface {
 	VolumeExport(name string, w io.Writer) error
 }
 
-// VolumeDataTarget is the target machine's import width: podman's volume
+// VolumeDataTarget is the target host's import width: podman's volume
 // import consuming a tar archive from r (merge semantics — podman-native,
 // there is no replace mode).
 type VolumeDataTarget interface {
@@ -61,7 +61,7 @@ func BoundOrDefault(wired int64) int64 {
 // mid-stream — the probe is bounded and never reads a big volume to its end.
 var errProbeNotEmpty = errors.New("volume probe: content entry found")
 
-// CopyVolumeData streams one volume's content from the source machine
+// CopyVolumeData streams one volume's content from the source host
 // into the target (§19): podman's export on the source spliced through
 // an in-process pipe into podman's import on the target — the shared
 // splice core below, the same ritual the image splice composes. The
@@ -179,7 +179,7 @@ func ProbeVolumeEmpty(e VolumeDataSource, name string) (bool, error) {
 	}
 }
 
-// countingReader counts the bytes actually crossing the machine-to-machine
+// countingReader counts the bytes actually crossing the host-to-host
 // splice (§19). It owns the transfer bound: crossing limit fails the read
 // (and so the import) with ErrBoundExceeded — the backstop that holds even
 // when the engine reports no inspect size for a pre-check. onBytes fires at

@@ -257,7 +257,7 @@ describe("LogViewer", () => {
 	it("preserves the envelope when the follow request itself fails", async () => {
 		const source = fakeSource({
 			follow: vi.fn(() =>
-				Promise.reject({ code: "MACHINE_UNREACHABLE", message: "ssh failed" }),
+				Promise.reject({ code: "HOST_UNREACHABLE", message: "ssh failed" }),
 			),
 		});
 		const user = userEvent.setup();
@@ -267,21 +267,21 @@ describe("LogViewer", () => {
 		await user.click(screen.getByTestId("log-follow-toggle"));
 
 		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("MACHINE_UNREACHABLE")).toBeInTheDocument();
+		expect(screen.getByText("HOST_UNREACHABLE")).toBeInTheDocument();
 		expect(screen.getByText("ssh failed")).toBeInTheDocument();
 	});
 
 	it("shows the fetch error when the initial tail fetch fails", async () => {
 		const source = fakeSource({
 			fetchTail: vi.fn().mockRejectedValue({
-				code: "MACHINE_UNREACHABLE",
+				code: "HOST_UNREACHABLE",
 				message: "ssh failed",
 			}),
 		});
 		renderViewer(source);
 
 		expect(await screen.findByRole("alert")).toBeInTheDocument();
-		expect(screen.getByText("MACHINE_UNREACHABLE")).toBeInTheDocument();
+		expect(screen.getByText("HOST_UNREACHABLE")).toBeInTheDocument();
 	});
 
 	// jsdom proves no real 360px layout; these pin the style props that

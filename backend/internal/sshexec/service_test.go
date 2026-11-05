@@ -53,7 +53,7 @@ func (r *fakeRunner) RunStream(ctx context.Context, cmd string, onLine func(Outp
 }
 
 // fakeDialer is a scriptable dialer. Dial returns the configured runner (or
-// error); Invalidate records that it was called for a given machineID.
+// error); Invalidate records that it was called for a given hostID.
 type fakeDialer struct {
 	mu sync.Mutex
 
@@ -78,16 +78,16 @@ func (d *fakeDialer) Dial(_ context.Context, _ string) (sessionRunner, error) {
 	return d.dialRunner, nil
 }
 
-func (d *fakeDialer) Invalidate(machineID string) {
+func (d *fakeDialer) Invalidate(hostID string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.invalidated = append(d.invalidated, machineID)
+	d.invalidated = append(d.invalidated, hostID)
 }
 
-func (d *fakeDialer) RemoveMachine(machineID string) {
+func (d *fakeDialer) RemoveHost(hostID string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.removed = append(d.removed, machineID)
+	d.removed = append(d.removed, hostID)
 }
 
 // Close satisfies the dialer interface. The fake never starts a cleanup
@@ -95,7 +95,7 @@ func (d *fakeDialer) RemoveMachine(machineID string) {
 // internal/app.App.Close may call it more than once.
 func (d *fakeDialer) Close() error { return nil }
 
-// Invalidated returns a snapshot of the machine IDs passed to Invalidate.
+// Invalidated returns a snapshot of the host IDs passed to Invalidate.
 func (d *fakeDialer) Invalidated() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -104,7 +104,7 @@ func (d *fakeDialer) Invalidated() []string {
 	return out
 }
 
-// Removed returns a snapshot of the machine IDs passed to RemoveMachine.
+// Removed returns a snapshot of the host IDs passed to RemoveHost.
 func (d *fakeDialer) Removed() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -141,7 +141,7 @@ func TestService_Exec_SuccessReturnsRunnerOutput(t *testing.T) {
 
 	res, err := svc.Exec(
 		context.Background(),
-		"machine-1", "user-1", "systemctl",
+		"host-1", "user-1", "systemctl",
 		ExecOptions{Args: []string{"is-active", "web.service"}},
 	)
 
@@ -170,7 +170,7 @@ func TestService_Exec_NonZeroExitIsNotAnError(t *testing.T) {
 
 	res, err := svc.Exec(
 		context.Background(),
-		"machine-1", "user-1", "systemctl",
+		"host-1", "user-1", "systemctl",
 		ExecOptions{Args: []string{"start", "missing.service"}},
 	)
 
@@ -188,12 +188,12 @@ func TestService_Exec_DialFailureReturnsErrorAndDoesNotInvalidate(t *testing.T) 
 
 	res, err := svc.Exec(
 		context.Background(),
-		"machine-1", "user-1", "echo",
+		"host-1", "user-1", "echo",
 		ExecOptions{},
 	)
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to dial machine")
+	assert.Contains(t, err.Error(), "failed to dial host")
 	assert.Equal(t, ExecResult{}, res)
 	assert.Empty(t, d.invalidated, "no Invalidate call when dial itself failed")
 }
@@ -208,15 +208,15 @@ func TestService_Exec_RealRunnerFailureInvalidatesCache(t *testing.T) {
 
 	res, err := svc.Exec(
 		context.Background(),
-		"machine-1", "user-1", "uptime",
+		"host-1", "user-1", "uptime",
 		ExecOptions{},
 	)
 
 	assert.Error(t, err)
 	assert.Equal(t, "session: connection reset", err.Error())
 	assert.Equal(t, ExecResult{}, res)
-	assert.Equal(t, []string{"machine-1"}, d.invalidated,
-		"Invalidate must be called exactly once for the failing machineID")
+	assert.Equal(t, []string{"host-1"}, d.invalidated,
+		"Invalidate must be called exactly once for the failing hostID")
 }
 
 func TestService_Exec_ContextCancellationPropagates(t *testing.T) {
@@ -232,7 +232,7 @@ func TestService_Exec_ContextCancellationPropagates(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel BEFORE the call
 
-	res, err := svc.Exec(ctx, "machine-1", "user-1", "sleep", ExecOptions{Args: []string{"10"}})
+	res, err := svc.Exec(ctx, "host-1", "user-1", "sleep", ExecOptions{Args: []string{"10"}})
 
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, ExecResult{}, res)
@@ -288,18 +288,18 @@ func TestService_Exec_ContextCancellationDuringRun(t *testing.T) {
 	assert.Equal(t, ExecResult{}, res)
 }
 
-// --- Service.RemoveMachine ---
+// --- Service.RemoveHost ---
 
-func TestService_RemoveMachine_DelegatesToDialer(t *testing.T) {
-	// The machines domain tears machines down through this public method
+func TestService_RemoveHost_DelegatesToDialer(t *testing.T) {
+	// The hosts domain tears hosts down through this public method
 	// (slice 300-5); it must reach the pool's graceful removal, not the
 	// fail-fast Invalidate.
 	d := &fakeDialer{}
 	svc := newServiceWithDialer(d)
 
-	svc.RemoveMachine("machine-1")
+	svc.RemoveHost("host-1")
 
-	assert.Equal(t, []string{"machine-1"}, d.Removed())
+	assert.Equal(t, []string{"host-1"}, d.Removed())
 	assert.Empty(t, d.Invalidated())
 }
 

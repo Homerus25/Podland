@@ -17,7 +17,7 @@ describe("PermissionHint", () => {
 
 		const hint = screen.getByTestId("containers-permission-hint");
 		expect(hint).toHaveTextContent(
-			"You have read-only access to this machine. Ask an owner or admin for write access to manage its containers.",
+			"You have read-only access to this host. Ask an owner or admin for write access to manage its containers.",
 		);
 		expect(hint).toHaveAttribute("data-requirement", "write");
 	});
@@ -38,7 +38,7 @@ describe("PermissionHint", () => {
 		);
 
 		const hint = screen.getByTestId("settings-permission-hint");
-		expect(hint).toHaveTextContent("Only the owner can edit this machine.");
+		expect(hint).toHaveTextContent("Only the owner can edit this host.");
 		expect(hint).toHaveAttribute("data-requirement", "owner");
 	});
 });

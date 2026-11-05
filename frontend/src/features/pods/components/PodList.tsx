@@ -1,5 +1,5 @@
 import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
-import { can } from "@features/machines/permissions";
+import { can } from "@features/hosts/permissions";
 import { CreatePodDialog } from "@features/pods/components/CreatePodDialog";
 import {
 	useCreatePod,
@@ -18,7 +18,7 @@ import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { useOpenLogs } from "@shared/logs/logRoute";
 import { detailPath } from "@shared/routes/detailRoute";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
@@ -89,25 +89,25 @@ function PrunePodsModal({
 // write-gated, but logs reads at read level, so the row keeps its logs
 // button below the manage capability.
 function PodRow({
-	machineId,
+	hostId,
 	pod,
 	canManage,
 	onRemove,
 	onShowLogs,
 }: {
-	machineId: string;
+	hostId: string;
 	pod: PodSummary;
 	canManage: boolean;
 	onRemove: (pod: PodSummary) => void;
 	onShowLogs: (pod: PodSummary) => void;
 }) {
 	const navigate = useNavigate();
-	const start = usePodAction(machineId, "start");
-	const stop = usePodAction(machineId, "stop");
-	const pause = usePodAction(machineId, "pause");
-	const unpause = usePodAction(machineId, "unpause");
-	const kill = usePodAction(machineId, "kill");
-	const restart = usePodAction(machineId, "restart");
+	const start = usePodAction(hostId, "start");
+	const stop = usePodAction(hostId, "stop");
+	const pause = usePodAction(hostId, "pause");
+	const unpause = usePodAction(hostId, "unpause");
+	const kill = usePodAction(hostId, "kill");
+	const restart = usePodAction(hostId, "restart");
 	// Podman's pod status is capitalized ("Paused"); compare case-insensitively.
 	const paused = pod.state.toLowerCase() === "paused";
 	const pauseAction = paused ? unpause : pause;
@@ -138,7 +138,7 @@ function PodRow({
 			<Tr
 				data-testid="pod-row"
 				cursor="pointer"
-				onClick={() => navigate(detailPath(machineId, "pods", pod.id))}
+				onClick={() => navigate(detailPath(hostId, "pods", pod.id))}
 			>
 				<Td fontFamily="mono">{pod.name}</Td>
 				<Td>
@@ -250,22 +250,22 @@ function PodRow({
 }
 
 // The Pods tab body. Metadata is visible to any grantee (the backend's
-// read level); write affordances are gated on the machine's per-caller
-// facts. The toolbar/triad/table machinery and the hint swap are
+// read level); write affordances are gated on the host's per-caller
+// facts. The toolbar/triad/table plumbing and the hint swap are
 // ResourceList's; this adapter owns only the columns, the row, and the
 // create/prune/remove modals (below the manage capability, the hint
 // replaces the controls — never bait users with disabled buttons).
-export function PodList({ machine }: { machine: Machine }) {
-	const machineId = machine.id;
-	const { data: pods, isPending, error } = usePods(machineId);
-	const createPod = useCreatePod(machineId);
-	const removePod = useRemovePod(machineId);
-	const prunePods = usePrunePods(machineId);
+export function PodList({ host }: { host: Host }) {
+	const hostId = host.id;
+	const { data: pods, isPending, error } = usePods(hostId);
+	const createPod = useCreatePod(hostId);
+	const removePod = useRemovePod(hostId);
+	const prunePods = usePrunePods(hostId);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [pendingRemove, setPendingRemove] = useState<PodSummary | null>(null);
-	const canManage = can(machine, "manage-pods");
-	const openLogs = useOpenLogs(machineId, "pod");
+	const canManage = can(host, "manage-pods");
+	const openLogs = useOpenLogs(hostId, "pod");
 
 	return (
 		<>
@@ -292,7 +292,7 @@ export function PodList({ machine }: { machine: Machine }) {
 				renderRow={(pod) => (
 					<PodRow
 						key={pod.id}
-						machineId={machineId}
+						hostId={hostId}
 						pod={pod}
 						canManage={canManage}
 						onRemove={setPendingRemove}
@@ -325,7 +325,7 @@ export function PodList({ machine }: { machine: Machine }) {
 			{isCreateOpen ? (
 				<CreatePodDialog
 					mutation={createPod}
-					machineId={machineId}
+					hostId={hostId}
 					onClose={() => setIsCreateOpen(false)}
 				/>
 			) : null}

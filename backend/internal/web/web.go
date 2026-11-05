@@ -3,12 +3,12 @@
 // {requestId, error{code, message}} envelope; successes are wire-shaped —
 // a DTO with an explicit status. Three entry points share one private
 // core for the error-mapping and success-write tail: Handle for
-// machine-scoped JSON endpoints (behind the /api/machines/{id} subtree
-// middleware), HandleStream for machine-scoped endpoints whose success
+// host-scoped JSON endpoints (behind the /api/hosts/{id} subtree
+// middleware), HandleStream for host-scoped endpoints whose success
 // is a byte stream or multipart upload, and HandleUser for user-scoped
-// JSON endpoints outside the subtree (auth, users, machines
+// JSON endpoints outside the subtree (auth, users, hosts
 // Create/List), where the user ID is passed through as-is — empty is a
-// legal state there, and there is no machine ID. Handlers cross this
+// legal state there, and there is no host ID. Handlers cross this
 // seam instead of re-assembling the identity guards and error mapping
 // per endpoint.
 //
@@ -29,9 +29,9 @@ import (
 	"github.com/go-playground/validator/v10"
 )
 
-// Handle runs a machine-scoped JSON endpoint through the endpoint
-// envelope. It extracts the caller and machine identities the subtree
-// middleware (RequireMachineAccess / RequireMachinePermission in
+// Handle runs a host-scoped JSON endpoint through the endpoint
+// envelope. It extracts the caller and host identities the subtree
+// middleware (RequireHostAccess / RequireHostPermission in
 // internal/middleware) has already validated, invokes call, and writes
 // the result with successStatus — or the error envelope when call
 // fails.
@@ -48,35 +48,35 @@ import (
 // closure should return a zero value); any other status encodes the
 // returned value as JSON.
 //
-// A missing userID or machineID maps to 500 INTERNAL_ERROR and a loud
-// log line: on the /api/machines/{id} subtree the middleware guarantees
+// A missing userID or hostID maps to 500 INTERNAL_ERROR and a loud
+// log line: on the /api/hosts/{id} subtree the middleware guarantees
 // both, so a miss means a miswired route, not a client error. Mounting
 // a Handle endpoint outside the subtree is a wiring bug the log will
 // surface.
-func Handle[T any](w http.ResponseWriter, r *http.Request, successStatus int, call func(ctx context.Context, userID, machineID string) (T, error)) {
+func Handle[T any](w http.ResponseWriter, r *http.Request, successStatus int, call func(ctx context.Context, userID, hostID string) (T, error)) {
 	requestID := contextutils.GetRequestID(r.Context())
 	userID := contextutils.GetUserIDFromContext(r.Context())
-	machineID := r.PathValue("id")
+	hostID := r.PathValue("id")
 
-	if userID == "" || machineID == "" {
-		slog.ErrorContext(r.Context(), "endpoint envelope: identity invariant violated (route mounted outside the machine subtree?)",
+	if userID == "" || hostID == "" {
+		slog.ErrorContext(r.Context(), "endpoint envelope: identity invariant violated (route mounted outside the host subtree?)",
 			slog.Any("requestID", requestID),
 			slog.Any("userID", userID),
-			slog.Any("machineID", machineID))
+			slog.Any("hostID", hostID))
 		appErrors.RespondWithError(w, appErrors.ErrInternalError, requestID)
 		return
 	}
 
-	result, err := call(r.Context(), userID, machineID)
+	result, err := call(r.Context(), userID, hostID)
 	respond(w, r, successStatus, result, err)
 }
 
-// HandleStream runs a machine-scoped endpoint whose success is a byte
+// HandleStream runs a host-scoped endpoint whose success is a byte
 // stream or multipart upload rather than a JSON DTO through the
 // endpoint envelope's error side: the same identity extraction, AppError
 // mapping, and 500 fallback Handle owns, without the JSON encode. It
-// extracts the caller and machine identities the subtree middleware
-// (RequireMachineAccess / RequireMachinePermission in
+// extracts the caller and host identities the subtree middleware
+// (RequireHostAccess / RequireHostPermission in
 // internal/middleware) has already validated and invokes stream; the
 // closure owns everything wire-specific — response headers, the body
 // ritual, the service call, and the success write (an implicit 200, an
@@ -92,32 +92,32 @@ func Handle[T any](w http.ResponseWriter, r *http.Request, successStatus int, ca
 // other error answers the 500 fallback with Handle's log shape
 // (requestID + error).
 //
-// A missing userID or machineID maps to 500 INTERNAL_ERROR and a loud
-// log line: on the /api/machines/{id} subtree the middleware guarantees
+// A missing userID or hostID maps to 500 INTERNAL_ERROR and a loud
+// log line: on the /api/hosts/{id} subtree the middleware guarantees
 // both, so a miss means a miswired route, not a client error — and
 // stream never runs. Mounting a HandleStream endpoint outside the
 // subtree is a wiring bug the log will surface.
-func HandleStream(w http.ResponseWriter, r *http.Request, stream func(ctx context.Context, userID, machineID string) error) {
+func HandleStream(w http.ResponseWriter, r *http.Request, stream func(ctx context.Context, userID, hostID string) error) {
 	requestID := contextutils.GetRequestID(r.Context())
 	userID := contextutils.GetUserIDFromContext(r.Context())
-	machineID := r.PathValue("id")
+	hostID := r.PathValue("id")
 
-	if userID == "" || machineID == "" {
-		slog.ErrorContext(r.Context(), "endpoint envelope: identity invariant violated (route mounted outside the machine subtree?)",
+	if userID == "" || hostID == "" {
+		slog.ErrorContext(r.Context(), "endpoint envelope: identity invariant violated (route mounted outside the host subtree?)",
 			slog.Any("requestID", requestID),
 			slog.Any("userID", userID),
-			slog.Any("machineID", machineID))
+			slog.Any("hostID", hostID))
 		appErrors.RespondWithError(w, appErrors.ErrInternalError, requestID)
 		return
 	}
 
-	if err := stream(r.Context(), userID, machineID); err != nil {
+	if err := stream(r.Context(), userID, hostID); err != nil {
 		respondError(w, r, err)
 	}
 }
 
-// HandleUser runs a user-scoped JSON endpoint outside the machine
-// subtree (auth Login/Refresh/Logout/Status, users Create, machines
+// HandleUser runs a user-scoped JSON endpoint outside the host
+// subtree (auth Login/Refresh/Logout/Status, users Create, hosts
 // Create/List) through the endpoint envelope. It passes the caller's
 // user ID from the request context to call as-is — empty included — and
 // writes the result with successStatus, or the error envelope when call
@@ -129,8 +129,8 @@ func HandleStream(w http.ResponseWriter, r *http.Request, stream func(ctx contex
 // by cookie, not JWT. Routes that need a caller rely on the JWT
 // middleware upstream; a miswire surfaces through the envelope's
 // unexpected-error log when the closure's service call fails. There is
-// no machine ID for the same reason — these endpoints sit outside the
-// /api/machines/{id} subtree.
+// no host ID for the same reason — these endpoints sit outside the
+// /api/hosts/{id} subtree.
 //
 // Within call, everything route-specific stays plain Go: body decode
 // (cross web.Decode), cookie reading, and header writes — cookies are

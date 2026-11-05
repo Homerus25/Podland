@@ -33,11 +33,11 @@ export interface LoginResponse {
 	role: UserRole;
 }
 
-export type MachinePermission = "read" | "write" | "admin";
+export type HostPermission = "read" | "write" | "admin";
 
-// Machine fields every machines endpoint returns — the bare shape the
-// backend calls MachineResponse (Create and Update answer it).
-export interface MachineResponse {
+// Host fields every hosts endpoint returns — the bare shape the
+// backend calls HostResponse (Create and Update answer it).
+export interface HostResponse {
 	id: string;
 	name: string;
 	description: string;
@@ -51,22 +51,22 @@ export interface MachineResponse {
 	updatedAt: string;
 }
 
-// Machine as the enrichment endpoints return it — GET /api/machines and
-// GET /api/machines/{id} both enrich every response with the caller's
-// own permission and ownership (backend/internal/domain/machines
-// /service.go AccessibleMachineResponse), so gating reads the facts
-// straight off the machine object.
-export interface Machine extends MachineResponse {
-	permission: MachinePermission;
+// Host as the enrichment endpoints return it — GET /api/hosts and
+// GET /api/hosts/{id} both enrich every response with the caller's
+// own permission and ownership (backend/internal/domain/hosts
+// /service.go AccessibleHostResponse), so gating reads the facts
+// straight off the host object.
+export interface Host extends HostResponse {
+	permission: HostPermission;
 	isOwner: boolean;
 }
 
-// Access grant as returned by GET /api/machines/{id}/access
-// (backend/internal/domain/machines/handler.go AccessResponse). The API
+// Access grant as returned by GET /api/hosts/{id}/access
+// (backend/internal/domain/hosts/handler.go AccessResponse). The API
 // identifies users by id only.
 export interface AccessGrant {
 	userId: string;
-	permission: MachinePermission;
+	permission: HostPermission;
 	grantedAt: string;
 }
 

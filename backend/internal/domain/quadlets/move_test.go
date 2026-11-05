@@ -18,37 +18,37 @@ import (
 )
 
 // fakeAccessRepo is the function-field fake for the permission.PermissionGetter
-// seam — the access store the cross-machine operations (move/copy) gate the
-// target machine on. An unarmed lookup panics, so an unexpected gate check
+// seam — the access store the cross-host operations (move/copy) gate the
+// target host on. An unarmed lookup panics, so an unexpected gate check
 // fails the test loudly.
 type fakeAccessRepo struct {
-	getPermissionFn func(machineID, userID string) (string, error)
+	getPermissionFn func(hostID, userID string) (string, error)
 }
 
-func (f *fakeAccessRepo) GetPermission(machineID, userID string) (string, error) {
+func (f *fakeAccessRepo) GetPermission(hostID, userID string) (string, error) {
 	if f.getPermissionFn == nil {
 		panic("unexpected PermissionGetter.GetPermission call")
 	}
-	return f.getPermissionFn(machineID, userID)
+	return f.getPermissionFn(hostID, userID)
 }
 
-// newMovePreviewTestServices builds both quadlet modules over per-machine
+// newMovePreviewTestServices builds both quadlet modules over per-host
 // fake engines (the two-lease shape MovePreview exercises) and the given
 // access store: the real lean service over the same engines, passed to
 // the transfer service as its lifecycle seam (architecture review
-// 2026-10-19, candidate C2). The source machine's quadlet is
-// web.container, stopped on machine-a; engines map machine IDs to their
-// fakes so each lease dials its own machine's engine.
+// 2026-10-19, candidate C2). The source host's quadlet is
+// web.container, stopped on host-a; engines map host IDs to their
+// fakes so each lease dials its own host's engine.
 func newMovePreviewTestServices(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo) (*QuadletService, *QuadletTransferService) {
 	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
-		"machine-a": sourceEngine,
-		"machine-b": targetEngine,
+		"host-a": sourceEngine,
+		"host-b": targetEngine,
 	}}
 	service := NewQuadletService(provider, nil, nil)
 	return service, NewQuadletTransferService(provider, nil, access, 0, service)
 }
 
-// newMovePreviewTestService builds the transfer service over per-machine
+// newMovePreviewTestService builds the transfer service over per-host
 // fake engines and the given access store, with the real lean service as
 // its seam — the shape the preview suites drive.
 func newMovePreviewTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo) *QuadletTransferService {
@@ -78,9 +78,9 @@ Volume=/srv/backup:/backup:ro
 `
 
 // allowTargetRead is the access store answer for a caller holding read
-// on the target machine — the minimum the preview requires.
-func allowTargetRead(machineID, userID string) (string, error) {
-	if machineID == "machine-b" {
+// on the target host — the minimum the preview requires.
+func allowTargetRead(hostID, userID string) (string, error) {
+	if hostID == "host-b" {
 		return models.PermissionRead, nil
 	}
 	return models.PermissionAdmin, nil
@@ -97,7 +97,7 @@ func TestQuadletService_MovePreview_ReturnsVolumesCollisionRunning(t *testing.T)
 		&fakeAccessRepo{getPermissionFn: allowTargetRead},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -170,7 +170,7 @@ func TestQuadletService_MovePreview_VolumeKinds(t *testing.T) {
 				&fakeAccessRepo{getPermissionFn: allowTargetRead},
 			)
 
-			got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+			got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got.Volumes)
@@ -187,7 +187,7 @@ func TestQuadletService_MovePreview_NoVolumesIsEmptyList(t *testing.T) {
 		&fakeAccessRepo{getPermissionFn: allowTargetRead},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -233,7 +233,7 @@ func TestQuadletService_MovePreview_CollisionRequiresNameAndResource(t *testing.
 				&fakeAccessRepo{getPermissionFn: allowTargetRead},
 			)
 
-			got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+			got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got.Collision)
@@ -270,7 +270,7 @@ func TestQuadletService_MovePreview_RunningReflectsSourceState(t *testing.T) {
 				&fakeAccessRepo{getPermissionFn: allowTargetRead},
 			)
 
-			got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+			got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got.Running)
@@ -279,7 +279,7 @@ func TestQuadletService_MovePreview_RunningReflectsSourceState(t *testing.T) {
 }
 
 func TestQuadletService_MovePreview_NoTargetAccessIsAccessDenied(t *testing.T) {
-	// Only the source machine's engine is armed: a preview that crossed the
+	// Only the source host's engine is armed: a preview that crossed the
 	// target's engine despite the missing grant would panic the fake and
 	// fail the test — the "no false preview" guarantee (issue 209).
 	service := newMovePreviewTestService(
@@ -291,7 +291,7 @@ func TestQuadletService_MovePreview_NoTargetAccessIsAccessDenied(t *testing.T) {
 		}},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.ErrorIs(t, err, appErrors.ErrAccessDenied)
 	assert.Nil(t, got)
@@ -301,8 +301,8 @@ func TestQuadletService_MovePreview_BelowReadTargetAccessIsAccessDenied(t *testi
 	service := newMovePreviewTestService(
 		movePreviewSourceFixture("[Container]\nImage=busybox\n"),
 		nil,
-		&fakeAccessRepo{getPermissionFn: func(machineID, _ string) (string, error) {
-			if machineID == "machine-b" {
+		&fakeAccessRepo{getPermissionFn: func(hostID, _ string) (string, error) {
+			if hostID == "host-b" {
 				// A malformed/stale level answers as below-read, like
 				// models.HasAtLeast treats any unknown level.
 				return "nonsense-level", nil
@@ -311,7 +311,7 @@ func TestQuadletService_MovePreview_BelowReadTargetAccessIsAccessDenied(t *testi
 		}},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.ErrorIs(t, err, appErrors.ErrAccessDenied)
 	assert.Nil(t, got)
@@ -326,7 +326,7 @@ func TestQuadletService_MovePreview_AccessLookupFailureIsInternalError(t *testin
 		}},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.ErrorIs(t, err, appErrors.ErrInternalError)
 	assert.Nil(t, got)
@@ -347,7 +347,7 @@ func TestQuadletService_MovePreview_MissingSourceQuadletIs404(t *testing.T) {
 		&fakeAccessRepo{getPermissionFn: allowTargetRead},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "gone.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "gone.container", "host-b")
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	assert.Nil(t, got)
@@ -355,21 +355,21 @@ func TestQuadletService_MovePreview_MissingSourceQuadletIs404(t *testing.T) {
 
 // --- The transfer (copy mode, issue 210) ---
 
-// newMoveTransferTestServices builds both quadlet modules over per-machine
-// fake engines and the given access store, with an SSH exec and machine
+// newMoveTransferTestServices builds both quadlet modules over per-host
+// fake engines and the given access store, with an SSH exec and host
 // lookup wired on the lean service for the post-install manager reload the
 // transfer performs on the target and the move-mode stops — both cross
 // the lifecycle seam, so the SSH-exec mock pins keep crossing both modules.
 func newMoveTransferTestServices(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, sshExec sshexec.SSHExecInterface) (*QuadletService, *QuadletTransferService) {
 	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
-		"machine-a": sourceEngine,
-		"machine-b": targetEngine,
+		"host-a": sourceEngine,
+		"host-b": targetEngine,
 	}}
 	service := NewQuadletService(provider, sshExec, lookupForUser("core"))
 	return service, NewQuadletTransferService(provider, nil, access, 0, service)
 }
 
-// newMoveTransferTestService builds the transfer service over per-machine
+// newMoveTransferTestService builds the transfer service over per-host
 // fake engines and the given access store, with the real lean service as
 // its seam — the shape the transfer suites drive.
 func newMoveTransferTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, sshExec sshexec.SSHExecInterface) *QuadletTransferService {
@@ -414,17 +414,17 @@ func emptyTargetEngine(t *testing.T) (*fakeQuadletEngine, *string, *string, *boo
 }
 
 // allowTargetWrite is the access store answer for a caller holding write on
-// the target machine — the minimum the transfer requires.
-func allowTargetWrite(machineID, userID string) (string, error) {
-	if machineID == "machine-b" {
+// the target host — the minimum the transfer requires.
+func allowTargetWrite(hostID, userID string) (string, error) {
+	if hostID == "host-b" {
 		return models.PermissionWrite, nil
 	}
 	return models.PermissionAdmin, nil
 }
 
-// moveCopyRequest is the body of a copy transfer to machine-b.
+// moveCopyRequest is the body of a copy transfer to host-b.
 func moveCopyRequest() QuadletMoveRequest {
-	return QuadletMoveRequest{TargetMachineID: "machine-b", Mode: "copy"}
+	return QuadletMoveRequest{TargetHostID: "host-b", Mode: "copy"}
 }
 
 const moveTransferContent = `[Container]
@@ -441,7 +441,7 @@ func TestQuadletService_Move_CopyInstallsIdenticalFileOnTarget(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -452,14 +452,14 @@ func TestQuadletService_Move_CopyInstallsIdenticalFileOnTarget(t *testing.T) {
 	assert.Equal(t, "web.container", got.Name)
 	assert.Equal(t, "container", got.Resource)
 	assert.Equal(t, MoveStatusCopied, got.Status)
-	assert.Equal(t, "machine-a", got.SourceMachineID)
-	assert.Equal(t, "machine-b", got.TargetMachineID)
+	assert.Equal(t, "host-a", got.SourceHostID)
+	assert.Equal(t, "host-b", got.TargetHostID)
 	assert.Equal(t, "/etc/containers/systemd/web.container", got.Path)
 }
 
 // TestQuadletService_Move_CopyReloadsOnlyTheTargetManager pins where the
 // post-install reload lands: exactly one daemon-reload, against the TARGET
-// machine — the copy leaves the source manager (and everything else on the
+// host — the copy leaves the source manager (and everything else on the
 // source) untouched.
 func TestQuadletService_Move_CopyReloadsOnlyTheTargetManager(t *testing.T) {
 	target, _, _, _ := emptyTargetEngine(t)
@@ -471,12 +471,12 @@ func TestQuadletService_Move_CopyReloadsOnlyTheTargetManager(t *testing.T) {
 		sshExec,
 	)
 
-	_, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+	_, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 	require.NoError(t, err)
 	calls := sshExec.Calls()
 	require.Len(t, calls, 1, "a successful copy must reload exactly one manager")
-	assert.Equal(t, "machine-b", calls[0].MachineID, "the reload must target the target machine")
+	assert.Equal(t, "host-b", calls[0].HostID, "the reload must target the target host")
 	assert.Equal(t, "systemctl", calls[0].Command)
 	assert.Equal(t, []string{"--user", "daemon-reload"}, calls[0].Opts.Args)
 }
@@ -495,7 +495,7 @@ func TestQuadletService_Move_CopyOfRunningQuadletNeedsNoStop(t *testing.T) {
 		sshExec,
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -525,7 +525,7 @@ func TestQuadletService_Move_CollisionOnTargetInstallsNothing(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletAlreadyExists)
 	assert.Nil(t, got)
@@ -551,7 +551,7 @@ func TestQuadletService_Move_SameNameDifferentResourceOnTargetCopies(t *testing.
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -580,7 +580,7 @@ func TestQuadletService_Move_AllFiveResourceTypesCopy(t *testing.T) {
 				testutils.NewMockSSHExec(),
 			)
 
-			got, err := service.Move(context.Background(), "user", "machine-a", "web."+tt.resource, moveCopyRequest())
+			got, err := service.Move(context.Background(), "user", "host-a", "web."+tt.resource, moveCopyRequest())
 
 			require.NoError(t, err)
 			require.NotNil(t, got)
@@ -609,8 +609,8 @@ func TestQuadletService_Move_TargetBelowWriteAccessIsAccessDenied(t *testing.T) 
 			service := newMoveTransferTestService(
 				&fakeQuadletEngine{},
 				nil,
-				&fakeAccessRepo{getPermissionFn: func(machineID, _ string) (string, error) {
-					if machineID == "machine-b" {
+				&fakeAccessRepo{getPermissionFn: func(hostID, _ string) (string, error) {
+					if hostID == "host-b" {
 						return tt.answer, nil
 					}
 					return models.PermissionAdmin, nil
@@ -618,7 +618,7 @@ func TestQuadletService_Move_TargetBelowWriteAccessIsAccessDenied(t *testing.T) 
 				testutils.NewMockSSHExec(),
 			)
 
-			got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+			got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 			require.ErrorIs(t, err, appErrors.ErrAccessDenied)
 			assert.Nil(t, got)
@@ -636,7 +636,7 @@ func TestQuadletService_Move_AccessLookupFailureIsInternalError(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 	require.ErrorIs(t, err, appErrors.ErrInternalError)
 	assert.Nil(t, got)
@@ -658,7 +658,7 @@ func TestQuadletService_Move_MissingSourceQuadletIs404(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "gone.container", moveCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "gone.container", moveCopyRequest())
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	assert.Nil(t, got)
@@ -710,7 +710,7 @@ func TestQuadletService_Move_InstallRefusalMapsAlreadyExists(t *testing.T) {
 				testutils.NewMockSSHExec(),
 			)
 
-			got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+			got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 			require.ErrorIs(t, err, appErrors.ErrQuadletAlreadyExists)
 			assert.Nil(t, got)
@@ -734,7 +734,7 @@ func TestQuadletService_Move_ReloadFailureFailsCopy(t *testing.T) {
 		}),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, got)
@@ -781,9 +781,9 @@ func recordingSourceFixture(status string, sequence *[]string, gotForce *bool) *
 	}
 }
 
-// moveModeRequest is the body of a move-mode transfer to machine-b.
+// moveModeRequest is the body of a move-mode transfer to host-b.
 func moveModeRequest() QuadletMoveRequest {
-	return QuadletMoveRequest{TargetMachineID: "machine-b", Mode: MoveModeMove}
+	return QuadletMoveRequest{TargetHostID: "host-b", Mode: MoveModeMove}
 }
 
 // TestQuadletService_Move_MoveRemovesSourceOnlyAfterInstall pins the AC at
@@ -800,7 +800,7 @@ func TestQuadletService_Move_MoveRemovesSourceOnlyAfterInstall(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveModeRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveModeRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -811,8 +811,8 @@ func TestQuadletService_Move_MoveRemovesSourceOnlyAfterInstall(t *testing.T) {
 	assert.Empty(t, got.Error, "a completed move carries no error detail")
 	assert.Equal(t, "web.container", got.ID)
 	assert.Equal(t, "container", got.Resource)
-	assert.Equal(t, "machine-a", got.SourceMachineID)
-	assert.Equal(t, "machine-b", got.TargetMachineID)
+	assert.Equal(t, "host-a", got.SourceHostID)
+	assert.Equal(t, "host-b", got.TargetHostID)
 }
 
 // TestQuadletService_Move_RunningSourceWithoutStopOrForceInstallsNothing
@@ -837,7 +837,7 @@ func TestQuadletService_Move_RunningSourceWithoutStopOrForceInstallsNothing(t *t
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveModeRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveModeRequest())
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletResourceRunning)
 	assert.Nil(t, got)
@@ -875,18 +875,18 @@ func TestQuadletService_Move_StopStopsThenMoves(t *testing.T) {
 		sshExec,
 	)
 
-	req := QuadletMoveRequest{TargetMachineID: "machine-b", Mode: MoveModeMove, Stop: true}
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", req)
+	req := QuadletMoveRequest{TargetHostID: "host-b", Mode: MoveModeMove, Stop: true}
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", req)
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, MoveStatusMoved, got.Status)
 	assert.False(t, gotForce)
 	require.Len(t, sshExec.Calls(), 2, "a stop-then-move performs exactly the target's reload and the stop")
-	assert.Equal(t, "machine-b", sshExec.Calls()[0].MachineID,
+	assert.Equal(t, "host-b", sshExec.Calls()[0].HostID,
 		"the reload completes the target install before the source is touched")
 	assert.Equal(t, []string{"--user", "daemon-reload"}, sshExec.Calls()[0].Opts.Args)
-	assert.Equal(t, "machine-a", sshExec.Calls()[1].MachineID)
+	assert.Equal(t, "host-a", sshExec.Calls()[1].HostID)
 	assert.Equal(t, "systemctl", sshExec.Calls()[1].Command)
 	assert.Equal(t, []string{"--user", "stop", "web.service"}, sshExec.Calls()[1].Opts.Args)
 	assert.Equal(t, 2, sshCallsAtRemove, "the stop must precede the remove")
@@ -931,9 +931,9 @@ func TestQuadletService_Move_CollisionAfterTheStopCarriesTheNote(t *testing.T) {
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		sshExec,
 	)
-	req := QuadletMoveRequest{TargetMachineID: "machine-b", Mode: MoveModeMove, Stop: true, MigrateVolumeData: true}
+	req := QuadletMoveRequest{TargetHostID: "host-b", Mode: MoveModeMove, Stop: true, MigrateVolumeData: true}
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", req)
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", req)
 
 	require.Nil(t, got)
 	appErr, ok := errors.AsType[*appErrors.AppError](err)
@@ -960,15 +960,15 @@ func TestQuadletService_Move_ForcePassesThroughToRemoval(t *testing.T) {
 		sshExec,
 	)
 
-	req := QuadletMoveRequest{TargetMachineID: "machine-b", Mode: MoveModeMove, Force: true}
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", req)
+	req := QuadletMoveRequest{TargetHostID: "host-b", Mode: MoveModeMove, Force: true}
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", req)
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, MoveStatusMoved, got.Status)
 	assert.True(t, gotForce, "force must pass through to the removal like the delete flow")
 	require.Len(t, sshExec.Calls(), 1, "a forced move performs no stop — only the target's reload")
-	assert.Equal(t, "machine-b", sshExec.Calls()[0].MachineID)
+	assert.Equal(t, "host-b", sshExec.Calls()[0].HostID)
 	assert.Equal(t, []string{"--user", "daemon-reload"}, sshExec.Calls()[0].Opts.Args)
 }
 
@@ -1003,7 +1003,7 @@ func TestQuadletService_Move_InstallFailureLeavesSourceUntouched(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveModeRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveModeRequest())
 
 	require.Error(t, err)
 	assert.Nil(t, got, "an install failure answers a plain error, not the transfer envelope")
@@ -1036,7 +1036,7 @@ func TestQuadletService_Move_RemoveFailureAfterInstallReturnsPartial(t *testing.
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveModeRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveModeRequest())
 
 	require.NoError(t, err, "a partial transfer is a success-shaped envelope, not an error")
 	require.NotNil(t, got)
@@ -1052,7 +1052,7 @@ func TestQuadletService_Move_RemoveFailureAfterInstallReturnsPartial(t *testing.
 // race answer: when the source quadlet vanished between the install and
 // the removal, the transfer's goal is already met and the status is
 // "moved" — never a false "partial" claiming the quadlet exists on both
-// machines.
+// hosts.
 func TestQuadletService_Move_SourceVanishedBeforeRemovalIsMoved(t *testing.T) {
 	sequence := []string{}
 	listCalls := 0
@@ -1080,7 +1080,7 @@ func TestQuadletService_Move_SourceVanishedBeforeRemovalIsMoved(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveModeRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveModeRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -1122,7 +1122,7 @@ func TestQuadletService_Move_CollisionOnTargetRemovesNothing(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveModeRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveModeRequest())
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletAlreadyExists)
 	assert.Nil(t, got)
@@ -1154,8 +1154,8 @@ func TestQuadletService_Move_CopyIgnoresStopAndForce(t *testing.T) {
 		sshExec,
 	)
 
-	req := QuadletMoveRequest{TargetMachineID: "machine-b", Mode: MoveModeCopy, Stop: true, Force: true}
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", req)
+	req := QuadletMoveRequest{TargetHostID: "host-b", Mode: MoveModeCopy, Stop: true, Force: true}
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", req)
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -1177,7 +1177,7 @@ Volume=app-data.volume:/var/lib/app:Z
 `
 
 // appDataVolumeContent is the companion .volume quadlet's content on the
-// source machine.
+// source host.
 const appDataVolumeContent = `[Volume]
 Driver=local
 Label=org.example.kind=app-data
@@ -1291,7 +1291,7 @@ func TestQuadletService_MovePreview_CompanionFieldsPerTargetState(t *testing.T) 
 				&fakeAccessRepo{getPermissionFn: allowTargetRead},
 			)
 
-			got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+			got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 			require.NoError(t, err)
 			require.Len(t, got.Volumes, 1)
@@ -1325,7 +1325,7 @@ Volume=/srv/host.volume:/host
 		},
 		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
 			// Only the main quadlet: missing.volume does not exist on the
-			// source machine.
+			// source host.
 			return []*entities.ListQuadlet{
 				{Name: "web.container", UnitName: "web.service", Path: "/x/web.container", Status: "stopped"},
 			}, nil
@@ -1344,7 +1344,7 @@ Volume=/srv/host.volume:/host
 		&fakeAccessRepo{getPermissionFn: allowTargetRead},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.NoError(t, err)
 	require.Len(t, got.Volumes, 3)
@@ -1407,7 +1407,7 @@ Volume=custom-name:/var/lib/other
 	}
 	service := newMovePreviewTestService(source, target, &fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.NoError(t, err)
 	require.Len(t, got.Volumes, 2, "per-reference rows: two references stay two entries")
@@ -1443,7 +1443,7 @@ func TestQuadletService_Move_CopyInstallsCompanionsBeforeMain(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -1479,7 +1479,7 @@ func TestQuadletService_Move_IdenticalCompanionOnTargetIsSkipped(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -1508,7 +1508,7 @@ func TestQuadletService_Move_DifferingCompanionOnTargetIs409(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveModeRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveModeRequest())
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -1568,7 +1568,7 @@ Volume=beta.volume:/b
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveModeRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveModeRequest())
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -1612,8 +1612,8 @@ func TestQuadletService_Move_FlagFalseSkipsCompanions(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	req := QuadletMoveRequest{TargetMachineID: "machine-b", Mode: MoveModeCopy, TransferVolumeQuadlets: ptr(false)}
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", req)
+	req := QuadletMoveRequest{TargetHostID: "host-b", Mode: MoveModeCopy, TransferVolumeQuadlets: ptr(false)}
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", req)
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -1649,7 +1649,7 @@ func TestQuadletService_Move_MoveRemovesOnlyMainQuadlet(t *testing.T) {
 		testutils.NewMockSSHExec(),
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveModeRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveModeRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got)

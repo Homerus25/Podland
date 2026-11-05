@@ -17,7 +17,7 @@ import { ndjsonResponse, streamFixtures, streamResponse } from "@/test/stream";
 
 const { progressEvent, completeEvent, errorEvent } = streamFixtures;
 
-const pullUrl = "*/api/machines/m-1/images/pull";
+const pullUrl = "*/api/hosts/m-1/images/pull";
 
 let requestCount = 0;
 

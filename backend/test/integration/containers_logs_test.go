@@ -19,7 +19,7 @@ import (
 // Test_Integration_Containers_Logs is the containers logs vertical slice
 // for the real-podman integration suite, mirroring the quadlets logs
 // slice. It proves the two log delivery modes of
-// GET /api/machines/{id}/containers/{cid}/logs against a real container:
+// GET /api/hosts/{id}/containers/{cid}/logs against a real container:
 //
 //	non-streaming (follow=false, default) → 200 {id, logs} multiline string
 //	streaming     (follow=true)            → NDJSON {timestamp, level, message} lines
@@ -36,7 +36,7 @@ func Test_Integration_Containers_Logs(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerContainersSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// Container create does not auto-pull; busybox must pre-exist.
 	ensureBusyboxImage(t)
@@ -63,15 +63,15 @@ func Test_Integration_Containers_Logs(t *testing.T) {
 		Image:   "busybox:latest",
 		Command: []string{"sh", "-c", "while true; do echo hi; sleep 1; done"},
 	}
-	containerID = createContainer(t, machineID, createReq)
+	containerID = createContainer(t, hostID, createReq)
 	require.NotEmpty(t, containerID, "create must return a non-empty container id")
-	startContainer(t, machineID, containerID)
-	waitForContainerState(t, machineID, containerID, "running",
+	startContainer(t, hostID, containerID)
+	waitForContainerState(t, hostID, containerID, "running",
 		"logs slice setup: container must be running to produce output")
 
 	// --- AC: non-streaming GET .../logs returns 200 {id, logs} --------
 	t.Run("NonStreamingReturnsLogsWithId", func(t *testing.T) {
-		logs := waitForContainerLogOutput(t, machineID, containerID)
+		logs := waitForContainerLogOutput(t, hostID, containerID)
 		require.Equal(t, containerID, logs.ID,
 			"logs response id must echo the container id from the URL path")
 		require.Contains(t, logs.Logs, "hi",
@@ -82,11 +82,11 @@ func Test_Integration_Containers_Logs(t *testing.T) {
 	t.Run("SinceAndTailParamsAccepted", func(t *testing.T) {
 		// since one hour ago: everything the container emitted qualifies.
 		since := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
-		all := getContainerLogs(t, machineID, containerID, "since="+url.QueryEscape(since))
+		all := getContainerLogs(t, hostID, containerID, "since="+url.QueryEscape(since))
 		require.Contains(t, all.Logs, "hi", "logs with since=<1h ago> must include the recipe's output")
 
 		// tail=1: podman keeps only the most recent line.
-		last := getContainerLogs(t, machineID, containerID, "tail=1")
+		last := getContainerLogs(t, hostID, containerID, "tail=1")
 		require.Equal(t, 1, len(strings.Split(strings.TrimSuffix(last.Logs, "\n"), "\n")),
 			"tail=1 must return exactly one log line. got: %q", last.Logs)
 		require.Equal(t, "hi", strings.TrimSuffix(last.Logs, "\n"),
@@ -95,7 +95,7 @@ func Test_Integration_Containers_Logs(t *testing.T) {
 
 	// --- AC: follow=true streams NDJSON {timestamp, level, message} ----
 	t.Run("StreamingFollowReturnsNDJSONEvents", func(t *testing.T) {
-		resp, cancel := openContainerLogStream(t, machineID, containerID)
+		resp, cancel := openContainerLogStream(t, hostID, containerID)
 		defer cancel()
 		defer resp.Body.Close()
 
@@ -121,7 +121,7 @@ func Test_Integration_Containers_Logs(t *testing.T) {
 
 	// --- AC: client disconnect during follow=true cancels the stream ---
 	t.Run("ClientDisconnectCancelsFollowStream", func(t *testing.T) {
-		resp, cancel := openContainerLogStream(t, machineID, containerID)
+		resp, cancel := openContainerLogStream(t, hostID, containerID)
 		defer cancel()
 
 		// Prove the stream is live before disconnecting.
@@ -132,7 +132,7 @@ func Test_Integration_Containers_Logs(t *testing.T) {
 		// Disconnect: cancel the request context. Server-side the request
 		// context cancels, the kit emits its OPERATION_CANCELLED event to
 		// the dead connection, and GetLogsWithStream must return so the
-		// machine connection is released. That event is written to a
+		// host connection is released. That event is written to a
 		// connection the client has already dropped, so it is not directly
 		// observable from here — the behavioral proof is that reading the
 		// stream terminates promptly and the logs path stays fully usable
@@ -142,12 +142,12 @@ func Test_Integration_Containers_Logs(t *testing.T) {
 			"reading a canceled follow stream must terminate promptly, not hang")
 		resp.Body.Close()
 
-		resp2, cancel2 := openContainerLogStream(t, machineID, containerID)
+		resp2, cancel2 := openContainerLogStream(t, hostID, containerID)
 		defer cancel2()
 		scanner2 := bufio.NewScanner(resp2.Body)
 		require.Truef(t, scanner2.Scan(),
 			"a new follow stream must work right after the disconnect — "+
-				"the canceled stream must have released the machine connection (err: %v)",
+				"the canceled stream must have released the host connection (err: %v)",
 			scanner2.Err())
 		cancel2()
 		resp2.Body.Close()
@@ -156,7 +156,7 @@ func Test_Integration_Containers_Logs(t *testing.T) {
 	// --- AC: logs on a missing container returns 404 -------------------
 	t.Run("MissingContainerReturns404", func(t *testing.T) {
 		missing := "it-" + suite.RunID + "-missing"
-		status, raw := getContainerLogsRaw(t, machineID, missing, "")
+		status, raw := getContainerLogsRaw(t, hostID, missing, "")
 		requireContainerLogs404(t, status, raw, "logs on a missing container")
 	})
 }
@@ -174,9 +174,9 @@ type containerLogsResponse struct {
 
 // getContainerLogsRaw GETs /containers/{id}/logs (with optional query
 // params) and returns the raw status and body without asserting either.
-func getContainerLogsRaw(t *testing.T, machineID, containerID string, query string) (int, []byte) {
+func getContainerLogsRaw(t *testing.T, hostID, containerID string, query string) (int, []byte) {
 	t.Helper()
-	u := suite.ServerURL + "/api/machines/" + machineID + "/containers/" + containerID + "/logs"
+	u := suite.ServerURL + "/api/hosts/" + hostID + "/containers/" + containerID + "/logs"
 	if query != "" {
 		u += "?" + query
 	}
@@ -202,9 +202,9 @@ func requireContainerLogs404(t *testing.T, status int, raw []byte, msg string) {
 
 // getContainerLogs GETs /containers/{id}/logs and asserts 200 + the
 // {id, logs} response shape, returning the decoded body.
-func getContainerLogs(t *testing.T, machineID, containerID, query string) containerLogsResponse {
+func getContainerLogs(t *testing.T, hostID, containerID, query string) containerLogsResponse {
 	t.Helper()
-	status, raw := getContainerLogsRaw(t, machineID, containerID, query)
+	status, raw := getContainerLogsRaw(t, hostID, containerID, query)
 	require.Equalf(t, http.StatusOK, status,
 		"get container logs: expected 200, got %d. body: %s", status, string(raw))
 	var logs containerLogsResponse
@@ -216,13 +216,13 @@ func getContainerLogs(t *testing.T, machineID, containerID, query string) contai
 // waitForContainerLogOutput polls the non-streaming logs endpoint until it
 // returns 200 with non-empty logs. The container needs a moment after the
 // start reports running before its first "hi" lands in the log stream.
-func waitForContainerLogOutput(t *testing.T, machineID, containerID string) containerLogsResponse {
+func waitForContainerLogOutput(t *testing.T, hostID, containerID string) containerLogsResponse {
 	t.Helper()
 	deadline := time.Now().Add(logOutputPollTimeout)
 	var lastBody []byte
 	var lastStatus int
 	for time.Now().Before(deadline) {
-		lastStatus, lastBody = getContainerLogsRaw(t, machineID, containerID, "")
+		lastStatus, lastBody = getContainerLogsRaw(t, hostID, containerID, "")
 		if lastStatus == http.StatusOK {
 			var logs containerLogsResponse
 			if err := json.Unmarshal(lastBody, &logs); err == nil && logs.Logs != "" {
@@ -279,12 +279,12 @@ var containerLogStreamClient = &http.Client{
 
 // openContainerLogStream opens a follow=true log stream and returns the
 // live response plus the cancel func for the request context.
-func openContainerLogStream(t *testing.T, machineID, containerID string) (*http.Response, context.CancelFunc) {
+func openContainerLogStream(t *testing.T, hostID, containerID string) (*http.Response, context.CancelFunc) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	u := suite.ServerURL + "/api/machines/" + machineID + "/containers/" + containerID + "/logs?follow=true"
+	u := suite.ServerURL + "/api/hosts/" + hostID + "/containers/" + containerID + "/logs?follow=true"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+suite.Token)

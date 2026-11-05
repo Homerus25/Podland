@@ -1,5 +1,5 @@
 import { autoUpdateStreamUrl } from "@features/quadlets/services/quadletsApi";
-import { invalidateMachineResources } from "@shared/queries/useListInvalidatingMutation";
+import { invalidateHostResources } from "@shared/queries/useListInvalidatingMutation";
 import { useNdjsonOperation } from "@shared/streaming/streamTransport";
 import type { ApiError } from "@shared/types/api";
 import { useQueryClient } from "@tanstack/react-query";
@@ -202,7 +202,7 @@ export interface UseQuadletAutoUpdateResult {
 	// mid-run), so this is the only event-ordered signal.
 	pullingUnit: string | null;
 	report: AutoUpdateReport | null;
-	// A terminal error event (machine unreachable, SSH failure) or an HTTP
+	// A terminal error event (host unreachable, SSH failure) or an HTTP
 	// failure — distinct from per-container failures inside the report.
 	connectionError: ApiError | null;
 	run: (dryRun: boolean, filter?: string) => void;
@@ -214,7 +214,7 @@ export interface UseQuadletAutoUpdateResult {
 // accumulated lines, the completion report, and the dry-run-aware
 // invalidation.
 export function useQuadletAutoUpdate(
-	machineId: string,
+	hostId: string,
 ): UseQuadletAutoUpdateResult {
 	const queryClient = useQueryClient();
 	const [dryRun, setDryRun] = useState(false);
@@ -239,7 +239,7 @@ export function useQuadletAutoUpdate(
 			setPullingUnit(null);
 			setReport(null);
 			start({
-				url: autoUpdateStreamUrl(machineId, {
+				url: autoUpdateStreamUrl(hostId, {
 					dryRun: runDryRun,
 					filter: runFilter,
 				}),
@@ -273,7 +273,7 @@ export function useQuadletAutoUpdate(
 						// Restarted containers and pulled images only change on a real
 						// run; a dry run mutates nothing, so its queries stay fresh.
 						if (!runDryRun) {
-							invalidateMachineResources(queryClient, machineId, [
+							invalidateHostResources(queryClient, hostId, [
 								"quadlets",
 								"containers",
 								"images",
@@ -283,7 +283,7 @@ export function useQuadletAutoUpdate(
 				},
 			});
 		},
-		[machineId, queryClient, start],
+		[hostId, queryClient, start],
 	);
 
 	return {

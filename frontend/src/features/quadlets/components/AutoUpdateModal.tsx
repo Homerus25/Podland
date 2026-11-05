@@ -311,7 +311,7 @@ export function AutoUpdateModal({
 			{!autoUpdate.isRunning &&
 			autoUpdate.report &&
 			autoUpdate.rows.length === 0 ? (
-				<Text mt={3}>No auto-update containers found on this machine.</Text>
+				<Text mt={3}>No auto-update containers found on this host.</Text>
 			) : null}
 			{!autoUpdate.isRunning &&
 			!autoUpdate.report &&

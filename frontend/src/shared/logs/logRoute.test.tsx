@@ -17,18 +17,18 @@ import { renderWithQuery } from "@/test/render";
 // typed navigation state. Feature logs suites keep only their wiring smokes.
 
 describe("logsPath", () => {
-	it("builds the machine-scoped logs path in the route pattern's own shape", () => {
+	it("builds the host-scoped logs path in the route pattern's own shape", () => {
 		expect(logsPath("m-1", "container", "c-1")).toBe(
-			"/machines/m-1/logs/container/c-1",
+			"/hosts/m-1/logs/container/c-1",
 		);
 		expect(logsPath("m-1", "quadlet", "web.service")).toBe(
-			"/machines/m-1/logs/quadlet/web.service",
+			"/hosts/m-1/logs/quadlet/web.service",
 		);
 	});
 
-	it("percent-encodes machineId and targetId so ids with reserved characters still match the route", () => {
+	it("percent-encodes hostId and targetId so ids with reserved characters still match the route", () => {
 		expect(logsPath("m/1", "container", "a b/c")).toBe(
-			"/machines/m%2F1/logs/container/a%20b%2Fc",
+			"/hosts/m%2F1/logs/container/a%20b%2Fc",
 		);
 	});
 });
@@ -46,8 +46,8 @@ describe("isLogKind", () => {
 // round trip: the route still matches for ids containing reserved characters
 // and the params come back as the originals. The navigation state arrives
 // typed, carrying the friendly display name.
-function OpenProbe({ machineId, kind }: { machineId: string; kind: LogKind }) {
-	const open = useOpenLogs(machineId, kind);
+function OpenProbe({ hostId, kind }: { hostId: string; kind: LogKind }) {
+	const open = useOpenLogs(hostId, kind);
 	return (
 		<button
 			onClick={() => open({ targetId: "a b/c", name: "Display Name" })}
@@ -59,8 +59,8 @@ function OpenProbe({ machineId, kind }: { machineId: string; kind: LogKind }) {
 }
 
 function RouteProbe() {
-	const { machineId, kind, targetId } = useParams<{
-		machineId: string;
+	const { hostId, kind, targetId } = useParams<{
+		hostId: string;
 		kind: string;
 		targetId: string;
 	}>();
@@ -68,7 +68,7 @@ function RouteProbe() {
 	const state = location.state as LogsPageState | null;
 	return (
 		<div>
-			<span data-testid="probe-machine">{machineId}</span>
+			<span data-testid="probe-host">{hostId}</span>
 			<span data-testid="probe-kind">{kind}</span>
 			<span data-testid="probe-target">{targetId}</span>
 			<span data-testid="probe-name">{state?.name}</span>
@@ -80,10 +80,7 @@ describe("useOpenLogs", () => {
 	it("navigates the encoded path; the mounted pattern matches it and decodes params and state", async () => {
 		renderWithQuery(
 			<Routes>
-				<Route
-					path="*"
-					element={<OpenProbe machineId="m/1" kind="container" />}
-				/>
+				<Route path="*" element={<OpenProbe hostId="m/1" kind="container" />} />
 				<Route path={LOG_ROUTE_PATTERN} element={<RouteProbe />} />
 			</Routes>,
 			{ router: { initialEntries: ["/somewhere"] } },
@@ -92,7 +89,7 @@ describe("useOpenLogs", () => {
 		const user = userEvent.setup();
 		await user.click(screen.getByRole("button", { name: "open" }));
 
-		expect(screen.getByTestId("probe-machine")).toHaveTextContent("m/1");
+		expect(screen.getByTestId("probe-host")).toHaveTextContent("m/1");
 		expect(screen.getByTestId("probe-kind")).toHaveTextContent("container");
 		expect(screen.getByTestId("probe-target")).toHaveTextContent("a b/c");
 		expect(screen.getByTestId("probe-name")).toHaveTextContent("Display Name");

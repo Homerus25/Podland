@@ -36,7 +36,7 @@ type Request struct {
 	RequestID string
 
 	// URLParams are injected via SetPathValue, e.g.
-	// {"id": "test-machine", "volumeName": "my-volume"}.
+	// {"id": "test-host", "volumeName": "my-volume"}.
 	URLParams map[string]string
 
 	// Body is optional; when set, Content-Type defaults to

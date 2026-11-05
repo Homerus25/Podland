@@ -19,11 +19,11 @@ import (
 // vertical slice (257). It proves the two write endpoints against a
 // real podman over the SSH connection seam — not just the fake engine:
 //
-//	POST /api/machines/{id}/networks                    → 201 network DTO
-//	POST /api/machines/{id}/networks/{name}/connect     → 200 empty body
-//	POST /api/machines/{id}/networks (duplicate name)    → 409 NETWORK_ALREADY_EXISTS
+//	POST /api/hosts/{id}/networks                    → 201 network DTO
+//	POST /api/hosts/{id}/networks/{name}/connect     → 200 empty body
+//	POST /api/hosts/{id}/networks (duplicate name)    → 409 NETWORK_ALREADY_EXISTS
 //
-// The machine is registered through the public API by TestMain (the
+// The host is registered through the public API by TestMain (the
 // harness boots the test host per the run-scoped-tag isolation model).
 // The flow creates a run-scoped network through the API, starts a
 // run-scoped container (the established pull-and-sleep pattern), connects
@@ -39,7 +39,7 @@ func Test_Integration_Networks_CreateConnect(t *testing.T) {
 	registerNetworksSweep()
 	registerContainersSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// Run-scoped names so list assertions and the suite sweeps can find
 	// exactly what this run created.
@@ -49,7 +49,7 @@ func Test_Integration_Networks_CreateConnect(t *testing.T) {
 	// --- AC: create a run-scoped network through the API; 201 with
 	// the list DTO contract (driver, subnets as CIDR, createdAt) ------
 	t.Run("CreateReturns201WithNetworkDTO", func(t *testing.T) {
-		created := createNetwork(t, machineID, networkName)
+		created := createNetwork(t, hostID, networkName)
 
 		assert.Equal(t, networkName, created.Name, "create must answer the requested network name")
 		assert.Equal(t, "bridge", created.Driver, "podman's default driver must be bridge")
@@ -67,7 +67,7 @@ func Test_Integration_Networks_CreateConnect(t *testing.T) {
 
 	// --- AC: the created network appears in the networks list --------
 	t.Run("CreatedNetworkAppearsInList", func(t *testing.T) {
-		networks := listNetworks(t, machineID)
+		networks := listNetworks(t, hostID)
 
 		var found *networkDTO
 		for i := range networks {
@@ -85,7 +85,7 @@ func Test_Integration_Networks_CreateConnect(t *testing.T) {
 	}
 
 	// --- AC: start a run-scoped container (pull-and-sleep) ----------
-	// Prerequisite: busybox must exist on the machine before
+	// Prerequisite: busybox must exist on the host before
 	// ContainerCreate will succeed (podman does not auto-pull on
 	// create). Idempotent; see the containers slice.
 	ensureBusyboxImage(t)
@@ -108,13 +108,13 @@ func Test_Integration_Networks_CreateConnect(t *testing.T) {
 	})
 
 	t.Run("CreateAndStartContainer", func(t *testing.T) {
-		containerID = createContainer(t, machineID, containerCreateBody{
+		containerID = createContainer(t, hostID, containerCreateBody{
 			Name:    containerName,
 			Image:   "busybox:latest",
 			Command: []string{"sh", "-c", "sleep 600"},
 		})
-		startContainer(t, machineID, containerID)
-		waitForContainerState(t, machineID, containerID, "running",
+		startContainer(t, hostID, containerID)
+		waitForContainerState(t, hostID, containerID, "running",
 			"container must reach running state after start")
 	})
 	// Fail fast: the connect phase depends on a running container.
@@ -124,7 +124,7 @@ func Test_Integration_Networks_CreateConnect(t *testing.T) {
 
 	// --- AC: connect the container; 200 with an empty body ----------
 	t.Run("ConnectReturns200EmptyBody", func(t *testing.T) {
-		connectContainerToNetwork(t, machineID, networkName, containerID)
+		connectContainerToNetwork(t, hostID, networkName, containerID)
 	})
 
 	// --- AC: the attachment is reflected in the containers list ------
@@ -132,7 +132,7 @@ func Test_Integration_Networks_CreateConnect(t *testing.T) {
 	// list DTO carries each container's networks — that is where the
 	// attachment is asserted.
 	t.Run("AttachmentReflectedInContainerList", func(t *testing.T) {
-		requireContainerNetworksContain(t, machineID, containerID, networkName)
+		requireContainerNetworksContain(t, hostID, containerID, networkName)
 	})
 
 	// --- AC: a duplicate create answers 409 NETWORK_ALREADY_EXISTS --
@@ -140,7 +140,7 @@ func Test_Integration_Networks_CreateConnect(t *testing.T) {
 		payload, err := json.Marshal(networkCreateBody{Name: networkName})
 		require.NoError(t, err)
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodPost,
-			suite.ServerURL+"/api/machines/"+machineID+"/networks",
+			suite.ServerURL+"/api/hosts/"+hostID+"/networks",
 			string(payload), http.StatusConflict, "NETWORK_ALREADY_EXISTS")
 	})
 }
@@ -165,12 +165,12 @@ type networkConnectBody struct {
 
 // createNetwork POSTs /networks and returns the created network DTO.
 // Asserts 201 (the handler writes StatusCreated on success).
-func createNetwork(t *testing.T, machineID, name string) networkDTO {
+func createNetwork(t *testing.T, hostID, name string) networkDTO {
 	t.Helper()
 	payload, err := json.Marshal(networkCreateBody{Name: name})
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/networks"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/networks"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
 	require.NoError(t, err, "POST /networks must connect to the in-process server")
 	defer resp.Body.Close()
@@ -188,12 +188,12 @@ func createNetwork(t *testing.T, machineID, name string) networkDTO {
 // connectContainerToNetwork POSTs /networks/{name}/connect and asserts
 // 200 with an empty body (the handler's struct{} result encodes as {},
 // the same "empty body" the handler contract test pins).
-func connectContainerToNetwork(t *testing.T, machineID, networkName, containerID string) {
+func connectContainerToNetwork(t *testing.T, hostID, networkName, containerID string) {
 	t.Helper()
 	payload, err := json.Marshal(networkConnectBody{Container: containerID})
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/networks/" + networkName + "/connect"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/networks/" + networkName + "/connect"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
 	require.NoError(t, err, "POST /networks/{name}/connect must connect to the in-process server")
 	defer resp.Body.Close()
@@ -209,10 +209,10 @@ func connectContainerToNetwork(t *testing.T, machineID, networkName, containerID
 // array in the containers list contains networkName. The containers list
 // DTO carries each container's networks — the seam where an attachment
 // is observable (the networks list DTO carries no attachment info).
-func requireContainerNetworksContain(t *testing.T, machineID, containerID, networkName string) {
+func requireContainerNetworksContain(t *testing.T, hostID, containerID, networkName string) {
 	t.Helper()
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/containers/?all=true"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/containers/?all=true"
 	resp, err := suite.AuthenticatedClient().Get(url)
 	require.NoError(t, err, "GET /containers/?all=true")
 	defer resp.Body.Close()

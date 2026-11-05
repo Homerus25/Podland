@@ -40,7 +40,7 @@ type ConnectSide =
 	| { kind: "container"; container: ContainerSummary };
 
 type ConnectDialogProps = {
-	machineId: string;
+	hostId: string;
 	onClose: () => void;
 } & (
 	| { network: NetworkSummary; container?: never }
@@ -62,7 +62,7 @@ type ConnectDialogProps = {
 // selection to the failed items for retry, and keeps the dialog open;
 // only an all-success batch closes it.
 export function ConnectDialog(props: ConnectDialogProps) {
-	const { machineId, onClose } = props;
+	const { hostId, onClose } = props;
 	const side: ConnectSide =
 		props.network !== undefined
 			? { kind: "network", network: props.network }
@@ -89,9 +89,9 @@ export function ConnectDialog(props: ConnectDialogProps) {
 					emptyMessage: "No networks to connect.",
 				};
 
-	const { data: containers } = useContainers(machineId);
-	const { data: networks } = useNetworks(machineId);
-	const connect = useConnectContainers(machineId);
+	const { data: containers } = useContainers(hostId);
+	const { data: networks } = useNetworks(hostId);
+	const connect = useConnectContainers(hostId);
 
 	const { register, handleSubmit, setValue, watch, formState } =
 		useForm<ConnectFormValues>({

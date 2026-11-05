@@ -15,18 +15,18 @@ import (
 )
 
 // Test_Integration_Networks_Prune is the networks prune vertical slice
-// (spec #385) against POST /api/machines/{id}/networks/prune. It seeds
+// (spec #385) against POST /api/hosts/{id}/networks/prune. It seeds
 // two unused networks plus one in-use network (a running container is
 // attached to it), prunes, and verifies the reports and survival via
 // the list endpoint:
 //
-//	POST /api/machines/{id}/networks/prune → 200, entry per removed network
+//	POST /api/hosts/{id}/networks/prune → 200, entry per removed network
 func Test_Integration_Networks_Prune(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerNetworksSweep()
 	registerContainersSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	unusedA := "it-" + suite.RunID + "net-prune-a"
 	unusedB := "it-" + suite.RunID + "net-prune-b"
@@ -56,7 +56,7 @@ func Test_Integration_Networks_Prune(t *testing.T) {
 
 	// --- AC: prune returns 200 with a report entry per removed network
 	resp, err := suite.AuthenticatedClient().Post(
-		suite.ServerURL+"/api/machines/"+machineID+"/networks/prune", "application/json", nil)
+		suite.ServerURL+"/api/hosts/"+hostID+"/networks/prune", "application/json", nil)
 	require.NoError(t, err, "POST prune must connect to the in-process server")
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
@@ -78,7 +78,7 @@ func Test_Integration_Networks_Prune(t *testing.T) {
 	assert.False(t, reported[inUse], "in-use network must not be reported as removed")
 
 	// --- AC: unused networks are gone; the in-use network survives ----
-	names := listNetworkNames(t, machineID)
+	names := listNetworkNames(t, hostID)
 	assert.NotContains(t, names, unusedA, "pruned unused network must be gone")
 	assert.NotContains(t, names, unusedB, "pruned unused network must be gone")
 	assert.Contains(t, names, inUse, "in-use network must survive the prune")
@@ -91,10 +91,10 @@ type networkPruneDTO struct {
 }
 
 // listNetworkNames GETs the networks list and returns the names.
-func listNetworkNames(t *testing.T, machineID string) []string {
+func listNetworkNames(t *testing.T, hostID string) []string {
 	t.Helper()
 
-	networks := listNetworks(t, machineID)
+	networks := listNetworks(t, hostID)
 	names := make([]string, 0, len(networks))
 	for _, network := range networks {
 		names = append(names, network.Name)
@@ -110,14 +110,14 @@ func Test_Integration_Networks_Prune_AccessControl(t *testing.T) {
 	t.Run("ReadLevelUserGets403", func(t *testing.T) {
 		client := levelUserClient(t, models.PermissionRead)
 		expectAPIError(t, client, http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/networks/prune",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/networks/prune",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		client := noAccessUserClient(t)
 		expectAPIError(t, client, http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/networks/prune",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/networks/prune",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 }

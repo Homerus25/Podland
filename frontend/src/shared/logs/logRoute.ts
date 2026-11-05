@@ -16,19 +16,19 @@ export function isLogKind(value: string | undefined): value is LogKind {
 // The route shape, owned once: the app router mounts it and every feature
 // logs test renderer mounts the same constant, so a shape change is a
 // one-line edit and no literal copy can drift.
-export const LOG_ROUTE_PATTERN = "/machines/:machineId/logs/:kind/:targetId";
+export const LOG_ROUTE_PATTERN = "/hosts/:hostId/logs/:kind/:targetId";
 
-// The one builder of logs paths: machineId and targetId are percent-encoded
-// (the C11 machine-scoped URL discipline, extended to the one machine-scoped
+// The one builder of logs paths: hostId and targetId are percent-encoded
+// (the C11 host-scoped URL discipline, extended to the one host-scoped
 // URL family it did not cover — an id containing `/` used to break the route
 // match silently), and the router decodes params on the far side, so the
 // round trip is safe. The kind is a typed LogKind member and rides bare.
 export function logsPath(
-	machineId: string,
+	hostId: string,
 	kind: LogKind,
 	targetId: string,
 ): string {
-	return `/machines/${encodeURIComponent(machineId)}/logs/${kind}/${encodeURIComponent(targetId)}`;
+	return `/hosts/${encodeURIComponent(hostId)}/logs/${kind}/${encodeURIComponent(targetId)}`;
 }
 
 // What the logs page reads back from navigation state; the typed cast there
@@ -42,10 +42,10 @@ export interface LogsPageState {
 // per feature at the hook call (a typo is a compile error, and each list
 // feature mentions its kind exactly once); open() builds the path through
 // logsPath and carries the typed navigation state.
-export function useOpenLogs(machineId: string, kind: LogKind) {
+export function useOpenLogs(hostId: string, kind: LogKind) {
 	const navigate = useNavigate();
 	return ({ targetId, name }: { targetId: string; name?: string }) => {
-		navigate(logsPath(machineId, kind, targetId), {
+		navigate(logsPath(hostId, kind, targetId), {
 			state: { name } satisfies LogsPageState,
 		});
 	};

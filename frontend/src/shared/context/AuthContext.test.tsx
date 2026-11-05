@@ -1,6 +1,6 @@
 import { useAuth } from "@features/auth/hooks/useAuth";
 import { AuthProvider } from "@shared/context/AuthContext";
-import { machinesQueryKey } from "@shared/queries/queryKeys";
+import { hostsQueryKey } from "@shared/queries/queryKeys";
 import type { User } from "@shared/types/api";
 import {
 	getBearerToken,
@@ -11,7 +11,7 @@ import { act, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { authStatusFixture, machineFixture } from "@/test/factories";
+import { authStatusFixture, hostFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -53,8 +53,8 @@ describe("logout and the query cache", () => {
 		const { result, queryClient } = renderAuth({
 			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
-		queryClient.setQueryData(machinesQueryKey, [
-			machineFixture({ name: "alice-machine" }),
+		queryClient.setQueryData(hostsQueryKey, [
+			hostFixture({ name: "alice-host" }),
 		]);
 		await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
 		expect(queryClient.getQueryCache().getAll()).toHaveLength(1);
@@ -69,7 +69,7 @@ describe("logout and the query cache", () => {
 
 	it("does not clear the query cache on login", async () => {
 		const { result, queryClient } = renderAuth();
-		queryClient.setQueryData(machinesQueryKey, [machineFixture()]);
+		queryClient.setQueryData(hostsQueryKey, [hostFixture()]);
 		await waitFor(() => expect(result.current.isResolving).toBe(false));
 		expect(queryClient.getQueryCache().getAll()).toHaveLength(1);
 
@@ -94,7 +94,7 @@ describe("adoptSession", () => {
 		const { result, queryClient } = renderAuth({
 			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
-		queryClient.setQueryData(machinesQueryKey, [machineFixture()]);
+		queryClient.setQueryData(hostsQueryKey, [hostFixture()]);
 		await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
 		expect(queryClient.getQueryCache().getAll()).toHaveLength(1);
 

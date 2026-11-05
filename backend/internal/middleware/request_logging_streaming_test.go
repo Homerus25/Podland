@@ -28,7 +28,7 @@ func TestRequestLogging_ForwardsWriteDeadlineExtension(t *testing.T) {
 	streamEndpoint := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := contextutils.SetUserID(r.Context(), "test-user")
 		r = r.WithContext(ctx)
-		r.SetPathValue("id", "test-machine")
+		r.SetPathValue("id", "test-host")
 		streaming.HandleProgress(w, r, "test-op", nil,
 			streaming.ProgressConfig[int, string]{
 				Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(int)) (string, error) {

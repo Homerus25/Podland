@@ -16,7 +16,7 @@ import (
 )
 
 // newMoveTestHandler builds the handler over the real service with
-// per-machine fake engines, a source-machine usage fake, and the
+// per-host fake engines, a source-host usage fake, and the
 // admin-on-source/write-on-target access store — the wiring the move
 // endpoints exercise.
 func newMoveTestHandler(sourceEngine, targetEngine *fakeSecretEngine, usage *fakeUsageEngine) *SecretHandler {
@@ -40,9 +40,9 @@ func secretMoveRequest(t *testing.T, handler *SecretHandler, body string) *httpt
 	t.Helper()
 	return testutils.Perform(handler.Move, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/machine-a/secrets/db-password/move",
+		Path:      "/api/hosts/host-a/secrets/db-password/move",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "secretId": "db-password"},
+		URLParams: map[string]string{"id": "host-a", "secretId": "db-password"},
 		Body:      strings.NewReader(body),
 	})
 }
@@ -59,9 +59,9 @@ func TestSecretHandler_MovePreview_ReturnsPreview(t *testing.T) {
 
 	w := testutils.Perform(newMoveTestHandler(moveSourceFixture(), emptyTargetFixture(), usage).MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/secrets/db-password/move-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/secrets/db-password/move-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "secretId": "db-password"},
+		URLParams: map[string]string{"id": "host-a", "secretId": "db-password"},
 	})
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -76,40 +76,40 @@ func TestSecretHandler_MovePreview_ReturnsPreview(t *testing.T) {
 func TestSecretHandler_MovePreview_EmptyQuadletsRendersAsArray(t *testing.T) {
 	w := testutils.Perform(newMoveTestHandler(moveSourceFixture(), emptyTargetFixture(), idleUsageFixture()).MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/secrets/db-password/move-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/secrets/db-password/move-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "secretId": "db-password"},
+		URLParams: map[string]string{"id": "host-a", "secretId": "db-password"},
 	})
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.JSONEq(t, `{"collision":false,"referencingQuadlets":[]}`, w.Body.String(),
-		"a machine without quadlets must render an empty JSON array, not null")
+		"a host without quadlets must render an empty JSON array, not null")
 }
 
 func TestSecretHandler_MovePreview_MissingSecretIDIs400(t *testing.T) {
 	w := testutils.Perform(newMoveTestHandler(&fakeSecretEngine{}, &fakeSecretEngine{}, idleUsageFixture()).MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/secrets//move-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/secrets//move-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "secretId": ""},
+		URLParams: map[string]string{"id": "host-a", "secretId": ""},
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestSecretHandler_MovePreview_MissingTargetMachineIDIs400(t *testing.T) {
+func TestSecretHandler_MovePreview_MissingTargetHostIDIs400(t *testing.T) {
 	w := testutils.Perform(newMoveTestHandler(&fakeSecretEngine{}, &fakeSecretEngine{}, idleUsageFixture()).MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/secrets/db-password/move-preview",
+		Path:      "/api/hosts/host-a/secrets/db-password/move-preview",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "secretId": "db-password"},
+		URLParams: map[string]string{"id": "host-a", "secretId": "db-password"},
 	})
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 
 	var errResp secretMoveErrorEnvelope
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
-	assert.Equal(t, "MISSING_TARGET_MACHINE_ID", errResp.Error.Code)
+	assert.Equal(t, "MISSING_TARGET_HOST_ID", errResp.Error.Code)
 }
 
 func TestSecretHandler_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
@@ -123,8 +123,8 @@ func TestSecretHandler_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
 		},
 	}
 	service := newMoveTestService(source, &fakeSecretEngine{}, idleUsageFixture(),
-		&fakeAccessRepo{getPermissionFn: func(machineID, userID string) (string, error) {
-			if machineID == "machine-b" {
+		&fakeAccessRepo{getPermissionFn: func(hostID, userID string) (string, error) {
+			if hostID == "host-b" {
 				return "", nil
 			}
 			return "admin", nil
@@ -133,9 +133,9 @@ func TestSecretHandler_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
 
 	w := testutils.Perform(handler.MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/secrets/db-password/move-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/secrets/db-password/move-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "secretId": "db-password"},
+		URLParams: map[string]string{"id": "host-a", "secretId": "db-password"},
 	})
 
 	require.Equal(t, http.StatusForbidden, w.Code)
@@ -148,9 +148,9 @@ func TestSecretHandler_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
 func TestSecretHandler_MovePreview_MissingSourceSecretIs404(t *testing.T) {
 	w := testutils.Perform(newMoveTestHandler(moveSourceFixture(), emptyTargetFixture(), idleUsageFixture()).MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/secrets/no-such-secret/move-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/secrets/no-such-secret/move-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "secretId": "no-such-secret"},
+		URLParams: map[string]string{"id": "host-a", "secretId": "no-such-secret"},
 	})
 
 	require.Equal(t, http.StatusNotFound, w.Code)
@@ -160,11 +160,11 @@ func TestSecretHandler_MovePreview_MissingSourceSecretIs404(t *testing.T) {
 	assert.Equal(t, "SECRET_NOT_FOUND", errResp.Error.Code)
 }
 
-// --- Move (POST /api/machines/{id}/secrets/{secretId}/move) ---------------
+// --- Move (POST /api/hosts/{id}/secrets/{secretId}/move) ---------------
 
 func TestSecretHandler_Move_ReturnsEnvelope(t *testing.T) {
 	w := secretMoveRequest(t, newMoveTestHandler(moveSourceFixture(), emptyTargetFixture(), idleUsageFixture()),
-		`{"targetMachineId":"machine-b","mode":"copy"}`)
+		`{"targetHostId":"host-b","mode":"copy"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -172,8 +172,8 @@ func TestSecretHandler_Move_ReturnsEnvelope(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
 	assert.Equal(t, "copied", got.Status)
 	assert.Equal(t, "db-password", got.Name)
-	assert.Equal(t, "machine-a", got.SourceMachineID)
-	assert.Equal(t, "machine-b", got.TargetMachineID)
+	assert.Equal(t, "host-a", got.SourceHostID)
+	assert.Equal(t, "host-b", got.TargetHostID)
 	assert.Empty(t, got.Error)
 	assert.NotContains(t, w.Body.String(), "secretData",
 		"the transfer envelope must never carry the value")
@@ -181,7 +181,7 @@ func TestSecretHandler_Move_ReturnsEnvelope(t *testing.T) {
 
 func TestSecretHandler_Move_MoveModeEnvelopeIsMoved(t *testing.T) {
 	w := secretMoveRequest(t, newMoveTestHandler(moveSourceFixture(), emptyTargetFixture(), idleUsageFixture()),
-		`{"targetMachineId":"machine-b","mode":"move"}`)
+		`{"targetHostId":"host-b","mode":"move"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -195,10 +195,10 @@ func TestSecretHandler_Move_MissingSecretIDIs400(t *testing.T) {
 
 	w := testutils.Perform(handler.Move, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/machine-a/secrets//move",
+		Path:      "/api/hosts/host-a/secrets//move",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "secretId": ""},
-		Body:      strings.NewReader(`{"targetMachineId":"machine-b","mode":"copy"}`),
+		URLParams: map[string]string{"id": "host-a", "secretId": ""},
+		Body:      strings.NewReader(`{"targetHostId":"host-b","mode":"copy"}`),
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -211,8 +211,8 @@ func TestSecretHandler_Move_BodyValidationIs400(t *testing.T) {
 		want string
 	}{
 		{name: "malformed JSON", body: `{`, want: "INVALID_REQUEST"},
-		{name: "missing targetMachineId", body: `{"mode":"copy"}`, want: "VALIDATION_FAILED"},
-		{name: "mode other than copy/move", body: `{"targetMachineId":"machine-b","mode":"teleport"}`, want: "VALIDATION_FAILED"},
+		{name: "missing targetHostId", body: `{"mode":"copy"}`, want: "VALIDATION_FAILED"},
+		{name: "mode other than copy/move", body: `{"targetHostId":"host-b","mode":"teleport"}`, want: "VALIDATION_FAILED"},
 	}
 
 	for _, tt := range tests {
@@ -240,7 +240,7 @@ func TestSecretHandler_Move_CollisionIs409(t *testing.T) {
 	}
 	handler := newMoveTestHandler(moveSourceFixture(), target, idleUsageFixture())
 
-	w := secretMoveRequest(t, handler, `{"targetMachineId":"machine-b","mode":"copy"}`)
+	w := secretMoveRequest(t, handler, `{"targetHostId":"host-b","mode":"copy"}`)
 
 	require.Equal(t, http.StatusConflict, w.Code)
 
@@ -252,7 +252,7 @@ func TestSecretHandler_Move_CollisionIs409(t *testing.T) {
 // TestSecretHandler_Move_PartialRidesTheEnvelope pins the partial
 // contract through the HTTP surface: a failed source removal after a
 // successful target install answers 200 with status "partial" and the
-// failure's detail in error — the secret exists on both machines.
+// failure's detail in error — the secret exists on both hosts.
 func TestSecretHandler_Move_PartialRidesTheEnvelope(t *testing.T) {
 	source := moveSourceFixture()
 	source.removeFn = func(name string) error {
@@ -260,7 +260,7 @@ func TestSecretHandler_Move_PartialRidesTheEnvelope(t *testing.T) {
 	}
 	handler := newMoveTestHandler(source, emptyTargetFixture(), idleUsageFixture())
 
-	w := secretMoveRequest(t, handler, `{"targetMachineId":"machine-b","mode":"move"}`)
+	w := secretMoveRequest(t, handler, `{"targetHostId":"host-b","mode":"move"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -277,12 +277,12 @@ func TestSecretHandler_Move_PartialRidesTheEnvelope(t *testing.T) {
 func TestSecretHandler_Move_BelowAdminSourceIs403(t *testing.T) {
 	// The engines stay unarmed: any engine call panics the test.
 	service := newMoveTestService(&fakeSecretEngine{}, &fakeSecretEngine{}, &fakeUsageEngine{},
-		&fakeAccessRepo{getPermissionFn: func(machineID, userID string) (string, error) {
+		&fakeAccessRepo{getPermissionFn: func(hostID, userID string) (string, error) {
 			return "write", nil
 		}})
 	handler := NewSecretHandler(service)
 
-	w := secretMoveRequest(t, handler, `{"targetMachineId":"machine-b","mode":"copy"}`)
+	w := secretMoveRequest(t, handler, `{"targetHostId":"host-b","mode":"copy"}`)
 
 	require.Equal(t, http.StatusForbidden, w.Code)
 

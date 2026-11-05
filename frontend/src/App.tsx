@@ -11,10 +11,10 @@ import { ProtectedRoute } from "@shared/components/ProtectedRoute";
 import { LOG_ROUTE_PATTERN } from "@shared/logs/logRoute";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { DashboardPage } from "@/pages/DashboardPage";
+import { HostDetailPage } from "@/pages/HostDetailPage";
+import { HostsPage } from "@/pages/HostsPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { LogsPage } from "@/pages/LogsPage";
-import { MachineDetailPage } from "@/pages/MachineDetailPage";
-import { MachinesPage } from "@/pages/MachinesPage";
 import { SetupPage } from "@/pages/SetupPage";
 import { UsersPage } from "@/pages/UsersPage";
 
@@ -32,37 +32,34 @@ export function App() {
 				}
 			>
 				<Route index element={<DashboardPage />} />
-				<Route path="machines" element={<MachinesPage />} />
-				<Route path="machines/:machineId" element={<MachineDetailPage />} />
+				<Route path="hosts" element={<HostsPage />} />
+				<Route path="hosts/:hostId" element={<HostDetailPage />} />
 				{/* The static `new` segment ranks above the dynamic
 				`:containerId` below, so the create page and the detail page
 				coexist in the containers area. */}
 				<Route
-					path="machines/:machineId/containers/new"
+					path="hosts/:hostId/containers/new"
 					element={<CreateContainerPage />}
 				/>
 				<Route
-					path="machines/:machineId/containers/:containerId"
+					path="hosts/:hostId/containers/:containerId"
 					element={<ContainerDetailPage />}
 				/>
+				<Route path="hosts/:hostId/pods/:podId" element={<PodDetailPage />} />
 				<Route
-					path="machines/:machineId/pods/:podId"
-					element={<PodDetailPage />}
-				/>
-				<Route
-					path="machines/:machineId/volumes/:volumeName"
+					path="hosts/:hostId/volumes/:volumeName"
 					element={<VolumeDetailPage />}
 				/>
 				<Route
-					path="machines/:machineId/images/:imageId"
+					path="hosts/:hostId/images/:imageId"
 					element={<ImageDetailPage />}
 				/>
 				<Route
-					path="machines/:machineId/networks/:networkName"
+					path="hosts/:hostId/networks/:networkName"
 					element={<NetworkDetailPage />}
 				/>
 				<Route
-					path="machines/:machineId/secrets/:secretId"
+					path="hosts/:hostId/secrets/:secretId"
 					element={<SecretDetailPage />}
 				/>
 				<Route path={LOG_ROUTE_PATTERN} element={<LogsPage />} />

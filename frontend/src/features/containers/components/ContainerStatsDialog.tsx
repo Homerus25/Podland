@@ -22,11 +22,11 @@ import { getApiError } from "@shared/utils/api";
 import { formatBytes } from "@shared/utils/format";
 
 interface ContainerStatsDialogProps {
-	machineId: string;
+	hostId: string;
 	onClose: () => void;
 	// Present on the container details page: the dialog scopes to the one
 	// container. Absent on the containers tab: the dialog shows every
-	// running container on the machine.
+	// running container on the host.
 	containerId?: string;
 }
 
@@ -64,13 +64,13 @@ function StatsRow({ stats }: { stats: ContainerStats }) {
 // stopped container's 404 (podman maps any first-report error to
 // not-found) surfaces its message through the shared error envelope.
 export function ContainerStatsDialog({
-	machineId,
+	hostId,
 	containerId,
 	onClose,
 }: ContainerStatsDialogProps) {
 	const scoped = containerId !== undefined;
-	const listQuery = useContainerStatsList(machineId, { enabled: !scoped });
-	const oneQuery = useContainerStats(machineId, containerId ?? "", {
+	const listQuery = useContainerStatsList(hostId, { enabled: !scoped });
+	const oneQuery = useContainerStats(hostId, containerId ?? "", {
 		enabled: scoped,
 	});
 	const query = scoped ? oneQuery : listQuery;

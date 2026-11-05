@@ -4,20 +4,20 @@ import type { ReactNode } from "react";
 
 // The transfer-presentation module (architecture review 2026-10-19,
 // candidate C8): the one module owning the two presentation rituals every
-// cross-machine move/copy surface re-derived — the phase-to-label mapping
+// cross-host move/copy surface re-derived — the phase-to-label mapping
 // of a transfer's live progress, and the stay-open report's skeleton. The
 // adapters stay the wording owners of everything domain (the partial cause
 // sentence, the narrations, the error-code hints); the module owns the
 // invariants: the phase vocabulary's labels, the header shape, the pinned
-// both-machines tail. The TransferDialog preset's report seam is untouched
+// both-hosts tail. The TransferDialog preset's report seam is untouched
 // (the issue-241 settlement holds): the skeleton is opt-in presentation the
 // caller composes and hands over as the report node.
 
-// The both-machines tail every partial report ends with: the target install
-// stands, so the item exists on both machines until someone cleans up. A
+// The both-hosts tail every partial report ends with: the target install
+// stands, so the item exists on both hosts until someone cleans up. A
 // user-facing invariant re-derived per feature before this module owned it.
-const BOTH_MACHINES_TAIL =
-	"It currently exists on both machines and must be cleaned up manually.";
+const BOTH_HOSTS_TAIL =
+	"It currently exists on both hosts and must be cleaned up manually.";
 
 // The shared phase vocabulary of a transfer's live progress: the phase, the
 // optional byte count, the optional skip reason. Both domain progress types
@@ -49,7 +49,7 @@ export function transferProgressLabel(progress: TransferProgressEntry): string {
 export interface TransferReportProps {
 	// The Moved/Copied header line, with the optional byte-count suffix the
 	// volume report carries. Omit it for a partial-only report — the
-	// quadlet's partial narrates the both-machines state without one.
+	// quadlet's partial narrates the both-hosts state without one.
 	header?: {
 		status: "moved" | "copied" | "partial";
 		itemName: string;
@@ -57,7 +57,7 @@ export interface TransferReportProps {
 		bytes?: number;
 	};
 	// The partial block: the domain's cause sentence (the skeleton appends
-	// the pinned both-machines tail) and the optional red error line.
+	// the pinned both-hosts tail) and the optional red error line.
 	partial?: {
 		cause: string;
 		error?: string;
@@ -99,7 +99,7 @@ export function TransferReport({
 	const partialBody = partial ? (
 		<>
 			<Text>
-				{partial.cause} {BOTH_MACHINES_TAIL}
+				{partial.cause} {BOTH_HOSTS_TAIL}
 			</Text>
 			{partial.error ? <Text color="red.500">{partial.error}</Text> : null}
 		</>

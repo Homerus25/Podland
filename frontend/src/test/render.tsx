@@ -18,7 +18,7 @@ type TestRouteEntry = string | { pathname: string; state?: unknown };
 // instance the tree actually uses.
 export type RenderWithQueryOptions = {
 	// true wraps a MemoryRouter; the object form additionally seeds
-	// initialEntries (e.g. deep links like /machines/m-1, or an entry object
+	// initialEntries (e.g. deep links like /hosts/m-1, or an entry object
 	// carrying navigation state).
 	router?: boolean | { initialEntries?: TestRouteEntry[] };
 	// The app theme is installed here because useToast renders its toast

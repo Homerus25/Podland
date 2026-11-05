@@ -157,10 +157,10 @@ func (m *MockUserRepository) CreateFirstUser(user *models.User) (bool, error) {
 	return true, nil
 }
 
-// MockMachineRepository implements a mock machine repository for testing
-type MockMachineRepository struct {
-	machines    map[string]*models.Machine
-	grants      []models.AccessibleMachine
+// MockHostRepository implements a mock host repository for testing
+type MockHostRepository struct {
+	hosts       map[string]*models.Host
+	grants      []models.AccessibleHost
 	listErr     error
 	getErr      error
 	createErr   error
@@ -169,16 +169,16 @@ type MockMachineRepository struct {
 	updateCalls []string
 }
 
-func NewMockMachineRepository() *MockMachineRepository {
-	return &MockMachineRepository{
-		machines: make(map[string]*models.Machine),
+func NewMockHostRepository() *MockHostRepository {
+	return &MockHostRepository{
+		hosts: make(map[string]*models.Host),
 	}
 }
 
-// NewMockMachineRepositoryWithErrors creates a mock repository with configurable errors
-func NewMockMachineRepositoryWithErrors(listErr, getErr, createErr, updateErr, deleteErr error) *MockMachineRepository {
-	return &MockMachineRepository{
-		machines:  make(map[string]*models.Machine),
+// NewMockHostRepositoryWithErrors creates a mock repository with configurable errors
+func NewMockHostRepositoryWithErrors(listErr, getErr, createErr, updateErr, deleteErr error) *MockHostRepository {
+	return &MockHostRepository{
+		hosts:     make(map[string]*models.Host),
 		listErr:   listErr,
 		getErr:    getErr,
 		createErr: createErr,
@@ -187,83 +187,83 @@ func NewMockMachineRepositoryWithErrors(listErr, getErr, createErr, updateErr, d
 	}
 }
 
-// AddMachine adds a machine directly to the mock repository
-func (m *MockMachineRepository) AddMachine(machine *models.Machine) {
-	m.machines[machine.ID] = machine
+// AddHost adds a host directly to the mock repository
+func (m *MockHostRepository) AddHost(host *models.Host) {
+	m.hosts[host.ID] = host
 }
 
-func (m *MockMachineRepository) Create(machine *models.Machine) error {
+func (m *MockHostRepository) Create(host *models.Host) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
-	m.machines[machine.ID] = machine
+	m.hosts[host.ID] = host
 	return nil
 }
 
-func (m *MockMachineRepository) GetByID(id string) (*models.Machine, error) {
+func (m *MockHostRepository) GetByID(id string) (*models.Host, error) {
 	if m.getErr != nil {
 		return nil, m.getErr
 	}
-	machine, exists := m.machines[id]
+	host, exists := m.hosts[id]
 	if !exists {
 		return nil, nil
 	}
-	return machine, nil
+	return host, nil
 }
 
-func (m *MockMachineRepository) Update(machine *models.Machine) error {
+func (m *MockHostRepository) Update(host *models.Host) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
-	m.updateCalls = append(m.updateCalls, machine.ID)
-	m.machines[machine.ID] = machine
+	m.updateCalls = append(m.updateCalls, host.ID)
+	m.hosts[host.ID] = host
 	return nil
 }
 
 // UpdateCalls returns a snapshot of every successful Update invocation's
-// machine IDs, in call order, so service tests can pin that a failed
+// host IDs, in call order, so service tests can pin that a failed
 // operation (e.g. a failed update probe) wrote nothing.
-func (m *MockMachineRepository) UpdateCalls() []string {
+func (m *MockHostRepository) UpdateCalls() []string {
 	out := make([]string, len(m.updateCalls))
 	copy(out, m.updateCalls)
 	return out
 }
 
-func (m *MockMachineRepository) Delete(id string) error {
+func (m *MockHostRepository) Delete(id string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
-	delete(m.machines, id)
+	delete(m.hosts, id)
 	return nil
 }
 
-// AddAccessibleMachine registers a machine the caller reaches through a
+// AddAccessibleHost registers a host the caller reaches through a
 // grant rather than ownership; ListAccessible returns it verbatim (the
-// granted permission included) after the owned machines.
-func (m *MockMachineRepository) AddAccessibleMachine(accessible models.AccessibleMachine) {
+// granted permission included) after the owned hosts.
+func (m *MockHostRepository) AddAccessibleHost(accessible models.AccessibleHost) {
 	m.grants = append(m.grants, accessible)
 }
 
-func (m *MockMachineRepository) ListAccessible(userID string) ([]models.AccessibleMachine, error) {
+func (m *MockHostRepository) ListAccessible(userID string) ([]models.AccessibleHost, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
-	// Owned machines carry the admin permission, mirroring the access
-	// row Create grants; machines registered through
-	// AddAccessibleMachine stand in for the granted rows the real JOIN
+	// Owned hosts carry the admin permission, mirroring the access
+	// row Create grants; hosts registered through
+	// AddAccessibleHost stand in for the granted rows the real JOIN
 	// also returns.
-	var result []models.AccessibleMachine
-	for _, machine := range m.machines {
-		if machine.OwnerID == userID {
-			result = append(result, models.AccessibleMachine{Machine: machine, Permission: models.PermissionAdmin})
+	var result []models.AccessibleHost
+	for _, host := range m.hosts {
+		if host.OwnerID == userID {
+			result = append(result, models.AccessibleHost{Host: host, Permission: models.PermissionAdmin})
 		}
 	}
 	return append(result, m.grants...), nil
 }
 
-func (m *MockMachineRepository) NameExistsForUser(userID, name string) (bool, error) {
-	for _, machine := range m.machines {
-		if machine.OwnerID == userID && machine.Name == name {
+func (m *MockHostRepository) NameExistsForUser(userID, name string) (bool, error) {
+	for _, host := range m.hosts {
+		if host.OwnerID == userID && host.Name == name {
 			return true, nil
 		}
 	}
@@ -395,59 +395,59 @@ func (m *MockSessionRepository) DeleteAllForUser(userID string) error {
 	return nil
 }
 
-// MockMachineAccessRepository implements a mock machine access repository for testing
-type MockMachineAccessRepository struct {
-	accesses               map[string]*MockMachineAccessEntry
-	createErr              error
-	getByMachineAndUserErr error
-	listByMachineErr       error
-	listByUserErr          error
-	updateErr              error
-	deleteErr              error
-	hasAccessErr           error
-	getPermissionErr       error
+// MockHostAccessRepository implements a mock host access repository for testing
+type MockHostAccessRepository struct {
+	accesses            map[string]*MockHostAccessEntry
+	createErr           error
+	getByHostAndUserErr error
+	listByHostErr       error
+	listByUserErr       error
+	updateErr           error
+	deleteErr           error
+	hasAccessErr        error
+	getPermissionErr    error
 }
 
-// MockMachineAccessEntry represents a mock machine access entry
-// Using machineID+userID as composite key
-type MockMachineAccessEntry struct {
-	machineID  string
+// MockHostAccessEntry represents a mock host access entry
+// Using hostID+userID as composite key
+type MockHostAccessEntry struct {
+	hostID     string
 	userID     string
 	permission string
 	grantedAt  time.Time
 }
 
-func NewMockMachineAccessRepository() *MockMachineAccessRepository {
-	return &MockMachineAccessRepository{
-		accesses: make(map[string]*MockMachineAccessEntry),
+func NewMockHostAccessRepository() *MockHostAccessRepository {
+	return &MockHostAccessRepository{
+		accesses: make(map[string]*MockHostAccessEntry),
 	}
 }
 
-// NewMockMachineAccessRepositoryWithErrors creates a mock access repository with configurable errors
-func NewMockMachineAccessRepositoryWithErrors(createErr, getByMachineAndUserErr, listByMachineErr, listByUserErr, updateErr, deleteErr, hasAccessErr error) *MockMachineAccessRepository {
-	return &MockMachineAccessRepository{
-		accesses:               make(map[string]*MockMachineAccessEntry),
-		createErr:              createErr,
-		getByMachineAndUserErr: getByMachineAndUserErr,
-		listByMachineErr:       listByMachineErr,
-		listByUserErr:          listByUserErr,
-		updateErr:              updateErr,
-		deleteErr:              deleteErr,
-		hasAccessErr:           hasAccessErr,
+// NewMockHostAccessRepositoryWithErrors creates a mock access repository with configurable errors
+func NewMockHostAccessRepositoryWithErrors(createErr, getByHostAndUserErr, listByHostErr, listByUserErr, updateErr, deleteErr, hasAccessErr error) *MockHostAccessRepository {
+	return &MockHostAccessRepository{
+		accesses:            make(map[string]*MockHostAccessEntry),
+		createErr:           createErr,
+		getByHostAndUserErr: getByHostAndUserErr,
+		listByHostErr:       listByHostErr,
+		listByUserErr:       listByUserErr,
+		updateErr:           updateErr,
+		deleteErr:           deleteErr,
+		hasAccessErr:        hasAccessErr,
 	}
 }
 
-func (m *MockMachineAccessRepository) createKey(machineID, userID string) string {
-	return machineID + "|" + userID
+func (m *MockHostAccessRepository) createKey(hostID, userID string) string {
+	return hostID + "|" + userID
 }
 
-func (m *MockMachineAccessRepository) Create(access *models.MachineAccess) error {
+func (m *MockHostAccessRepository) Create(access *models.HostAccess) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
-	key := m.createKey(access.MachineID, access.UserID)
-	m.accesses[key] = &MockMachineAccessEntry{
-		machineID:  access.MachineID,
+	key := m.createKey(access.HostID, access.UserID)
+	m.accesses[key] = &MockHostAccessEntry{
+		hostID:     access.HostID,
 		userID:     access.UserID,
 		permission: access.Permission,
 		grantedAt:  access.GrantedAt,
@@ -455,32 +455,32 @@ func (m *MockMachineAccessRepository) Create(access *models.MachineAccess) error
 	return nil
 }
 
-func (m *MockMachineAccessRepository) GetByMachineAndUser(machineID, userID string) (*models.MachineAccess, error) {
-	if m.getByMachineAndUserErr != nil {
-		return nil, m.getByMachineAndUserErr
+func (m *MockHostAccessRepository) GetByHostAndUser(hostID, userID string) (*models.HostAccess, error) {
+	if m.getByHostAndUserErr != nil {
+		return nil, m.getByHostAndUserErr
 	}
-	key := m.createKey(machineID, userID)
+	key := m.createKey(hostID, userID)
 	entry, exists := m.accesses[key]
 	if !exists {
 		return nil, nil
 	}
-	return &models.MachineAccess{
-		MachineID:  entry.machineID,
+	return &models.HostAccess{
+		HostID:     entry.hostID,
 		UserID:     entry.userID,
 		Permission: entry.permission,
 		GrantedAt:  entry.grantedAt,
 	}, nil
 }
 
-func (m *MockMachineAccessRepository) ListByMachine(machineID string) ([]*models.MachineAccess, error) {
-	if m.listByMachineErr != nil {
-		return nil, m.listByMachineErr
+func (m *MockHostAccessRepository) ListByHost(hostID string) ([]*models.HostAccess, error) {
+	if m.listByHostErr != nil {
+		return nil, m.listByHostErr
 	}
-	var result []*models.MachineAccess
+	var result []*models.HostAccess
 	for _, entry := range m.accesses {
-		if entry.machineID == machineID {
-			result = append(result, &models.MachineAccess{
-				MachineID:  entry.machineID,
+		if entry.hostID == hostID {
+			result = append(result, &models.HostAccess{
+				HostID:     entry.hostID,
 				UserID:     entry.userID,
 				Permission: entry.permission,
 				GrantedAt:  entry.grantedAt,
@@ -490,15 +490,15 @@ func (m *MockMachineAccessRepository) ListByMachine(machineID string) ([]*models
 	return result, nil
 }
 
-func (m *MockMachineAccessRepository) ListByUser(userID string) ([]*models.MachineAccess, error) {
+func (m *MockHostAccessRepository) ListByUser(userID string) ([]*models.HostAccess, error) {
 	if m.listByUserErr != nil {
 		return nil, m.listByUserErr
 	}
-	var result []*models.MachineAccess
+	var result []*models.HostAccess
 	for _, entry := range m.accesses {
 		if entry.userID == userID {
-			result = append(result, &models.MachineAccess{
-				MachineID:  entry.machineID,
+			result = append(result, &models.HostAccess{
+				HostID:     entry.hostID,
 				UserID:     entry.userID,
 				Permission: entry.permission,
 				GrantedAt:  entry.grantedAt,
@@ -508,13 +508,13 @@ func (m *MockMachineAccessRepository) ListByUser(userID string) ([]*models.Machi
 	return result, nil
 }
 
-func (m *MockMachineAccessRepository) Update(access *models.MachineAccess) error {
+func (m *MockHostAccessRepository) Update(access *models.HostAccess) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
-	key := m.createKey(access.MachineID, access.UserID)
-	m.accesses[key] = &MockMachineAccessEntry{
-		machineID:  access.MachineID,
+	key := m.createKey(access.HostID, access.UserID)
+	m.accesses[key] = &MockHostAccessEntry{
+		hostID:     access.HostID,
 		userID:     access.UserID,
 		permission: access.Permission,
 		grantedAt:  access.GrantedAt,
@@ -522,20 +522,20 @@ func (m *MockMachineAccessRepository) Update(access *models.MachineAccess) error
 	return nil
 }
 
-func (m *MockMachineAccessRepository) Delete(machineID, userID string) error {
+func (m *MockHostAccessRepository) Delete(hostID, userID string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
-	key := m.createKey(machineID, userID)
+	key := m.createKey(hostID, userID)
 	delete(m.accesses, key)
 	return nil
 }
 
-func (m *MockMachineAccessRepository) HasAccess(machineID, userID string) (bool, error) {
+func (m *MockHostAccessRepository) HasAccess(hostID, userID string) (bool, error) {
 	if m.hasAccessErr != nil {
 		return false, m.hasAccessErr
 	}
-	key := m.createKey(machineID, userID)
+	key := m.createKey(hostID, userID)
 	_, exists := m.accesses[key]
 	return exists, nil
 }
@@ -543,11 +543,11 @@ func (m *MockMachineAccessRepository) HasAccess(machineID, userID string) (bool,
 // GetPermission returns the stored permission level for the pair, or
 // "" when no entry exists — mirroring the repository's no-row contract
 // that models.HasAtLeast consumes.
-func (m *MockMachineAccessRepository) GetPermission(machineID, userID string) (string, error) {
+func (m *MockHostAccessRepository) GetPermission(hostID, userID string) (string, error) {
 	if m.getPermissionErr != nil {
 		return "", m.getPermissionErr
 	}
-	key := m.createKey(machineID, userID)
+	key := m.createKey(hostID, userID)
 	entry, exists := m.accesses[key]
 	if !exists {
 		return "", nil
@@ -558,16 +558,16 @@ func (m *MockMachineAccessRepository) GetPermission(machineID, userID string) (s
 // WithGetPermissionError returns the same repository with GetPermission
 // configured to fail, for tests injecting a permission-lookup storage
 // failure (mirrors MockSessionRepository.WithRotateError).
-func (m *MockMachineAccessRepository) WithGetPermissionError(err error) *MockMachineAccessRepository {
+func (m *MockHostAccessRepository) WithGetPermissionError(err error) *MockHostAccessRepository {
 	m.getPermissionErr = err
 	return m
 }
 
 // AddAccess adds access directly without going through Create
-func (m *MockMachineAccessRepository) AddAccess(machineID, userID, permission string, grantedAt time.Time) {
-	key := m.createKey(machineID, userID)
-	m.accesses[key] = &MockMachineAccessEntry{
-		machineID:  machineID,
+func (m *MockHostAccessRepository) AddAccess(hostID, userID, permission string, grantedAt time.Time) {
+	key := m.createKey(hostID, userID)
+	m.accesses[key] = &MockHostAccessEntry{
+		hostID:     hostID,
 		userID:     userID,
 		permission: permission,
 		grantedAt:  grantedAt,

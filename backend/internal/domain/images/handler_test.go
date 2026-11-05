@@ -59,11 +59,11 @@ func TestImageHandler_List_Success(t *testing.T) {
 	}
 	handler := newTestHandler(engine)
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/images", nil).WithContext(authedContext())
+	req := httptest.NewRequest("GET", "/api/hosts/test-host/images", nil).WithContext(authedContext())
 
 	rr := httptest.NewRecorder()
 	r := http.NewServeMux()
-	r.HandleFunc("GET /api/machines/{id}/images", handler.List)
+	r.HandleFunc("GET /api/hosts/{id}/images", handler.List)
 	r.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code, "Should return 200 OK")
@@ -89,7 +89,7 @@ func TestImageHandler_List_Success(t *testing.T) {
 }
 
 // TestImageHandler_List_AllQueryParam tests that the all query parameter is parsed
-// and reaches the machine's list call.
+// and reaches the host's list call.
 func TestImageHandler_List_AllQueryParam(t *testing.T) {
 	var gotOpts entities.ImageListOptions
 	engine := &fakeImageEngine{
@@ -100,20 +100,20 @@ func TestImageHandler_List_AllQueryParam(t *testing.T) {
 	}
 	handler := newTestHandler(engine)
 
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/images?all=true", nil).WithContext(authedContext())
+	req := httptest.NewRequest("GET", "/api/hosts/test-host/images?all=true", nil).WithContext(authedContext())
 
 	rr := httptest.NewRecorder()
 	r := http.NewServeMux()
-	r.HandleFunc("GET /api/machines/{id}/images", handler.List)
+	r.HandleFunc("GET /api/hosts/{id}/images", handler.List)
 	r.ServeHTTP(rr, req)
 
 	assert.Equal(t, http.StatusOK, rr.Code)
-	assert.True(t, gotOpts.All, "the all query param must reach the machine as All")
+	assert.True(t, gotOpts.All, "the all query param must reach the host as All")
 }
 
 // TestImageHandler_List_FiltersQueryParam pins the HTTP seam of the list
 // filters: the `filters` query parameter (a JSON map[string][]string, contract
-// at doku/description_images_api.md:15-16) must reach the machine as flattened
+// at doku/description_images_api.md:15-16) must reach the host as flattened
 // "key=value" entries in ImageListOptions.Filter. Map iteration order makes
 // the flattened order non-deterministic, so the assertions use ElementsMatch.
 func TestImageHandler_List_FiltersQueryParam(t *testing.T) {
@@ -160,11 +160,11 @@ func TestImageHandler_List_FiltersQueryParam(t *testing.T) {
 			}
 			handler := newTestHandler(engine)
 
-			req := httptest.NewRequest("GET", "/api/machines/test-machine/images"+tt.queryParams, nil).WithContext(authedContext())
+			req := httptest.NewRequest("GET", "/api/hosts/test-host/images"+tt.queryParams, nil).WithContext(authedContext())
 
 			rr := httptest.NewRecorder()
 			r := http.NewServeMux()
-			r.HandleFunc("GET /api/machines/{id}/images", handler.List)
+			r.HandleFunc("GET /api/hosts/{id}/images", handler.List)
 			r.ServeHTTP(rr, req)
 
 			assert.Equal(t, http.StatusOK, rr.Code, "an (even ignored) filters param must never fail the request")
@@ -189,11 +189,11 @@ func TestImageHandler_Delete_Success(t *testing.T) {
 	}
 	handler := newTestHandler(engine)
 
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123", nil).WithContext(authedContext())
+	req := httptest.NewRequest("DELETE", "/api/hosts/test-host/images/sha256:abc123", nil).WithContext(authedContext())
 
 	w := httptest.NewRecorder()
 	r := http.NewServeMux()
-	r.HandleFunc("DELETE /api/machines/{id}/images/{imageId}", handler.Delete)
+	r.HandleFunc("DELETE /api/hosts/{id}/images/{imageId}", handler.Delete)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code, "Should return 204 on success")
@@ -212,28 +212,28 @@ func TestImageHandler_Delete_Force(t *testing.T) {
 	}
 	handler := newTestHandler(engine)
 
-	req := httptest.NewRequest("DELETE", "/api/machines/test-machine/images/sha256:abc123?force=true", nil).WithContext(authedContext())
+	req := httptest.NewRequest("DELETE", "/api/hosts/test-host/images/sha256:abc123?force=true", nil).WithContext(authedContext())
 
 	w := httptest.NewRecorder()
 	r := http.NewServeMux()
-	r.HandleFunc("DELETE /api/machines/{id}/images/{imageId}", handler.Delete)
+	r.HandleFunc("DELETE /api/hosts/{id}/images/{imageId}", handler.Delete)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNoContent, w.Code, "Should return 204 on success with force=true")
-	assert.True(t, gotForce, "force=true must reach the machine")
+	assert.True(t, gotForce, "force=true must reach the host")
 }
 
 // TestImageHandler_Pull_InvalidRequestBody tests that Pull handles invalid request body
 func TestImageHandler_Pull_InvalidRequestBody(t *testing.T) {
 	handler := newTestHandler(&fakeImageEngine{})
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", nil).
+	req := httptest.NewRequest("POST", "/api/hosts/test-host/images/pull", nil).
 		WithContext(authedContext())
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
 	r := http.NewServeMux()
-	r.HandleFunc("POST /api/machines/{id}/images/pull", handler.Pull)
+	r.HandleFunc("POST /api/hosts/{id}/images/pull", handler.Pull)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when request body is invalid")
@@ -248,13 +248,13 @@ func TestImageHandler_Pull_ValidationFailure(t *testing.T) {
 	}
 	jsonBody, _ := json.Marshal(requestBody)
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody)).
+	req := httptest.NewRequest("POST", "/api/hosts/test-host/images/pull", bytes.NewReader(jsonBody)).
 		WithContext(authedContext())
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
 	r := http.NewServeMux()
-	r.HandleFunc("POST /api/machines/{id}/images/pull", handler.Pull)
+	r.HandleFunc("POST /api/hosts/{id}/images/pull", handler.Pull)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 when validation fails")
@@ -286,9 +286,9 @@ func findEvent(t *testing.T, body string, eventType string) PullProgressEvent {
 }
 
 // TestImageHandler_Pull_Success_Streaming pins the pull stream through the
-// real service: progress emitted inside the machine's pull surfaces as
+// real service: progress emitted inside the host's pull surfaces as
 // NDJSON events, and the stream ends with the complete event carrying the
-// machine ID.
+// host ID.
 func TestImageHandler_Pull_Success_Streaming(t *testing.T) {
 	engine := &fakeImageEngine{
 		pullFn: func(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {
@@ -305,18 +305,18 @@ func TestImageHandler_Pull_Success_Streaming(t *testing.T) {
 	}
 	jsonBody, _ := json.Marshal(requestBody)
 
-	req := httptest.NewRequest("POST", "/api/machines/test-machine/images/pull", bytes.NewReader(jsonBody)).
+	req := httptest.NewRequest("POST", "/api/hosts/test-host/images/pull", bytes.NewReader(jsonBody)).
 		WithContext(authedContext())
 	req.Header.Set("Content-Type", "application/json")
 
 	w := httptest.NewRecorder()
 	r := http.NewServeMux()
-	r.HandleFunc("POST /api/machines/{id}/images/pull", handler.Pull)
+	r.HandleFunc("POST /api/hosts/{id}/images/pull", handler.Pull)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code, "Should return 200 for streaming response")
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"), "Should set Content-Type to application/json")
 
 	completeEvent := findEvent(t, w.Body.String(), EventTypeComplete)
-	assert.Equal(t, "test-machine", completeEvent.MachineID, "Should have correct machine ID")
+	assert.Equal(t, "test-host", completeEvent.HostID, "Should have correct host ID")
 }

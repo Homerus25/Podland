@@ -31,7 +31,7 @@ func TestImageService_List_ReturnsEngineSummaries(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.List(context.Background(), "user", "machine", entities.ImageListOptions{})
+	got, err := service.List(context.Background(), "user", "host", entities.ImageListOptions{})
 
 	require.NoError(t, err)
 	assert.Equal(t, summaries, got)
@@ -45,7 +45,7 @@ func TestImageService_List_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.List(context.Background(), "user", "machine", entities.ImageListOptions{})
+	got, err := service.List(context.Background(), "user", "host", entities.ImageListOptions{})
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -61,7 +61,7 @@ func TestImageService_Delete_ClassifiesPodmanRefusals(t *testing.T) {
 		}
 		service := NewImageService(fakeEngineProvider{engine: engine})
 
-		err := service.Delete(context.Background(), "user", "machine", "image-123", false)
+		err := service.Delete(context.Background(), "user", "host", "image-123", false)
 
 		require.ErrorIs(t, err, appErrors.ErrImageNotFound)
 	})
@@ -74,7 +74,7 @@ func TestImageService_Delete_ClassifiesPodmanRefusals(t *testing.T) {
 		}
 		service := NewImageService(fakeEngineProvider{engine: engine})
 
-		err := service.Delete(context.Background(), "user", "machine", "image-123", false)
+		err := service.Delete(context.Background(), "user", "host", "image-123", false)
 
 		require.ErrorIs(t, err, appErrors.ErrImageUsedByContainers)
 	})
@@ -87,7 +87,7 @@ func TestImageService_Delete_ClassifiesPodmanRefusals(t *testing.T) {
 		}
 		service := NewImageService(fakeEngineProvider{engine: engine})
 
-		err := service.Delete(context.Background(), "user", "machine", "image-123", false)
+		err := service.Delete(context.Background(), "user", "host", "image-123", false)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to remove image")
@@ -101,7 +101,7 @@ func TestImageService_Delete_ClassifiesPodmanRefusals(t *testing.T) {
 		}
 		service := NewImageService(fakeEngineProvider{engine: engine})
 
-		err := service.Delete(context.Background(), "user", "machine", "image-123", false)
+		err := service.Delete(context.Background(), "user", "host", "image-123", false)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no remove report returned for image: image-123")
@@ -118,7 +118,7 @@ func TestImageService_PullWithProgress_ReturnsEngineReport(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.PullWithProgress(context.Background(), "user", "machine", "nginx:latest", entities.ImagePullOptions{}, nil)
+	got, err := service.PullWithProgress(context.Background(), "user", "host", "nginx:latest", entities.ImagePullOptions{}, nil)
 
 	require.NoError(t, err)
 	assert.Same(t, report, got)
@@ -132,7 +132,7 @@ func TestImageService_PullWithProgress_MapsFailureToPullFailed(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.PullWithProgress(context.Background(), "user", "machine", "nginx:latest", entities.ImagePullOptions{}, nil)
+	got, err := service.PullWithProgress(context.Background(), "user", "host", "nginx:latest", entities.ImagePullOptions{}, nil)
 
 	require.ErrorIs(t, err, appErrors.ErrImagePullFailed)
 	assert.Nil(t, got)
@@ -142,7 +142,7 @@ func TestImageService_PullWithProgress_MapsFailureToPullFailed(t *testing.T) {
 // release regression: a blocking engine Pull call plus a cancelled
 // context must return the operation-cancelled sentinel promptly (the
 // shared promptness harness owns the ritual). The pull itself keeps
-// running on the machine (remote outcome unchanged); the service just
+// running on the host (remote outcome unchanged); the service just
 // stops waiting on it.
 func TestImageService_PullWithProgress_ReturnsPromptlyOnCancel(t *testing.T) {
 	started, block := testutils.CancelStubs(t)
@@ -157,7 +157,7 @@ func TestImageService_PullWithProgress_ReturnsPromptlyOnCancel(t *testing.T) {
 
 	testutils.RequirePromptReturnOnCancel(t, "PullWithProgress", started,
 		func(ctx context.Context) error {
-			_, err := service.PullWithProgress(ctx, "user", "machine", "nginx:latest", entities.ImagePullOptions{}, nil)
+			_, err := service.PullWithProgress(ctx, "user", "host", "nginx:latest", entities.ImagePullOptions{}, nil)
 			return err
 		})
 }
@@ -181,7 +181,7 @@ func TestImageService_PullWithProgress_ArmsTheProgressWriter(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.PullWithProgress(context.Background(), "user", "machine", "nginx:latest",
+	got, err := service.PullWithProgress(context.Background(), "user", "host", "nginx:latest",
 		entities.ImagePullOptions{}, func(event PullProgressEvent) { events = append(events, event) })
 
 	require.NoError(t, err)
@@ -200,7 +200,7 @@ func TestImageService_Prune_ReturnsEngineReports(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Prune(context.Background(), "user", "machine")
+	got, err := service.Prune(context.Background(), "user", "host")
 
 	require.NoError(t, err)
 	assert.Equal(t, prunes, got)
@@ -214,7 +214,7 @@ func TestImageService_Prune_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Prune(context.Background(), "user", "machine")
+	got, err := service.Prune(context.Background(), "user", "host")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -228,7 +228,7 @@ func TestImageService_Prune_WrapsEngineFailure(t *testing.T) {
 func TestImageService_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewImageService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	got, err := service.List(context.Background(), "user", "machine", entities.ImageListOptions{})
+	got, err := service.List(context.Background(), "user", "host", entities.ImageListOptions{})
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, got)
@@ -279,7 +279,7 @@ func TestImageService_Export_GatesOnExistence(t *testing.T) {
 	service := NewImageService(fakeEngineProvider{engine: engine})
 	var sink bytes.Buffer
 
-	err := service.Export(context.Background(), "user", "machine", "sha256:abc123", &sink)
+	err := service.Export(context.Background(), "user", "host", "sha256:abc123", &sink)
 
 	require.ErrorIs(t, err, appErrors.ErrImageNotFound)
 	assert.Zero(t, sink.Len(), "no byte may be written for a missing image")
@@ -298,7 +298,7 @@ func TestImageService_Export_StreamsEngineBytesUnchanged(t *testing.T) {
 	service := NewImageService(fakeEngineProvider{engine: engine})
 	var sink bytes.Buffer
 
-	err := service.Export(context.Background(), "user", "machine", "sha256:abc123", &sink)
+	err := service.Export(context.Background(), "user", "host", "sha256:abc123", &sink)
 
 	require.NoError(t, err)
 	assert.Equal(t, "tar-bytes", sink.String())

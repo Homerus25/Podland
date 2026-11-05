@@ -40,7 +40,7 @@ function imageNotFoundCreate() {
 // A create handler that refuses the first request with IMAGE_NOT_FOUND
 // (the image is missing) and accepts the second (after the pull).
 function createFailsThenSucceedsHandler() {
-	return http.post("*/api/machines/m-1/containers", async ({ request }) => {
+	return http.post("*/api/hosts/m-1/containers", async ({ request }) => {
 		createRequests.count++;
 		createRequests.body = await request.json();
 		if (createRequests.count === 1) {

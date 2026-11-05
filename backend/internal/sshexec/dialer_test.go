@@ -37,17 +37,17 @@ func (c *fakeSSHClient) NewSession() (*ssh.Session, error) {
 	return nil, errors.New("fakeSSHClient.NewSession not used in cache tests")
 }
 
-// fakeMachineRepo is a minimal machineRepo for dialSSHProd tests.
-type fakeMachineRepo struct {
-	machines map[string]*models.Machine
-	err      error
+// fakeHostRepo is a minimal hostRepo for dialSSHProd tests.
+type fakeHostRepo struct {
+	hosts map[string]*models.Host
+	err   error
 }
 
-func (r *fakeMachineRepo) GetByID(id string) (*models.Machine, error) {
+func (r *fakeHostRepo) GetByID(id string) (*models.Host, error) {
 	if r.err != nil {
 		return nil, r.err
 	}
-	return r.machines[id], nil
+	return r.hosts[id], nil
 }
 
 // fakeEncryption is a minimal encryptionSvc for dialSSHProd tests.
@@ -78,7 +78,7 @@ func newTestDialer(maxSize int) *sshDialer {
 }
 
 // newRecordingDialer builds an sshDialer whose fake dialSSH hands out one
-// fakeSSHClient per machineID, recording them for close-count assertions.
+// fakeSSHClient per hostID, recording them for close-count assertions.
 func newRecordingDialer(maxSize int) (*sshDialer, map[string]*fakeSSHClient) {
 	return newRecordingDialerWithCfg(maxSize, 15*time.Minute, 0)
 }
@@ -93,9 +93,9 @@ func newRecordingDialerWithCfg(maxSize int, idleTimeout, cleanupInterval time.Du
 		cleanupInterval: cleanupInterval,
 		connectTimeout:  30 * time.Second,
 	})
-	d.dialSSH = func(_ context.Context, machineID string) (sshClient, error) {
+	d.dialSSH = func(_ context.Context, hostID string) (sshClient, error) {
 		c := &fakeSSHClient{}
-		clients[machineID] = c
+		clients[hostID] = c
 		return c, nil
 	}
 	return d, clients
@@ -106,34 +106,34 @@ func newRecordingDialerWithCfg(maxSize int, idleTimeout, cleanupInterval time.Du
 // The cache lifecycle itself is pinned once in internal/rescache's suite;
 // these tests pin the adapter's projection — that the dialer runs over the
 // resource cache with its dialer interface unchanged — and the behaviour
-// changes the migration lands: no cross-machine dial serialization, no
+// changes the migration lands: no cross-host dial serialization, no
 // mid-exec closes from eviction or cleanup, concurrent cold dials share one
 // dial, the soft cap.
 
-func TestSSHDialer_Dial_CachesClientPerMachine(t *testing.T) {
+func TestSSHDialer_Dial_CachesClientPerHost(t *testing.T) {
 	d := newTestDialer(10)
 	d.dialSSH = func(_ context.Context, _ string) (sshClient, error) {
 		return &fakeSSHClient{}, nil
 	}
 
 	// First call: cache miss, dial happens.
-	r1, err := d.Dial(context.Background(), "machine-1")
+	r1, err := d.Dial(context.Background(), "host-1")
 	assert.NoError(t, err)
 	assert.NotNil(t, r1)
 	assert.Equal(t, int32(1), d.dialCount.Load(), "first Dial should produce one real dial")
 	r1.Close()
 
 	// Second call: cache hit, no new dial.
-	r2, err := d.Dial(context.Background(), "machine-1")
+	r2, err := d.Dial(context.Background(), "host-1")
 	assert.NoError(t, err)
 	assert.NotNil(t, r2)
-	assert.Equal(t, int32(1), d.dialCount.Load(), "second Dial for same machine must reuse the cached client")
+	assert.Equal(t, int32(1), d.dialCount.Load(), "second Dial for same host must reuse the cached client")
 	r2.Close()
 
-	// Different machine: another dial.
-	r3, err := d.Dial(context.Background(), "machine-2")
+	// Different host: another dial.
+	r3, err := d.Dial(context.Background(), "host-2")
 	assert.NoError(t, err)
-	assert.Equal(t, int32(2), d.dialCount.Load(), "different machineID must trigger a new dial")
+	assert.Equal(t, int32(2), d.dialCount.Load(), "different hostID must trigger a new dial")
 	r3.Close()
 }
 
@@ -148,12 +148,12 @@ func TestSSHDialer_Dial_PropagatesDialErrorAndDoesNotCache(t *testing.T) {
 		return &fakeSSHClient{}, nil
 	}
 
-	_, err := d.Dial(context.Background(), "machine-1")
+	_, err := d.Dial(context.Background(), "host-1")
 	assert.ErrorIs(t, err, wantErr, "dialSSH error must propagate unwrapped")
 
 	// The next call must try again (no cached failure): the second dial
 	// succeeds and is the one cached dial.
-	r, err := d.Dial(context.Background(), "machine-1")
+	r, err := d.Dial(context.Background(), "host-1")
 	assert.NoError(t, err)
 	assert.NotNil(t, r)
 	assert.Equal(t, int32(1), d.dialCount.Load(), "the successful re-dial is the one cached dial")
@@ -174,7 +174,7 @@ func TestSSHDialer_Dial_ConcurrentColdDialsShareOneDial(t *testing.T) {
 	errs := make(chan error, 2)
 	for range 2 {
 		wg.Go(func() {
-			r, err := d.Dial(context.Background(), "machine-1")
+			r, err := d.Dial(context.Background(), "host-1")
 			if err != nil {
 				errs <- err
 				return
@@ -192,23 +192,23 @@ func TestSSHDialer_Dial_ConcurrentColdDialsShareOneDial(t *testing.T) {
 	assert.NoError(t, <-errs)
 	assert.NoError(t, <-errs)
 	assert.Equal(t, int32(1), d.dialCount.Load(),
-		"concurrent cold dials for one machine must share one dial")
+		"concurrent cold dials for one host must share one dial")
 }
 
-func TestSSHDialer_Dial_ColdDialsToDifferentMachinesDoNotSerialize(t *testing.T) {
+func TestSSHDialer_Dial_ColdDialsToDifferentHostsDoNotSerialize(t *testing.T) {
 	// The behaviour change this migration lands: the dial runs outside the
-	// cache lock, so a cold dial to one machine never blocks dials to
-	// other machines (the old dialer held its mutex across the dial).
+	// cache lock, so a cold dial to one host never blocks dials to
+	// other hosts (the old dialer held its mutex across the dial).
 	d := newTestDialer(10)
 	blockA := make(chan struct{})
 	startedA := make(chan struct{}, 1)
 	startedB := make(chan struct{}, 1)
-	d.dialSSH = func(_ context.Context, machineID string) (sshClient, error) {
-		switch machineID {
-		case "machine-a":
+	d.dialSSH = func(_ context.Context, hostID string) (sshClient, error) {
+		switch hostID {
+		case "host-a":
 			startedA <- struct{}{}
 			<-blockA
-		case "machine-b":
+		case "host-b":
 			startedB <- struct{}{}
 		}
 		return &fakeSSHClient{}, nil
@@ -216,23 +216,23 @@ func TestSSHDialer_Dial_ColdDialsToDifferentMachinesDoNotSerialize(t *testing.T)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		r, _ := d.Dial(context.Background(), "machine-a")
+		r, _ := d.Dial(context.Background(), "host-a")
 		r.Close()
 	})
 	<-startedA
 	wg.Go(func() {
-		r, _ := d.Dial(context.Background(), "machine-b")
+		r, _ := d.Dial(context.Background(), "host-b")
 		r.Close()
 	})
 
 	select {
 	case <-startedB:
-		// machine-b's dial started while machine-a's is still blocked:
-		// cold dials to different machines don't serialize behind one lock.
+		// host-b's dial started while host-a's is still blocked:
+		// cold dials to different hosts don't serialize behind one lock.
 	case <-time.After(2 * time.Second):
 		close(blockA)
 		wg.Wait()
-		t.Fatal("cold dial to a second machine serialized behind the first machine's in-flight dial")
+		t.Fatal("cold dial to a second host serialized behind the first host's in-flight dial")
 	}
 
 	close(blockA)
@@ -251,7 +251,7 @@ func TestSSHDialer_Dial_LRUEvictionClosesLRUIdleClientWhenFull(t *testing.T) {
 	assert.NoError(t, err)
 	r2.Close() // m2 idle; m1 is now the LRU idle entry
 
-	// Third distinct machine: triggers LRU eviction. m1 (oldest idle) must go.
+	// Third distinct host: triggers LRU eviction. m1 (oldest idle) must go.
 	r3, err := d.Dial(context.Background(), "m3")
 	assert.NoError(t, err)
 	defer r3.Close()
@@ -320,9 +320,9 @@ func TestSSHDialer_Invalidate_ClosesEvenMidFlight(t *testing.T) {
 		"releasing after Invalidate must not close the client twice")
 }
 
-// --- RemoveMachine: graceful invalidation (mirrors connections.Manager) ---
+// --- RemoveHost: graceful invalidation (mirrors connections.Manager) ---
 
-func TestSSHDialer_RemoveMachine_WaitsForInFlightRunnersBeforeClosing(t *testing.T) {
+func TestSSHDialer_RemoveHost_WaitsForInFlightRunnersBeforeClosing(t *testing.T) {
 	// The graceful-removal contract (docs/architecture-decisions.md §4): in-flight execs run to
 	// completion; the client closes when the LAST in-flight exec releases.
 	d, clients := newRecordingDialer(10)
@@ -333,7 +333,7 @@ func TestSSHDialer_RemoveMachine_WaitsForInFlightRunnersBeforeClosing(t *testing
 	r2, err := d.Dial(ctx, "m1") // in-flight exec #2 (same cached client)
 	assert.NoError(t, err)
 
-	d.RemoveMachine("m1")
+	d.RemoveHost("m1")
 
 	assert.Equal(t, int32(0), clients["m1"].closes.Load(),
 		"in-flight execs must keep the client open after removal")
@@ -347,27 +347,27 @@ func TestSSHDialer_RemoveMachine_WaitsForInFlightRunnersBeforeClosing(t *testing
 		"client must close exactly when the last in-flight exec releases")
 }
 
-func TestSSHDialer_RemoveMachine_ClosesIdleClientImmediately(t *testing.T) {
+func TestSSHDialer_RemoveHost_ClosesIdleClientImmediately(t *testing.T) {
 	d, clients := newRecordingDialer(10)
 
 	r, err := d.Dial(context.Background(), "m1")
 	assert.NoError(t, err)
 	r.Close() // exec finished before removal: the entry is idle
 
-	d.RemoveMachine("m1")
+	d.RemoveHost("m1")
 
 	assert.Equal(t, int32(1), clients["m1"].closes.Load(),
 		"an idle entry's client must close immediately on removal")
 }
 
-func TestSSHDialer_RemoveMachine_UnknownMachineIsNoOp(t *testing.T) {
+func TestSSHDialer_RemoveHost_UnknownHostIsNoOp(t *testing.T) {
 	d, _ := newRecordingDialer(10)
 
-	assert.NotPanics(t, func() { d.RemoveMachine("no-such-machine") })
+	assert.NotPanics(t, func() { d.RemoveHost("no-such-host") })
 }
 
-func TestSSHDialer_RemoveMachine_LaterExecDialsAFreshClient(t *testing.T) {
-	// No tombstone: after removal, the next exec for the machine dials
+func TestSSHDialer_RemoveHost_LaterExecDialsAFreshClient(t *testing.T) {
+	// No tombstone: after removal, the next exec for the host dials
 	// again. The fresh client must be live, not the removed one.
 	d, clients := newRecordingDialer(10)
 
@@ -375,7 +375,7 @@ func TestSSHDialer_RemoveMachine_LaterExecDialsAFreshClient(t *testing.T) {
 	assert.NoError(t, err)
 	r.Close()
 
-	d.RemoveMachine("m1")
+	d.RemoveHost("m1")
 	assert.Equal(t, int32(1), clients["m1"].closes.Load(),
 		"removal of an idle client closes it immediately")
 
@@ -388,20 +388,20 @@ func TestSSHDialer_RemoveMachine_LaterExecDialsAFreshClient(t *testing.T) {
 
 	r2.Close()
 	assert.Equal(t, int32(1), oldClient.closes.Load(),
-		"releasing the fresh runner must not close the removed machine's old client")
+		"releasing the fresh runner must not close the removed host's old client")
 	assert.Zero(t, clients["m1"].closes.Load(),
 		"the fresh client must not be closed by releasing its own runner")
 }
 
-func TestSSHDialer_RemoveMachine_IsIdempotent(t *testing.T) {
+func TestSSHDialer_RemoveHost_IsIdempotent(t *testing.T) {
 	d, clients := newRecordingDialer(10)
 
 	r, err := d.Dial(context.Background(), "m1")
 	assert.NoError(t, err)
 	r.Close()
 
-	d.RemoveMachine("m1")
-	d.RemoveMachine("m1")
+	d.RemoveHost("m1")
+	d.RemoveHost("m1")
 
 	assert.Equal(t, int32(1), clients["m1"].closes.Load(),
 		"repeat removal must not close the client twice")
@@ -505,34 +505,34 @@ func TestSSHDialer_Close_DrainsAllClients(t *testing.T) {
 
 // --- dialSSHProd error paths (no live SSH server needed) ---
 
-func TestSSHDialer_dialSSHProd_MachineNotFound(t *testing.T) {
+func TestSSHDialer_dialSSHProd_HostNotFound(t *testing.T) {
 	d := newSSHDialer(sshDialerConfig{
-		machineRepo: &fakeMachineRepo{machines: map[string]*models.Machine{}},
-		encryption:  &fakeEncryption{},
+		hostRepo:   &fakeHostRepo{hosts: map[string]*models.Host{}},
+		encryption: &fakeEncryption{},
 	})
 
 	_, err := d.dialSSHProd(context.Background(), "missing")
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "machine not found")
+	assert.Contains(t, err.Error(), "host not found")
 }
 
 func TestSSHDialer_dialSSHProd_RepoErrorWrapped(t *testing.T) {
 	repoErr := errors.New("disk i/o")
 	d := newSSHDialer(sshDialerConfig{
-		machineRepo: &fakeMachineRepo{err: repoErr},
-		encryption:  &fakeEncryption{},
+		hostRepo:   &fakeHostRepo{err: repoErr},
+		encryption: &fakeEncryption{},
 	})
 
 	_, err := d.dialSSHProd(context.Background(), "m1")
 
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed to fetch machine")
+	assert.Contains(t, err.Error(), "failed to fetch host")
 	assert.ErrorIs(t, err, repoErr, "the underlying repo error must be wrapped, not swallowed")
 }
 
 func TestSSHDialer_dialSSHProd_DecryptFailureWrapped(t *testing.T) {
-	machine := &models.Machine{
+	host := &models.Host{
 		ID:              "m1",
 		Hostname:        "10.0.0.1",
 		Port:            22,
@@ -541,8 +541,8 @@ func TestSSHDialer_dialSSHProd_DecryptFailureWrapped(t *testing.T) {
 	}
 	decErr := errors.New("bad ciphertext")
 	d := newSSHDialer(sshDialerConfig{
-		machineRepo: &fakeMachineRepo{machines: map[string]*models.Machine{"m1": machine}},
-		encryption:  &fakeEncryption{decryptErr: decErr},
+		hostRepo:   &fakeHostRepo{hosts: map[string]*models.Host{"m1": host}},
+		encryption: &fakeEncryption{decryptErr: decErr},
 	})
 
 	_, err := d.dialSSHProd(context.Background(), "m1")
@@ -555,7 +555,7 @@ func TestSSHDialer_dialSSHProd_DecryptFailureWrapped(t *testing.T) {
 func TestSSHDialer_dialSSHProd_InvalidPEMWrapped(t *testing.T) {
 	// fakeEncryption returns the literal "raw-key" — not a PEM — so
 	// ssh.ParsePrivateKey must fail with a parse error that we wrap.
-	machine := &models.Machine{
+	host := &models.Host{
 		ID:              "m1",
 		Hostname:        "10.0.0.1",
 		Port:            22,
@@ -563,8 +563,8 @@ func TestSSHDialer_dialSSHProd_InvalidPEMWrapped(t *testing.T) {
 		SSHKeyEncrypted: []byte("whatever"),
 	}
 	d := newSSHDialer(sshDialerConfig{
-		machineRepo: &fakeMachineRepo{machines: map[string]*models.Machine{"m1": machine}},
-		encryption:  &fakeEncryption{rawKey: "raw-key"},
+		hostRepo:   &fakeHostRepo{hosts: map[string]*models.Host{"m1": host}},
+		encryption: &fakeEncryption{rawKey: "raw-key"},
 	})
 
 	_, err := d.dialSSHProd(context.Background(), "m1")
@@ -579,7 +579,7 @@ func TestSSHDialer_dialSSHProd_InvalidPEMWrapped(t *testing.T) {
 // resolvers are required to never resolve, so this fails fast without
 // depending on any specific port being closed.
 func TestSSHDialer_dialSSHProd_UnreachableHost(t *testing.T) {
-	machine := &models.Machine{
+	host := &models.Host{
 		ID:              "m1",
 		Hostname:        "nonexistent.invalid",
 		Port:            22,
@@ -587,7 +587,7 @@ func TestSSHDialer_dialSSHProd_UnreachableHost(t *testing.T) {
 		SSHKeyEncrypted: []byte("ignored"),
 	}
 	d := newSSHDialer(sshDialerConfig{
-		machineRepo:    &fakeMachineRepo{machines: map[string]*models.Machine{"m1": machine}},
+		hostRepo:       &fakeHostRepo{hosts: map[string]*models.Host{"m1": host}},
 		encryption:     &fakeEncryption{rawKey: validPEM(t)},
 		connectTimeout: 2 * time.Second,
 	})

@@ -7,7 +7,7 @@ import {
 import { usersQueryKey } from "@shared/queries/queryKeys";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-// The user directory is app-wide (not machine-scoped), so one shared key
+// The user directory is app-wide (not host-scoped), so one shared key
 // serves every consumer — this page, the share form's picker.
 export function useUsers() {
 	return useQuery({
@@ -18,7 +18,7 @@ export function useUsers() {
 
 // Every users mutation invalidates the one shared key on success, so all
 // consumers refetch the post-mutation directory. App-wide, so the
-// machine-scoped list-invalidating factory does not apply.
+// host-scoped list-invalidating factory does not apply.
 function useUsersInvalidatingMutation<TInput, TData>(
 	mutationFn: (input: TInput) => Promise<TData>,
 ) {

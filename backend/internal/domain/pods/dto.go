@@ -29,7 +29,7 @@ type PodListResponse struct {
 	Labels map[string]string `json:"labels,omitempty"`
 }
 
-// PodCreateRequest is the POST /api/machines/{id}/pods body: the pod's
+// PodCreateRequest is the POST /api/hosts/{id}/pods body: the pod's
 // name, the networks it joins, named volumes, bind mounts, and port
 // mappings in the same shapes as the container create request, labels,
 // and resource limits.
@@ -176,7 +176,7 @@ type PodContainerRef struct {
 	State string `json:"state"`
 }
 
-// PodDetailResponse is the GET /api/machines/{id}/pods/{podId} detail
+// PodDetailResponse is the GET /api/hosts/{id}/pods/{podId} detail
 // DTO: the fields the pod detail page renders, mapped from the inspect
 // report.
 type PodDetailResponse struct {

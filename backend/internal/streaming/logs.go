@@ -89,7 +89,7 @@ type LogStreamOp struct {
 	Tail  int64
 	// Stream runs the domain's follow-mode log fetch, reporting each log
 	// event through onEvent. It must honour ctx cancellation.
-	Stream func(ctx context.Context, userID, machineID string, onEvent func(LogEvent)) error
+	Stream func(ctx context.Context, userID, hostID string, onEvent func(LogEvent)) error
 }
 
 // RunLogStream is the entry point for follow-mode log streams: one call
@@ -112,7 +112,7 @@ func RunLogStream(w http.ResponseWriter, r *http.Request, op LogStreamOp) {
 
 	run(r.Context(), stream.Writer, streamConfig[LogEvent, struct{}]{
 		Operation: func(ctx context.Context, onEvent func(LogEvent)) (struct{}, error) {
-			return struct{}{}, op.Stream(ctx, stream.UserID, stream.MachineID, onEvent)
+			return struct{}{}, op.Stream(ctx, stream.UserID, stream.HostID, onEvent)
 		},
 		OnEvent: func(event LogEvent) error {
 			return stream.Writer.Write(event)

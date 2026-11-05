@@ -21,7 +21,7 @@ describe("LoginPage", () => {
 
 		await waitFor(() => {
 			expect(
-				screen.getByText("Manage Podman on remote machines"),
+				screen.getByText("Manage Podman on remote hosts"),
 			).toBeInTheDocument();
 		});
 	});
@@ -29,7 +29,7 @@ describe("LoginPage", () => {
 	it("stores username and memory-only token, and sends the Bearer header on API requests", async () => {
 		let authHeader: string | null = null;
 		server.use(
-			http.get("*/api/machines", ({ request }) => {
+			http.get("*/api/hosts", ({ request }) => {
 				authHeader = request.headers.get("authorization");
 				return HttpResponse.json([]);
 			}),
@@ -41,7 +41,7 @@ describe("LoginPage", () => {
 			expect(screen.getByTestId("auth-user")).toHaveTextContent("alice");
 		});
 
-		await api.get("/machines");
+		await api.get("/hosts");
 
 		expect(authHeader).toBe("Bearer test-access-token");
 
@@ -75,7 +75,7 @@ describe("LoginPage", () => {
 		).toBeInTheDocument();
 		expect(screen.getByText("INVALID_CREDENTIALS")).toBeInTheDocument();
 		expect(
-			screen.queryByText("Manage Podman on remote machines"),
+			screen.queryByText("Manage Podman on remote hosts"),
 		).not.toBeInTheDocument();
 	});
 
@@ -106,7 +106,7 @@ describe("LoginPage", () => {
 		expect(await screen.findByText("Username is required")).toBeInTheDocument();
 		expect(screen.getByText("Password is required")).toBeInTheDocument();
 		expect(
-			screen.queryByText("Manage Podman on remote machines"),
+			screen.queryByText("Manage Podman on remote hosts"),
 		).not.toBeInTheDocument();
 	});
 

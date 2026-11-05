@@ -262,7 +262,7 @@ func TestRateLimitMiddleware_OverLimitAnswersEnvelope(t *testing.T) {
 	handler := RateLimitMiddleware(limiter)(countingHandler(&calls))
 
 	request := func() *http.Request {
-		req := requestAsUser(http.MethodGet, "/api/machines", "user-1")
+		req := requestAsUser(http.MethodGet, "/api/hosts", "user-1")
 		return req.WithContext(contextutils.SetRequestID(req.Context(), "req-123"))
 	}
 

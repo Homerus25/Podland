@@ -28,7 +28,7 @@ func TestSecretService_Inspect_ReturnsRawReport(t *testing.T) {
 	}
 	service := NewSecretService(fakeEngineProvider{engine: engine}, nil)
 
-	result, err := service.Inspect(context.Background(), "reader-1", "machine", "db-password")
+	result, err := service.Inspect(context.Background(), "reader-1", "host", "db-password")
 
 	require.NoError(t, err)
 	assert.Same(t, report, result, "inspect must return the engine's raw report, not a DTO mapping")
@@ -50,7 +50,7 @@ func TestSecretService_Inspect_NeverPassesReveal(t *testing.T) {
 	// inspect into a reveal.
 	service := NewSecretService(fakeEngineProvider{engine: engine}, adminRepo{})
 
-	_, err := service.Inspect(context.Background(), "admin-1", "machine", "db-password")
+	_, err := service.Inspect(context.Background(), "admin-1", "host", "db-password")
 
 	require.NoError(t, err)
 	assert.Equal(t, []bool{false}, gotReveals,
@@ -71,7 +71,7 @@ func TestSecretService_Inspect_NotFound(t *testing.T) {
 	}
 	service := NewSecretService(fakeEngineProvider{engine: engine}, nil)
 
-	result, err := service.Inspect(context.Background(), "reader-1", "machine", "nope")
+	result, err := service.Inspect(context.Background(), "reader-1", "host", "nope")
 
 	assert.ErrorIs(t, err, appErrors.ErrSecretNotFound)
 	assert.Nil(t, result)
@@ -88,7 +88,7 @@ func TestSecretService_Inspect_EngineFailureWraps(t *testing.T) {
 	}
 	service := NewSecretService(fakeEngineProvider{engine: engine}, nil)
 
-	result, err := service.Inspect(context.Background(), "reader-1", "machine", "db-password")
+	result, err := service.Inspect(context.Background(), "reader-1", "host", "db-password")
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "failed to inspect secret")
@@ -104,7 +104,7 @@ func TestSecretService_Inspect_EngineFailureWraps(t *testing.T) {
 func TestSecretService_Inspect_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewSecretService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}, nil)
 
-	result, err := service.Inspect(context.Background(), "user", "machine", "db-password")
+	result, err := service.Inspect(context.Background(), "user", "host", "db-password")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, result)

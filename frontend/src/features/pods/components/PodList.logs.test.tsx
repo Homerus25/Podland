@@ -7,12 +7,12 @@ import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
-import { machineFixture, podFixture } from "@/test/factories";
+import { hostFixture, podFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function mockPods(pods: PodSummary[]) {
-	server.use(http.get("*/api/machines/m-1/pods", () => podsListResponse(pods)));
+	server.use(http.get("*/api/hosts/m-1/pods", () => podsListResponse(pods)));
 }
 
 function podsListResponse(pods: PodSummary[]) {
@@ -27,12 +27,12 @@ function renderPodList(permission: "read" | "write" | "admin" = "admin") {
 	renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId"
-				element={<PodList machine={machineFixture({ permission })} />}
+				path="/hosts/:hostId"
+				element={<PodList host={hostFixture({ permission })} />}
 			/>
 			<Route path={LOG_ROUTE_PATTERN} element={<LogsPage />} />
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1"] } },
 	);
 }
 
@@ -45,10 +45,8 @@ describe("PodList logs", () => {
 	it("wires a list row's logs button to the pod logs endpoint and renders its history", async () => {
 		const requestedPaths: string[] = [];
 		server.use(
-			http.get("*/api/machines/m-1/pods", () =>
-				podsListResponse([podFixture()]),
-			),
-			http.get("*/api/machines/m-1/pods/p-1/logs", ({ request }) => {
+			http.get("*/api/hosts/m-1/pods", () => podsListResponse([podFixture()])),
+			http.get("*/api/hosts/m-1/pods/p-1/logs", ({ request }) => {
 				requestedPaths.push(new URL(request.url).pathname);
 				return HttpResponse.json({
 					id: "p-1",
@@ -70,7 +68,7 @@ describe("PodList logs", () => {
 		expect(screen.getByText(/hist-line-2/)).toBeInTheDocument();
 		expect(requestedPaths.length).toBeGreaterThan(0);
 		for (const path of requestedPaths) {
-			expect(path).toBe("/api/machines/m-1/pods/p-1/logs");
+			expect(path).toBe("/api/hosts/m-1/pods/p-1/logs");
 		}
 	});
 

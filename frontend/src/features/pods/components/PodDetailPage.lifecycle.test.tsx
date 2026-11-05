@@ -5,32 +5,32 @@ import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { machineFixture, podDetailFixture } from "@/test/factories";
+import { hostFixture, podDetailFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
-// The page reads the machine's per-caller facts for the manage gate.
-function mockMachine(permission: "read" | "write" | "admin" = "admin") {
+// The page reads the host's per-caller facts for the manage gate.
+function mockHost(permission: "read" | "write" | "admin" = "admin") {
 	server.use(
-		http.get("*/api/machines/m-1", () =>
+		http.get("*/api/hosts/m-1", () =>
 			HttpResponse.json(
-				machineFixture({ permission, isOwner: permission === "admin" }),
+				hostFixture({ permission, isOwner: permission === "admin" }),
 			),
 		),
 	);
 }
 
-function mockMachineError() {
+function mockHostError() {
 	server.use(
-		http.get("*/api/machines/m-1", () =>
-			errorResponse(500, "MACHINE_UNREACHABLE", "Machine unreachable"),
+		http.get("*/api/hosts/m-1", () =>
+			errorResponse(500, "HOST_UNREACHABLE", "Host unreachable"),
 		),
 	);
 }
 
 function mockPodDetail(state = "Running") {
 	server.use(
-		http.get("*/api/machines/m-1/pods/p-1", () =>
+		http.get("*/api/hosts/m-1/pods/p-1", () =>
 			HttpResponse.json(podDetailFixture({ state })),
 		),
 	);
@@ -39,12 +39,9 @@ function mockPodDetail(state = "Running") {
 function renderPodDetailPage() {
 	return renderWithQuery(
 		<Routes>
-			<Route
-				path="/machines/:machineId/pods/:podId"
-				element={<PodDetailPage />}
-			/>
+			<Route path="/hosts/:hostId/pods/:podId" element={<PodDetailPage />} />
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/pods/p-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1/pods/p-1"] } },
 	);
 }
 
@@ -59,13 +56,13 @@ describe("PodDetailPage lifecycle actions", () => {
 	it("sends stop to the running pod's endpoint and refetches the pod detail", async () => {
 		const stopRequests: string[] = [];
 		let detailRequests = 0;
-		mockMachine();
+		mockHost();
 		server.use(
-			http.get("*/api/machines/m-1/pods/p-1", () => {
+			http.get("*/api/hosts/m-1/pods/p-1", () => {
 				detailRequests++;
 				return HttpResponse.json(podDetailFixture({ state: "Running" }));
 			}),
-			http.post("*/api/machines/m-1/pods/p-1/stop", ({ request }) => {
+			http.post("*/api/hosts/m-1/pods/p-1/stop", ({ request }) => {
 				stopRequests.push(request.url);
 				return HttpResponse.json({
 					id: "p-1",
@@ -93,10 +90,10 @@ describe("PodDetailPage lifecycle actions", () => {
 
 	it("labels the button Start on a stopped pod and sends start to its endpoint", async () => {
 		const startRequests: string[] = [];
-		mockMachine();
+		mockHost();
 		mockPodDetail("Exited");
 		server.use(
-			http.post("*/api/machines/m-1/pods/p-1/start", ({ request }) => {
+			http.post("*/api/hosts/m-1/pods/p-1/start", ({ request }) => {
 				startRequests.push(request.url);
 				return HttpResponse.json({
 					id: "p-1",
@@ -117,10 +114,10 @@ describe("PodDetailPage lifecycle actions", () => {
 	});
 
 	it("shows the error envelope when the action fails", async () => {
-		mockMachine();
+		mockHost();
 		mockPodDetail();
 		server.use(
-			http.post("*/api/machines/m-1/pods/p-1/stop", () =>
+			http.post("*/api/hosts/m-1/pods/p-1/stop", () =>
 				errorResponse(
 					409,
 					"POD_STATE_CONFLICT",
@@ -145,11 +142,11 @@ describe("PodDetailPage lifecycle actions", () => {
 
 	// The gate renders from the hook's tri-state (spec #437 ticket #436):
 	// allowed renders the lifecycle section, denied renders the shared
-	// write hint — for a read-only caller and a failed machine query
+	// write hint — for a read-only caller and a failed host query
 	// alike, the divergence fix — and pending renders neither. The
 	// classification itself is pinned once in the hook's suite.
 	it("shows the write hint in place of the lifecycle buttons for a read-only caller", async () => {
-		mockMachine("read");
+		mockHost("read");
 		mockPodDetail();
 		renderPodDetailPage();
 
@@ -157,14 +154,14 @@ describe("PodDetailPage lifecycle actions", () => {
 		const hint = await screen.findByTestId("pod-lifecycle-permission-hint");
 		expect(hint).toHaveAttribute("data-requirement", "write");
 		expect(hint).toHaveTextContent(
-			"You have read-only access to this machine. Ask an owner or admin for write access to manage its pods.",
+			"You have read-only access to this host. Ask an owner or admin for write access to manage its pods.",
 		);
 		expect(screen.queryByTestId("stop-pod-button")).not.toBeInTheDocument();
 		expect(screen.queryByTestId("start-pod-button")).not.toBeInTheDocument();
 	});
 
-	it("renders the write hint when the machine query fails, not a silent gap", async () => {
-		mockMachineError();
+	it("renders the write hint when the host query fails, not a silent gap", async () => {
+		mockHostError();
 		mockPodDetail();
 		renderPodDetailPage();
 
@@ -183,9 +180,9 @@ describe("PodDetailPage lifecycle actions", () => {
 			release = resolve;
 		});
 		server.use(
-			http.get("*/api/machines/m-1", async () => {
+			http.get("*/api/hosts/m-1", async () => {
 				await gate;
-				return HttpResponse.json(machineFixture({ permission: "write" }));
+				return HttpResponse.json(hostFixture({ permission: "write" }));
 			}),
 		);
 		renderPodDetailPage();

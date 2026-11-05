@@ -13,14 +13,14 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// createRequest serves POST /api/machines/{id}/volumes with the given
+// createRequest serves POST /api/hosts/{id}/volumes with the given
 // JSON body through the handler with an authenticated test identity.
 func createRequest(create http.HandlerFunc, body string) *httptest.ResponseRecorder {
 	return testutils.Perform(create, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/volumes",
+		Path:      "/api/hosts/test-host/volumes",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 		Body:      strings.NewReader(body),
 	})
 }
@@ -43,9 +43,9 @@ func TestVolumeHandler_Create_Success(t *testing.T) {
 	w := createRequest(newTestHandler(engine).Create, `{"name":"my-volume","labels":{"app":"test"},"options":{"type":"tmpfs"}}`)
 
 	assert.Equal(t, 201, w.Code, "create should return 201")
-	assert.Equal(t, "my-volume", createdOpts.Name, "the decoded request must reach the machine")
-	assert.Equal(t, map[string]string{"app": "test"}, createdOpts.Labels, "the decoded labels must reach the machine")
-	assert.Equal(t, map[string]string{"type": "tmpfs"}, createdOpts.Options, "the decoded options must reach the machine")
+	assert.Equal(t, "my-volume", createdOpts.Name, "the decoded request must reach the host")
+	assert.Equal(t, map[string]string{"app": "test"}, createdOpts.Labels, "the decoded labels must reach the host")
+	assert.Equal(t, map[string]string{"type": "tmpfs"}, createdOpts.Options, "the decoded options must reach the host")
 	var got VolumeInspectResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got), "response must decode as a volume config")
 	assert.Equal(t, "my-volume", got.Name)

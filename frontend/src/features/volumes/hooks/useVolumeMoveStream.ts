@@ -24,7 +24,7 @@ export interface VolumeMoveProgress {
 interface VolumeMoveStreamEvent {
 	operationId: string;
 	type: "volume" | "complete" | "error";
-	machineId: string;
+	hostId: string;
 	volume?: string;
 	phase?: VolumeMoveProgress["phase"];
 	bytes?: number;
@@ -73,23 +73,21 @@ export interface UseVolumeMoveStreamResult {
 // NDJSON, so the dialog drives it through the stream transport. The
 // run/cancel lifecycle, reset-on-run, the malformed-event and
 // complete-without-envelope skips, the terminal handling, and the
-// both-machines invalidation are the shared transfer-hooks module's (issue
+// both-hosts invalidation are the shared transfer-hooks module's (issue
 // 273); this adapter keeps the volume domain — the event vocabulary, shape
 // guard, and single-value progress fold — and supplies the URL builder.
-export function useVolumeMoveStream(
-	machineId: string,
-): UseVolumeMoveStreamResult {
+export function useVolumeMoveStream(hostId: string): UseVolumeMoveStreamResult {
 	const config = useMemo<
 		MoveStreamConfig<VolumeMoveStreamEvent, VolumeMoveProgress | null>
 	>(
 		() => ({
 			resource: "volumes",
-			url: (volumeName) => volumeMoveStreamUrl(machineId, volumeName),
+			url: (volumeName) => volumeMoveStreamUrl(hostId, volumeName),
 			isEvent: isVolumeMoveStreamEvent,
 			foldProgress,
 			initialProgress: null,
 		}),
-		[machineId],
+		[hostId],
 	);
 	return useMoveStream<
 		VolumeMoveStreamEvent,

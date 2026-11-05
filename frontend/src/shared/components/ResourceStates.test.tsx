@@ -48,7 +48,7 @@ describe("ResourceStates", () => {
 		renderResourceStates({ items: [] });
 
 		const empty = screen.getByTestId("gadgets-empty");
-		expect(empty).toHaveTextContent("No gadgets on this machine yet.");
+		expect(empty).toHaveTextContent("No gadgets on this host yet.");
 		expect(screen.queryByTestId("gadget-content")).not.toBeInTheDocument();
 	});
 

@@ -5,7 +5,7 @@ import (
 	"io"
 )
 
-// ImageDataSource is the source machine's export width: podman's image
+// ImageDataSource is the source host's export width: podman's image
 // export streaming the image's archive into w by image reference. The
 // method names match the images domain's engine, so its engine satisfies
 // this structurally — no adapter.
@@ -13,7 +13,7 @@ type ImageDataSource interface {
 	Export(ref string, w io.Writer) error
 }
 
-// ImageDataTarget is the target machine's load width: podman's image
+// ImageDataTarget is the target host's load width: podman's image
 // load consuming the archive from r and answering the names the load
 // applied. The load is idempotent by construction — images are
 // content-addressed, so loading onto a target that already holds the
@@ -46,7 +46,7 @@ func ImageBoundOrDefault(wired int64) int64 {
 	return wired
 }
 
-// CopyImageData streams one image's archive from the source machine
+// CopyImageData streams one image's archive from the source host
 // into the target (§19, the kit's fourth composition): podman's export
 // on the source spliced through the in-process pipe into podman's load
 // on the target — the same pipe, counting reader, byte bound, and

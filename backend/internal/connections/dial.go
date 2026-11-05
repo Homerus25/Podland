@@ -8,24 +8,24 @@ import (
 	"go.podman.io/podman/v6/pkg/bindings"
 )
 
-// dialForMachine is the production dial seam: repo lookup → key decrypt →
+// dialForHost is the production dial seam: repo lookup → key decrypt →
 // podman-over-SSH dial with a close handle. It is wired in
 // NewConnectionManager and replaced by a fake in tests.
-func (m *ConnectionManager) dialForMachine(ctx context.Context, machineID string) (context.Context, bindings.CloseFunc, error) {
-	machine, err := m.machineRepo.GetByID(machineID)
+func (m *ConnectionManager) dialForHost(ctx context.Context, hostID string) (context.Context, bindings.CloseFunc, error) {
+	host, err := m.hostRepo.GetByID(hostID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get machine details: %w", err)
+		return nil, nil, fmt.Errorf("failed to get host details: %w", err)
 	}
-	if machine == nil {
-		return nil, nil, fmt.Errorf("machine not found")
+	if host == nil {
+		return nil, nil, fmt.Errorf("host not found")
 	}
 
-	sshKey, err := m.encryption.Decrypt(machine.SSHKeyEncrypted)
+	sshKey, err := m.encryption.Decrypt(host.SSHKeyEncrypted)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to decrypt SSH key: %w", err)
 	}
 
-	return dialCredentials(ctx, machine.Hostname, machine.Port, machine.SSHUsername, sshKey, machine.PodmanSocketPath)
+	return dialCredentials(ctx, host.Hostname, host.Port, host.SSHUsername, sshKey, host.PodmanSocketPath)
 }
 
 // dialCredentials dials a podman socket over SSH using raw credentials and

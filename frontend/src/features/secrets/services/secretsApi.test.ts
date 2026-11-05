@@ -8,9 +8,9 @@ import { describe, expect, it } from "vitest";
 import { server } from "@/test/server";
 
 describe("secretsApi", () => {
-	it("lists a machine\u2019s secrets from the machine-scoped endpoint", async () => {
+	it("lists a host\u2019s secrets from the host-scoped endpoint", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/secrets", () =>
+			http.get("*/api/hosts/m-1/secrets", () =>
 				HttpResponse.json([
 					{
 						id: "3f2e1d0c",
@@ -44,7 +44,7 @@ describe("secretsApi", () => {
 	it("posts the create payload byte-identical, preserving whitespace and newlines", async () => {
 		let received: unknown;
 		server.use(
-			http.post("*/api/machines/m-1/secrets", async ({ request }) => {
+			http.post("*/api/hosts/m-1/secrets", async ({ request }) => {
 				received = await request.json();
 				return HttpResponse.json({ id: "fresh" }, { status: 201 });
 			}),
@@ -64,11 +64,11 @@ describe("secretsApi", () => {
 
 	// The list DTO's name is the natural row key, so deletion addresses the
 	// secret by name; the endpoint returns 204 with no body.
-	it("deletes a secret by name on the machine-scoped endpoint", async () => {
+	it("deletes a secret by name on the host-scoped endpoint", async () => {
 		let method: string | undefined;
 		let url: URL | undefined;
 		server.use(
-			http.delete("*/api/machines/m-1/secrets/:secretId", ({ request }) => {
+			http.delete("*/api/hosts/m-1/secrets/:secretId", ({ request }) => {
 				method = request.method;
 				url = new URL(request.url);
 				return new HttpResponse(null, { status: 204 });
@@ -78,7 +78,7 @@ describe("secretsApi", () => {
 		await deleteSecret("m-1", "db-password");
 
 		expect(method).toBe("DELETE");
-		expect(url?.pathname).toBe("/api/machines/m-1/secrets/db-password");
+		expect(url?.pathname).toBe("/api/hosts/m-1/secrets/db-password");
 	});
 
 	// Names are user-controlled, so they are URL-encoded on the way out;
@@ -86,7 +86,7 @@ describe("secretsApi", () => {
 	it("URL-encodes the secret name in the delete path", async () => {
 		let url: URL | undefined;
 		server.use(
-			http.delete("*/api/machines/m-1/secrets/:secretId", ({ request }) => {
+			http.delete("*/api/hosts/m-1/secrets/:secretId", ({ request }) => {
 				url = new URL(request.url);
 				return new HttpResponse(null, { status: 204 });
 			}),
@@ -94,6 +94,6 @@ describe("secretsApi", () => {
 
 		await deleteSecret("m-1", "db password/2");
 
-		expect(url?.pathname).toBe("/api/machines/m-1/secrets/db%20password%2F2");
+		expect(url?.pathname).toBe("/api/hosts/m-1/secrets/db%20password%2F2");
 	});
 });

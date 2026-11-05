@@ -5,19 +5,19 @@ import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { machineFixture, podDetailFixture } from "@/test/factories";
+import { hostFixture, podDetailFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 const generatedContent = "[Pod]\nName=app-pod\nPublishPort=8080:80\n";
 
-// The page reads the machine's per-caller facts for the save gate; the
+// The page reads the host's per-caller facts for the save gate; the
 // generate and copy actions stay read-level.
-function mockMachine(permission: "read" | "write" | "admin" = "admin") {
+function mockHost(permission: "read" | "write" | "admin" = "admin") {
 	server.use(
-		http.get("*/api/machines/m-1", () =>
+		http.get("*/api/hosts/m-1", () =>
 			HttpResponse.json(
-				machineFixture({ permission, isOwner: permission === "admin" }),
+				hostFixture({ permission, isOwner: permission === "admin" }),
 			),
 		),
 	);
@@ -25,10 +25,10 @@ function mockMachine(permission: "read" | "write" | "admin" = "admin") {
 
 function mockPodDetail() {
 	server.use(
-		http.get("*/api/machines/m-1/pods/p-1", () =>
+		http.get("*/api/hosts/m-1/pods/p-1", () =>
 			HttpResponse.json(podDetailFixture()),
 		),
-		http.get("*/api/machines/m-1/pods/p-1/inspect", () =>
+		http.get("*/api/hosts/m-1/pods/p-1/inspect", () =>
 			HttpResponse.json({ Id: "p-1" }),
 		),
 	);
@@ -37,17 +37,14 @@ function mockPodDetail() {
 function renderPodDetailPage() {
 	return renderWithQuery(
 		<Routes>
-			<Route
-				path="/machines/:machineId/pods/:podId"
-				element={<PodDetailPage />}
-			/>
+			<Route path="/hosts/:hostId/pods/:podId" element={<PodDetailPage />} />
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/pods/p-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1/pods/p-1"] } },
 	);
 }
 
 function generateHandler() {
-	return http.post("*/api/machines/m-1/quadlets/p-1/generate", () =>
+	return http.post("*/api/hosts/m-1/quadlets/p-1/generate", () =>
 		HttpResponse.json({
 			id: "app-pod",
 			name: "app-pod",
@@ -61,7 +58,7 @@ function generateHandler() {
 // The generate-quadlet flow (spec #402 ticket #406): the detail page's
 // button opens a feature-owned modal that runs the quadlet generate
 // endpoint for this pod and shows the generated .pod text, with copy and
-// save-to-machine actions. The modal's phase machinery follows the
+// save-to-host actions. The modal's phase wiring follows the
 // ImportComposeModal precedent; this suite keeps the pod-domain assertions.
 describe("PodDetailPage generate quadlet", () => {
 	it("opens the modal on the Generate quadlet button and shows the generated .pod text", async () => {
@@ -69,7 +66,7 @@ describe("PodDetailPage generate quadlet", () => {
 		mockPodDetail();
 		server.use(
 			http.post(
-				"*/api/machines/m-1/quadlets/p-1/generate",
+				"*/api/hosts/m-1/quadlets/p-1/generate",
 				async ({ request }) => {
 					generateBodies.push(await request.json());
 					return HttpResponse.json({
@@ -120,13 +117,13 @@ describe("PodDetailPage generate quadlet", () => {
 		expect(writeText).toHaveBeenCalledWith(generatedContent);
 	});
 
-	it("saves the generated quadlet to the machine through the quadlet create endpoint", async () => {
+	it("saves the generated quadlet to the host through the quadlet create endpoint", async () => {
 		const createBodies: unknown[] = [];
-		mockMachine();
+		mockHost();
 		mockPodDetail();
 		server.use(
 			generateHandler(),
-			http.post("*/api/machines/m-1/quadlets", async ({ request }) => {
+			http.post("*/api/hosts/m-1/quadlets", async ({ request }) => {
 				createBodies.push(await request.json());
 				return HttpResponse.json(
 					{
@@ -164,7 +161,7 @@ describe("PodDetailPage generate quadlet", () => {
 	it("renders a generate failure in the modal with no generated text", async () => {
 		mockPodDetail();
 		server.use(
-			http.post("*/api/machines/m-1/quadlets/p-1/generate", () =>
+			http.post("*/api/hosts/m-1/quadlets/p-1/generate", () =>
 				errorResponse(404, "POD_NOT_FOUND", "pod not found"),
 			),
 		);
@@ -183,11 +180,11 @@ describe("PodDetailPage generate quadlet", () => {
 	});
 
 	it("renders a save failure in the modal and keeps the generated text for a retry", async () => {
-		mockMachine();
+		mockHost();
 		mockPodDetail();
 		server.use(
 			generateHandler(),
-			http.post("*/api/machines/m-1/quadlets", () =>
+			http.post("*/api/hosts/m-1/quadlets", () =>
 				errorResponse(409, "QUADLET_ALREADY_EXISTS", "Quadlet already exists"),
 			),
 		);
@@ -207,8 +204,8 @@ describe("PodDetailPage generate quadlet", () => {
 		expect(screen.getByTestId("save-generated-quadlet-button")).toBeEnabled();
 	});
 
-	it("hides the Save to machine action below the manage-quadlets capability, keeping Generate and Copy", async () => {
-		mockMachine("read");
+	it("hides the Save to host action below the manage-quadlets capability, keeping Generate and Copy", async () => {
+		mockHost("read");
 		mockPodDetail();
 		server.use(generateHandler());
 		renderPodDetailPage();

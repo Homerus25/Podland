@@ -17,7 +17,7 @@ describe("getVolumeMovePreview", () => {
 		};
 		server.use(
 			http.get(
-				"*/api/machines/m-1/volumes/app-data/move-preview",
+				"*/api/hosts/m-1/volumes/app-data/move-preview",
 				({ request }) => {
 					const url = new URL(request.url);
 					captured.path = url.pathname;
@@ -29,10 +29,8 @@ describe("getVolumeMovePreview", () => {
 
 		const preview = await getVolumeMovePreview("m-1", "app-data", "m-2");
 
-		expect(captured.path).toBe(
-			"/api/machines/m-1/volumes/app-data/move-preview",
-		);
-		expect(captured.query?.get("targetMachineId")).toBe("m-2");
+		expect(captured.path).toBe("/api/hosts/m-1/volumes/app-data/move-preview");
+		expect(captured.query?.get("targetHostId")).toBe("m-2");
 		expect(preview).toEqual(volumeMovePreviewFixture());
 	});
 
@@ -46,7 +44,7 @@ describe("getVolumeMovePreview", () => {
 			],
 		});
 		server.use(
-			http.get("*/api/machines/m-1/volumes/app-data/move-preview", () =>
+			http.get("*/api/hosts/m-1/volumes/app-data/move-preview", () =>
 				HttpResponse.json(facts),
 			),
 		);
@@ -60,7 +58,7 @@ describe("getVolumeMovePreview", () => {
 describe("volumeMoveStreamUrl", () => {
 	it("builds the full move-stream URL for the fetch transport", () => {
 		expect(volumeMoveStreamUrl("m-1", "app-data")).toBe(
-			"/api/machines/m-1/volumes/app-data/move",
+			"/api/hosts/m-1/volumes/app-data/move",
 		);
 	});
 });

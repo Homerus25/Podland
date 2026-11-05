@@ -1,4 +1,4 @@
-// Shared machinery for Newline-delimited JSON (NDJSON) byte streams, as
+// Shared plumbing for Newline-delimited JSON (NDJSON) byte streams, as
 // produced by the backend's streaming endpoints (image pull, container logs).
 // Malformed lines are logged and skipped so one bad line never kills a
 // long-running stream; values split across reads are reassembled by buffering
@@ -19,7 +19,7 @@ export interface StreamEventError {
 export interface StreamEvent {
 	operationId: string;
 	type: "progress" | "complete" | "error";
-	machineId?: string;
+	hostId?: string;
 	state?: StreamEventState;
 	error?: StreamEventError;
 	timestamp?: string;

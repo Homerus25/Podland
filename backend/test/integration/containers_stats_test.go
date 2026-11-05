@@ -33,8 +33,8 @@ type containerStatsEntry struct {
 // Test_Integration_Containers_Stats pins both container stats routes'
 // happy paths against the container test host (spec 415, ticket 416):
 //
-//	GET /api/machines/{id}/containers/stats            → 200 list envelope
-//	GET /api/machines/{id}/containers/{cid}/stats      → 200 single DTO
+//	GET /api/hosts/{id}/containers/stats            → 200 list envelope
+//	GET /api/hosts/{id}/containers/{cid}/stats      → 200 single DTO
 //
 // A run-scoped busybox container is started first — podman samples stats
 // only for running containers, and the server-side sampling takes ~1s per
@@ -47,7 +47,7 @@ func Test_Integration_Containers_Stats(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerContainersSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 	ensureBusyboxImage(t)
 
 	containerName := "it-" + suite.RunID + "-stats"
@@ -68,14 +68,14 @@ func Test_Integration_Containers_Stats(t *testing.T) {
 	})
 
 	// --- Setup: create and start the run-scoped container ---------------
-	containerID = createContainer(t, machineID, createReq)
-	startContainer(t, machineID, containerID)
-	waitForContainerState(t, machineID, containerID, "running",
+	containerID = createContainer(t, hostID, createReq)
+	startContainer(t, hostID, containerID)
+	waitForContainerState(t, hostID, containerID, "running",
 		"container must be running before stats can be sampled")
 
 	// --- AC: the all-stats route answers the list envelope --------------
 	t.Run("AllStatsSnapshot", func(t *testing.T) {
-		url := suite.ServerURL + "/api/machines/" + machineID + "/containers/stats"
+		url := suite.ServerURL + "/api/hosts/" + hostID + "/containers/stats"
 		resp, err := suite.AuthenticatedClient().Get(url)
 		require.NoError(t, err, "GET /containers/stats must connect to the in-process server")
 		defer resp.Body.Close()
@@ -110,7 +110,7 @@ func Test_Integration_Containers_Stats(t *testing.T) {
 
 	// --- AC: the per-container route answers the single DTO -------------
 	t.Run("PerContainerStats", func(t *testing.T) {
-		url := suite.ServerURL + "/api/machines/" + machineID + "/containers/" + containerID + "/stats"
+		url := suite.ServerURL + "/api/hosts/" + hostID + "/containers/" + containerID + "/stats"
 		resp, err := suite.AuthenticatedClient().Get(url)
 		require.NoError(t, err, "GET /containers/{cid}/stats must connect to the in-process server")
 		defer resp.Body.Close()

@@ -22,15 +22,15 @@ import (
 // Test_Integration_Pods_Lifecycle is the pods vertical slice for the
 // real-podman integration suite (spec 353). It exercises the full
 // pod-management request flow end-to-end against the once-registered
-// machine:
+// host:
 //
-//	POST   /api/machines/{id}/pods              → 201 created
-//	GET    /api/machines/{id}/pods              → listed
-//	GET    /api/machines/{id}/pods/{podId}      → detail DTO
-//	GET    /api/machines/{id}/pods/{podId}/inspect → raw report
+//	POST   /api/hosts/{id}/pods              → 201 created
+//	GET    /api/hosts/{id}/pods              → listed
+//	GET    /api/hosts/{id}/pods/{podId}      → detail DTO
+//	GET    /api/hosts/{id}/pods/{podId}/inspect → raw report
 //	POST   .../pods/{podId}/pause|unpause|kill|restart → action contract
-//	DELETE /api/machines/{id}/pods/{podId}?force=true → 204 removed
-//	POST   /api/machines/{id}/pods/prune        → removed stopped pod
+//	DELETE /api/hosts/{id}/pods/{podId}?force=true → 204 removed
+//	POST   /api/hosts/{id}/pods/prune        → removed stopped pod
 //
 // Isolation model (per the master PRD's "run-scoped tag + per-test
 // cleanup + suite sweep" ruling): run-scoped pod names, per-test
@@ -50,7 +50,7 @@ func Test_Integration_Pods_Lifecycle(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerPodsSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 	podName := "it-" + suite.RunID + "-pod"
 
 	// Per-test cleanup: force-remove the pod we create (its containers
@@ -65,7 +65,7 @@ func Test_Integration_Pods_Lifecycle(t *testing.T) {
 	// --- AC: POST creates a run-scoped-named pod; 201 -----------------
 	var podID string
 	t.Run("CreateReturns201", func(t *testing.T) {
-		podID = createTestPod(t, machineID, podName)
+		podID = createTestPod(t, hostID, podName)
 		require.NotEmpty(t, podID, "create must return a non-empty pod id")
 		t.Logf("pod created: id=%s name=%s", podID, podName)
 	})
@@ -75,7 +75,7 @@ func Test_Integration_Pods_Lifecycle(t *testing.T) {
 
 	// --- AC: GET list and detail reflect the created pod ---------------
 	t.Run("ListAndDetailShowPod", func(t *testing.T) {
-		pods := listPods(t, machineID)
+		pods := listPods(t, hostID)
 		var found *podListDTO
 		for i := range pods {
 			if pods[i].ID == podID {
@@ -86,7 +86,7 @@ func Test_Integration_Pods_Lifecycle(t *testing.T) {
 		require.NotNil(t, found, "created pod %q must appear in the list, got %d pods", podName, len(pods))
 		assert.Equal(t, podName, found.Name)
 
-		detail := getPodDetail(t, machineID, podID)
+		detail := getPodDetail(t, hostID, podID)
 		assert.Equal(t, podID, detail.ID)
 		assert.Equal(t, podName, detail.Name)
 		assert.NotEmpty(t, detail.State)
@@ -96,7 +96,7 @@ func Test_Integration_Pods_Lifecycle(t *testing.T) {
 
 	// --- AC: raw inspect returns podman's report -----------------------
 	t.Run("InspectReturnsRawReport", func(t *testing.T) {
-		raw := inspectPodRaw(t, machineID, podID)
+		raw := inspectPodRaw(t, hostID, podID)
 		require.Contains(t, raw, "Name", "the raw report must carry podman's inspect fields")
 	})
 
@@ -107,7 +107,7 @@ func Test_Integration_Pods_Lifecycle(t *testing.T) {
 				"pause/unpause/kill/restart need running pod containers — the lifecycle contract is " +
 				"pinned by the service tests against the fake engine")
 		}
-		exercisePodLifecycleWithContainer(t, machineID, podID)
+		exercisePodLifecycleWithContainer(t, hostID, podID)
 	})
 	if t.Failed() {
 		return
@@ -115,10 +115,10 @@ func Test_Integration_Pods_Lifecycle(t *testing.T) {
 
 	// --- AC: DELETE removes the pod; a subsequent list excludes it -----
 	t.Run("RemoveDeletesPod", func(t *testing.T) {
-		removeTestPod(t, machineID, podID, true)
+		removeTestPod(t, hostID, podID, true)
 		podID = "" // already gone: the per-test cleanup becomes a no-op
 
-		pods := listPods(t, machineID)
+		pods := listPods(t, hostID)
 		for _, pod := range pods {
 			require.NotEqual(t, podName, pod.Name, "removed pod must not appear in the list")
 		}
@@ -135,13 +135,13 @@ func Test_Integration_Pods_Lifecycle(t *testing.T) {
 				t.Logf("cleanup: pod rm -f %q best-effort failed: %v (%s)", pruneName, err, strings.TrimSpace(out))
 			}
 		})
-		pruneID := createTestPod(t, machineID, pruneName)
+		pruneID := createTestPod(t, hostID, pruneName)
 
 		if !podContainersRunnable(t) {
 			// podman's prune only removes Exited pods, and reaching Exited
 			// needs the infra container to start, which nested podman cannot
 			// do here. Still pin the response shape: 200 with an array.
-			pruneTestPods(t, machineID)
+			pruneTestPods(t, hostID)
 			t.Skip("podman prune only removes Exited pods; the infra container cannot start in this " +
 				"nested environment — the removal contract is pinned by the service tests against the fake engine")
 		}
@@ -154,7 +154,7 @@ func Test_Integration_Pods_Lifecycle(t *testing.T) {
 			t.Fatalf("pod stop must succeed: %v (%s)", err, strings.TrimSpace(out))
 		}
 
-		removed := pruneTestPods(t, machineID)
+		removed := pruneTestPods(t, hostID)
 		require.Contains(t, removed, pruneID, "the stopped pod must be pruned, got %v", removed)
 	})
 }
@@ -165,12 +165,12 @@ func Test_Integration_Pods_Lifecycle(t *testing.T) {
 // the start endpoint, and observes the real state transitions through
 // the detail endpoint — the full pause → unpause → kill → restart
 // cycle.
-func exercisePodLifecycleWithContainer(t *testing.T, machineID, podID string) {
+func exercisePodLifecycleWithContainer(t *testing.T, hostID, podID string) {
 	t.Helper()
 
 	ensureBusyboxImage(t)
 	ctrName := "it-" + suite.RunID + "-pod-ctr"
-	ctrID := createContainer(t, machineID, containerCreateBody{
+	ctrID := createContainer(t, hostID, containerCreateBody{
 		Name:    ctrName,
 		Image:   "busybox:latest",
 		Command: []string{"sh", "-c", "sleep 600"},
@@ -181,45 +181,45 @@ func exercisePodLifecycleWithContainer(t *testing.T, machineID, podID string) {
 			t.Logf("cleanup: rm -f %q best-effort failed: %v (%s)", ctrID, err, strings.TrimSpace(out))
 		}
 	})
-	startContainer(t, machineID, ctrID)
+	startContainer(t, hostID, ctrID)
 
-	detail := getPodDetail(t, machineID, podID)
+	detail := getPodDetail(t, hostID, podID)
 	require.Len(t, detail.Containers, 1, "the pod's container must appear in the detail DTO")
 	assert.Equal(t, ctrName, detail.Containers[0].Name)
 
-	body := podAction(t, machineID, podID, "pause")
+	body := podAction(t, hostID, podID, "pause")
 	assert.Equal(t, "paused", body.State, "the pause response must stamp the paused state")
-	waitForPodState(t, machineID, podID, "Paused", "pod must reach Paused after pause")
+	waitForPodState(t, hostID, podID, "Paused", "pod must reach Paused after pause")
 
-	body = podAction(t, machineID, podID, "unpause")
+	body = podAction(t, hostID, podID, "unpause")
 	assert.Equal(t, "running", body.State, "the unpause response must stamp the running state")
-	waitForPodState(t, machineID, podID, "Running", "pod must reach Running after unpause")
+	waitForPodState(t, hostID, podID, "Running", "pod must reach Running after unpause")
 
-	body = podAction(t, machineID, podID, "kill")
+	body = podAction(t, hostID, podID, "kill")
 	assert.Equal(t, "exited", body.State, "the kill response must stamp the exited state")
-	waitForPodState(t, machineID, podID, "Exited", "pod must reach Exited after kill")
+	waitForPodState(t, hostID, podID, "Exited", "pod must reach Exited after kill")
 
-	body = podAction(t, machineID, podID, "restart")
+	body = podAction(t, hostID, podID, "restart")
 	assert.Equal(t, "running", body.State, "the restart response must stamp the running state")
-	waitForPodState(t, machineID, podID, "Running", "pod must reach Running after restart")
+	waitForPodState(t, hostID, podID, "Running", "pod must reach Running after restart")
 }
 
 // Test_Integration_Pods_AccessControl pins the route gating: the pods
-// subtree rides RequireMachineAccess, and its write routes gate at
+// subtree rides RequireHostAccess, and its write routes gate at
 // write level — a read-level grantee gets 403 ACCESS_DENIED.
 func Test_Integration_Pods_AccessControl(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		expectAPIError(t, noAccessUserClient(t), http.MethodGet,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/pods",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/pods",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
 	t.Run("ReadLevelUserWriteRouteDenied", func(t *testing.T) {
 		client := levelUserClient(t, models.PermissionRead)
 		expectAPIError(t, client, http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/pods",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/pods",
 			`{"name":"it-pod-denied"}`, http.StatusForbidden, "ACCESS_DENIED")
 	})
 }
@@ -253,13 +253,13 @@ type podActionDTO struct {
 
 // createTestPod POSTs the pod create request and returns the created
 // pod's ID.
-func createTestPod(t *testing.T, machineID, podName string) string {
+func createTestPod(t *testing.T, hostID, podName string) string {
 	t.Helper()
 
 	payload, err := json.Marshal(map[string]any{"name": podName})
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/pods"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/pods"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
 	require.NoError(t, err, "POST /pods must connect to the in-process server")
 	defer resp.Body.Close()
@@ -273,11 +273,11 @@ func createTestPod(t *testing.T, machineID, podName string) string {
 	return created.ID
 }
 
-// listPods GETs /api/machines/{id}/pods and decodes the wrapped list.
-func listPods(t *testing.T, machineID string) []podListDTO {
+// listPods GETs /api/hosts/{id}/pods and decodes the wrapped list.
+func listPods(t *testing.T, hostID string) []podListDTO {
 	t.Helper()
 
-	resp, err := suite.AuthenticatedClient().Get(suite.ServerURL + "/api/machines/" + machineID + "/pods")
+	resp, err := suite.AuthenticatedClient().Get(suite.ServerURL + "/api/hosts/" + hostID + "/pods")
 	require.NoError(t, err, "GET /pods must connect to the in-process server")
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -293,12 +293,12 @@ func listPods(t *testing.T, machineID string) []podListDTO {
 	return out.Pods
 }
 
-// getPodDetail GETs /api/machines/{id}/pods/{podID} and decodes the
+// getPodDetail GETs /api/hosts/{id}/pods/{podID} and decodes the
 // detail DTO.
-func getPodDetail(t *testing.T, machineID, podID string) podDetailDTO {
+func getPodDetail(t *testing.T, hostID, podID string) podDetailDTO {
 	t.Helper()
 
-	resp, err := suite.AuthenticatedClient().Get(suite.ServerURL + "/api/machines/" + machineID + "/pods/" + podID)
+	resp, err := suite.AuthenticatedClient().Get(suite.ServerURL + "/api/hosts/" + hostID + "/pods/" + podID)
 	require.NoError(t, err, "GET pod detail must connect to the in-process server")
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -313,10 +313,10 @@ func getPodDetail(t *testing.T, machineID, podID string) podDetailDTO {
 
 // inspectPodRaw GETs the raw inspect endpoint and returns the body as
 // a generic JSON object — the raw report is podman's, unmapped.
-func inspectPodRaw(t *testing.T, machineID, podID string) map[string]any {
+func inspectPodRaw(t *testing.T, hostID, podID string) map[string]any {
 	t.Helper()
 
-	resp, err := suite.AuthenticatedClient().Get(suite.ServerURL + "/api/machines/" + machineID + "/pods/" + podID + "/inspect")
+	resp, err := suite.AuthenticatedClient().Get(suite.ServerURL + "/api/hosts/" + hostID + "/pods/" + podID + "/inspect")
 	require.NoError(t, err, "GET pod inspect must connect to the in-process server")
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
@@ -330,10 +330,10 @@ func inspectPodRaw(t *testing.T, machineID, podID string) map[string]any {
 }
 
 // podAction POSTs one lifecycle action and decodes the action response.
-func podAction(t *testing.T, machineID, podID, action string) podActionDTO {
+func podAction(t *testing.T, hostID, podID, action string) podActionDTO {
 	t.Helper()
 
-	url := fmt.Sprintf("%s/api/machines/%s/pods/%s/%s", suite.ServerURL, machineID, podID, action)
+	url := fmt.Sprintf("%s/api/hosts/%s/pods/%s/%s", suite.ServerURL, hostID, podID, action)
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", strings.NewReader("{}"))
 	require.NoError(t, err, "POST pod action must connect to the in-process server")
 	defer resp.Body.Close()
@@ -348,10 +348,10 @@ func podAction(t *testing.T, machineID, podID, action string) podActionDTO {
 }
 
 // removeTestPod DELETEs the pod with the force flag.
-func removeTestPod(t *testing.T, machineID, podID string, force bool) {
+func removeTestPod(t *testing.T, hostID, podID string, force bool) {
 	t.Helper()
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/pods/" + podID
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/pods/" + podID
 	if force {
 		url += "?force=true"
 	}
@@ -367,10 +367,10 @@ func removeTestPod(t *testing.T, machineID, podID string, force bool) {
 
 // pruneTestPods POSTs the prune endpoint and returns the removed pods'
 // IDs.
-func pruneTestPods(t *testing.T, machineID string) []string {
+func pruneTestPods(t *testing.T, hostID string) []string {
 	t.Helper()
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/pods/prune"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/pods/prune"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", strings.NewReader("{}"))
 	require.NoError(t, err, "POST pods/prune must connect to the in-process server")
 	defer resp.Body.Close()
@@ -392,7 +392,7 @@ func pruneTestPods(t *testing.T, machineID string) []string {
 
 // waitForPodState polls the detail endpoint until the pod reports the
 // wanted state, failing the test on timeout.
-func waitForPodState(t *testing.T, machineID, podID, wantState, msg string) {
+func waitForPodState(t *testing.T, hostID, podID, wantState, msg string) {
 	t.Helper()
 
 	// podStatePollTimeout caps how long a state-transition poll waits.
@@ -400,7 +400,7 @@ func waitForPodState(t *testing.T, machineID, podID, wantState, msg string) {
 	deadline := time.Now().Add(podStatePollTimeout)
 	var last podDetailDTO
 	for time.Now().Before(deadline) {
-		last = getPodDetail(t, machineID, podID)
+		last = getPodDetail(t, hostID, podID)
 		if last.State == wantState {
 			t.Logf("pod %s reached state=%q", podID, wantState)
 			return

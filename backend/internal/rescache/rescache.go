@@ -1,4 +1,4 @@
-// Package rescache is the one owner of the per-machine cache lifecycle
+// Package rescache is the one owner of the per-host cache lifecycle
 // (architecture review 2026-10-19, candidate C1; docs/architecture-decisions.md §4).
 //
 // A Cache is generic over the cached resource: an adapter hands over a Dial

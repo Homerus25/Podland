@@ -11,7 +11,7 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
-// ImageEngine is the images domain's view of one machine's podman: the
+// ImageEngine is the images domain's view of one host's podman: the
 // exact set of image operations the service performs, in domain vocabulary
 // (single names, plain flags) and without a context parameter — the
 // connection context lives only inside the production adapter below.
@@ -27,17 +27,17 @@ type ImageEngine interface {
 	// Inspect reports podman's per-item failures through the error slice,
 	// not an error return — the service classifies them.
 	Inspect(id string) ([]*entities.ImageInspectReport, []error, error)
-	// Exists answers whether the machine holds the image by ID or name
+	// Exists answers whether the host holds the image by ID or name
 	// through podman's dedicated exists endpoint — the existence ritual's
 	// width (the export's 404 gate, issue 401, and the copy's source and
 	// target presence checks, issue 375), cheaper than an inspect whose
 	// report is then discarded.
 	Exists(id string) (bool, error)
 	// Export streams the image's archive into w by image reference —
-	// the source width of the cross-machine copy (issue 375, §19).
+	// the source width of the cross-host copy (issue 375, §19).
 	Export(ref string, w io.Writer) error
 	// Load consumes an image archive from r and answers the names the
-	// load applied — the target width of the cross-machine copy
+	// load applied — the target width of the cross-host copy
 	// (issue 375, §19). Idempotent by construction: images are
 	// content-addressed, so loading onto a target that already holds
 	// the image skips present layers and re-applies tags.
@@ -45,11 +45,11 @@ type ImageEngine interface {
 }
 
 // ImageEngineProvider is the images domain's slice of the connection seam:
-// it hands a closure one machine's ImageEngine. It delegates to
+// it hands a closure one host's ImageEngine. It delegates to
 // connections.Manager.WithConnection, which owns acquisition, the
 // warn-and-502-sentinel failure contract, and the op tag.
 type ImageEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e ImageEngine) error) error
+	WithEngine(ctx context.Context, userID, hostID, op string, fn func(e ImageEngine) error) error
 }
 
 // NewImageEngineProvider returns the production provider: it wraps the
@@ -65,8 +65,8 @@ type connectionEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e ImageEngine) error) error {
-	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+func (p connectionEngines) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e ImageEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, hostID, op, func(connCtx context.Context) error {
 		return fn(&podmanImageEngine{ctx: connCtx})
 	})
 }

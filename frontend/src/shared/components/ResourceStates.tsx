@@ -43,7 +43,7 @@ export function ResourceStates({
 				/>
 			) : !items || items.length === 0 ? (
 				<Text color="gray.500" data-testid={`${plural}-empty`}>
-					{emptyMessage ?? `No ${plural} on this machine yet.`}
+					{emptyMessage ?? `No ${plural} on this host yet.`}
 				</Text>
 			) : (
 				children

@@ -25,11 +25,11 @@ func GenerateTestUser() *models.User {
 	}
 }
 
-// GenerateTestMachine creates a test machine with random ID
-func GenerateTestMachine() *models.Machine {
-	return &models.Machine{
+// GenerateTestHost creates a test host with random ID
+func GenerateTestHost() *models.Host {
+	return &models.Host{
 		ID:          uuid.New().String(),
-		Name:        fmt.Sprintf("test-machine-%s", uuid.New().String()[:8]),
+		Name:        fmt.Sprintf("test-host-%s", uuid.New().String()[:8]),
 		OwnerID:     uuid.New().String(),
 		Hostname:    "example.com",
 		SSHUsername: "root",
@@ -39,11 +39,11 @@ func GenerateTestMachine() *models.Machine {
 	}
 }
 
-// GenerateTestMachineWithOwner creates a test machine with specified owner ID
-func GenerateTestMachineWithOwner(ownerID string) *models.Machine {
-	return &models.Machine{
+// GenerateTestHostWithOwner creates a test host with specified owner ID
+func GenerateTestHostWithOwner(ownerID string) *models.Host {
+	return &models.Host{
 		ID:          uuid.New().String(),
-		Name:        fmt.Sprintf("test-machine-%s", uuid.New().String()[:8]),
+		Name:        fmt.Sprintf("test-host-%s", uuid.New().String()[:8]),
 		OwnerID:     ownerID,
 		Hostname:    "example.com",
 		SSHUsername: "root",

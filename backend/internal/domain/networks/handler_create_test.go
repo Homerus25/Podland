@@ -15,14 +15,14 @@ import (
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// createRequest serves POST /api/machines/{id}/networks with the given
+// createRequest serves POST /api/hosts/{id}/networks with the given
 // JSON body through the handler with an authenticated test identity.
 func createRequest(create http.HandlerFunc, body string) *httptest.ResponseRecorder {
 	return testutils.Perform(create, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/networks",
+		Path:      "/api/hosts/test-host/networks",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 		Body:      strings.NewReader(body),
 	})
 }
@@ -48,7 +48,7 @@ func TestNetworkHandler_Create_Success(t *testing.T) {
 	w := createRequest(newTestHandler(engine).Create, `{"name":"frontend","containers":["ctr-a","ctr-b"]}`)
 
 	assert.Equal(t, 201, w.Code, "create should return 201")
-	assert.Equal(t, "frontend", createdName, "the decoded request must reach the machine")
+	assert.Equal(t, "frontend", createdName, "the decoded request must reach the host")
 	assert.Equal(t, []string{"ctr-a", "ctr-b"}, attached, "the listed containers must be attached in the same call")
 	var got NetworkResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got), "response must decode as a network")

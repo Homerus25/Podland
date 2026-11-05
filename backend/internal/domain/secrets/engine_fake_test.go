@@ -58,21 +58,21 @@ func (f *fakeSecretEngine) Remove(name string) error {
 type fakeEngineProvider struct {
 	engine SecretEngine
 	err    error
-	// engines serves per-machine engines keyed by machine ID — the shape
-	// the cross-machine copy/move exercises. When non-nil it takes
+	// engines serves per-host engines keyed by host ID — the shape
+	// the cross-host copy/move exercises. When non-nil it takes
 	// precedence over engine; a lookup miss panics, so a closure crossing
-	// an unexpected machine fails the test loudly.
+	// an unexpected host fails the test loudly.
 	engines map[string]SecretEngine
 }
 
-func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretEngine) error) error {
+func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e SecretEngine) error) error {
 	if p.err != nil {
 		return p.err
 	}
 	if p.engines != nil {
-		e, ok := p.engines[machineID]
+		e, ok := p.engines[hostID]
 		if !ok {
-			panic("unexpected WithEngine machine: " + machineID)
+			panic("unexpected WithEngine host: " + hostID)
 		}
 		return fn(e)
 	}
@@ -103,21 +103,21 @@ func (f *fakeUsageEngine) PrintQuadlet(name string) (string, error) {
 	return f.printQuadletFn(name)
 }
 
-// fakeUsageEngineProvider serves per-machine quadlet readers keyed by
-// machine ID; a lookup miss panics, so a closure crossing an unexpected
-// machine fails the test loudly.
+// fakeUsageEngineProvider serves per-host quadlet readers keyed by
+// host ID; a lookup miss panics, so a closure crossing an unexpected
+// host fails the test loudly.
 type fakeUsageEngineProvider struct {
 	engines map[string]transfer.QuadletReader
 	err     error
 }
 
-func (p fakeUsageEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e transfer.QuadletReader) error) error {
+func (p fakeUsageEngineProvider) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e transfer.QuadletReader) error) error {
 	if p.err != nil {
 		return p.err
 	}
-	e, ok := p.engines[machineID]
+	e, ok := p.engines[hostID]
 	if !ok {
-		panic("unexpected usage WithEngine machine: " + machineID)
+		panic("unexpected usage WithEngine host: " + hostID)
 	}
 	return fn(e)
 }
@@ -131,7 +131,7 @@ func (p fakeUsageEngineProvider) WithEngine(ctx context.Context, userID, machine
 func TestSecretService_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewSecretService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}, nil)
 
-	result, err := service.List(context.Background(), "user", "machine")
+	result, err := service.List(context.Background(), "user", "host")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, result)
@@ -156,7 +156,7 @@ func TestSecretService_Create_MapsAlreadyExists(t *testing.T) {
 	}
 	service := NewSecretService(fakeEngineProvider{engine: engine}, nil)
 
-	result, err := service.Create(context.Background(), "user", "machine",
+	result, err := service.Create(context.Background(), "user", "host",
 		SecretCreateRequest{Name: "db-password", Value: "hunter2"})
 
 	assert.ErrorIs(t, err, appErrors.ErrSecretAlreadyExists)
@@ -169,7 +169,7 @@ func TestSecretService_Create_MapsAlreadyExists(t *testing.T) {
 func TestSecretService_Get_RevealDeniedNeverTouchesEngine(t *testing.T) {
 	service := NewSecretService(fakeEngineProvider{engine: &fakeSecretEngine{}}, &denyRepo{})
 
-	result, err := service.Get(context.Background(), "reader-1", "machine", "db-password", true)
+	result, err := service.Get(context.Background(), "reader-1", "host", "db-password", true)
 
 	assert.ErrorIs(t, err, appErrors.ErrAccessDenied)
 	assert.Nil(t, result)
@@ -178,6 +178,6 @@ func TestSecretService_Get_RevealDeniedNeverTouchesEngine(t *testing.T) {
 // denyRepo answers every permission lookup with a non-admin level.
 type denyRepo struct{}
 
-func (denyRepo) GetPermission(machineID, userID string) (string, error) {
+func (denyRepo) GetPermission(hostID, userID string) (string, error) {
 	return "read", nil
 }

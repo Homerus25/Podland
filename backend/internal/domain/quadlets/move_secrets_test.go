@@ -18,7 +18,7 @@ import (
 
 // The quadlet move/copy secret surface (issue 215): every `Secret=` line
 // of the quadlet content counts, whatever the resource type; the preview
-// always reports the references and their existence in each machine's
+// always reports the references and their existence in each host's
 // podman secret store; the transfer carries VALUES only when the request
 // opts into transferSecrets — admin on the source, never removed from the
 // source, same-name skips keep re-runs safe. Through external behavior
@@ -28,13 +28,13 @@ import (
 // --- preview ----------------------------------------------------------
 
 // newMoveSecretPreviewTestService builds the transfer service with the
-// secret provider wired: quadlet engines per machine, the access store,
-// and per-machine secret engines — with the real lean service over the
+// secret provider wired: quadlet engines per host, the access store,
+// and per-host secret engines — with the real lean service over the
 // same engines as its lifecycle seam.
 func newMoveSecretPreviewTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, secrets map[string]moveSecretEngine) *QuadletTransferService {
 	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
-		"machine-a": sourceEngine,
-		"machine-b": targetEngine,
+		"host-a": sourceEngine,
+		"host-b": targetEngine,
 	}}
 	service := NewQuadletService(provider, nil, nil)
 	return NewQuadletTransferService(provider, fakeSecretEngineProvider{engines: secrets}, access, 0, service)
@@ -74,12 +74,12 @@ func TestQuadletService_MovePreview_SecretExistencePerStore(t *testing.T) {
 		map[string]moveSecretEngine{
 			// token1 exists on the source only; the hostPath entry claims
 			// nothing anywhere.
-			"machine-a": secretStoreFixture("token1"),
-			"machine-b": secretStoreFixture(),
+			"host-a": secretStoreFixture("token1"),
+			"host-b": secretStoreFixture(),
 		},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.NoError(t, err)
 	require.Len(t, got.Secrets, 2)
@@ -103,12 +103,12 @@ func TestQuadletService_MovePreview_SecretOnBothStores(t *testing.T) {
 		},
 		&fakeAccessRepo{getPermissionFn: allowTargetRead},
 		map[string]moveSecretEngine{
-			"machine-a": secretStoreFixture("token1"),
-			"machine-b": secretStoreFixture("token1"),
+			"host-a": secretStoreFixture("token1"),
+			"host-b": secretStoreFixture("token1"),
 		},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.NoError(t, err)
 	require.Len(t, got.Secrets, 1)
@@ -126,12 +126,12 @@ func TestQuadletService_MovePreview_DanglingSecretIsHonestEntry(t *testing.T) {
 		},
 		&fakeAccessRepo{getPermissionFn: allowTargetRead},
 		map[string]moveSecretEngine{
-			"machine-a": secretStoreFixture(),
-			"machine-b": secretStoreFixture(),
+			"host-a": secretStoreFixture(),
+			"host-b": secretStoreFixture(),
 		},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.NoError(t, err, "a dangling reference is an honest entry, not an error")
 	require.Len(t, got.Secrets, 1)
@@ -150,12 +150,12 @@ func TestQuadletService_MovePreview_NoSecretLinesIsEmptyArray(t *testing.T) {
 		&fakeAccessRepo{getPermissionFn: allowTargetRead},
 		map[string]moveSecretEngine{
 			// No engine may be dialed for a content without Secret= lines.
-			"machine-a": secretStoreFixture("token1"),
-			"machine-b": secretStoreFixture(),
+			"host-a": secretStoreFixture("token1"),
+			"host-b": secretStoreFixture(),
 		},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.NoError(t, err)
 	require.NotNil(t, got.Secrets, "the secrets array renders empty, never null")
@@ -176,7 +176,7 @@ func TestQuadletService_MovePreview_HostPathOnlyNeverDialsTheStores(t *testing.T
 		&fakeAccessRepo{getPermissionFn: allowTargetRead},
 	)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.NoError(t, err)
 	require.Len(t, got.Secrets, 1)
@@ -189,12 +189,12 @@ func TestQuadletService_MovePreview_HostPathOnlyNeverDialsTheStores(t *testing.T
 
 // newMoveSecretTransferTestService builds the transfer service with the
 // secret provider wired, mirroring newMoveTransferTestService: the real
-// lean service over the same engines (SSH exec and machine lookup wired
+// lean service over the same engines (SSH exec and host lookup wired
 // for the seam crossings) passed as the lifecycle seam.
 func newMoveSecretTransferTestService(sourceEngine, targetEngine *fakeQuadletEngine, access *fakeAccessRepo, sshExec sshexec.SSHExecInterface, secrets map[string]moveSecretEngine) *QuadletTransferService {
 	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
-		"machine-a": sourceEngine,
-		"machine-b": targetEngine,
+		"host-a": sourceEngine,
+		"host-b": targetEngine,
 	}}
 	service := NewQuadletService(provider, sshExec, lookupForUser("core"))
 	return NewQuadletTransferService(provider, fakeSecretEngineProvider{engines: secrets}, access, 0, service)
@@ -207,9 +207,9 @@ Image=busybox
 Secret=dbpass
 `
 
-// secretTransferRequest is a copy to machine-b with transferSecrets set.
+// secretTransferRequest is a copy to host-b with transferSecrets set.
 func secretTransferRequest(mode string) QuadletMoveRequest {
-	return QuadletMoveRequest{TargetMachineID: "machine-b", Mode: mode, TransferSecrets: true}
+	return QuadletMoveRequest{TargetHostID: "host-b", Mode: mode, TransferSecrets: true}
 }
 
 // recordingSecretStore builds a secret engine holding the given names,
@@ -288,12 +288,12 @@ func TestQuadletService_Move_CopyWithSecretsCreatesOnTarget(t *testing.T) {
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		testutils.NewMockSSHExec(),
 		map[string]moveSecretEngine{
-			"machine-a": sourceStore,
-			"machine-b": targetStore,
+			"host-a": sourceStore,
+			"host-b": targetStore,
 		},
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", secretTransferRequest(MoveModeCopy))
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", secretTransferRequest(MoveModeCopy))
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -332,12 +332,12 @@ func TestQuadletService_Move_MoveKeepsSourceSecretsAndRemovesOnlyTheQuadlet(t *t
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		testutils.NewMockSSHExec(),
 		map[string]moveSecretEngine{
-			"machine-a": sourceStore,
-			"machine-b": targetStore,
+			"host-a": sourceStore,
+			"host-b": targetStore,
 		},
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", secretTransferRequest(MoveModeMove))
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", secretTransferRequest(MoveModeMove))
 
 	require.NoError(t, err)
 	assert.Equal(t, MoveStatusMoved, got.Status)
@@ -356,12 +356,12 @@ func TestQuadletService_Move_SameNameOnTargetIsSkippedNotOverwritten(t *testing.
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		testutils.NewMockSSHExec(),
 		map[string]moveSecretEngine{
-			"machine-a": sourceStore,
-			"machine-b": targetStore,
+			"host-a": sourceStore,
+			"host-b": targetStore,
 		},
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", secretTransferRequest(MoveModeCopy))
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", secretTransferRequest(MoveModeCopy))
 
 	require.NoError(t, err)
 	assert.Empty(t, targetStore.created, "nothing on the target is overwritten")
@@ -387,12 +387,12 @@ Secret=/etc/certs/store.pem
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		testutils.NewMockSSHExec(),
 		map[string]moveSecretEngine{
-			"machine-a": sourceStore,
-			"machine-b": targetStore,
+			"host-a": sourceStore,
+			"host-b": targetStore,
 		},
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", secretTransferRequest(MoveModeCopy))
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", secretTransferRequest(MoveModeCopy))
 
 	require.NoError(t, err, "dangling references are reported, not errors")
 	assert.Empty(t, targetStore.created)
@@ -407,9 +407,9 @@ Secret=/etc/certs/store.pem
 }
 
 func TestQuadletService_Move_BelowAdminOnSourceIsRefusedInPreflight(t *testing.T) {
-	// The caller holds write on BOTH machines — enough for a plain
+	// The caller holds write on BOTH hosts — enough for a plain
 	// transfer, not enough to move a value off the source.
-	writeBoth := func(machineID, userID string) (string, error) {
+	writeBoth := func(hostID, userID string) (string, error) {
 		return models.PermissionWrite, nil
 	}
 	target, _, _, _ := emptyTargetEngine(t)
@@ -421,12 +421,12 @@ func TestQuadletService_Move_BelowAdminOnSourceIsRefusedInPreflight(t *testing.T
 		&fakeAccessRepo{getPermissionFn: writeBoth},
 		testutils.NewMockSSHExec(),
 		map[string]moveSecretEngine{
-			"machine-a": sourceStore,
-			"machine-b": targetStore,
+			"host-a": sourceStore,
+			"host-b": targetStore,
 		},
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", secretTransferRequest(MoveModeCopy))
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", secretTransferRequest(MoveModeCopy))
 
 	require.Error(t, err)
 	assert.Nil(t, got, "a refused transfer answers no envelope")
@@ -451,16 +451,16 @@ func TestQuadletService_Move_FlagAbsentReadsNoValueAndAnswersNoBlock(t *testing.
 			// reveal map is never consulted... so arm an explicit tripwire
 			// instead: a reveal here means the value was read without the
 			// flag asking for it.
-			"machine-a": &fakeMoveSecretEngine{
+			"host-a": &fakeMoveSecretEngine{
 				revealFn: func(string) (string, error) {
 					return "", errors.New("no value may be read without transferSecrets")
 				},
 			},
-			"machine-b": targetStore,
+			"host-b": targetStore,
 		},
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", moveCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", moveCopyRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, gotFile, "the transfer behaves exactly as today")
@@ -485,12 +485,12 @@ func TestQuadletService_Move_SecretFailureIs500NamesTheSecretAndInstallsNothing(
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		testutils.NewMockSSHExec(),
 		map[string]moveSecretEngine{
-			"machine-a": sourceStore,
-			"machine-b": targetStore,
+			"host-a": sourceStore,
+			"host-b": targetStore,
 		},
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", secretTransferRequest(MoveModeCopy))
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", secretTransferRequest(MoveModeCopy))
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -510,8 +510,8 @@ func TestQuadletService_Move_ReRunSkipsTheDeliveredSecret(t *testing.T) {
 	sourceStore := newRecordingSecretStore(nil, map[string]string{"dbpass": "s3cret-value"})
 	targetStore := newRecordingSecretStore(nil, nil)
 	secrets := map[string]moveSecretEngine{
-		"machine-a": sourceStore,
-		"machine-b": targetStore,
+		"host-a": sourceStore,
+		"host-b": targetStore,
 	}
 	service := newMoveSecretTransferTestService(
 		moveSourceFixture("web.container", "/x/web.container", "stopped", moveSecretTransferContent),
@@ -521,7 +521,7 @@ func TestQuadletService_Move_ReRunSkipsTheDeliveredSecret(t *testing.T) {
 		secrets,
 	)
 
-	_, err := service.Move(context.Background(), "user", "machine-a", "web.container", secretTransferRequest(MoveModeCopy))
+	_, err := service.Move(context.Background(), "user", "host-a", "web.container", secretTransferRequest(MoveModeCopy))
 	require.NoError(t, err)
 
 	// The quadlet vanished from the target between runs (cleanup after a
@@ -530,7 +530,7 @@ func TestQuadletService_Move_ReRunSkipsTheDeliveredSecret(t *testing.T) {
 	target.listFn = func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
 		return []*entities.ListQuadlet{}, nil
 	}
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", secretTransferRequest(MoveModeCopy))
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", secretTransferRequest(MoveModeCopy))
 
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"dbpass": "s3cret-value"}, targetStore.created,
@@ -550,14 +550,14 @@ func TestQuadletService_Move_SecretsAndVolumeDataBlocksRideTogether(t *testing.T
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		testutils.NewMockSSHExec(),
 		map[string]moveSecretEngine{
-			"machine-a": sourceStore,
-			"machine-b": targetStore,
+			"host-a": sourceStore,
+			"host-b": targetStore,
 		},
 	)
 	req := secretTransferRequest(MoveModeCopy)
 	req.MigrateVolumeData = true
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", req)
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", req)
 
 	require.NoError(t, err)
 	require.NotNil(t, got.SecretTransfer, "the secretTransfer block rides the envelope beside volumeMigration")
@@ -591,12 +591,12 @@ func TestQuadletService_Move_SecretFailureLeavesTargetQuadletSetUntouched(t *tes
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		testutils.NewMockSSHExec(),
 		map[string]moveSecretEngine{
-			"machine-a": sourceStore,
-			"machine-b": targetStore,
+			"host-a": sourceStore,
+			"host-b": targetStore,
 		},
 	)
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", secretTransferRequest(MoveModeCopy))
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", secretTransferRequest(MoveModeCopy))
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -649,15 +649,15 @@ func TestQuadletService_Move_SecretFailureBeforeTheStopStopsNothing(t *testing.T
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		sshExec,
 		map[string]moveSecretEngine{
-			"machine-a": sourceStore,
-			"machine-b": targetStore,
+			"host-a": sourceStore,
+			"host-b": targetStore,
 		},
 	)
 	req := secretTransferRequest(MoveModeMove)
 	req.Stop = true
 	req.MigrateVolumeData = true
 
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", req)
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", req)
 
 	require.Error(t, err)
 	assert.Nil(t, got)

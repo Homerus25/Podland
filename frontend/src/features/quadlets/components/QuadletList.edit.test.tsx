@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson, errorResponse } from "@/test/errors";
-import { machineFixture, quadletFixture } from "@/test/factories";
+import { hostFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -25,13 +25,13 @@ function resetCounters() {
 }
 
 function quadletsHandler(quadlets: () => QuadletSummary[]) {
-	return http.get("*/api/machines/m-1/quadlets", () =>
+	return http.get("*/api/hosts/m-1/quadlets", () =>
 		HttpResponse.json(quadlets()),
 	);
 }
 
 function getHandler(content = existingContent) {
-	return http.get("*/api/machines/m-1/quadlets/:quadletId", () =>
+	return http.get("*/api/hosts/m-1/quadlets/:quadletId", () =>
 		HttpResponse.json({ ...existing, content }),
 	);
 }
@@ -42,7 +42,7 @@ function updateHandler(
 	onUpdated?: () => void,
 ) {
 	return http.put(
-		"*/api/machines/m-1/quadlets/:quadletId",
+		"*/api/hosts/m-1/quadlets/:quadletId",
 		async ({ request }) => {
 			updateRequests.count++;
 			updateRequests.body = await request.json();
@@ -57,7 +57,7 @@ function updateHandler(
 }
 
 function renderQuadletList() {
-	renderWithQuery(<QuadletList machine={machineFixture()} />, {
+	renderWithQuery(<QuadletList host={hostFixture()} />, {
 		router: true,
 	});
 }
@@ -163,7 +163,7 @@ describe("QuadletList edit", () => {
 	it("shows a loading state while the content is fetched", async () => {
 		server.use(
 			quadletsHandler(() => [existing]),
-			http.get("*/api/machines/m-1/quadlets/:quadletId", async () => {
+			http.get("*/api/hosts/m-1/quadlets/:quadletId", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
 				return HttpResponse.json({ ...existing, content: existingContent });
 			}),
@@ -186,7 +186,7 @@ describe("QuadletList edit", () => {
 	it("shows the error envelope when the quadlet disappeared before opening", async () => {
 		server.use(
 			quadletsHandler(() => [existing]),
-			http.get("*/api/machines/m-1/quadlets/:quadletId", () =>
+			http.get("*/api/hosts/m-1/quadlets/:quadletId", () =>
 				errorResponse(404, "QUADLET_NOT_FOUND", "Quadlet not found", "req-41"),
 			),
 		);
@@ -237,17 +237,14 @@ describe("QuadletList edit", () => {
 		let servedContent = existingContent;
 		server.use(
 			quadletsHandler(() => [existing]),
-			http.get("*/api/machines/m-1/quadlets/:quadletId", () =>
+			http.get("*/api/hosts/m-1/quadlets/:quadletId", () =>
 				HttpResponse.json({ ...existing, content: servedContent }),
 			),
-			http.put(
-				"*/api/machines/m-1/quadlets/:quadletId",
-				async ({ request }) => {
-					const body = (await request.json()) as { content: string };
-					servedContent = body.content;
-					return HttpResponse.json({ ...existing, content: body.content });
-				},
-			),
+			http.put("*/api/hosts/m-1/quadlets/:quadletId", async ({ request }) => {
+				const body = (await request.json()) as { content: string };
+				servedContent = body.content;
+				return HttpResponse.json({ ...existing, content: body.content });
+			}),
 		);
 		const user = await openEditModal();
 

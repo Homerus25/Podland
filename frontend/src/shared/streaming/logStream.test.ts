@@ -64,11 +64,11 @@ describe("parseLogErrorEvent", () => {
 			parseLogErrorEvent({
 				timestamp: "t",
 				level: "ERROR",
-				message: "CONNECTION_FAILED: Failed to connect to machine",
+				message: "CONNECTION_FAILED: Failed to connect to host",
 			}),
 		).toEqual({
 			code: "CONNECTION_FAILED",
-			message: "Failed to connect to machine",
+			message: "Failed to connect to host",
 		});
 	});
 

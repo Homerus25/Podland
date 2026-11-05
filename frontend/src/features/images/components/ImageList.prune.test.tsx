@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
-import { imageFixture, machineFixture } from "@/test/factories";
+import { hostFixture, imageFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -28,7 +28,7 @@ function installHandlers(
 	}),
 ) {
 	server.use(
-		http.get("*/api/machines/m-1/images", () => {
+		http.get("*/api/hosts/m-1/images", () => {
 			listRequests.count += 1;
 			return HttpResponse.json([
 				imageFixture(),
@@ -38,7 +38,7 @@ function installHandlers(
 				}),
 			]);
 		}),
-		http.post("*/api/machines/m-1/images/prune", ({ request }) => {
+		http.post("*/api/hosts/m-1/images/prune", ({ request }) => {
 			pruneRequests.count += 1;
 			pruneRequests.pathname = new URL(request.url).pathname;
 			const response = pruneResponse();
@@ -48,9 +48,9 @@ function installHandlers(
 }
 
 function renderImageList(permission: "read" | "write" | "admin" = "admin") {
-	renderWithQuery(<ImageList machine={machineFixture({ permission })} />, {
+	renderWithQuery(<ImageList host={hostFixture({ permission })} />, {
 		chakra: true,
-		router: { initialEntries: ["/machines/m-1"] },
+		router: { initialEntries: ["/hosts/m-1"] },
 	});
 }
 
@@ -122,7 +122,7 @@ describe("ImageList prune", () => {
 		await user.click(screen.getByTestId("confirm-prune-button"));
 
 		await waitFor(() => expect(pruneRequests.count).toBe(1));
-		expect(pruneRequests.pathname).toBe("/api/machines/m-1/images/prune");
+		expect(pruneRequests.pathname).toBe("/api/hosts/m-1/images/prune");
 		expect(listRequests.count).toBeGreaterThanOrEqual(2);
 		expect(await screen.findByTestId("prune-report")).toBeInTheDocument();
 	});

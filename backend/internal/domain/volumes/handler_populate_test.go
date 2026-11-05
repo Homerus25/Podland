@@ -34,14 +34,14 @@ func buildMultipartBody(t *testing.T, parts map[string]map[string][]byte) (*byte
 }
 
 // recordPopulateRequest serves POST
-// /api/machines/{id}/volumes/{volumeName}/populate through the handler
+// /api/hosts/{id}/volumes/{volumeName}/populate through the handler
 // with an authenticated identity and the given body.
-func recordPopulateRequest(handler http.HandlerFunc, machineID, volumeName string, body *bytes.Buffer, contentType string) *httptest.ResponseRecorder {
+func recordPopulateRequest(handler http.HandlerFunc, hostID, volumeName string, body *bytes.Buffer, contentType string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/" + machineID + "/volumes/" + volumeName + "/populate",
+		Path:      "/api/hosts/" + hostID + "/volumes/" + volumeName + "/populate",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": machineID, "volumeName": volumeName},
+		URLParams: map[string]string{"id": hostID, "volumeName": volumeName},
 		Body:      body,
 		Header:    http.Header{"Content-Type": []string{contentType}},
 	})
@@ -69,7 +69,7 @@ func readTarEntries(t *testing.T, r io.Reader) map[string][]byte {
 
 // TestVolumeHandler_Populate_FilesShape pins the files contract: the
 // spooled parts land in the assembled tar with their relative paths
-// preserved, and the machine's import receives it as the source.
+// preserved, and the host's import receives it as the source.
 func TestVolumeHandler_Populate_FilesShape(t *testing.T) {
 	body, contentType := buildMultipartBody(t, map[string]map[string][]byte{
 		"files": {
@@ -91,10 +91,10 @@ func TestVolumeHandler_Populate_FilesShape(t *testing.T) {
 		},
 	}
 
-	w := recordPopulateRequest(newTestHandler(engine).Populate, "test-machine", "my-volume", body, contentType)
+	w := recordPopulateRequest(newTestHandler(engine).Populate, "test-host", "my-volume", body, contentType)
 
 	assert.Equal(t, 204, w.Code, "populate should return 204 on success")
-	require.NotNil(t, entries, "the machine must receive the assembled tar")
+	require.NotNil(t, entries, "the host must receive the assembled tar")
 	require.Len(t, entries, 2, "each uploaded file must be a tar entry")
 	assert.Equal(t, []byte("hello"), entries["docs/readme.txt"], "relative paths must be preserved")
 	assert.Equal(t, []byte{0x00, 0x01}, entries["data.bin"])
@@ -129,7 +129,7 @@ func TestVolumeHandler_Populate_ArchiveShape(t *testing.T) {
 		},
 	}
 
-	w := recordPopulateRequest(newTestHandler(engine).Populate, "test-machine", "my-volume", body, contentType)
+	w := recordPopulateRequest(newTestHandler(engine).Populate, "test-host", "my-volume", body, contentType)
 
 	assert.Equal(t, 204, w.Code)
 	assert.Equal(t, tarBuf.Bytes(), got, "archive must be imported as-is")
@@ -145,7 +145,7 @@ func TestVolumeHandler_Populate_ShapeValidation(t *testing.T) {
 			"files":   {"a.txt": []byte("x")},
 			"archive": {"seed.tar": []byte("tar")},
 		})
-		w := recordPopulateRequest(handler.Populate, "test-machine", "my-volume", body, contentType)
+		w := recordPopulateRequest(handler.Populate, "test-host", "my-volume", body, contentType)
 		assert.Equal(t, 400, w.Code)
 		assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
 		assert.NotContains(t, w.Body.String(), "requestId\")", "")
@@ -153,13 +153,13 @@ func TestVolumeHandler_Populate_ShapeValidation(t *testing.T) {
 
 	t.Run("EmptyUploadGets400", func(t *testing.T) {
 		body, contentType := buildMultipartBody(t, map[string]map[string][]byte{})
-		w := recordPopulateRequest(handler.Populate, "test-machine", "my-volume", body, contentType)
+		w := recordPopulateRequest(handler.Populate, "test-host", "my-volume", body, contentType)
 		assert.Equal(t, 400, w.Code)
 		assert.Contains(t, w.Body.String(), "INVALID_REQUEST")
 	})
 
 	t.Run("NonMultipartGets400", func(t *testing.T) {
-		w := recordPopulateRequest(handler.Populate, "test-machine", "my-volume",
+		w := recordPopulateRequest(handler.Populate, "test-host", "my-volume",
 			bytes.NewBufferString("not multipart"), "text/plain")
 		assert.Equal(t, 400, w.Code)
 	})
@@ -175,7 +175,7 @@ func TestVolumeHandler_Populate_TraversalRejected(t *testing.T) {
 		body, contentType := buildMultipartBody(t, map[string]map[string][]byte{
 			"files": {name: []byte("x")},
 		})
-		w := recordPopulateRequest(handler.Populate, "test-machine", "my-volume", body, contentType)
+		w := recordPopulateRequest(handler.Populate, "test-host", "my-volume", body, contentType)
 		assert.Equal(t, 400, w.Code, "path %q must be rejected", name)
 	}
 }
@@ -189,7 +189,7 @@ func TestVolumeHandler_Populate_CapEnforced(t *testing.T) {
 	body, contentType := buildMultipartBody(t, map[string]map[string][]byte{
 		"files": {"big.bin": bytes.Repeat([]byte{0xAA}, 64)},
 	})
-	w := recordPopulateRequest(handler.Populate, "test-machine", "my-volume", body, contentType)
+	w := recordPopulateRequest(handler.Populate, "test-host", "my-volume", body, contentType)
 
 	assert.Equal(t, 413, w.Code, "oversized uploads must yield 413")
 	assert.Contains(t, w.Body.String(), "VOLUME_UPLOAD_TOO_LARGE")
@@ -209,7 +209,7 @@ func TestVolumeHandler_Populate_NotFound(t *testing.T) {
 		// a missing volume.
 	}
 
-	w := recordPopulateRequest(newTestHandler(engine).Populate, "test-machine", "no-such-volume", body, contentType)
+	w := recordPopulateRequest(newTestHandler(engine).Populate, "test-host", "no-such-volume", body, contentType)
 
 	assert.Equal(t, 404, w.Code)
 	assert.Contains(t, w.Body.String(), "VOLUME_NOT_FOUND")

@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { imageFixture, machineFixture } from "@/test/factories";
+import { hostFixture, imageFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -21,12 +21,12 @@ const image = imageFixture({
 	id: "sha256:abc123def4567890abc123def4567890abc123def4567890abc123def4567890",
 });
 const encodedImageId = encodeURIComponent(image.id);
-const exportUrl = `/api/machines/m-1/images/${encodedImageId}/export`;
+const exportUrl = `/api/hosts/m-1/images/${encodedImageId}/export`;
 
 function installHandlers() {
 	server.use(
-		http.get("*/api/machines/m-1/images", () => HttpResponse.json([image])),
-		http.get("*/api/machines/m-1/images/*/export", () =>
+		http.get("*/api/hosts/m-1/images", () => HttpResponse.json([image])),
+		http.get("*/api/hosts/m-1/images/*/export", () =>
 			HttpResponse.arrayBuffer(new ArrayBuffer(0), {
 				headers: {
 					"Content-Type": "application/x-tar",
@@ -38,9 +38,9 @@ function installHandlers() {
 }
 
 function renderImageList(permission: "read" | "write" | "admin" = "read") {
-	renderWithQuery(<ImageList machine={machineFixture({ permission })} />, {
+	renderWithQuery(<ImageList host={hostFixture({ permission })} />, {
 		chakra: true,
-		router: { initialEntries: ["/machines/m-1"] },
+		router: { initialEntries: ["/hosts/m-1"] },
 	});
 }
 
@@ -154,9 +154,9 @@ describe("ImageList download", () => {
 		renderWithQuery(
 			<>
 				<LocationProbe />
-				<ImageList machine={machineFixture({ permission: "read" })} />
+				<ImageList host={hostFixture({ permission: "read" })} />
 			</>,
-			{ chakra: true, router: { initialEntries: ["/machines/m-1"] } },
+			{ chakra: true, router: { initialEntries: ["/hosts/m-1"] } },
 		);
 		const user = userEvent.setup();
 
@@ -167,6 +167,6 @@ describe("ImageList download", () => {
 		);
 
 		await waitFor(() => expect(mockedDownload).toHaveBeenCalled());
-		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
 	});
 });

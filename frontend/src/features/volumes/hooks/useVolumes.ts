@@ -15,53 +15,53 @@ import { useAlwaysRefetchListQuery } from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import { useMovePreview } from "@shared/transfers/transferHooks";
 
-export function useVolumes(machineId: string) {
-	return useAlwaysRefetchListQuery(volumesQueryKey(machineId), () =>
-		listVolumes(machineId),
+export function useVolumes(hostId: string) {
+	return useAlwaysRefetchListQuery(volumesQueryKey(hostId), () =>
+		listVolumes(hostId),
 	);
 }
 
-// A create extends the machine's volume list, so the list refetches on
+// A create extends the host's volume list, so the list refetches on
 // success and shows the server's post-action state; no optimistic updates.
-export function useCreateVolume(machineId: string) {
+export function useCreateVolume(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"volumes",
-		(input: VolumeCreateInput) => createVolume(machineId, input),
+		(input: VolumeCreateInput) => createVolume(hostId, input),
 	);
 }
 
-// A delete removes one volume from the machine's list, so the list
+// A delete removes one volume from the host's list, so the list
 // refetches on success; no optimistic updates.
-export function useDeleteVolume(machineId: string) {
+export function useDeleteVolume(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"volumes",
 		({ volumeName, force }: { volumeName: string; force: boolean }) =>
-			deleteVolume(machineId, volumeName, force),
+			deleteVolume(hostId, volumeName, force),
 	);
 }
 
-// A prune changes the machine's volume set, so the list refetches on
+// A prune changes the host's volume set, so the list refetches on
 // success and the report shows the server's post-prune state.
-export function usePruneVolumes(machineId: string) {
-	return useListInvalidatingMutation(machineId, "volumes", () =>
-		pruneVolumes(machineId),
+export function usePruneVolumes(hostId: string) {
+	return useListInvalidatingMutation(hostId, "volumes", () =>
+		pruneVolumes(hostId),
 	);
 }
 
 // Populate changes a volume's contents (and reported size), so the list
 // refetches on success; no optimistic updates.
-export function usePopulateVolume(machineId: string) {
+export function usePopulateVolume(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"volumes",
 		(input: {
 			volumeName: string;
 			form: FormData;
 			onProgress?: (fraction: number) => void;
 		}) =>
-			populateVolume(machineId, input.volumeName, input.form, input.onProgress),
+			populateVolume(hostId, input.volumeName, input.form, input.onProgress),
 	);
 }
 
@@ -71,13 +71,13 @@ export function usePopulateVolume(machineId: string) {
 // transfer-hooks module's (issue 273); this adapter supplies the key
 // constructor and fetcher.
 export function useVolumeMovePreview(
-	machineId: string,
+	hostId: string,
 	volumeName: string,
-	targetMachineId: string | null,
+	targetHostId: string | null,
 ) {
 	return useMovePreview(
-		(target) => volumeMovePreviewQueryKey(machineId, volumeName, target),
-		(target) => getVolumeMovePreview(machineId, volumeName, target),
-		targetMachineId,
+		(target) => volumeMovePreviewQueryKey(hostId, volumeName, target),
+		(target) => getVolumeMovePreview(hostId, volumeName, target),
+		targetHostId,
 	);
 }

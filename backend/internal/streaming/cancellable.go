@@ -18,7 +18,7 @@ import (
 // untouched for the caller to map, context cancellation answers
 // ErrOperationCancelled immediately and abandons fn's goroutine, which
 // keeps running on the engine's detached context until it ends naturally
-// or the connection is reaped (idle cleanup, LRU eviction, machine
+// or the connection is reaped (idle cleanup, LRU eviction, host
 // removal).
 //
 // Placement rule: call this inside the WithEngine closure. Abandonment

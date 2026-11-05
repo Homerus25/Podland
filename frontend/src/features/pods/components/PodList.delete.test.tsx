@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { machineFixture, podFixture } from "@/test/factories";
+import { hostFixture, podFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -18,7 +18,7 @@ function podsListResponse(pods: PodSummary[]) {
 }
 
 function renderPodList(permission: "read" | "write" | "admin" = "admin") {
-	return renderWithQuery(<PodList machine={machineFixture({ permission })} />, {
+	return renderWithQuery(<PodList host={hostFixture({ permission })} />, {
 		router: true,
 	});
 }
@@ -33,11 +33,11 @@ describe("PodList remove", () => {
 		const removeRequests: string[] = [];
 		let listRequests = 0;
 		server.use(
-			http.get("*/api/machines/m-1/pods", () => {
+			http.get("*/api/hosts/m-1/pods", () => {
 				listRequests++;
 				return podsListResponse([podFixture()]);
 			}),
-			http.delete("*/api/machines/m-1/pods/*", ({ request }) => {
+			http.delete("*/api/hosts/m-1/pods/*", ({ request }) => {
 				removeRequests.push(request.url);
 				return new HttpResponse(null, { status: 204 });
 			}),
@@ -64,10 +64,10 @@ describe("PodList remove", () => {
 	it("offers a forced retry after a running-refusal error", async () => {
 		const removeRequests: { url: string; force: boolean }[] = [];
 		server.use(
-			http.get("*/api/machines/m-1/pods", () =>
+			http.get("*/api/hosts/m-1/pods", () =>
 				podsListResponse([podFixture({ state: "Running" })]),
 			),
-			http.delete("*/api/machines/m-1/pods/*", ({ request }) => {
+			http.delete("*/api/hosts/m-1/pods/*", ({ request }) => {
 				const url = new URL(request.url);
 				removeRequests.push({
 					url: request.url,

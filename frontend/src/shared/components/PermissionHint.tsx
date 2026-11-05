@@ -28,10 +28,10 @@ export type PermissionHintProps = TextProps & {
 export function PermissionHint(props: PermissionHintProps) {
 	const sentence =
 		props.requirement === "write"
-			? `You have read-only access to this machine. Ask an owner or admin for write access to manage its ${props.resource}s.`
+			? `You have read-only access to this host. Ask an owner or admin for write access to manage its ${props.resource}s.`
 			: props.requirement === "admin"
 				? "Revealing the secret's value requires admin access."
-				: `Only the owner can ${props.phrase} this machine.`;
+				: `Only the owner can ${props.phrase} this host.`;
 	const { scope, requirement, ...textProps } = props;
 
 	return (

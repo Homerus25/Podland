@@ -107,75 +107,75 @@ func TestMockUserRepository(t *testing.T) {
 	})
 }
 
-// TestMockMachineRepository tests the mock machine repository functionality
-func TestMockMachineRepository(t *testing.T) {
+// TestMockHostRepository tests the mock host repository functionality
+func TestMockHostRepository(t *testing.T) {
 	t.Run("basic operations", func(t *testing.T) {
-		repo := NewMockMachineRepository()
+		repo := NewMockHostRepository()
 
-		// Test creating a machine
-		machine := GenerateTestMachine()
-		err := repo.Create(machine)
+		// Test creating a host
+		host := GenerateTestHost()
+		err := repo.Create(host)
 		assert.NoError(t, err)
 
-		// Test getting machine by ID
-		fetchedMachine, err := repo.GetByID(machine.ID)
+		// Test getting host by ID
+		fetchedHost, err := repo.GetByID(host.ID)
 		assert.NoError(t, err)
-		assert.NotNil(t, fetchedMachine)
-		assert.Equal(t, machine.ID, fetchedMachine.ID)
+		assert.NotNil(t, fetchedHost)
+		assert.Equal(t, host.ID, fetchedHost.ID)
 
-		// Test updating machine
-		machine.Name = "updated-machine-name"
-		err = repo.Update(machine)
-		assert.NoError(t, err)
-
-		updatedMachine, err := repo.GetByID(machine.ID)
-		assert.NoError(t, err)
-		assert.Equal(t, "updated-machine-name", updatedMachine.Name)
-
-		// Test delete machine
-		err = repo.Delete(machine.ID)
+		// Test updating host
+		host.Name = "updated-host-name"
+		err = repo.Update(host)
 		assert.NoError(t, err)
 
-		deletedMachine, err := repo.GetByID(machine.ID)
+		updatedHost, err := repo.GetByID(host.ID)
 		assert.NoError(t, err)
-		assert.Nil(t, deletedMachine)
+		assert.Equal(t, "updated-host-name", updatedHost.Name)
+
+		// Test delete host
+		err = repo.Delete(host.ID)
+		assert.NoError(t, err)
+
+		deletedHost, err := repo.GetByID(host.ID)
+		assert.NoError(t, err)
+		assert.Nil(t, deletedHost)
 	})
 
 	t.Run("ListAccessible", func(t *testing.T) {
-		repo := NewMockMachineRepository()
+		repo := NewMockHostRepository()
 
-		// Create multiple machines for different owners
-		machine1 := GenerateTestMachine()
-		machine2 := GenerateTestMachine()
-		machine2.OwnerID = machine1.OwnerID // Same owner
-		machine3 := GenerateTestMachine()
+		// Create multiple hosts for different owners
+		host1 := GenerateTestHost()
+		host2 := GenerateTestHost()
+		host2.OwnerID = host1.OwnerID // Same owner
+		host3 := GenerateTestHost()
 
-		repo.Create(machine1)
-		repo.Create(machine2)
-		repo.Create(machine3)
+		repo.Create(host1)
+		repo.Create(host2)
+		repo.Create(host3)
 
-		accessible, err := repo.ListAccessible(machine1.OwnerID)
+		accessible, err := repo.ListAccessible(host1.OwnerID)
 		assert.NoError(t, err)
 		assert.Len(t, accessible, 2)
 	})
 
 	t.Run("NameExistsForUser", func(t *testing.T) {
-		repo := NewMockMachineRepository()
-		machine := GenerateTestMachine()
-		repo.Create(machine)
+		repo := NewMockHostRepository()
+		host := GenerateTestHost()
+		repo.Create(host)
 
-		exists, err := repo.NameExistsForUser(machine.OwnerID, machine.Name)
+		exists, err := repo.NameExistsForUser(host.OwnerID, host.Name)
 		assert.NoError(t, err)
 		assert.True(t, exists)
 
-		notExists, err := repo.NameExistsForUser(machine.OwnerID, "non-existent-name")
+		notExists, err := repo.NameExistsForUser(host.OwnerID, "non-existent-name")
 		assert.NoError(t, err)
 		assert.False(t, notExists)
 	})
 
 	t.Run("error injection", func(t *testing.T) {
-		expectedErr := errors.New("machine repository error")
-		repo := NewMockMachineRepositoryWithErrors(
+		expectedErr := errors.New("host repository error")
+		repo := NewMockHostRepositoryWithErrors(
 			expectedErr, // listErr
 			expectedErr, // getErr
 			expectedErr, // createErr
@@ -183,29 +183,29 @@ func TestMockMachineRepository(t *testing.T) {
 			expectedErr, // deleteErr
 		)
 
-		machine := GenerateTestMachine()
-		err := repo.Create(machine)
+		host := GenerateTestHost()
+		err := repo.Create(host)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "machine repository error")
+		assert.Contains(t, err.Error(), "host repository error")
 
-		_, err = repo.GetByID(machine.ID)
+		_, err = repo.GetByID(host.ID)
 		assert.Error(t, err)
 
-		err = repo.Delete(machine.ID)
+		err = repo.Delete(host.ID)
 		assert.Error(t, err)
 	})
 
-	t.Run("direct machine addition", func(t *testing.T) {
-		repo := NewMockMachineRepository()
-		machine := GenerateTestMachine()
+	t.Run("direct host addition", func(t *testing.T) {
+		repo := NewMockHostRepository()
+		host := GenerateTestHost()
 
-		// Add machine directly without going through Create
-		repo.AddMachine(machine)
+		// Add host directly without going through Create
+		repo.AddHost(host)
 
-		fetchedMachine, err := repo.GetByID(machine.ID)
+		fetchedHost, err := repo.GetByID(host.ID)
 		assert.NoError(t, err)
-		assert.NotNil(t, fetchedMachine)
-		assert.Equal(t, machine.ID, fetchedMachine.ID)
+		assert.NotNil(t, fetchedHost)
+		assert.Equal(t, host.ID, fetchedHost.ID)
 	})
 }
 
@@ -255,17 +255,17 @@ func TestTestDataGenerators(t *testing.T) {
 		assert.False(t, user.CreatedAt.IsZero())
 	})
 
-	t.Run("GenerateTestMachine", func(t *testing.T) {
-		machine := GenerateTestMachine()
-		assert.NotNil(t, machine)
-		assert.NotEmpty(t, machine.ID)
-		assert.NotEmpty(t, machine.Name)
-		assert.NotEmpty(t, machine.OwnerID)
-		assert.NotEmpty(t, machine.Hostname)
-		assert.Equal(t, 22, machine.Port)            // Default SSH port
-		assert.Equal(t, "root", machine.SSHUsername) // Default SSH username
-		assert.False(t, machine.CreatedAt.IsZero())
-		assert.False(t, machine.UpdatedAt.IsZero())
+	t.Run("GenerateTestHost", func(t *testing.T) {
+		host := GenerateTestHost()
+		assert.NotNil(t, host)
+		assert.NotEmpty(t, host.ID)
+		assert.NotEmpty(t, host.Name)
+		assert.NotEmpty(t, host.OwnerID)
+		assert.NotEmpty(t, host.Hostname)
+		assert.Equal(t, 22, host.Port)            // Default SSH port
+		assert.Equal(t, "root", host.SSHUsername) // Default SSH username
+		assert.False(t, host.CreatedAt.IsZero())
+		assert.False(t, host.UpdatedAt.IsZero())
 	})
 
 	t.Run("GenerateValidPEMKey", func(t *testing.T) {
@@ -425,7 +425,7 @@ func TestMockConnectionManager_WithConnection(t *testing.T) {
 
 		var sawCtx context.Context
 		fnErr := errors.New("engine exploded")
-		err := mock.WithConnection(context.Background(), "user-1", "machine-1", "volumes.List", func(connCtx context.Context) error {
+		err := mock.WithConnection(context.Background(), "user-1", "host-1", "volumes.List", func(connCtx context.Context) error {
 			sawCtx = connCtx
 			return fnErr
 		})
@@ -439,7 +439,7 @@ func TestMockConnectionManager_WithConnection(t *testing.T) {
 		mock := NewMockConnectionManagerWithAcquireError(acquireErr)
 
 		fnRan := false
-		err := mock.WithConnection(context.Background(), "user-1", "machine-1", "volumes.List", func(context.Context) error {
+		err := mock.WithConnection(context.Background(), "user-1", "host-1", "volumes.List", func(context.Context) error {
 			fnRan = true
 			return nil
 		})
@@ -512,19 +512,19 @@ func TestMockSSHExec(t *testing.T) {
 		m := NewMockSSHExec()
 		opts := sshexec.ExecOptions{Args: []string{"start", "web.service"}}
 
-		_, _ = m.Exec(ctx, "machine-1", "user-1", "systemctl", opts)
-		_, _ = m.Exec(ctx, "machine-2", "user-2", "echo", sshexec.ExecOptions{})
+		_, _ = m.Exec(ctx, "host-1", "user-1", "systemctl", opts)
+		_, _ = m.Exec(ctx, "host-2", "user-2", "echo", sshexec.ExecOptions{})
 
 		assert.Equal(t, 2, m.CallCount())
 
 		calls := m.Calls()
 		assert.Len(t, calls, 2)
-		assert.Equal(t, "machine-1", calls[0].MachineID)
+		assert.Equal(t, "host-1", calls[0].HostID)
 		assert.Equal(t, "user-1", calls[0].UserID)
 		assert.Equal(t, "systemctl", calls[0].Command)
 		assert.Equal(t, []string{"start", "web.service"}, calls[0].Opts.Args)
 
-		assert.Equal(t, "machine-2", calls[1].MachineID)
+		assert.Equal(t, "host-2", calls[1].HostID)
 		assert.Equal(t, "echo", calls[1].Command)
 		assert.Empty(t, calls[1].Opts.Args)
 	})
@@ -550,7 +550,7 @@ func TestMockSSHExec(t *testing.T) {
 		})
 
 		var lines []sshexec.OutputLine
-		res, err := m.ExecStream(ctx, "machine-1", "user-1", "systemctl", sshexec.ExecOptions{}, func(line sshexec.OutputLine) {
+		res, err := m.ExecStream(ctx, "host-1", "user-1", "systemctl", sshexec.ExecOptions{}, func(line sshexec.OutputLine) {
 			lines = append(lines, line)
 		})
 
@@ -567,11 +567,11 @@ func TestMockSSHExec(t *testing.T) {
 		m := NewMockSSHExec()
 		opts := sshexec.ExecOptions{Args: []string{"auto-update", "web"}}
 
-		_, _ = m.ExecStream(ctx, "machine-1", "user-1", "podman", opts, func(sshexec.OutputLine) {})
+		_, _ = m.ExecStream(ctx, "host-1", "user-1", "podman", opts, func(sshexec.OutputLine) {})
 
 		calls := m.StreamCalls()
 		assert.Len(t, calls, 1)
-		assert.Equal(t, "machine-1", calls[0].MachineID)
+		assert.Equal(t, "host-1", calls[0].HostID)
 		assert.Equal(t, "user-1", calls[0].UserID)
 		assert.Equal(t, "podman", calls[0].Command)
 		assert.Equal(t, []string{"auto-update", "web"}, calls[0].Opts.Args)

@@ -1,7 +1,7 @@
 import {
 	containerCreatePath,
 	detailPath,
-	machineTabPath,
+	hostTabPath,
 } from "@shared/routes/detailRoute";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -15,53 +15,49 @@ import { renderWithQuery } from "@/test/render";
 // keep only their wiring smokes.
 
 describe("detailPath", () => {
-	it("builds the machine-scoped detail path in the route pattern's own shape", () => {
+	it("builds the host-scoped detail path in the route pattern's own shape", () => {
 		expect(detailPath("m-1", "containers", "c-1")).toBe(
-			"/machines/m-1/containers/c-1",
+			"/hosts/m-1/containers/c-1",
 		);
 		expect(detailPath("m-1", "volumes", "app-data")).toBe(
-			"/machines/m-1/volumes/app-data",
+			"/hosts/m-1/volumes/app-data",
 		);
 		expect(detailPath("m-1", "images", "sha256:abc")).toBe(
-			"/machines/m-1/images/sha256%3Aabc",
+			"/hosts/m-1/images/sha256%3Aabc",
 		);
 		expect(detailPath("m-1", "networks", "app-net")).toBe(
-			"/machines/m-1/networks/app-net",
+			"/hosts/m-1/networks/app-net",
 		);
 		expect(detailPath("m-1", "secrets", "db-password")).toBe(
-			"/machines/m-1/secrets/db-password",
+			"/hosts/m-1/secrets/db-password",
 		);
 	});
 
-	it("percent-encodes machineId and id so ids with reserved characters still match the route", () => {
+	it("percent-encodes hostId and id so ids with reserved characters still match the route", () => {
 		expect(detailPath("m/1", "containers", "a b/c")).toBe(
-			"/machines/m%2F1/containers/a%20b%2Fc",
+			"/hosts/m%2F1/containers/a%20b%2Fc",
 		);
 	});
 });
 
-describe("machineTabPath", () => {
-	it("builds the machine page path with the tab the back button returns to", () => {
-		expect(machineTabPath("m-1", "containers")).toBe(
-			"/machines/m-1?tab=containers",
-		);
-		expect(machineTabPath("m-1", "volumes")).toBe("/machines/m-1?tab=volumes");
+describe("hostTabPath", () => {
+	it("builds the host page path with the tab the back button returns to", () => {
+		expect(hostTabPath("m-1", "containers")).toBe("/hosts/m-1?tab=containers");
+		expect(hostTabPath("m-1", "volumes")).toBe("/hosts/m-1?tab=volumes");
 	});
 
-	it("percent-encodes the machineId", () => {
-		expect(machineTabPath("m/1", "networks")).toBe(
-			"/machines/m%2F1?tab=networks",
-		);
+	it("percent-encodes the hostId", () => {
+		expect(hostTabPath("m/1", "networks")).toBe("/hosts/m%2F1?tab=networks");
 	});
 });
 
 describe("containerCreatePath", () => {
 	it("builds the create-page path in the containers area's route shape", () => {
-		expect(containerCreatePath("m-1")).toBe("/machines/m-1/containers/new");
+		expect(containerCreatePath("m-1")).toBe("/hosts/m-1/containers/new");
 	});
 
-	it("percent-encodes the machineId", () => {
-		expect(containerCreatePath("m/1")).toBe("/machines/m%2F1/containers/new");
+	it("percent-encodes the hostId", () => {
+		expect(containerCreatePath("m/1")).toBe("/hosts/m%2F1/containers/new");
 	});
 });
 
@@ -69,24 +65,24 @@ describe("containerCreatePath", () => {
 // round trip: the route still matches for ids containing reserved
 // characters and the params come back as the originals.
 function DetailProbe() {
-	const { machineId, containerId } = useParams<{
-		machineId: string;
+	const { hostId, containerId } = useParams<{
+		hostId: string;
 		containerId: string;
 	}>();
 	return (
 		<div>
-			<span data-testid="probe-machine">{machineId}</span>
+			<span data-testid="probe-host">{hostId}</span>
 			<span data-testid="probe-id">{containerId}</span>
 		</div>
 	);
 }
 
 function TabProbe() {
-	const { machineId } = useParams<{ machineId: string }>();
+	const { hostId } = useParams<{ hostId: string }>();
 	const location = useLocation();
 	return (
 		<div>
-			<span data-testid="probe-machine">{machineId}</span>
+			<span data-testid="probe-host">{hostId}</span>
 			<span data-testid="probe-search">{location.search}</span>
 		</div>
 	);
@@ -103,7 +99,7 @@ describe("detailPath round trip", () => {
 					}
 				/>
 				<Route
-					path="/machines/:machineId/containers/:containerId"
+					path="/hosts/:hostId/containers/:containerId"
 					element={<DetailProbe />}
 				/>
 			</Routes>,
@@ -113,20 +109,20 @@ describe("detailPath round trip", () => {
 		const user = userEvent.setup();
 		await user.click(screen.getByRole("link", { name: "open" }));
 
-		expect(screen.getByTestId("probe-machine")).toHaveTextContent("m/1");
+		expect(screen.getByTestId("probe-host")).toHaveTextContent("m/1");
 		expect(screen.getByTestId("probe-id")).toHaveTextContent("a b/c");
 	});
 });
 
-describe("machineTabPath round trip", () => {
-	it("the machine route matches the encoded path and decodes the machineId", async () => {
+describe("hostTabPath round trip", () => {
+	it("the host route matches the encoded path and decodes the hostId", async () => {
 		renderWithQuery(
 			<Routes>
 				<Route
 					path="*"
-					element={<Link to={machineTabPath("m/1", "containers")}>back</Link>}
+					element={<Link to={hostTabPath("m/1", "containers")}>back</Link>}
 				/>
-				<Route path="/machines/:machineId" element={<TabProbe />} />
+				<Route path="/hosts/:hostId" element={<TabProbe />} />
 			</Routes>,
 			{ router: { initialEntries: ["/somewhere"] } },
 		);
@@ -134,7 +130,7 @@ describe("machineTabPath round trip", () => {
 		const user = userEvent.setup();
 		await user.click(screen.getByRole("link", { name: "back" }));
 
-		expect(screen.getByTestId("probe-machine")).toHaveTextContent("m/1");
+		expect(screen.getByTestId("probe-host")).toHaveTextContent("m/1");
 		expect(screen.getByTestId("probe-search")).toHaveTextContent(
 			"?tab=containers",
 		);

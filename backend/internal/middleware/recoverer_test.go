@@ -22,7 +22,7 @@ func TestRecoverer_PanickingHandlerAnswers500Envelope(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/machines", nil).
+	req := httptest.NewRequest(http.MethodGet, "/api/hosts", nil).
 		WithContext(contextutils.SetRequestID(t.Context(), "test-request-id"))
 
 	require.NotPanics(t, func() {

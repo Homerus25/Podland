@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
-import { machineFixture, volumeFixture } from "@/test/factories";
+import { hostFixture, volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -28,14 +28,14 @@ function installHandlers(
 	}),
 ) {
 	server.use(
-		http.get("*/api/machines/m-1/volumes", () => {
+		http.get("*/api/hosts/m-1/volumes", () => {
 			listRequests.count += 1;
 			return HttpResponse.json([
 				volumeFixture({ name: "unused-a", size: 1024 }),
 				volumeFixture({ name: "unused-b", size: 2048 }),
 			]);
 		}),
-		http.post("*/api/machines/m-1/volumes/prune", ({ request }) => {
+		http.post("*/api/hosts/m-1/volumes/prune", ({ request }) => {
 			pruneRequests.count += 1;
 			pruneRequests.pathname = new URL(request.url).pathname;
 			const response = pruneResponse();
@@ -45,7 +45,7 @@ function installHandlers(
 }
 
 function renderVolumeList(permission: "read" | "write" | "admin" = "admin") {
-	renderWithQuery(<VolumeList machine={machineFixture({ permission })} />, {
+	renderWithQuery(<VolumeList host={hostFixture({ permission })} />, {
 		chakra: true,
 		router: true,
 	});
@@ -101,7 +101,7 @@ describe("VolumeList prune", () => {
 		await user.click(screen.getByTestId("confirm-prune-button"));
 
 		await waitFor(() => expect(pruneRequests.count).toBe(1));
-		expect(pruneRequests.pathname).toBe("/api/machines/m-1/volumes/prune");
+		expect(pruneRequests.pathname).toBe("/api/hosts/m-1/volumes/prune");
 		expect(listRequests.count).toBeGreaterThanOrEqual(2);
 		expect(await screen.findByTestId("prune-report")).toBeInTheDocument();
 	});

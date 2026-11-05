@@ -14,7 +14,7 @@ import (
 )
 
 // logsRequest serves GET
-// /api/machines/{id}/containers/{containerId}/logs{query} through the
+// /api/hosts/{id}/containers/{containerId}/logs{query} through the
 // handler with an authenticated test identity.
 func logsRequest(handler http.HandlerFunc, containerID, query string) *httptest.ResponseRecorder {
 	return logsRequestWithBase(handler, context.Background(), containerID, query)
@@ -25,16 +25,16 @@ func logsRequest(handler http.HandlerFunc, containerID, query string) *httptest.
 func logsRequestWithBase(handler http.HandlerFunc, base context.Context, containerID, query string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/containers/" + containerID + "/logs" + query,
+		Path:      "/api/hosts/test-host/containers/" + containerID + "/logs" + query,
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+		URLParams: map[string]string{"id": "test-host", "containerId": containerID},
 		Context:   base,
 	})
 }
 
 // TestContainerHandler_Logs_Success tests successful buffered log retrieval
 // through the real service: the buffered service call receives the right
-// target and window through the HTTP surface, and the machine's log
+// target and window through the HTTP surface, and the host's log
 // lines land in the response.
 func TestContainerHandler_Logs_Success(t *testing.T) {
 	got := testutils.CallCapture[entities.ContainerLogsOptions]{}

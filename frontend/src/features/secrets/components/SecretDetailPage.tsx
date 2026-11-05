@@ -2,7 +2,7 @@ import { Box, Button, HStack, Table, Tbody, Text } from "@chakra-ui/react";
 import {
 	type CapabilityGate,
 	useCapabilityGate,
-} from "@features/machines/hooks/useCapabilityGate";
+} from "@features/hosts/hooks/useCapabilityGate";
 import {
 	useRevealSecret,
 	useSecret,
@@ -24,18 +24,18 @@ const MASK = "••••••••••••";
 // it and it dies with the page. On screen the value stays masked until a
 // second click on the eye. The section renders from the capability gate's
 // tri-state: the flow on allowed, the admin hint on denied — including a
-// failed machine query — and neither while pending, so an admin caller
+// failed host query — and neither while pending, so an admin caller
 // never sees the hint flash while their level loads.
 function RevealValueSection({
-	machineId,
+	hostId,
 	secretId,
 	revealAccess,
 }: {
-	machineId: string;
+	hostId: string;
 	secretId: string;
 	revealAccess: CapabilityGate;
 }) {
-	const reveal = useRevealSecret(machineId);
+	const reveal = useRevealSecret(hostId);
 	const [isVisible, setIsVisible] = useState(false);
 
 	if (revealAccess === "pending") {
@@ -95,20 +95,20 @@ function RevealValueSection({
 // detail query (the freshness factory's one-shot flavor, refetched on
 // every visit); the raw inspect
 // report fetches lazily on the first "Show inspect JSON" click and never
-// carries the value. The capability gate (the machines feature's hook)
+// carries the value. The capability gate (the hosts feature's hook)
 // answers the per-caller fact the reveal flow renders from; the overview
 // itself is readable at read level.
 export function SecretDetailPage() {
-	const { machineId, secretId } = useParams<{
-		machineId: string;
+	const { hostId, secretId } = useParams<{
+		hostId: string;
 		secretId: string;
 	}>();
 	const [revealed, setRevealed] = useState(false);
-	const secret = useSecret(machineId!, secretId!);
-	const inspectQuery = useSecretInspect(machineId!, secretId!, {
+	const secret = useSecret(hostId!, secretId!);
+	const inspectQuery = useSecretInspect(hostId!, secretId!, {
 		enabled: revealed,
 	});
-	const gate = useCapabilityGate(machineId!, "reveal-secrets");
+	const gate = useCapabilityGate(hostId!, "reveal-secrets");
 
 	return (
 		<DetailPage
@@ -165,7 +165,7 @@ export function SecretDetailPage() {
 						</Tbody>
 					</Table>
 					<RevealValueSection
-						machineId={machineId!}
+						hostId={hostId!}
 						secretId={secretId!}
 						revealAccess={gate}
 					/>

@@ -28,8 +28,8 @@ type moveErrorEnvelope struct {
 }
 
 // newMovePreviewTestHandler builds the handler over both quadlet modules
-// with per-machine fake engines and a passing access store — the wiring
-// the move-preview handler exercises (one lease per machine, plus the
+// with per-host fake engines and a passing access store — the wiring
+// the move-preview handler exercises (one lease per host, plus the
 // target gate).
 func newMovePreviewTestHandler(sourceEngine, targetEngine *fakeQuadletEngine) *QuadletHandler {
 	service, transfer := newMovePreviewTestServices(sourceEngine, targetEngine,
@@ -37,8 +37,8 @@ func newMovePreviewTestHandler(sourceEngine, targetEngine *fakeQuadletEngine) *Q
 	return NewQuadletHandler(service, transfer)
 }
 
-func movePreviewRequest(target, userID, machineID, quadletID string) *http.Request {
-	return quadletRequest("GET", target, userID, machineID, quadletID, nil)
+func movePreviewRequest(target, userID, hostID, quadletID string) *http.Request {
+	return quadletRequest("GET", target, userID, hostID, quadletID, nil)
 }
 
 func TestQuadletHandler_MovePreview_ReturnsPreview(t *testing.T) {
@@ -60,8 +60,8 @@ func TestQuadletHandler_MovePreview_ReturnsPreview(t *testing.T) {
 		},
 	}
 
-	req := movePreviewRequest("/api/machines/machine-a/quadlets/web.container/move-preview?targetMachineId=machine-b",
-		"user123", "machine-a", "web.container")
+	req := movePreviewRequest("/api/hosts/host-a/quadlets/web.container/move-preview?targetHostId=host-b",
+		"user123", "host-a", "web.container")
 
 	rr := httptest.NewRecorder()
 	newMovePreviewTestHandler(sourceEngine, targetEngine).MovePreview(rr, req)
@@ -92,8 +92,8 @@ func TestQuadletHandler_MovePreview_EmptyVolumesRendersAsArray(t *testing.T) {
 		return nil, nil
 	}}
 
-	req := movePreviewRequest("/api/machines/machine-a/quadlets/web.container/move-preview?targetMachineId=machine-b",
-		"user123", "machine-a", "web.container")
+	req := movePreviewRequest("/api/hosts/host-a/quadlets/web.container/move-preview?targetHostId=host-b",
+		"user123", "host-a", "web.container")
 
 	rr := httptest.NewRecorder()
 	newMovePreviewTestHandler(sourceEngine, targetEngine).MovePreview(rr, req)
@@ -104,8 +104,8 @@ func TestQuadletHandler_MovePreview_EmptyVolumesRendersAsArray(t *testing.T) {
 }
 
 func TestQuadletHandler_MovePreview_MissingQuadletIDIs400(t *testing.T) {
-	req := movePreviewRequest("/api/machines/machine-a/quadlets//move-preview?targetMachineId=machine-b",
-		"user123", "machine-a", "")
+	req := movePreviewRequest("/api/hosts/host-a/quadlets//move-preview?targetHostId=host-b",
+		"user123", "host-a", "")
 
 	rr := httptest.NewRecorder()
 	newMovePreviewTestHandler(&fakeQuadletEngine{}, &fakeQuadletEngine{}).MovePreview(rr, req)
@@ -113,9 +113,9 @@ func TestQuadletHandler_MovePreview_MissingQuadletIDIs400(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
 }
 
-func TestQuadletHandler_MovePreview_MissingTargetMachineIDIs400(t *testing.T) {
-	req := movePreviewRequest("/api/machines/machine-a/quadlets/web.container/move-preview",
-		"user123", "machine-a", "web.container")
+func TestQuadletHandler_MovePreview_MissingTargetHostIDIs400(t *testing.T) {
+	req := movePreviewRequest("/api/hosts/host-a/quadlets/web.container/move-preview",
+		"user123", "host-a", "web.container")
 
 	rr := httptest.NewRecorder()
 	newMovePreviewTestHandler(&fakeQuadletEngine{}, &fakeQuadletEngine{}).MovePreview(rr, req)
@@ -124,7 +124,7 @@ func TestQuadletHandler_MovePreview_MissingTargetMachineIDIs400(t *testing.T) {
 
 	var errResp moveErrorEnvelope
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &errResp))
-	assert.Equal(t, "MISSING_TARGET_MACHINE_ID", errResp.Error.Code)
+	assert.Equal(t, "MISSING_TARGET_HOST_ID", errResp.Error.Code)
 }
 
 func TestQuadletHandler_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
@@ -138,15 +138,15 @@ func TestQuadletHandler_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
 		},
 	}
 	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
-		"machine-a": sourceEngine,
+		"host-a": sourceEngine,
 	}}
 	lean := NewQuadletService(provider, nil, nil)
 	handler := NewQuadletHandler(lean, NewQuadletTransferService(provider, nil, &fakeAccessRepo{getPermissionFn: func(string, string) (string, error) {
 		return "", nil
 	}}, 0, lean))
 
-	req := movePreviewRequest("/api/machines/machine-a/quadlets/web.container/move-preview?targetMachineId=machine-b",
-		"user123", "machine-a", "web.container")
+	req := movePreviewRequest("/api/hosts/host-a/quadlets/web.container/move-preview?targetHostId=host-b",
+		"user123", "host-a", "web.container")
 
 	rr := httptest.NewRecorder()
 	handler.MovePreview(rr, req)
@@ -169,8 +169,8 @@ func TestQuadletHandler_MovePreview_MissingSourceQuadletIs404(t *testing.T) {
 		return nil, nil
 	}}
 
-	req := movePreviewRequest("/api/machines/machine-a/quadlets/gone.container/move-preview?targetMachineId=machine-b",
-		"user123", "machine-a", "gone.container")
+	req := movePreviewRequest("/api/hosts/host-a/quadlets/gone.container/move-preview?targetHostId=host-b",
+		"user123", "host-a", "gone.container")
 
 	rr := httptest.NewRecorder()
 	newMovePreviewTestHandler(emptyEngine, targetEngine).MovePreview(rr, req)
@@ -185,7 +185,7 @@ func TestQuadletHandler_MovePreview_MissingSourceQuadletIs404(t *testing.T) {
 // --- The transfer handler (copy mode, issue 210) ---
 
 // newMoveTestHandler builds the handler over both quadlet modules with
-// per-machine fake engines, a write-allowing access store, and a succeeding
+// per-host fake engines, a write-allowing access store, and a succeeding
 // SSH exec — the wiring the transfer handler exercises (the target gate,
 // both engine leases, and the post-install reload on the target).
 func newMoveTestHandler(sourceEngine, targetEngine *fakeQuadletEngine) *QuadletHandler {
@@ -202,10 +202,10 @@ func moveTransferSourceFixture() *fakeQuadletEngine {
 
 // moveRequest builds a POST .../move request with the given JSON body.
 func moveRequest(target string, body string) *http.Request {
-	return quadletRequest("POST", target, "user123", "machine-a", "web.container", strings.NewReader(body))
+	return quadletRequest("POST", target, "user123", "host-a", "web.container", strings.NewReader(body))
 }
 
-const moveEndpoint = "/api/machines/machine-a/quadlets/web.container/move"
+const moveEndpoint = "/api/hosts/host-a/quadlets/web.container/move"
 
 func TestQuadletHandler_Move_ReturnsCopiedEnvelope(t *testing.T) {
 	targetEngine := &fakeQuadletEngine{
@@ -219,7 +219,7 @@ func TestQuadletHandler_Move_ReturnsCopiedEnvelope(t *testing.T) {
 		},
 	}
 
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy"}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"copy"}`)
 
 	rr := httptest.NewRecorder()
 	newMoveTestHandler(moveTransferSourceFixture(), targetEngine).Move(rr, req)
@@ -231,14 +231,14 @@ func TestQuadletHandler_Move_ReturnsCopiedEnvelope(t *testing.T) {
 	assert.Equal(t, "web.container", got.ID)
 	assert.Equal(t, "container", got.Resource)
 	assert.Equal(t, MoveStatusCopied, got.Status)
-	assert.Equal(t, "machine-a", got.SourceMachineID)
-	assert.Equal(t, "machine-b", got.TargetMachineID)
+	assert.Equal(t, "host-a", got.SourceHostID)
+	assert.Equal(t, "host-b", got.TargetHostID)
 	assert.Equal(t, "/etc/containers/systemd/web.container", got.Path)
 }
 
 func TestQuadletHandler_Move_MissingQuadletIDIs400(t *testing.T) {
-	req := quadletRequest("POST", "/api/machines/machine-a/quadlets//move", "user123", "machine-a", "",
-		strings.NewReader(`{"targetMachineId":"machine-b","mode":"copy"}`))
+	req := quadletRequest("POST", "/api/hosts/host-a/quadlets//move", "user123", "host-a", "",
+		strings.NewReader(`{"targetHostId":"host-b","mode":"copy"}`))
 
 	rr := httptest.NewRecorder()
 	newMoveTestHandler(&fakeQuadletEngine{}, &fakeQuadletEngine{}).Move(rr, req)
@@ -253,8 +253,8 @@ func TestQuadletHandler_Move_BodyValidationIs400(t *testing.T) {
 		want string
 	}{
 		{name: "malformed JSON", body: `{`, want: "INVALID_REQUEST"},
-		{name: "missing targetMachineId", body: `{"mode":"copy"}`, want: "VALIDATION_FAILED"},
-		{name: "mode other than copy/move", body: `{"targetMachineId":"machine-b","mode":"teleport"}`, want: "VALIDATION_FAILED"},
+		{name: "missing targetHostId", body: `{"mode":"copy"}`, want: "VALIDATION_FAILED"},
+		{name: "mode other than copy/move", body: `{"targetHostId":"host-b","mode":"teleport"}`, want: "VALIDATION_FAILED"},
 	}
 
 	for _, tt := range tests {
@@ -284,19 +284,19 @@ func TestQuadletHandler_Move_TargetAccessDeniedIs403(t *testing.T) {
 		},
 	}
 	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
-		"machine-a": sourceEngine,
+		"host-a": sourceEngine,
 	}}
 	lean := NewQuadletService(provider, testutils.NewMockSSHExec(), lookupForUser("core"))
 	handler := NewQuadletHandler(lean, NewQuadletTransferService(provider, nil, &fakeAccessRepo{
-		getPermissionFn: func(machineID, _ string) (string, error) {
-			if machineID == "machine-b" {
+		getPermissionFn: func(hostID, _ string) (string, error) {
+			if hostID == "host-b" {
 				return models.PermissionRead, nil
 			}
 			return models.PermissionAdmin, nil
 		},
 	}, 0, lean))
 
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy"}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"copy"}`)
 
 	rr := httptest.NewRecorder()
 	handler.Move(rr, req)
@@ -320,7 +320,7 @@ func TestQuadletHandler_Move_CollisionIs409(t *testing.T) {
 		},
 	}
 
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy"}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"copy"}`)
 
 	rr := httptest.NewRecorder()
 	newMoveTestHandler(moveTransferSourceFixture(), targetEngine).Move(rr, req)
@@ -340,8 +340,8 @@ func TestQuadletHandler_Move_MissingSourceQuadletIs404(t *testing.T) {
 		},
 	}
 
-	req := quadletRequest("POST", "/api/machines/machine-a/quadlets/gone.container/move", "user123", "machine-a", "gone.container",
-		strings.NewReader(`{"targetMachineId":"machine-b","mode":"copy"}`))
+	req := quadletRequest("POST", "/api/hosts/host-a/quadlets/gone.container/move", "user123", "host-a", "gone.container",
+		strings.NewReader(`{"targetHostId":"host-b","mode":"copy"}`))
 
 	rr := httptest.NewRecorder()
 	newMoveTestHandler(emptyEngine, &fakeQuadletEngine{}).Move(rr, req)
@@ -380,7 +380,7 @@ func installingTargetFixture() *fakeQuadletEngine {
 }
 
 func TestQuadletHandler_Move_MoveModeReturnsMovedEnvelope(t *testing.T) {
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"move"}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"move"}`)
 
 	rr := httptest.NewRecorder()
 	newMoveTestHandler(movableSourceFixture(), installingTargetFixture()).Move(rr, req)
@@ -410,7 +410,7 @@ func TestQuadletHandler_Move_RunningSourceWithoutStopOrForceIs400(t *testing.T) 
 		},
 	}
 
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"move"}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"move"}`)
 
 	rr := httptest.NewRecorder()
 	newMoveTestHandler(source, target).Move(rr, req)
@@ -431,7 +431,7 @@ func TestQuadletHandler_Move_RemoveFailureReturnsPartialEnvelope(t *testing.T) {
 		return errors.New("source read-only")
 	}
 
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"move"}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"move"}`)
 
 	rr := httptest.NewRecorder()
 	newMoveTestHandler(source, installingTargetFixture()).Move(rr, req)
@@ -480,8 +480,8 @@ Volume=missing.volume:/var/lib/gone
 		},
 	}
 
-	req := movePreviewRequest("/api/machines/machine-a/quadlets/web.container/move-preview?targetMachineId=machine-b",
-		"user123", "machine-a", "web.container")
+	req := movePreviewRequest("/api/hosts/host-a/quadlets/web.container/move-preview?targetHostId=host-b",
+		"user123", "host-a", "web.container")
 
 	rr := httptest.NewRecorder()
 	newMovePreviewTestHandler(sourceEngine, targetEngine).MovePreview(rr, req)
@@ -539,7 +539,7 @@ func TestQuadletHandler_Move_TransfersCompanionsAndHonorsTheFlag(t *testing.T) {
 			},
 		}
 
-		req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy"}`)
+		req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"copy"}`)
 		rr := httptest.NewRecorder()
 		newMoveTestHandler(companionSourceFixture(companionContent), target).Move(rr, req)
 
@@ -563,7 +563,7 @@ func TestQuadletHandler_Move_TransfersCompanionsAndHonorsTheFlag(t *testing.T) {
 			},
 		}
 
-		req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy","transferVolumeQuadlets":false}`)
+		req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"copy","transferVolumeQuadlets":false}`)
 		rr := httptest.NewRecorder()
 		newMoveTestHandler(companionSourceFixture(companionContent), target).Move(rr, req)
 
@@ -591,7 +591,7 @@ func TestQuadletHandler_Move_DifferingCompanionIs409(t *testing.T) {
 		},
 	}
 
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy"}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"copy"}`)
 
 	rr := httptest.NewRecorder()
 	newMoveTestHandler(companionSourceFixture(companionContent), target).Move(rr, req)
@@ -680,7 +680,7 @@ func migrateMoveHandler() (*QuadletHandler, *string) {
 func TestQuadletHandler_Move_MigrateStreamsNDJSON(t *testing.T) {
 	handler, gotImported := migrateMoveHandler()
 
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy","migrateVolumeData":true}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"copy","migrateVolumeData":true}`)
 
 	rr := httptest.NewRecorder()
 	handler.Move(rr, req)
@@ -693,7 +693,7 @@ func TestQuadletHandler_Move_MigrateStreamsNDJSON(t *testing.T) {
 	assert.Equal(t, MoveEventTypeVolume, events[0].Type)
 	assert.Equal(t, MoveVolumePhaseStart, events[0].Phase)
 	assert.Equal(t, "pgdata", events[0].Ref)
-	assert.Equal(t, "machine-a", events[0].MachineID)
+	assert.Equal(t, "host-a", events[0].HostID)
 	assert.NotEmpty(t, events[0].OperationID, "the transport stamps its operation ID")
 	assert.NotEmpty(t, events[0].Timestamp)
 
@@ -710,7 +710,7 @@ func TestQuadletHandler_Move_MigrateStreamsNDJSON(t *testing.T) {
 
 	for _, event := range events {
 		assert.Equal(t, events[0].OperationID, event.OperationID)
-		assert.Equal(t, "machine-a", event.MachineID)
+		assert.Equal(t, "host-a", event.HostID)
 	}
 }
 
@@ -744,7 +744,7 @@ func TestQuadletHandler_Move_MigrateErrorEventTerminal(t *testing.T) {
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite}, testutils.NewMockSSHExec())
 	handler := NewQuadletHandler(lean, transfer)
 
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"copy","migrateVolumeData":true}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"copy","migrateVolumeData":true}`)
 
 	rr := httptest.NewRecorder()
 	handler.Move(rr, req)
@@ -763,7 +763,7 @@ func TestQuadletHandler_Move_MigrateErrorEventTerminal(t *testing.T) {
 // boundary: errors answered BEFORE the stream begins keep the plain JSON
 // envelope, even when the request asked for migration.
 func TestQuadletHandler_Move_MigratePreStreamErrorStaysPlain(t *testing.T) {
-	req := moveRequest(moveEndpoint, `{"targetMachineId":"machine-b","mode":"teleport","migrateVolumeData":true}`)
+	req := moveRequest(moveEndpoint, `{"targetHostId":"host-b","mode":"teleport","migrateVolumeData":true}`)
 
 	rr := httptest.NewRecorder()
 	newMoveTestHandler(&fakeQuadletEngine{}, &fakeQuadletEngine{}).Move(rr, req)

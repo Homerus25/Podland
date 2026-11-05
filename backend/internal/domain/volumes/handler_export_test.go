@@ -12,14 +12,14 @@ import (
 )
 
 // exportRequest serves GET
-// /api/machines/{id}/volumes/{volumeName}/export through the handler
+// /api/hosts/{id}/volumes/{volumeName}/export through the handler
 // with an authenticated test identity.
-func exportRequest(export http.HandlerFunc, machineID, volumeName string) *httptest.ResponseRecorder {
+func exportRequest(export http.HandlerFunc, hostID, volumeName string) *httptest.ResponseRecorder {
 	return testutils.Perform(export, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/" + machineID + "/volumes/" + volumeName + "/export",
+		Path:      "/api/hosts/" + hostID + "/volumes/" + volumeName + "/export",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": machineID, "volumeName": volumeName},
+		URLParams: map[string]string{"id": hostID, "volumeName": volumeName},
 	})
 }
 
@@ -37,7 +37,7 @@ func TestVolumeHandler_Export_Success(t *testing.T) {
 		},
 	}
 
-	w := exportRequest(newTestHandler(engine).Export, "test-machine", "my-volume")
+	w := exportRequest(newTestHandler(engine).Export, "test-host", "my-volume")
 
 	assert.Equal(t, 200, w.Code)
 	assert.Equal(t, "application/x-tar", w.Header().Get("Content-Type"))
@@ -56,7 +56,7 @@ func TestVolumeHandler_Export_NotFound(t *testing.T) {
 		// missing volume.
 	}
 
-	w := exportRequest(newTestHandler(engine).Export, "test-machine", "no-such-volume")
+	w := exportRequest(newTestHandler(engine).Export, "test-host", "no-such-volume")
 
 	assert.Equal(t, 404, w.Code)
 	assert.Contains(t, w.Body.String(), "VOLUME_NOT_FOUND")

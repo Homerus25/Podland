@@ -62,8 +62,8 @@ type removeTerminals struct {
 //     error (issue 263), so a race where the quadlet vanished or its
 //     resource started between the locate and the remove maps the same
 //     way.
-func (s *QuadletService) stopAndRemove(ctx context.Context, userID, machineID, name string, force, stop bool, op string, terminals removeTerminals) error {
-	return s.engines.WithEngine(ctx, userID, machineID, op, func(e QuadletEngine) error {
+func (s *QuadletService) stopAndRemove(ctx context.Context, userID, hostID, name string, force, stop bool, op string, terminals removeTerminals) error {
+	return s.engines.WithEngine(ctx, userID, hostID, op, func(e QuadletEngine) error {
 		list, err := e.List(entities.QuadletListOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to list quadlets: %w", err)
@@ -83,7 +83,7 @@ func (s *QuadletService) stopAndRemove(ctx context.Context, userID, machineID, n
 		}
 
 		if running && stop && !force {
-			if err := s.applyUnitAction(ctx, userID, machineID, actionStop, resolveUnitName(target, name), LifecycleOptions{}); err != nil {
+			if err := s.applyUnitAction(ctx, userID, hostID, actionStop, resolveUnitName(target, name), LifecycleOptions{}); err != nil {
 				return fmt.Errorf("failed to stop quadlet before remove: %w", err)
 			}
 		}

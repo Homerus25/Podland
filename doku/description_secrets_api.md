@@ -2,25 +2,25 @@
 
 Part of the [API contract](description_api.md). See the main document for base URL, common headers, and the error response format.
 
-Secrets live only in the remote machine's podman; the backend proxies podman's service API and persists nothing locally. The permission model maps onto the machine levels:
+Secrets live only in the remote host's podman; the backend proxies podman's service API and persists nothing locally. The permission model maps onto the host levels:
 
 - **read** — see secret **metadata** (name, ID, driver, timestamps, labels)
 - **write** — additionally create and delete secrets
 - **admin** — additionally **reveal secret values** (`?reveal=true`)
 
-**Redaction discipline:** a secret's value reaches the client exactly twice — in the create request and in an admin reveal response. It is never persisted by the backend, never logged at any level, and never appears in any other response (list and metadata inspect responses have no value field at all). The one server-side exception is the quadlet move/copy transfer's opt-in secret phase (issue 215, see the [quadlets doc](description_quadlets_api.md)): a `transferSecrets` request reveals a referenced secret's value on the source — requiring **admin** on the source machine, the same gate as `?reveal=true` — and recreates the secret, value identical, on the target; the value never reaches the client, and each moved secret is audit-logged by name only. The standalone secret copy/move (issue 239, below) is the second server-side exception with the same shape: the transfer reveals the value on the source (admin) and recreates it on the target; the value never reaches the client and the audit event carries the name only.
+**Redaction discipline:** a secret's value reaches the client exactly twice — in the create request and in an admin reveal response. It is never persisted by the backend, never logged at any level, and never appears in any other response (list and metadata inspect responses have no value field at all). The one server-side exception is the quadlet move/copy transfer's opt-in secret phase (issue 215, see the [quadlets doc](description_quadlets_api.md)): a `transferSecrets` request reveals a referenced secret's value on the source — requiring **admin** on the source host, the same gate as `?reveal=true` — and recreates the secret, value identical, on the target; the value never reaches the client, and each moved secret is audit-logged by name only. The standalone secret copy/move (issue 239, below) is the second server-side exception with the same shape: the transfer reveals the value on the source (admin) and recreates it on the target; the value never reaches the client and the audit event carries the name only.
 
 ---
 
 ## Secret Endpoints
 
-### GET /api/machines/{id}/secrets
+### GET /api/hosts/{id}/secrets
 
-List the secrets on a machine. Metadata only: the response can never carry a value.
+List the secrets on a host. Metadata only: the response can never carry a value.
 
 **Authentication:** Required
 
-**Permission:** `read` (any grantee of the machine)
+**Permission:** `read` (any grantee of the host)
 
 **Response (Success - 200):**
 ```json
@@ -39,13 +39,13 @@ List the secrets on a machine. Metadata only: the response can never carry a val
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/secrets/{secretId}
+### GET /api/hosts/{id}/secrets/{secretId}
 
 Inspect a single secret. `{secretId}` may be the secret's name or its ID; podman resolves both.
 
@@ -72,13 +72,13 @@ Inspect a single secret. `{secretId}` may be the secret's name or its ID; podman
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row, or `?reveal=true` below admin)
-- 404: `MACHINE_NOT_FOUND`, `SECRET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `SECRET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/secrets/{secretId}/inspect
+### GET /api/hosts/{id}/secrets/{secretId}/inspect
 
 Inspect a single secret and answer with podman's **raw inspect report** as the top-level JSON body (issue 287) — the entity's own field names (`ID`, `CreatedAt`, `UpdatedAt`, `Spec`), not the mapped DTO the `GET .../secrets/{secretId}` endpoint returns. `{secretId}` may be the secret's name or its ID; podman resolves both.
 
@@ -86,7 +86,7 @@ Inspect a single secret and answer with podman's **raw inspect report** as the t
 
 **Authentication:** Required
 
-**Permission:** `read` (any grantee of the machine)
+**Permission:** `read` (any grantee of the host)
 
 **Response (Success - 200):**
 ```json
@@ -108,15 +108,15 @@ Inspect a single secret and answer with podman's **raw inspect report** as the t
 - 400: `MISSING_SECRET_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `SECRET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `SECRET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/secrets
+### POST /api/hosts/{id}/secrets
 
-Create a secret on a machine. The value is forwarded to podman byte-identical — it is never trimmed or otherwise mutated, and leading/trailing whitespace and embedded newlines are significant.
+Create a secret on a host. The value is forwarded to podman byte-identical — it is never trimmed or otherwise mutated, and leading/trailing whitespace and embedded newlines are significant.
 
 **Authentication:** Required
 
@@ -148,22 +148,22 @@ The response carries only the created ID — never the value.
 - 400: `VALIDATION_FAILED`, `INVALID_REQUEST`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`
-- 409: `SECRET_ALREADY_EXISTS` (a secret with this name already exists on the machine)
+- 404: `HOST_NOT_FOUND`
+- 409: `SECRET_ALREADY_EXISTS` (a secret with this name already exists on the host)
 - 500: `INTERNAL_ERROR` (creation failures surface as `SECRET_CREATION_FAILED` internally; 5xx bodies are rewritten generic)
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### DELETE /api/machines/{id}/secrets/{secretId}
+### DELETE /api/hosts/{id}/secrets/{secretId}
 
-Removes a secret from the machine. The `{secretId}` path segment accepts a secret name or ID. Gated at **write** level: `read` → 403, `write`/`admin` → proceed.
+Removes a secret from the host. The `{secretId}` path segment accepts a secret name or ID. Gated at **write** level: `read` → 403, `write`/`admin` → proceed.
 
 **Responses**
 
 - 204: removed successfully. The response body is **empty** — the frontend (series 170) should invalidate its secrets list on the 204, there is nothing to parse.
 - 403: `ACCESS_DENIED` (caller below write level)
-- 404: `SECRET_NOT_FOUND` (no such secret on the machine)
+- 404: `SECRET_NOT_FOUND` (no such secret on the host)
 - 409: `SECRET_IN_USE` (podman refuses to remove a secret referenced by a container; podman's own refusal message — naming the container that holds the secret — is forwarded in the 409 body since it is a 4xx, not rewritten generic)
 - 500: `INTERNAL_ERROR` (other podman failures; 5xx bodies are rewritten generic)
 - 502: `CONNECTION_FAILED`
@@ -172,25 +172,25 @@ Podman secrets are immutable — an update is a conscious non-goal in v1; replac
 
 ---
 
-### GET /api/machines/{id}/secrets/{secretId}/move-preview
+### GET /api/hosts/{id}/secrets/{secretId}/move-preview
 
-Preview a secret copy/move to another machine (issue 239): the facts the
-transfer dialog must show before confirming — whether the target machine
+Preview a secret copy/move to another host (issue 239): the facts the
+transfer dialog must show before confirming — whether the target host
 already holds a same-named secret, and which source quadlets reference it.
 The `{secretId}` path segment accepts a secret name or ID.
 
 **Authentication:** Required
 
-Read-level access on the source machine suffices (the endpoint mutates
+Read-level access on the source host suffices (the endpoint mutates
 nothing and reveals nothing). The caller additionally needs **at least
-read access on the target machine**: the target's secret store is read
+read access on the target host**: the target's secret store is read
 server-side, and a caller without target access gets the standard
-`ACCESS_DENIED` error — never a false preview. An unknown target machine
+`ACCESS_DENIED` error — never a false preview. An unknown target host
 ID answers `ACCESS_DENIED` the same way (no access row can exist for it);
-`MACHINE_NOT_FOUND` is reserved for the source machine in the path.
+`HOST_NOT_FOUND` is reserved for the source host in the path.
 
 **Query Parameters:**
-- `targetMachineId` (string, required): ID of the target machine the
+- `targetHostId` (string, required): ID of the target host the
   preview refers to.
 
 **Response (Success - 200):**
@@ -201,11 +201,11 @@ ID answers `ACCESS_DENIED` the same way (no access row can exist for it);
 }
 ```
 
-- `collision`: true exactly when the target machine already holds a
+- `collision`: true exactly when the target host already holds a
   secret of the same name. The transfer never overwrites — the flag
   drives the dialog's confirm gate, and the transfer re-checks at
   execution time.
-- `referencingQuadlets`: the source machine's quadlet files whose
+- `referencingQuadlets`: the source host's quadlet files whose
   `Secret=` lines resolve to the secret — the token before the first
   comma, unless it carries `=` (the all-options form, where `source=`
   governs); absolute-path sources are host-path references and never
@@ -213,21 +213,21 @@ ID answers `ACCESS_DENIED` the same way (no access row can exist for it);
   secret copy/move. Empty is `[]`, never `null`.
 
 **Response (Error):**
-- 400: `MISSING_SECRET_ID`, `MISSING_TARGET_MACHINE_ID`
+- 400: `MISSING_SECRET_ID`, `MISSING_TARGET_HOST_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row on the source, or below-read level
   on the target)
-- 404: `MACHINE_NOT_FOUND`, `SECRET_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `SECRET_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED` (source or target unreachable)
 
 ---
 
-### POST /api/machines/{id}/secrets/{secretId}/move
+### POST /api/hosts/{id}/secrets/{secretId}/move
 
-Transfer a secret to another machine (issue 239). The `{secretId}` path
+Transfer a secret to another host (issue 239). The `{secretId}` path
 segment accepts a secret name or ID; the name is preserved on both
-machines — no rename, no overwrite. Two modes:
+hosts — no rename, no overwrite. Two modes:
 
 - **copy** reveals the value on the source and creates the secret on the
   target, value byte-identical; the source is never touched.
@@ -235,7 +235,7 @@ machines — no rename, no overwrite. Two modes:
   the target holds it (install-first-then-remove). A failed source
   removal does not fail the request: the envelope answers `status:
   "partial"` with the failure's detail in `error` — the secret then
-  exists on both machines and the source side must be cleaned up
+  exists on both hosts and the source side must be cleaned up
   manually. A source secret that vanished between the transfer and the
   removal needs no removal — the answer is `"moved"`.
 
@@ -245,12 +245,12 @@ value never appears in the response; it travelled source→target inside
 the transfer.
 
 **Permission:** the route's write-level middleware proves the caller may
-mutate the SOURCE machine, but the value LEAVES it — a reveal — so the
+mutate the SOURCE host, but the value LEAVES it — a reveal — so the
 service gates the source at **admin** (the reveal gate's own level; a
 below-admin caller gets 403 `ACCESS_DENIED` and podman is never asked
-for the value). The TARGET machine needs **at least write access**,
+for the value). The TARGET host needs **at least write access**,
 enforced in-service against the access store (route middleware only sees
-the route's machine). The operation is therefore effectively
+the route's host). The operation is therefore effectively
 admin-on-source plus write-on-target.
 
 **The collision is re-checked at execution time**: a target secret that
@@ -260,7 +260,7 @@ an overwrite.
 **Request:**
 ```json
 {
-  "targetMachineId": "string (required)",
+  "targetHostId": "string (required)",
   "mode": "string (required, \"copy\" or \"move\")"
 }
 ```
@@ -270,26 +270,26 @@ an overwrite.
 {
   "name": "string",
   "status": "copied|moved|partial",
-  "sourceMachineId": "string",
-  "targetMachineId": "string",
+  "sourceHostId": "string",
+  "targetHostId": "string",
   "error": "string (optional, present only when status is \"partial\")"
 }
 ```
 
 - `error`: the source removal failure's detail; present only with
-  `"partial"`. Clients must narrate the both-machines state from it.
+  `"partial"`. Clients must narrate the both-hosts state from it.
 
 The transfer is audit-logged value-free ("secret transferred": who, from
-which machine, to which machine, by name — never the value).
+which host, to which host, by name — never the value).
 
 **Response (Error):**
 - 400: `MISSING_SECRET_ID`, `INVALID_REQUEST` (malformed body),
-  `VALIDATION_FAILED` (missing `targetMachineId`, or a `mode` other than
+  `VALIDATION_FAILED` (missing `targetHostId`, or a `mode` other than
   `"copy"` / `"move"`)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (below-admin level on the source, or below-write
   level on the target)
-- 404: `MACHINE_NOT_FOUND`, `SECRET_NOT_FOUND` (the source secret
+- 404: `HOST_NOT_FOUND`, `SECRET_NOT_FOUND` (the source secret
   vanished before the reveal)
 - 409: `SECRET_ALREADY_EXISTS` (a same-named secret on the target — the
   execution-time re-check)

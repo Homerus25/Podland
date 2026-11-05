@@ -6,7 +6,7 @@ import { Route, Routes, useParams } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import {
 	containerFixture,
-	machineFixture,
+	hostFixture,
 	networkFixture,
 	rawInspectFixture,
 } from "@/test/factories";
@@ -16,7 +16,7 @@ import { server } from "@/test/server";
 const container = containerFixture({ id: "c-1", names: ["/web"] });
 
 function containersHandler() {
-	return http.get("*/api/machines/m-1/containers", () =>
+	return http.get("*/api/hosts/m-1/containers", () =>
 		HttpResponse.json({
 			containers: [container],
 			total: 1,
@@ -28,13 +28,13 @@ function containersHandler() {
 // The detail page's stand-in: the row click's navigation target, observed
 // through the route params the real detail page reads.
 function DetailProbe() {
-	const { machineId, containerId } = useParams<{
-		machineId: string;
+	const { hostId, containerId } = useParams<{
+		hostId: string;
 		containerId: string;
 	}>();
 	return (
 		<div>
-			<span data-testid="probe-machine">{machineId}</span>
+			<span data-testid="probe-host">{hostId}</span>
 			<span data-testid="probe-container">{containerId}</span>
 		</div>
 	);
@@ -43,14 +43,14 @@ function DetailProbe() {
 // The logs page's stand-in: the logs button's navigation target, observed
 // through the route params the real logs page reads.
 function LogsProbe() {
-	const { machineId, kind, targetId } = useParams<{
-		machineId: string;
+	const { hostId, kind, targetId } = useParams<{
+		hostId: string;
 		kind: string;
 		targetId: string;
 	}>();
 	return (
 		<div>
-			<span data-testid="probe-logs-machine">{machineId}</span>
+			<span data-testid="probe-logs-host">{hostId}</span>
 			<span data-testid="probe-logs-kind">{kind}</span>
 			<span data-testid="probe-logs-target">{targetId}</span>
 		</div>
@@ -61,19 +61,19 @@ function renderContainerList() {
 	renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId"
-				element={<ContainerList machine={machineFixture()} />}
+				path="/hosts/:hostId"
+				element={<ContainerList host={hostFixture()} />}
 			/>
 			<Route
-				path="/machines/:machineId/containers/:containerId"
+				path="/hosts/:hostId/containers/:containerId"
 				element={<DetailProbe />}
 			/>
 			<Route
-				path="/machines/:machineId/logs/:kind/:targetId"
+				path="/hosts/:hostId/logs/:kind/:targetId"
 				element={<LogsProbe />}
 			/>
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1"] } },
 	);
 }
 
@@ -85,7 +85,7 @@ describe("ContainerList row navigation", () => {
 
 		await user.click(await screen.findByTestId("container-row"));
 
-		expect(screen.getByTestId("probe-machine")).toHaveTextContent("m-1");
+		expect(screen.getByTestId("probe-host")).toHaveTextContent("m-1");
 		expect(screen.getByTestId("probe-container")).toHaveTextContent("c-1");
 	});
 
@@ -93,7 +93,7 @@ describe("ContainerList row navigation", () => {
 		let inspectRequests = 0;
 		server.use(
 			containersHandler(),
-			http.get("*/api/machines/m-1/containers/*/inspect", () => {
+			http.get("*/api/hosts/m-1/containers/*/inspect", () => {
 				inspectRequests++;
 				return HttpResponse.json(rawInspectFixture());
 			}),
@@ -109,7 +109,7 @@ describe("ContainerList row navigation", () => {
 
 	it("keeps the row's action buttons from navigating to the detail page", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/containers", () =>
+			http.get("*/api/hosts/m-1/containers", () =>
 				HttpResponse.json({
 					containers: [
 						containerFixture({ id: "c-1", names: ["/web"], state: "running" }),
@@ -119,13 +119,13 @@ describe("ContainerList row navigation", () => {
 					timestamp: "2026-08-26T00:00:00Z",
 				}),
 			),
-			http.post("*/api/machines/m-1/containers/*/stop", () =>
+			http.post("*/api/hosts/m-1/containers/*/stop", () =>
 				HttpResponse.json({ id: "c-1" }),
 			),
-			http.post("*/api/machines/m-1/containers/*/start", () =>
+			http.post("*/api/hosts/m-1/containers/*/start", () =>
 				HttpResponse.json({ id: "c-2" }),
 			),
-			http.get("*/api/machines/m-1/networks", () =>
+			http.get("*/api/hosts/m-1/networks", () =>
 				HttpResponse.json([networkFixture()]),
 			),
 		);
@@ -167,7 +167,7 @@ describe("ContainerList row navigation", () => {
 
 		// The logs button navigates to the logs page (stopPropagation held:
 		// the row click did not fire the detail-page navigation).
-		expect(screen.getByTestId("probe-logs-machine")).toHaveTextContent("m-1");
+		expect(screen.getByTestId("probe-logs-host")).toHaveTextContent("m-1");
 		expect(screen.getByTestId("probe-logs-kind")).toHaveTextContent(
 			"container",
 		);

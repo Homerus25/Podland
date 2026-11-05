@@ -9,11 +9,11 @@ New domain endpoints should be written by reading and mirroring the
 closest sibling that already exists. Rulings so far:
 
 - **JSON endpoints (the endpoint envelope)** — `internal/web.Handle` is
-  the seam every machine-scoped JSON endpoint crosses: it owns identity
+  the seam every host-scoped JSON endpoint crosses: it owns identity
   extraction, the AppError→envelope mapping, the 500 fallback, and JSON
   encode. The volumes handler (`internal/domain/volumes/handler.go`) is
   the reference: a handler is `web.Decode` + URL params + service call
-  inside one `web.Handle` closure; identity/machine guards and error
+  inside one `web.Handle` closure; identity/host guards and error
   envelopes belong to the envelope and the subtree middleware, never to
   handlers. `web.Decode` (`internal/web`) owns the decode+validate
   ritual: a malformed body answers 400 `INVALID_REQUEST` ("Invalid
@@ -33,10 +33,10 @@ closest sibling that already exists. Rulings so far:
   pre-stream reference) responds the returned AppError itself before
   `streaming.HandleProgress`.
   Every domain has migrated (volumes, containers, quadlets, secrets,
-  images, machines subtree): the subtree handlers are envelope closures
-  across the board, machines update/delete/status/access included.
-  JSON endpoints outside the machine subtree (auth
-  Login/Refresh/Logout/Status, users Create, machines Create/List)
+  images, hosts subtree): the subtree handlers are envelope closures
+  across the board, hosts update/delete/status/access included.
+  JSON endpoints outside the host subtree (auth
+  Login/Refresh/Logout/Status, users Create, hosts Create/List)
   cross the user-scoped twin `web.HandleUser` (`internal/web`): it
   passes the context user ID through as-is — empty is a legal state
   (Status answers anonymous callers), the JWT middleware is the
@@ -57,7 +57,7 @@ closest sibling that already exists. Rulings so far:
   logs). `HandleProgress` owns the whole handler-side ritual: the
   operationID minting, the operation slog line (assembled from the
   handler's operation name and attrs over the kit's
-  requestID/machineID/operationID base), the 10-minute write-deadline
+  requestID/hostID/operationID base), the 10-minute write-deadline
   extension (one kit-level constant — an operation-duration fact, §18 —
   applied to every progress stream, so no handler can forget it), the
   NDJSON headers, writer creation (including the early 500
@@ -69,7 +69,7 @@ closest sibling that already exists. Rulings so far:
   end, for progress streams the domain's own complete event; the
   invariant is pinned once in the `streaming` package tests, not per
   domain). The kit mints the operationID and passes the operation
-  context (`OperationContext`: `OperationID`, `MachineID`, `UserID`)
+  context (`OperationContext`: `OperationID`, `HostID`, `UserID`)
   into every domain callback (`Operation`, `CompleteEvent`,
   `ErrorEvent`); handlers shrink to their pre-stream ritual (URL-param
   guards, `web.Decode` 400s, domain forks like the quadlet move's
@@ -119,7 +119,7 @@ closest sibling that already exists. Rulings so far:
   context answers `OPERATION_CANCELLED` without starting the work, a
   mid-call cancellation abandons the goroutine, which keeps running
   untracked on the detached context until it ends naturally or the
-  connection is reaped (idle cleanup, LRU eviction, machine removal;
+  connection is reaped (idle cleanup, LRU eviction, host removal;
   release-while-in-use is the design, not a leak). Placement rule:
   `Cancellable` is called inside the `WithEngine` closure —
   abandonment only helps if it makes that closure return, and the
@@ -164,7 +164,7 @@ closest sibling that already exists. Rulings so far:
   the handler-side log dispatch settled 2026-10-30 (issue 423,
   spec 421).
 - **Binary endpoints (the binary envelope)** — `web.HandleStream`
-  (`internal/web`) is the seam every machine-scoped endpoint whose
+  (`internal/web`) is the seam every host-scoped endpoint whose
   success is a byte stream or multipart upload rather than a DTO
   crosses. The envelope owns identity extraction (a missing identity is
   the same wiring-bug ruling as `web.Handle`: 500 `INTERNAL_ERROR` plus
@@ -227,7 +227,7 @@ closest sibling that already exists. Rulings so far:
 - **Quadlet service split (the lean service and the transfer service)** —
   `internal/domain/quadlets` carries two structs (architecture review
   2026-10-19, candidate C2): the lean `QuadletService` (dependencies: the
-  engine provider, sshExec, machines — rituals: CRUD, lifecycle, logs,
+  engine provider, sshExec, hosts — rituals: CRUD, lifecycle, logs,
   generate, import, auto-update) and `QuadletTransferService`
   (dependencies: the engine provider, secretEngines, accessRepo,
   maxVolumeUploadBytes, plus the lifecycle seam — rituals: the move/copy
@@ -258,8 +258,8 @@ closest sibling that already exists. Rulings so far:
   vocabulary; the classification matrix is pinned once in its suite, the
   domains keep their composition pins. Settled 2026-10-09 (issue 264,
   riding the seam flattened by issue 263).
-- **Cross-machine transfer core** — `internal/transfer` is the one kit
-  behind every cross-machine copy/move (architecture-decisions §19):
+- **Cross-host transfer core** — `internal/transfer` is the one kit
+  behind every cross-host copy/move (architecture-decisions §19):
   `CopyVolumeData` (export→import splice, byte bound, progress),
   `CopyImageData` (the image export→load splice over the same shared
   core, its own 10 GiB bound default), `ProbeVolumeEmpty` (bounded tar
@@ -269,7 +269,7 @@ closest sibling that already exists. Rulings so far:
   line parse and the source→name rules, one seam for the quadlet move's
   preview/plan and the volumes and secrets move previews — the parse
   ritual is pinned once in the kit's suite, the domains pin their
-  projections), and the machine-wide quadlet scan
+  projections), and the host-wide quadlet scan
   (`transfer/quadlet_scan.go`, issue 259: the list → print-each →
   match ritual the volumes and secrets move previews read their
   referencing-quadlet warnings from — the scan ritual is pinned once in
@@ -301,39 +301,39 @@ closest sibling that already exists. Rulings so far:
   `ErrAccessDenied`, never a silent allow/deny guess — has one owner:
   `permission.RequireLevel` (`internal/permission`, with its
   `PermissionGetter` lookup interface). Its callers are the
-  `RequireMachinePermission` middleware (which contributes the
-  HTTP-shaped machine-resolution ritual — 401/400/404 — and maps the
+  `RequireHostPermission` middleware (which contributes the
+  HTTP-shaped host-resolution ritual — 401/400/404 — and maps the
   returned sentinels onto the error envelope the way the web envelope
   unwraps AppErrors), the secrets reveal gate (admin level, fired
   before the connection lease), the quadlet move/copy secret-transfer
-  gate (admin on the SOURCE machine, fired in preflight when
+  gate (admin on the SOURCE host, fired in preflight when
   `transferSecrets` is set — issue 215; a secret's value leaving a
-  machine is a reveal), and the cross-machine transfer gates of the
+  host is a reveal), and the cross-host transfer gates of the
   volumes and secrets copy/move (issues 238/239) and the images copy
-  (issue 375: the target machine's
+  (issue 375: the target host's
   level — read for a preview, write for a transfer — enforced
-  in-service, since route middleware only sees the route's machine;
+  in-service, since route middleware only sees the route's host;
   the secrets transfer additionally re-gates the source at admin,
   the reveal). `models.HasAtLeast` and the level
   constants stay in `models`; `RequireAdmin` is a different domain
   (role, not level) with its own single owner already.
-- **Runtime connection failures** — a persisted machine's podman socket
+- **Runtime connection failures** — a persisted host's podman socket
   unreachable during an operation is 502 `CONNECTION_FAILED`
-  (`appErrors.ErrConnectionFailed`). The cause log (op, machineID,
+  (`appErrors.ErrConnectionFailed`). The cause log (op, hostID,
   userID, cause) lives at the connection seam:
   `connections.Manager.WithConnection` warns and returns the sentinel;
   service call sites never map or log the acquisition error themselves.
-  `ProbeMachine` has no `WithConnection` wrapper: the status endpoint logs
+  `ProbeHost` has no `WithConnection` wrapper: the status endpoint logs
   the probe failure itself (the reason never surfaces to clients —
-  machines can be shared with read-only users).
+  hosts can be shared with read-only users).
   Never a wrapped 500; `errors.go` documents the registration-vs-runtime
   distinction.
-- **Connection seam (the podman prologue)** — every machine-scoped
+- **Connection seam (the podman prologue)** — every host-scoped
   podman call crosses `connections.Manager`
   (`internal/connections/manager.go`); the volumes service is the
   reference for the shape (`internal/domain/volumes/service.go`, `List`):
   hold the result in a closure variable, call the domain's engine
-  provider (`s.engines.WithEngine(ctx, userID, machineID, "domain.Op",
+  provider (`s.engines.WithEngine(ctx, userID, hostID, "domain.Op",
   func(e VolumeEngine) error)`) with an op tag, use the handed engine
   inside, return its error untouched. Each domain declares its own
   caller-width engine interface (no context parameter, single names,
@@ -352,14 +352,14 @@ closest sibling that already exists. Rulings so far:
   disconnect detection; the engine never carries one. Service tests
   exercise real behaviour through a function-field fake engine
   (colocated in the domain's tests); an acquire failure is simulated by
-  the fake provider returning `ErrConnectionFailed`. The machines
-  domain keeps calling `connections.Manager` directly — ProbeMachine and
-  TestConnection are the manager's other entry points. Machine deletion
-  owns full teardown, wired in one place (`MachineService.Delete`):
-  DB row removal first, then the manager's `RemoveMachine` (graceful,
+  the fake provider returning `ErrConnectionFailed`. The hosts
+  domain keeps calling `connections.Manager` directly — ProbeHost and
+  TestConnection are the manager's other entry points. Host deletion
+  owns full teardown, wired in one place (`HostService.Delete`):
+  DB row removal first, then the manager's `RemoveHost` (graceful,
   refcounted eviction of the cached podman connection), then the SSH-exec
-  pool through the machines-local `sshInvalidator` seam (a single
-  `RemoveMachine(machineID string)` method; the shared
+  pool through the hosts-local `sshInvalidator` seam (a single
+  `RemoveHost(hostID string)` method; the shared
   `sshexec.SSHExecInterface` is not widened, and `internal/app` passes
   the real sshexec service). Teardown runs only after a successful DB
   delete — a failed delete evicts nothing — and access rows ride the
@@ -371,13 +371,13 @@ closest sibling that already exists. Rulings so far:
   is nil — so no report-slice type crosses the seam (pods, quadlets,
   volumes, containers; the containers fold settled 2026-10-24, issue
   359).
-- **Resource-cache kit** — `internal/rescache` is the one owner of the per-machine cache lifecycle (architecture review 2026-10-19, candidate C1): acquire with dial dedup (the dial runs outside the lock; concurrent cold acquires for one machine share one dial; dials to different machines never serialize), refcounted release, LRU-idle eviction with the soft cap, idle cleanup that skips in-use entries, graceful `Remove`, fail-fast `Invalidate`/`InvalidateAll`, and an idempotent `Stop` that joins the cleanup goroutine. The podman Connection Cache (`internal/connections`) and the SSH-exec client cache (`internal/sshexec`) are its two adapters: each hands over its dial and close and keeps its own error vocabulary, probe regime, and payload (the connection-context detachment, §4, stays in the connections adapter's dial). The lifecycle's concurrency contract is pinned once in the kit's suite; the adapters' suites pin their projections. §4's wording is unchanged — the kit makes it true by construction for both caches. Settled 2026-10-19 (architecture-review candidate C1).
+- **Resource-cache kit** — `internal/rescache` is the one owner of the per-host cache lifecycle (architecture review 2026-10-19, candidate C1): acquire with dial dedup (the dial runs outside the lock; concurrent cold acquires for one host share one dial; dials to different hosts never serialize), refcounted release, LRU-idle eviction with the soft cap, idle cleanup that skips in-use entries, graceful `Remove`, fail-fast `Invalidate`/`InvalidateAll`, and an idempotent `Stop` that joins the cleanup goroutine. The podman Connection Cache (`internal/connections`) and the SSH-exec client cache (`internal/sshexec`) are its two adapters: each hands over its dial and close and keeps its own error vocabulary, probe regime, and payload (the connection-context detachment, §4, stays in the connections adapter's dial). The lifecycle's concurrency contract is pinned once in the kit's suite; the adapters' suites pin their projections. §4's wording is unchanged — the kit makes it true by construction for both caches. Settled 2026-10-19 (architecture-review candidate C1).
 - **Pure per-domain create builders (the thin lease)** — a create service's request → specgen mapping lives in one pure, package-local builder: request in, populated specgen out, no error — every wire-documented guard is decode-level, owned by `web.Decode` and the request's struct tags, so the builder carries no error vocabulary of its own. One exception, shared by both creates: the memory limit parses through podman's units parser, which cannot be a struct tag, so the unparseable-value branch is the builder's single error (`appErrors.ErrValidationFailed.WithMessage`, the documented 400 `VALIDATION_FAILED`) — the pods twin (issue #361) and the containers twin (issue #377) alike. The service builds the spec before the lease is acquired, so its `WithEngine` closure stays a thin lease: the engine call plus the not-found classification (the domain's 404 forks, with podman's own message riding along as the disambiguator) — a request-local validation failure never costs an engine lease. The mapping pins are direct builder table tests — build the request, call the builder, assert the spec; no handler, no fake engine, no HTTP ride — and the handler create suite keeps only what the wire owns: the 201 response contract, the decode/validation 400 table, the 404 forks, the error surfacing. The containers create (`buildCreateSpec`, `internal/domain/containers/create_spec.go`) is the reference; the pods create is the twin to mirror. Settled 2026-10-24 (architecture review 2026-10-24, issue #361); the containers memory-parse exception settled 2026-10-25 (issue #377).
 
 ## Duplication across domains
 
 A new endpoint that copies an established sibling pattern (error
-envelope, `userID`/`machineID` extraction, JSON encode, test helper
+envelope, `userID`/`hostID` extraction, JSON encode, test helper
 like `recordPruneRequest`) is **correct**, not a smell. Extract shared
 helpers only when a **third** domain copies the same shape. That
 threshold exists to catch drift, not to count copies: when copies have
@@ -441,8 +441,8 @@ is incomplete.
   same fake engine — the handler-test pattern is the engine-seam shape
   and there is no per-domain service mock (see the handler contract
   tests ruling above). `internal/testutils` keeps
-  `MockConnectionManager` for the machines domain, which still crosses
-  the manager directly (its `RemoveMachine` records calls so service
+  `MockConnectionManager` for the hosts domain, which still crosses
+  the manager directly (its `RemoveHost` records calls so service
   tests can pin deletion teardown), and
   `MockSSHExec` for the quadlets lifecycle's systemctl-over-SSH seam,
   plus the cancellation-promptness harness (`CancelStubs` +
@@ -460,18 +460,18 @@ is incomplete.
   prerequisite of `make test-integration`; run contract owned by
   `test/integration/testhost.go`) that the harness boots and tears
   down per run, registering it through the same public API as any
-  machine. Runs are serialized per host — fixed container name, fixed
+  host. Runs are serialized per host — fixed container name, fixed
   published port (127.0.0.1:24422), and cache volumes shared across
   runs — so a second concurrent run fails fast with "another
   integration run is active on this host"; that error is the
-  serialization contract, not a broken environment. Cross-machine
+  serialization contract, not a broken environment. Cross-host
   features get a second, state-independent test host under the same
   contract (name, port 127.0.0.1:24423, own volumes): it is booted
-  lazily by `Suite.RegisterSecondMachine` and paid for only by runs
+  lazily by `Suite.RegisterSecondHost` and paid for only by runs
   that use it (decision recorded in `test/integration/secondhost_test.go`).
   To target an
   externally managed host instead (e.g. a manually started podman
-  machine on macOS), set the `PODLAND_TEST_SSH_*` overrides documented
+  host on macOS), set the `PODLAND_TEST_SSH_*` overrides documented
   in the Makefile's `test-integration` header — the container
   lifecycle is skipped entirely.
 - Every error code the doku lists for an endpoint earns a service-test pin

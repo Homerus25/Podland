@@ -28,17 +28,17 @@ type envelope struct {
 
 // serve runs a Handle endpoint the way the router does: request-scoped
 // context values plus URL params.
-func serve(t *testing.T, handler http.HandlerFunc, userID, machineID string) *httptest.ResponseRecorder {
+func serve(t *testing.T, handler http.HandlerFunc, userID, hostID string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	ctx := contextutils.SetRequestID(context.Background(), "test-request-id")
 	if userID != "" {
 		ctx = contextutils.SetUserID(ctx, userID)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/machines/"+machineID+"/volumes", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/api/hosts/"+hostID+"/volumes", nil).WithContext(ctx)
 
-	if machineID != "" {
-		req.SetPathValue("id", machineID)
+	if hostID != "" {
+		req.SetPathValue("id", hostID)
 	}
 
 	w := httptest.NewRecorder()
@@ -47,19 +47,19 @@ func serve(t *testing.T, handler http.HandlerFunc, userID, machineID string) *ht
 }
 
 func TestHandle_SuccessEncodesDTOWithStatus(t *testing.T) {
-	var gotUserID, gotMachineID string
+	var gotUserID, gotHostID string
 
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (map[string]string, error) {
-			gotUserID, gotMachineID = userID, machineID
+		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (map[string]string, error) {
+			gotUserID, gotHostID = userID, hostID
 			return map[string]string{"name": "my-volume"}, nil
 		})
-	}, "test-user", "test-machine")
+	}, "test-user", "test-host")
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 	assert.Equal(t, "test-user", gotUserID, "closure must receive the context user ID")
-	assert.Equal(t, "test-machine", gotMachineID, "closure must receive the chi machine ID")
+	assert.Equal(t, "test-host", gotHostID, "closure must receive the chi host ID")
 
 	var body map[string]string
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
@@ -68,20 +68,20 @@ func TestHandle_SuccessEncodesDTOWithStatus(t *testing.T) {
 
 func TestHandle_CustomSuccessStatus(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (map[string]string, error) {
+		Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, hostID string) (map[string]string, error) {
 			return map[string]string{"created": "true"}, nil
 		})
-	}, "test-user", "test-machine")
+	}, "test-user", "test-host")
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 }
 
 func TestHandle_NoContentSkipsEncoding(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+		Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, hostID string) (struct{}, error) {
 			return struct{}{}, nil
 		})
-	}, "test-user", "test-machine")
+	}, "test-user", "test-host")
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.Empty(t, w.Body.String(), "204 responses must have an empty body")
@@ -89,10 +89,10 @@ func TestHandle_NoContentSkipsEncoding(t *testing.T) {
 
 func TestHandle_AppErrorMapsToItsStatusAndCode(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (map[string]string, error) {
+		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (map[string]string, error) {
 			return nil, appErrors.ErrVolumeNotFound
 		})
-	}, "test-user", "test-machine")
+	}, "test-user", "test-host")
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
@@ -104,10 +104,10 @@ func TestHandle_AppErrorMapsToItsStatusAndCode(t *testing.T) {
 
 func TestHandle_WrappedAppErrorIsUnwrapped(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (map[string]string, error) {
+		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (map[string]string, error) {
 			return nil, fmt.Errorf("listing volumes: %w", appErrors.ErrVolumeInUse)
 		})
-	}, "test-user", "test-machine")
+	}, "test-user", "test-host")
 
 	assert.Equal(t, http.StatusConflict, w.Code, "wrapped AppErrors must keep their status")
 
@@ -118,10 +118,10 @@ func TestHandle_WrappedAppErrorIsUnwrapped(t *testing.T) {
 
 func TestHandle_PlainErrorFallsBackTo500WithGenericMessage(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (map[string]string, error) {
+		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (map[string]string, error) {
 			return nil, errors.New("boom with secret detail")
 		})
-	}, "test-user", "test-machine")
+	}, "test-user", "test-host")
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
@@ -135,11 +135,11 @@ func TestHandle_PlainErrorFallsBackTo500WithGenericMessage(t *testing.T) {
 
 func TestHandle_MissingUserIDIsAnInvariantViolation(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (map[string]string, error) {
+		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (map[string]string, error) {
 			t.Fatal("closure must not run when the identity invariant is violated")
 			return nil, nil
 		})
-	}, "", "test-machine")
+	}, "", "test-host")
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code,
 		"the subtree middleware guarantees a user ID; a miss is a miswired route, not a client error")
@@ -149,16 +149,16 @@ func TestHandle_MissingUserIDIsAnInvariantViolation(t *testing.T) {
 	assert.Equal(t, "INTERNAL_ERROR", env.Error.Code)
 }
 
-func TestHandle_MissingMachineIDIsAnInvariantViolation(t *testing.T) {
+func TestHandle_MissingHostIDIsAnInvariantViolation(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (map[string]string, error) {
+		Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (map[string]string, error) {
 			t.Fatal("closure must not run when the identity invariant is violated")
 			return nil, nil
 		})
 	}, "test-user", "")
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code,
-		"the subtree middleware guarantees a machine ID; a miss is a miswired route, not a client error")
+		"the subtree middleware guarantees a host ID; a miss is a miswired route, not a client error")
 }
 
 // HandleStream pins — the binary twin carries the envelope's error side
@@ -166,18 +166,18 @@ func TestHandle_MissingMachineIDIsAnInvariantViolation(t *testing.T) {
 // six behaviors are pinned here once, exactly like Handle's above.
 
 func TestHandleStream_SuccessPassesThroughUnmodified(t *testing.T) {
-	var gotUserID, gotMachineID string
+	var gotUserID, gotHostID string
 
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
-			gotUserID, gotMachineID = userID, machineID
+		HandleStream(w, r, func(ctx context.Context, userID, hostID string) error {
+			gotUserID, gotHostID = userID, hostID
 			w.Header().Set("Content-Type", "application/x-tar")
 			w.Header().Set("Content-Disposition", `attachment; filename="my-volume.tar"`)
 			w.WriteHeader(http.StatusOK)
 			_, err := w.Write([]byte("tar-bytes"))
 			return err
 		})
-	}, "test-user", "test-machine")
+	}, "test-user", "test-host")
 
 	assert.Equal(t, http.StatusOK, w.Code, "the closure's status must not be overridden")
 	assert.Equal(t, "application/x-tar", w.Header().Get("Content-Type"),
@@ -186,15 +186,15 @@ func TestHandleStream_SuccessPassesThroughUnmodified(t *testing.T) {
 	assert.Equal(t, "tar-bytes", w.Body.String(),
 		"the closure's bytes must reach the response unmodified (no JSON encode)")
 	assert.Equal(t, "test-user", gotUserID, "closure must receive the context user ID")
-	assert.Equal(t, "test-machine", gotMachineID, "closure must receive the chi machine ID")
+	assert.Equal(t, "test-host", gotHostID, "closure must receive the chi host ID")
 }
 
 func TestHandleStream_AppErrorMapsToItsStatusAndCode(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+		HandleStream(w, r, func(ctx context.Context, userID, hostID string) error {
 			return appErrors.ErrVolumeNotFound
 		})
-	}, "test-user", "test-machine")
+	}, "test-user", "test-host")
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 
@@ -206,10 +206,10 @@ func TestHandleStream_AppErrorMapsToItsStatusAndCode(t *testing.T) {
 
 func TestHandleStream_WrappedAppErrorIsUnwrapped(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+		HandleStream(w, r, func(ctx context.Context, userID, hostID string) error {
 			return fmt.Errorf("exporting volume: %w", appErrors.ErrVolumeNotFound)
 		})
-	}, "test-user", "test-machine")
+	}, "test-user", "test-host")
 
 	assert.Equal(t, http.StatusNotFound, w.Code, "wrapped AppErrors must keep their status")
 
@@ -220,10 +220,10 @@ func TestHandleStream_WrappedAppErrorIsUnwrapped(t *testing.T) {
 
 func TestHandleStream_PlainErrorFallsBackTo500WithGenericMessage(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+		HandleStream(w, r, func(ctx context.Context, userID, hostID string) error {
 			return errors.New("boom with secret detail")
 		})
-	}, "test-user", "test-machine")
+	}, "test-user", "test-host")
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 
@@ -237,11 +237,11 @@ func TestHandleStream_PlainErrorFallsBackTo500WithGenericMessage(t *testing.T) {
 
 func TestHandleStream_MissingUserIDIsAnInvariantViolation(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+		HandleStream(w, r, func(ctx context.Context, userID, hostID string) error {
 			t.Fatal("closure must not run when the identity invariant is violated")
 			return nil
 		})
-	}, "", "test-machine")
+	}, "", "test-host")
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code,
 		"the subtree middleware guarantees a user ID; a miss is a miswired route, not a client error")
@@ -251,16 +251,16 @@ func TestHandleStream_MissingUserIDIsAnInvariantViolation(t *testing.T) {
 	assert.Equal(t, "INTERNAL_ERROR", env.Error.Code)
 }
 
-func TestHandleStream_MissingMachineIDIsAnInvariantViolation(t *testing.T) {
+func TestHandleStream_MissingHostIDIsAnInvariantViolation(t *testing.T) {
 	w := serve(t, func(w http.ResponseWriter, r *http.Request) {
-		HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+		HandleStream(w, r, func(ctx context.Context, userID, hostID string) error {
 			t.Fatal("closure must not run when the identity invariant is violated")
 			return nil
 		})
 	}, "test-user", "")
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code,
-		"the subtree middleware guarantees a machine ID; a miss is a miswired route, not a client error")
+		"the subtree middleware guarantees a host ID; a miss is a miswired route, not a client error")
 
 	var env envelope
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env))
@@ -268,7 +268,7 @@ func TestHandleStream_MissingMachineIDIsAnInvariantViolation(t *testing.T) {
 }
 
 // HandleUser pins — the user-scoped twin for JSON endpoints outside the
-// machine subtree (auth, users, machines Create/List). Same error
+// host subtree (auth, users, hosts Create/List). Same error
 // mapping and success write as Handle, but the user ID is passed through
 // as-is: empty is a legal state (the auth surface answers anonymous
 // callers), so there is no identity invariant and the closure always
@@ -395,7 +395,7 @@ type decodeTarget struct {
 }
 
 func decodeRequest(body string) *http.Request {
-	return httptest.NewRequest(http.MethodPost, "/api/machines/m/volumes", strings.NewReader(body))
+	return httptest.NewRequest(http.MethodPost, "/api/hosts/m/volumes", strings.NewReader(body))
 }
 
 func TestDecode_MalformedBodyAnswersInvalidRequest(t *testing.T) {
@@ -502,7 +502,7 @@ func TestDecode_BodyAtCapDecodesNormally(t *testing.T) {
 func TestDecode_OversizedBodyIsCutOffAtTheReader(t *testing.T) {
 	w := httptest.NewRecorder()
 	counter := &countingReader{src: strings.NewReader(oversizedBody(MaxBodyBytes + 2<<20))}
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/m/volumes", counter)
+	req := httptest.NewRequest(http.MethodPost, "/api/hosts/m/volumes", counter)
 
 	var target decodeTarget
 	appErr := Decode(w, req, &target)
@@ -522,7 +522,7 @@ func TestDecode_OversizedBodyIsCutOffAtTheReader(t *testing.T) {
 // paramRequest builds a request carrying URL params the way the
 // router would.
 func paramRequest(params map[string]string) *http.Request {
-	req := httptest.NewRequest(http.MethodGet, "/api/machines/m/volumes", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/hosts/m/volumes", nil)
 	for name, value := range params {
 		req.SetPathValue(name, value)
 	}
@@ -577,25 +577,25 @@ func TestQueryInt_ParsedValueWinsOverDefault(t *testing.T) {
 }
 
 func TestQueryString_PresentValuePassesThrough(t *testing.T) {
-	value, appErr := QueryString(queryRequest("targetMachineId=machine-b"), "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+	value, appErr := QueryString(queryRequest("targetHostId=host-b"), "targetHostId", "MISSING_TARGET_HOST_ID")
 
 	assert.Nil(t, appErr)
-	assert.Equal(t, "machine-b", value)
+	assert.Equal(t, "host-b", value)
 }
 
 func TestQueryString_EmptyValueAnswersGuardWithDerivedMessage(t *testing.T) {
-	value, appErr := QueryString(queryRequest(""), "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+	value, appErr := QueryString(queryRequest(""), "targetHostId", "MISSING_TARGET_HOST_ID")
 
 	require.NotNil(t, appErr)
 	assert.Empty(t, value)
 	assert.Equal(t, http.StatusBadRequest, appErr.Status)
-	assert.Equal(t, "MISSING_TARGET_MACHINE_ID", appErr.Code)
-	assert.Equal(t, "Target machine ID is required", appErr.Message,
+	assert.Equal(t, "MISSING_TARGET_HOST_ID", appErr.Code)
+	assert.Equal(t, "Target host ID is required", appErr.Message,
 		"the message must be derived from the code")
 }
 
 func queryRequest(query string) *http.Request {
-	target := "/api/machines/m/volumes"
+	target := "/api/hosts/m/volumes"
 	if query != "" {
 		target += "?" + query
 	}

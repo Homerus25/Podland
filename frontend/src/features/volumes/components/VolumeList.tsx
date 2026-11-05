@@ -10,7 +10,7 @@ import {
 	Tr,
 	useToast,
 } from "@chakra-ui/react";
-import { can } from "@features/machines/permissions";
+import { can } from "@features/hosts/permissions";
 import { CreateVolumeDialog } from "@features/volumes/components/CreateVolumeDialog";
 import { MoveVolumeDialog } from "@features/volumes/components/MoveVolumeDialog";
 import {
@@ -33,7 +33,7 @@ import {
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { downloadFile } from "@shared/utils/download";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
@@ -182,8 +182,7 @@ function DeleteVolumeModal({
 			body={
 				<>
 					<Text>
-						Delete volume {volume.name} from this machine? This cannot be
-						undone.
+						Delete volume {volume.name} from this host? This cannot be undone.
 					</Text>
 					<Checkbox
 						mt={3}
@@ -211,7 +210,7 @@ function DeleteVolumeModal({
 }
 
 // The prune adapter over PruneReportDialog, the twin of the images one:
-// the module owns the machinery, this adapter hands over the noun and the
+// the module owns the plumbing, this adapter hands over the noun and the
 // two entry accessors that make a volume entry a report row.
 function PruneVolumesModal({
 	onClose,
@@ -362,19 +361,19 @@ function PopulateVolumeModal({
 	);
 }
 
-// The Volumes tab body. The toolbar/triad/table machinery, the plural
+// The Volumes tab body. The toolbar/triad/table plumbing, the plural
 // testids, and the hint swap are ResourceList's; this adapter owns only the
 // columns, the clickable row navigating to the volume's detail page, and
 // the create, export, populate, move/copy, delete, and prune feature code.
-export function VolumeList({ machine }: { machine: Machine }) {
-	const machineId = machine.id;
+export function VolumeList({ host }: { host: Host }) {
+	const hostId = host.id;
 	const navigate = useNavigate();
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
-	const { data: volumes, isPending, error } = useVolumes(machineId);
-	const createVolume = useCreateVolume(machineId);
-	const deleteVolume = useDeleteVolume(machineId);
-	const pruneVolumes = usePruneVolumes(machineId);
-	const populateVolume = usePopulateVolume(machineId);
+	const { data: volumes, isPending, error } = useVolumes(hostId);
+	const createVolume = useCreateVolume(hostId);
+	const deleteVolume = useDeleteVolume(hostId);
+	const pruneVolumes = usePruneVolumes(hostId);
+	const populateVolume = usePopulateVolume(hostId);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [populateTarget, setPopulateTarget] = useState<VolumeSummary | null>(
 		null,
@@ -390,7 +389,7 @@ export function VolumeList({ machine }: { machine: Machine }) {
 		setExportingName(volume.name);
 		try {
 			await downloadFile(
-				volumeExportUrl(machineId, volume.name),
+				volumeExportUrl(hostId, volume.name),
 				`${volume.name}.tar`,
 			);
 		} catch (error) {
@@ -405,7 +404,7 @@ export function VolumeList({ machine }: { machine: Machine }) {
 		}
 	};
 
-	const canManage = can(machine, "manage-volumes");
+	const canManage = can(host, "manage-volumes");
 
 	return (
 		<>
@@ -434,9 +433,7 @@ export function VolumeList({ machine }: { machine: Machine }) {
 					<VolumeRow
 						key={volume.name}
 						volume={volume}
-						onSelect={(name) =>
-							navigate(detailPath(machineId, "volumes", name))
-						}
+						onSelect={(name) => navigate(detailPath(hostId, "volumes", name))}
 						canManage={canManage}
 						onDelete={setPendingDelete}
 						isExporting={exportingName === volume.name}
@@ -490,7 +487,7 @@ export function VolumeList({ machine }: { machine: Machine }) {
 			) : null}
 			{moveTarget ? (
 				<MoveVolumeDialog
-					machine={machine}
+					host={host}
 					volume={moveTarget}
 					onClose={() => setMoveTarget(null)}
 				/>

@@ -21,7 +21,7 @@ func TestContainerService_Delete_Succeeds(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	err := service.Delete(context.Background(), "user", "machine", "container-123", true)
+	err := service.Delete(context.Background(), "user", "host", "container-123", true)
 
 	require.NoError(t, err)
 	assert.True(t, gotForce, "the force flag must reach the engine")
@@ -36,7 +36,7 @@ func TestContainerService_Delete_MapsNotFoundTo404(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		err := service.Delete(context.Background(), "user", "machine", "container-123", false)
+		err := service.Delete(context.Background(), "user", "host", "container-123", false)
 
 		require.ErrorIs(t, err, appErrors.ErrContainerNotFound)
 	})
@@ -48,7 +48,7 @@ func TestContainerService_Delete_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	err := service.Delete(context.Background(), "user", "machine", "container-123", false)
+	err := service.Delete(context.Background(), "user", "host", "container-123", false)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to remove container")

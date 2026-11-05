@@ -19,42 +19,42 @@ import {
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import { useMovePreview } from "@shared/transfers/transferHooks";
 
-export function useImages(machineId: string) {
-	return useAlwaysRefetchListQuery(imagesQueryKey(machineId), () =>
-		listImages(machineId),
+export function useImages(hostId: string) {
+	return useAlwaysRefetchListQuery(imagesQueryKey(hostId), () =>
+		listImages(hostId),
 	);
 }
 
-export function useImage(machineId: string, imageId: string) {
-	return useOneShotQuery(imageQueryKey(machineId, imageId), () =>
-		getImage(machineId, imageId),
+export function useImage(hostId: string, imageId: string) {
+	return useOneShotQuery(imageQueryKey(hostId, imageId), () =>
+		getImage(hostId, imageId),
 	);
 }
 
 export function useImageInspect(
-	machineId: string,
+	hostId: string,
 	imageId: string,
 	options?: { enabled?: boolean },
 ) {
 	return useOneShotQuery(
-		imageInspectQueryKey(machineId, imageId),
-		() => inspectImage(machineId, imageId),
+		imageInspectQueryKey(hostId, imageId),
+		() => inspectImage(hostId, imageId),
 		options,
 	);
 }
 
-export function useDeleteImage(machineId: string) {
+export function useDeleteImage(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"images",
 		({ imageId, force }: { imageId: string; force?: boolean }) =>
-			deleteImage(machineId, imageId, force ?? false),
+			deleteImage(hostId, imageId, force ?? false),
 	);
 }
 
-export function usePruneImages(machineId: string) {
-	return useListInvalidatingMutation(machineId, "images", () =>
-		pruneImages(machineId),
+export function usePruneImages(hostId: string) {
+	return useListInvalidatingMutation(hostId, "images", () =>
+		pruneImages(hostId),
 	);
 }
 
@@ -64,13 +64,13 @@ export function usePruneImages(machineId: string) {
 // module's (issue 273); this adapter supplies the key constructor and
 // fetcher.
 export function useImageCopyPreview(
-	machineId: string,
+	hostId: string,
 	imageId: string,
-	targetMachineId: string | null,
+	targetHostId: string | null,
 ) {
 	return useMovePreview(
-		(target) => imageCopyPreviewQueryKey(machineId, imageId, target),
-		(target) => getImageCopyPreview(machineId, imageId, target),
-		targetMachineId,
+		(target) => imageCopyPreviewQueryKey(hostId, imageId, target),
+		(target) => getImageCopyPreview(hostId, imageId, target),
+		targetHostId,
 	);
 }

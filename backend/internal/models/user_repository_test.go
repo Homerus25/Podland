@@ -14,7 +14,7 @@ import (
 // newTestDB opens a temp SQLite database and runs the real migrations,
 // so repository tests exercise the actual schema (including column
 // defaults) rather than hand-rolled CREATE TABLEs. Shared by the user
-// and machine-access repository tests.
+// and host-access repository tests.
 func newTestDB(t *testing.T, filename string) *sql.DB {
 	t.Helper()
 

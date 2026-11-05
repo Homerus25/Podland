@@ -38,92 +38,89 @@ import {
 } from "@shared/transfers/transferHooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-export function useQuadlets(machineId: string) {
-	return useAlwaysRefetchListQuery(quadletsQueryKey(machineId), () =>
-		listQuadlets(machineId),
+export function useQuadlets(hostId: string) {
+	return useAlwaysRefetchListQuery(quadletsQueryKey(hostId), () =>
+		listQuadlets(hostId),
 	);
 }
 
-export function useCreateQuadlet(machineId: string) {
+export function useCreateQuadlet(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"quadlets",
-		(input: CreateQuadletInput) => createQuadlet(machineId, input),
+		(input: CreateQuadletInput) => createQuadlet(hostId, input),
 	);
 }
 
 // Generating a quadlet from an existing resource installs nothing on the
-// machine, so it rides a plain mutation (spec #402 ticket #406); the save
+// host, so it rides a plain mutation (spec #402 ticket #406); the save
 // that follows is a regular create through useCreateQuadlet.
-export function useGenerateQuadlet(machineId: string) {
+export function useGenerateQuadlet(hostId: string) {
 	return useMutation({
-		mutationFn: (input: GenerateQuadletInput) =>
-			generateQuadlet(machineId, input),
+		mutationFn: (input: GenerateQuadletInput) => generateQuadlet(hostId, input),
 	});
 }
 
 // One-shot: the editor must reopen on the file's current content, so a
 // reopen after a save refetches instead of reseeding the form with the
 // pre-edit file.
-export function useQuadlet(machineId: string, quadletId: string) {
-	return useOneShotQuery(quadletQueryKey(machineId, quadletId), () =>
-		getQuadlet(machineId, quadletId),
+export function useQuadlet(hostId: string, quadletId: string) {
+	return useOneShotQuery(quadletQueryKey(hostId, quadletId), () =>
+		getQuadlet(hostId, quadletId),
 	);
 }
 
 // A content update can change the quadlet's systemd state, so the list
 // refetches on success.
-export function useUpdateQuadlet(machineId: string) {
+export function useUpdateQuadlet(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"quadlets",
 		({ quadletId, content }: { quadletId: string } & UpdateQuadletInput) =>
-			updateQuadlet(machineId, quadletId, { content }),
+			updateQuadlet(hostId, quadletId, { content }),
 	);
 }
 
-// A delete removes the unit from the machine, so the list refetches on
+// A delete removes the unit from the host, so the list refetches on
 // success and the quadlet disappears.
-export function useDeleteQuadlet(machineId: string) {
+export function useDeleteQuadlet(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"quadlets",
 		({ quadletId, ...options }: { quadletId: string } & DeleteQuadletOptions) =>
-			deleteQuadlet(machineId, quadletId, options),
+			deleteQuadlet(hostId, quadletId, options),
 	);
 }
 
 // Lifecycle actions change the unit's systemd state, so the list refetches on
-// success and the state badge reflects what the machine now reports.
-export function useStartQuadlet(machineId: string) {
-	return useListInvalidatingMutation(
-		machineId,
-		"quadlets",
-		(quadletId: string) => startQuadlet(machineId, quadletId),
+// success and the state badge reflects what the host now reports.
+export function useStartQuadlet(hostId: string) {
+	return useListInvalidatingMutation(hostId, "quadlets", (quadletId: string) =>
+		startQuadlet(hostId, quadletId),
 	);
 }
 
-export function useStopQuadlet(machineId: string) {
+export function useStopQuadlet(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"quadlets",
 		({
 			quadletId,
 			...options
 		}: { quadletId: string } & QuadletLifecycleOptions) =>
-			stopQuadlet(machineId, quadletId, options),
+			stopQuadlet(hostId, quadletId, options),
 	);
 }
 
-export function useRestartQuadlet(machineId: string) {
+export function useRestartQuadlet(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"quadlets",
 		({
 			quadletId,
 			...options
 		}: { quadletId: string } & QuadletLifecycleOptions) =>
-			restartQuadlet(machineId, quadletId, options),
+			restartQuadlet(hostId, quadletId, options),
 	);
 }
 
@@ -133,18 +130,18 @@ export function useRestartQuadlet(machineId: string) {
 // transfer-hooks module's (issue 273); this adapter supplies the key
 // constructor and fetcher.
 export function useQuadletMovePreview(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
-	targetMachineId: string | null,
+	targetHostId: string | null,
 ) {
 	return useMovePreview(
-		(target) => quadletMovePreviewQueryKey(machineId, quadletId, target),
-		(target) => quadletMovePreview(machineId, quadletId, target),
-		targetMachineId,
+		(target) => quadletMovePreviewQueryKey(hostId, quadletId, target),
+		(target) => quadletMovePreview(hostId, quadletId, target),
+		targetHostId,
 	);
 }
 
-// Compose-to-quadlet conversion touches no machine data, so it rides a
+// Compose-to-quadlet conversion touches no host data, so it rides a
 // plain mutation — never a cached query (spec #336).
 export function useConvertCompose() {
 	return useMutation({
@@ -152,32 +149,32 @@ export function useConvertCompose() {
 	});
 }
 
-// Installing the converted quadlets changes the machine's quadlet list, so
+// Installing the converted quadlets changes the host's quadlet list, so
 // the list refetches on success (spec #336).
-export function useImportQuadlets(machineId: string) {
+export function useImportQuadlets(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"quadlets",
-		(request: QuadletImportRequest) => importQuadlets(machineId, request),
+		(request: QuadletImportRequest) => importQuadlets(hostId, request),
 	);
 }
 
-// A move/copy touches two machines: the quadlet leaves the source and (in
+// A move/copy touches two hosts: the quadlet leaves the source and (in
 // move mode) is gone from it, while the target gains it. The response carries
-// both machine ids, so both lists invalidate from what the server answered
-// rather than from closure assumptions — the both-machines rule the shared
+// both host ids, so both lists invalidate from what the server answered
+// rather than from closure assumptions — the both-hosts rule the shared
 // transfer-hooks module owns (issue 273), called from this onSuccess and from
 // the stream factory's complete handler alike. A "partial" result is still a
 // success-shaped answer — the target install stands — so both lists refresh
 // there too.
-export function useMoveQuadlet(machineId: string) {
+export function useMoveQuadlet(hostId: string) {
 	const queryClient = useQueryClient();
 	return useMutation({
 		mutationFn: ({
 			quadletId,
 			...input
 		}: { quadletId: string } & QuadletMoveInput) =>
-			moveQuadlet(machineId, quadletId, input),
+			moveQuadlet(hostId, quadletId, input),
 		onSuccess: (result) => {
 			invalidateMoveResult(queryClient, result, "quadlets");
 		},

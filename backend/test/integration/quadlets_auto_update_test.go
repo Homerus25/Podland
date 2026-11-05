@@ -16,8 +16,8 @@ import (
 
 // Test_Integration_Quadlets_AutoUpdate closes out the quadlet auto-update
 // epic (190-04): end-to-end coverage of
-// POST /api/machines/{id}/quadlets/auto-update against the real podman
-// machine, in --dry-run mode only. Real update runs hit live registries
+// POST /api/hosts/{id}/quadlets/auto-update against the real podman
+// host, in --dry-run mode only. Real update runs hit live registries
 // and mutate containers — explicitly out of scope for the harness.
 //
 // podman auto-update only considers units that declare an update policy,
@@ -41,23 +41,23 @@ func Test_Integration_Quadlets_AutoUpdate(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerQuadletsSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// The endpoint shells out to `podman auto-update` over SSH as the
-	// machine's SSH user; same transport preconditions as the lifecycle
+	// host's SSH user; same transport preconditions as the lifecycle
 	// slice (user systemd must be usable for the fixture unit to run).
 	requireUserSystemd(t)
 
 	ensureBusyboxImage(t)
 
-	// Run-scoped fixture: file on the remote machine becomes
+	// Run-scoped fixture: file on the remote host becomes
 	// `<name>.container`, the unit `<name>.service`, and the spawned
 	// container `systemd-<name>` (podman quadlet naming).
 	quadletName := "it-" + suite.RunID + "-autoupd"
 	quadletID := quadletName + ".container"
 
 	autoUpdatePath := func(query string) string {
-		u := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/auto-update"
+		u := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/auto-update"
 		if query != "" {
 			u += "?" + query
 		}
@@ -67,7 +67,7 @@ func Test_Integration_Quadlets_AutoUpdate(t *testing.T) {
 	// Per-test cleanup, registered before create so it runs even if a
 	// later phase fails. Best-effort; the sweep is the abort backstop.
 	t.Cleanup(func() {
-		forceDeleteQuadlet(t, machineID, quadletID)
+		forceDeleteQuadlet(t, hostID, quadletID)
 		removeSpawnedContainer(t, quadletName)
 	})
 
@@ -75,7 +75,7 @@ func Test_Integration_Quadlets_AutoUpdate(t *testing.T) {
 	//
 	// AutoUpdate=registry is what makes this unit visible to
 	// `podman auto-update`; without it the endpoint is a no-op.
-	createQuadlet(t, machineID, quadletCreateBody{
+	createQuadlet(t, hostID, quadletCreateBody{
 		Name:     quadletName,
 		Resource: "container",
 		// A policy-less short name ("busybox") is refused at start:
@@ -86,8 +86,8 @@ AutoUpdate=registry
 Exec=sh -c "sleep 3600"
 `,
 	})
-	startQuadlet(t, machineID, quadletID)
-	waitForQuadletRunning(t, machineID, quadletID,
+	startQuadlet(t, hostID, quadletID)
+	waitForQuadletRunning(t, hostID, quadletID,
 		"auto-update slice setup: fixture quadlet must be running to be visible to podman auto-update")
 
 	// --- AC: unauthenticated request is rejected ----------------------
@@ -185,7 +185,7 @@ Exec=sh -c "sleep 3600"
 		require.NoErrorf(t, scanner.Err(), "scanning the NDJSON stream must not fail")
 
 		// The plan event opens the stream and names the fixture's unit with
-		// its image (issue 448): the machine may carry other participating
+		// its image (issue 448): the host may carry other participating
 		// quadlets, so the fixture's entry must be present, not alone.
 		require.Equalf(t, "plan", firstEventType,
 			"the stream must open with a plan event (got %q)", firstEventType)
@@ -225,7 +225,7 @@ Exec=sh -c "sleep 3600"
 
 	// --- AC: dry-run performs no mutation ------------------------------
 	t.Run("DryRunLeavesContainerUnmutated", func(t *testing.T) {
-		got := getQuadlet(t, machineID, quadletID)
+		got := getQuadlet(t, hostID, quadletID)
 		require.Equal(t, "running", got.State,
 			"the dry-run must leave the fixture quadlet running")
 		require.Contains(t, got.Content, "Image=docker.io/library/busybox:latest",

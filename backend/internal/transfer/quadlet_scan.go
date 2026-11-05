@@ -2,7 +2,7 @@ package transfer
 
 import "fmt"
 
-// The machine-wide quadlet scan (issue 259, §19): the list → print-each
+// The host-wide quadlet scan (issue 259, §19): the list → print-each
 // → match ritual that finds the referencing quadlets — the quadlets
 // whose `Volume=` or `Secret=` lines resolve to a given volume or
 // secret. The volumes and secrets move previews each carried a private
@@ -14,7 +14,7 @@ import "fmt"
 // discovery is deliberately NOT a rider of this seam — it keeps its own
 // loop and its stricter fail-on-non-not-found policy (§19).
 
-// QuadletReader is the machine's quadlet-file width the scan needs:
+// QuadletReader is the host's quadlet-file width the scan needs:
 // list the quadlet file names, print one file's content. A domain
 // engine whose methods already match satisfies it structurally; the
 // kit stays pure — no podman imports, no connection wiring, the
@@ -50,9 +50,9 @@ func scanQuadlets(r QuadletReader) ([]string, map[string]string, error) {
 	return names, contents, nil
 }
 
-// QuadletContents prints every quadlet on the machine once into a
+// QuadletContents prints every quadlet on the host once into a
 // name→content map (issue 259, §19) — the contents half of the scan,
-// for callers that need the files themselves. An empty machine answers
+// for callers that need the files themselves. An empty host answers
 // an empty non-nil map; a listed-but-unprintable file is skipped; a
 // list failure is wrapped exactly once.
 func QuadletContents(r QuadletReader) (map[string]string, error) {
@@ -63,7 +63,7 @@ func QuadletContents(r QuadletReader) (map[string]string, error) {
 	return contents, nil
 }
 
-// QuadletsReferencingVolume lists the machine's quadlet files whose
+// QuadletsReferencingVolume lists the host's quadlet files whose
 // `Volume=` lines resolve to the volume (issue 259, §19) — the move
 // previews' warning, never a block. A bare-name source matches
 // directly; a `.volume` companion source resolves through its
@@ -97,7 +97,7 @@ func QuadletsReferencingVolume(r QuadletReader, volumeName string) ([]string, er
 	return referencing, nil
 }
 
-// QuadletsReferencingSecret lists the machine's quadlet files whose
+// QuadletsReferencingSecret lists the host's quadlet files whose
 // `Secret=` lines resolve to the secret (issue 259, §19) — the move
 // previews' warning, never a block. Only a kind-secret reference names
 // a store secret; a hostPath source is read off the host filesystem at

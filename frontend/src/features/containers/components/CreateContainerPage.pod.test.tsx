@@ -24,7 +24,7 @@ import { errorJson } from "@/test/errors";
 // services/containersApi.create.test.ts.
 
 describe("CreateContainerPage pod selector", () => {
-	it("offers the machine's pods in a single-select with No pod as the default", async () => {
+	it("offers the host's pods in a single-select with No pod as the default", async () => {
 		setupCreatePage();
 		renderCreatePage();
 
@@ -82,7 +82,7 @@ describe("CreateContainerPage pod selector", () => {
 
 	it("surfaces a POD_NOT_FOUND create failure in the form's error region", async () => {
 		setupCreatePage(
-			http.post("*/api/machines/m-1/containers", () =>
+			http.post("*/api/hosts/m-1/containers", () =>
 				HttpResponse.json(errorJson("POD_NOT_FOUND", "pod not found"), {
 					status: 404,
 				}),

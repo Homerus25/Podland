@@ -27,8 +27,8 @@ import (
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/domain/auth"
 	"github.com/Homerus25/podland/backend/internal/domain/containers"
+	"github.com/Homerus25/podland/backend/internal/domain/hosts"
 	"github.com/Homerus25/podland/backend/internal/domain/images"
-	"github.com/Homerus25/podland/backend/internal/domain/machines"
 	"github.com/Homerus25/podland/backend/internal/domain/networks"
 	"github.com/Homerus25/podland/backend/internal/domain/pods"
 	"github.com/Homerus25/podland/backend/internal/domain/quadlets"
@@ -146,12 +146,12 @@ func New(cfg *config.Config) (*App, error) {
 	authService = authService.WithLoginBudget(loginBudget).WithChangeBudget(changeBudget).WithRevokedTokenRepo(revokedTokenRepo)
 
 	// Initialize repositories
-	machineRepo := models.NewMachineRepository(db)
-	accessRepo := models.NewMachineAccessRepository(db)
+	hostRepo := models.NewHostRepository(db)
+	accessRepo := models.NewHostAccessRepository(db)
 
 	// Initialize connection manager
 	connectionManager := connections.NewConnectionManager(
-		machineRepo,
+		hostRepo,
 		encryptionService,
 		cfg.Connections.MaxConcurrent,
 		time.Duration(cfg.Connections.TestTimeoutSeconds)*time.Second,
@@ -163,19 +163,19 @@ func New(cfg *config.Config) (*App, error) {
 	// consumed by the quadlet lifecycle endpoints (070-06), which run
 	// `systemctl` over SSH.
 	sshExecService := sshexec.NewService(sshexec.Options{
-		MachineRepo: machineRepo,
-		Encryption:  encryptionService,
+		HostRepo:   hostRepo,
+		Encryption: encryptionService,
 	})
 
-	// Initialize services. sshExecService is handed to the machine service
-	// too: it satisfies the machines package's narrow sshInvalidator seam,
-	// so machine deletion can invalidate the machine's pooled SSH clients.
+	// Initialize services. sshExecService is handed to the host service
+	// too: it satisfies the hosts package's narrow sshInvalidator seam,
+	// so host deletion can invalidate the host's pooled SSH clients.
 	// The host policy is the opt-in egress block on the registration probe
 	// target (pentest 2026-11-01 finding 1): NewHostPolicy(false) is the
-	// disabled zero value, so an unset/false MACHINE_HOST_BLOCK_PRIVATE_
+	// disabled zero value, so an unset/false HOST_BLOCK_PRIVATE_
 	// RANGES leaves registration exactly as before.
-	machineService := machines.NewMachineService(machineRepo, accessRepo, connectionManager, encryptionService, sshExecService).
-		WithHostPolicy(machines.NewHostPolicy(cfg.Machines.HostBlockPrivateRanges))
+	hostService := hosts.NewHostService(hostRepo, accessRepo, connectionManager, encryptionService, sshExecService).
+		WithHostPolicy(hosts.NewHostPolicy(cfg.Hosts.HostBlockPrivateRanges))
 	containerService := containers.NewContainerService(containers.NewContainerEngineProvider(connectionManager))
 	imageService := images.NewImageService(images.NewImageEngineProvider(connectionManager)).
 		WithAccessRepo(accessRepo).
@@ -183,13 +183,13 @@ func New(cfg *config.Config) (*App, error) {
 	// The quadlets domain is two modules (architecture review 2026-10-19,
 	// candidate C2): the lean QuadletService (CRUD, lifecycle, logs,
 	// generate, import, auto-update) and the QuadletTransferService
-	// (cross-machine move/copy), which crosses into the lean half through
+	// (cross-host move/copy), which crosses into the lean half through
 	// the lifecycle seam the lean service satisfies.
 	quadletEngineProvider := quadlets.NewQuadletEngineProvider(connectionManager)
 	// The compose-to-quadlet conversion (spec #336) runs behind the
 	// quadlets domain's ComposeConverter seam; the production adapter
 	// shells out to the podlet binary on PATH.
-	quadletService := quadlets.NewQuadletService(quadletEngineProvider, sshExecService, machineRepo).
+	quadletService := quadlets.NewQuadletService(quadletEngineProvider, sshExecService, hostRepo).
 		WithComposeConverter(quadlets.NewPodletComposeConverter())
 	quadletTransferService := quadlets.NewQuadletTransferService(
 		quadletEngineProvider,
@@ -214,7 +214,7 @@ func New(cfg *config.Config) (*App, error) {
 		WithLoginBudget(loginBudget).
 		WithChangeBudget(changeBudget)
 	userHandler := users.NewUserHandler(userService).WithFailureBudget(resetBudget)
-	machineHandler := machines.NewMachineHandler(machineService)
+	hostHandler := hosts.NewHostHandler(hostService)
 	containerHandler := containers.NewContainerHandler(containerService)
 	imageHandler := images.NewImageHandler(imageService)
 	quadletHandler := quadlets.NewQuadletHandler(quadletService, quadletTransferService)
@@ -246,15 +246,15 @@ func New(cfg *config.Config) (*App, error) {
 	//     route (and its 404s) stays API-shaped while all other paths
 	//     fall back to index.html, mirroring the Caddy container's
 	//     try_files contract this replaces.
-	//   - An API mux with method patterns ("GET /machines") and one
+	//   - An API mux with method patterns ("GET /hosts") and one
 	//     sub-mux per middleware boundary, mounted with its middleware
-	//     wrapping it: apiMux.Handle("/machines/{id}", requireMachine-
-	//     Access(machineMux)) plus the /{id}/ subtree twin — the mount
+	//     wrapping it: apiMux.Handle("/hosts/{id}", requireHost-
+	//     Access(hostMux)) plus the /{id}/ subtree twin — the mount
 	//     matches only when an {id} segment is present, so the slashed
-	//     /machines/ form falls to the API catch-all's 404 instead of
+	//     /hosts/ form falls to the API catch-all's 404 instead of
 	//     reaching the access middleware with an empty id.
 	//   - Sub-muxes are mounted behind http.StripPrefix, so their
-	//     patterns drop the stripped literal: the machine sub-mux is
+	//     patterns drop the stripped literal: the host sub-mux is
 	//     rooted at "{id}" ("GET /{id}/containers"), not at the full
 	//     request path. The {id} segment itself stays in every
 	//     pattern — the standard library has no wildcard-aware
@@ -266,8 +266,8 @@ func New(cfg *config.Config) (*App, error) {
 	//     the SPA's index.html.
 	//
 	// URLs canonicalize on the slashless form: ServeMux's subtree
-	// patterns ("/machines/") would 301 "/machines" to "/machines/"
-	// were the exact method patterns ("GET /machines") not registered
+	// patterns ("/hosts/") would 301 "/hosts" to "/hosts/"
+	// were the exact method patterns ("GET /hosts") not registered
 	// alongside — they are, so slashless serves and slashed forms fall
 	// to the catch-alls' 404 (the frontend was swept: no production
 	// call uses a trailing slash). One accepted quirk: an unregistered
@@ -282,40 +282,40 @@ func New(cfg *config.Config) (*App, error) {
 		apperrors.RespondWithHTTPError(w, http.StatusNotFound, "NOT_FOUND", "Route not found", contextutils.GetRequestID(r.Context()))
 	})
 
-	// The machine sub-mux — the RequireMachineAccess boundary. The
-	// mount strips the /machines literal (http.StripPrefix), so every
+	// The host sub-mux — the RequireHostAccess boundary. The
+	// mount strips the /hosts literal (http.StripPrefix), so every
 	// pattern below is rooted at the {id} segment; the {id} itself
 	// stays in each pattern — the standard library has no
 	// wildcard-aware StripPrefix. Each domain family (containers,
 	// images, quadlets, secrets, volumes, networks, pods) is its own
 	// sub-mux mounted here with the exact + subtree twin — the same
-	// two-pattern trick the machine subtree itself is mounted with —
+	// two-pattern trick the host subtree itself is mounted with —
 	// and carries its own "/" JSON-404 catch-all.
-	machineMux := http.NewServeMux()
+	hostMux := http.NewServeMux()
 
 	// requireWrite is the level-aware gate for mutating routes: the
-	// subtree-level RequireMachineAccess mounting this mux only proves
+	// subtree-level RequireHostAccess mounting this mux only proves
 	// an access row exists, so without this a read-level grantee could
 	// change remote state. Read-only routes (lists, gets, logs,
 	// generate) stay at the subtree level.
 	requireWrite := func(h http.HandlerFunc) http.Handler {
-		return appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)(h)
+		return appmiddleware.RequireHostPermission(hostRepo, accessRepo, models.PermissionWrite)(h)
 	}
 
-	// Machines. Every machine-scoped route below is gated on the
-	// caller's machine_access row: 403 ACCESS_DENIED for a machine
-	// the user cannot use, 404 MACHINE_NOT_FOUND for an unknown ID.
-	// One seam covers the machines endpoints and the containers/
+	// Hosts. Every host-scoped route below is gated on the
+	// caller's host_access row: 403 ACCESS_DENIED for a host
+	// the user cannot use, 404 HOST_NOT_FOUND for an unknown ID.
+	// One seam covers the hosts endpoints and the containers/
 	// images/quadlets/secrets/volumes/networks/pods families that ride
-	// on a machine.
-	machineMux.HandleFunc("GET /{id}", machineHandler.Get)
-	machineMux.HandleFunc("GET /{id}/status", machineHandler.Status)
-	machineMux.HandleFunc("GET /{id}/version", machineHandler.Version)
-	machineMux.HandleFunc("PUT /{id}", machineHandler.Update)
-	machineMux.HandleFunc("DELETE /{id}", machineHandler.Delete)
-	machineMux.HandleFunc("GET /{id}/access", machineHandler.ListAccess)
-	machineMux.HandleFunc("POST /{id}/access", machineHandler.GrantAccess)
-	machineMux.HandleFunc("DELETE /{id}/access/{userId}", machineHandler.RevokeAccess)
+	// on a host.
+	hostMux.HandleFunc("GET /{id}", hostHandler.Get)
+	hostMux.HandleFunc("GET /{id}/status", hostHandler.Status)
+	hostMux.HandleFunc("GET /{id}/version", hostHandler.Version)
+	hostMux.HandleFunc("PUT /{id}", hostHandler.Update)
+	hostMux.HandleFunc("DELETE /{id}", hostHandler.Delete)
+	hostMux.HandleFunc("GET /{id}/access", hostHandler.ListAccess)
+	hostMux.HandleFunc("POST /{id}/access", hostHandler.GrantAccess)
+	hostMux.HandleFunc("DELETE /{id}/access/{userId}", hostHandler.RevokeAccess)
 
 	// Containers. The literal prune and stats routes win over the
 	// {containerId} subtree by ServeMux's literal-before-wildcard
@@ -340,8 +340,8 @@ func New(cfg *config.Config) (*App, error) {
 	containersMux.HandleFunc("GET /{id}/containers/{containerId}/inspect", containerHandler.Inspect)
 	containersMux.HandleFunc("GET /{id}/containers/{containerId}/stats", containerHandler.ContainerStats)
 	containersMux.Handle("/", apiNotFound)
-	machineMux.Handle("/{id}/containers", containersMux)
-	machineMux.Handle("/{id}/containers/", containersMux)
+	hostMux.Handle("/{id}/containers", containersMux)
+	hostMux.Handle("/{id}/containers/", containersMux)
 
 	// Images. Bulk deletion (prune), so write-level like the volume
 	// prune. No shadowing hazard: the parametric routes are a DELETE
@@ -358,21 +358,21 @@ func New(cfg *config.Config) (*App, error) {
 	imagesMux.HandleFunc("GET /{id}/images/{imageId}/inspect", imageHandler.Inspect)
 	// The archive download mutates nothing, so it stays read-level
 	// like the volume export (issue 401): users who can read a
-	// machine's state can read its data.
+	// host's state can read its data.
 	imagesMux.HandleFunc("GET /{id}/images/{imageId}/export", imageHandler.Export)
 	// Copy preview stays read-level: it mutates nothing on the source,
-	// and the target machine's read access is enforced inside the
+	// and the target host's read access is enforced inside the
 	// service against the access store (issue 375).
 	imagesMux.HandleFunc("GET /{id}/images/{imageId}/copy-preview", imageHandler.CopyPreview)
-	// The copy mutates remote state (it loads on the target machine),
-	// so it gates at write level on the source; the target machine's
+	// The copy mutates remote state (it loads on the target host),
+	// so it gates at write level on the source; the target host's
 	// write access is enforced inside the service against the access
-	// store — route middleware only sees the route's machine (issue
+	// store — route middleware only sees the route's host (issue
 	// 375).
 	imagesMux.Handle("POST /{id}/images/{imageId}/copy", requireWrite(imageHandler.Copy))
 	imagesMux.Handle("/", apiNotFound)
-	machineMux.Handle("/{id}/images", imagesMux)
-	machineMux.Handle("/{id}/images/", imagesMux)
+	hostMux.Handle("/{id}/images", imagesMux)
+	hostMux.Handle("/{id}/images/", imagesMux)
 
 	// Quadlets.
 	quadletsMux := http.NewServeMux()
@@ -389,18 +389,18 @@ func New(cfg *config.Config) (*App, error) {
 	quadletsMux.HandleFunc("GET /{id}/quadlets/{quadletId}/logs", quadletHandler.GetLogs)
 	quadletsMux.HandleFunc("POST /{id}/quadlets/{quadletId}/generate", quadletHandler.Generate)
 	// Move/copy preview stays read-level: it mutates nothing on the
-	// source, and the target machine's read access is enforced inside
+	// source, and the target host's read access is enforced inside
 	// the service against the access store (issue 209).
 	quadletsMux.HandleFunc("GET /{id}/quadlets/{quadletId}/move-preview", quadletHandler.MovePreview)
 	// The transfer mutates remote state (it installs on the target
-	// machine), so it gates at write level on the source; the target
-	// machine's write access is enforced inside the service against
+	// host), so it gates at write level on the source; the target
+	// host's write access is enforced inside the service against
 	// the access store — route middleware only sees the route's
-	// machine (issue 210).
+	// host (issue 210).
 	quadletsMux.Handle("POST /{id}/quadlets/{quadletId}/move", requireWrite(quadletHandler.Move))
 	quadletsMux.Handle("/", apiNotFound)
-	machineMux.Handle("/{id}/quadlets", quadletsMux)
-	machineMux.Handle("/{id}/quadlets/", quadletsMux)
+	hostMux.Handle("/{id}/quadlets", quadletsMux)
+	hostMux.Handle("/{id}/quadlets/", quadletsMux)
 
 	// Secrets — read-level subtree: secret METADATA (list + inspect)
 	// is visible to any grantee (subtree membership is the read
@@ -415,21 +415,21 @@ func New(cfg *config.Config) (*App, error) {
 	secretsMux.HandleFunc("GET /{id}/secrets/{secretId}", secretHandler.Get)
 	secretsMux.HandleFunc("GET /{id}/secrets/{secretId}/inspect", secretHandler.Inspect)
 	// Move/copy preview stays read-level: it mutates nothing and
-	// reveals nothing on the source, and the target machine's read
+	// reveals nothing on the source, and the target host's read
 	// access is enforced inside the service against the access store
 	// (issue 239).
 	secretsMux.HandleFunc("GET /{id}/secrets/{secretId}/move-preview", secretHandler.MovePreview)
 	// The transfer mutates remote state (it creates on the target
-	// machine) and the value leaving the source is a reveal, so the
+	// host) and the value leaving the source is a reveal, so the
 	// service gates the source at admin on top of this write gate; the
-	// target machine's write access is enforced inside the service
+	// target host's write access is enforced inside the service
 	// against the access store — route middleware only sees the
-	// route's machine (issue 239).
+	// route's host (issue 239).
 	secretsMux.Handle("POST /{id}/secrets/{secretId}/move", requireWrite(secretHandler.Move))
 	secretsMux.Handle("DELETE /{id}/secrets/{secretId}", requireWrite(secretHandler.Delete))
 	secretsMux.Handle("/", apiNotFound)
-	machineMux.Handle("/{id}/secrets", secretsMux)
-	machineMux.Handle("/{id}/secrets/", secretsMux)
+	hostMux.Handle("/{id}/secrets", secretsMux)
+	hostMux.Handle("/{id}/secrets/", secretsMux)
 
 	// Volumes — list/inspect stay read-level; create (and later
 	// slices) mutate remote state, so they gate at write (200-03). The
@@ -441,24 +441,24 @@ func New(cfg *config.Config) (*App, error) {
 	volumesMux.Handle("POST /{id}/volumes", requireWrite(volumeHandler.Create))
 	volumesMux.Handle("POST /{id}/volumes/prune", requireWrite(volumeHandler.Prune))
 	volumesMux.HandleFunc("GET /{id}/volumes/{volumeName}", volumeHandler.Get)
-	// Export stays read-level: users who can read a machine's state
+	// Export stays read-level: users who can read a host's state
 	// can read its data.
 	volumesMux.HandleFunc("GET /{id}/volumes/{volumeName}/export", volumeHandler.Export)
 	// Move/copy preview stays read-level: it mutates nothing on the
-	// source, and the target machine's read access is enforced inside
+	// source, and the target host's read access is enforced inside
 	// the service against the access store (issue 238).
 	volumesMux.HandleFunc("GET /{id}/volumes/{volumeName}/move-preview", volumeHandler.MovePreview)
 	volumesMux.Handle("POST /{id}/volumes/{volumeName}/populate", requireWrite(volumeHandler.Populate))
 	// The transfer mutates remote state (it creates on the target
-	// machine), so it gates at write level on the source; the target
-	// machine's write access is enforced inside the service against
+	// host), so it gates at write level on the source; the target
+	// host's write access is enforced inside the service against
 	// the access store — route middleware only sees the route's
-	// machine (issue 238).
+	// host (issue 238).
 	volumesMux.Handle("POST /{id}/volumes/{volumeName}/move", requireWrite(volumeHandler.Move))
 	volumesMux.Handle("DELETE /{id}/volumes/{volumeName}", requireWrite(volumeHandler.Delete))
 	volumesMux.Handle("/", apiNotFound)
-	machineMux.Handle("/{id}/volumes", volumesMux)
-	machineMux.Handle("/{id}/volumes/", volumesMux)
+	hostMux.Handle("/{id}/volumes", volumesMux)
+	hostMux.Handle("/{id}/volumes/", volumesMux)
 
 	// Networks — the list and the detail endpoint stay at the
 	// subtree's read level; create, connect, and prune mutate remote
@@ -473,8 +473,8 @@ func New(cfg *config.Config) (*App, error) {
 	networksMux.Handle("POST /{id}/networks", requireWrite(networkHandler.Create))
 	networksMux.Handle("POST /{id}/networks/{networkName}/connect", requireWrite(networkHandler.Connect))
 	networksMux.Handle("/", apiNotFound)
-	machineMux.Handle("/{id}/networks", networksMux)
-	machineMux.Handle("/{id}/networks/", networksMux)
+	hostMux.Handle("/{id}/networks", networksMux)
+	hostMux.Handle("/{id}/networks/", networksMux)
 
 	// Pods — the list, detail, raw inspect, and logs endpoints stay at
 	// the subtree's read level; create, prune, lifecycle actions, and
@@ -496,13 +496,13 @@ func New(cfg *config.Config) (*App, error) {
 	podsMux.Handle("POST /{id}/pods/{podId}/stop", requireWrite(podHandler.Stop))
 	podsMux.Handle("DELETE /{id}/pods/{podId}", requireWrite(podHandler.Remove))
 	podsMux.Handle("/", apiNotFound)
-	machineMux.Handle("/{id}/pods", podsMux)
-	machineMux.Handle("/{id}/pods/", podsMux)
+	hostMux.Handle("/{id}/pods", podsMux)
+	hostMux.Handle("/{id}/pods/", podsMux)
 
-	// The machine subtree's JSON-404 catch-all: unknown paths and
+	// The host subtree's JSON-404 catch-all: unknown paths and
 	// unregistered method+path combinations inside the subtree answer
 	// the envelope, never the SPA shell.
-	machineMux.Handle("/", apiNotFound)
+	hostMux.Handle("/", apiNotFound)
 
 	// The API mux. http.StripPrefix at the root hands it paths without
 	// the /api prefix; its own patterns are method-qualified.
@@ -548,7 +548,7 @@ func New(cfg *config.Config) (*App, error) {
 	apiMux.Handle("POST /auth/password", appmiddleware.JWTMiddleware(authService)(http.HandlerFunc(authHandler.ChangePassword)))
 
 	// Protected group: every route below demands a JWT and rides the
-	// per-user rate limiter. The group is not prefix-shaped (machines,
+	// per-user rate limiter. The group is not prefix-shaped (hosts,
 	// the compose conversion, and users sit side by side), so the
 	// chain wraps each mount point.
 	jwtAuth := appmiddleware.JWTMiddleware(authService)
@@ -560,28 +560,28 @@ func New(cfg *config.Config) (*App, error) {
 		return jwtAuth(perUserLimit(appmiddleware.RequireAdmin(userRepo)(h)))
 	}
 
-	// Machines — Create/List sit outside the RequireMachineAccess
-	// boundary (user-scoped, no machine yet); the {id} subtree is the
-	// machine sub-mux behind it.
-	apiMux.Handle("GET /machines", protected(machineHandler.List))
-	apiMux.Handle("POST /machines", protected(machineHandler.Create))
-	// The {id} subtree mount: the "/machines/{id}" exact pattern and
-	// its "/{id}/" subtree twin both hand the machine sub-mux to the
-	// access middleware — and nothing else does, so "/machines/"
-	// (the slashed form) never reaches RequireMachineAccess with an
+	// Hosts — Create/List sit outside the RequireHostAccess
+	// boundary (user-scoped, no host yet); the {id} subtree is the
+	// host sub-mux behind it.
+	apiMux.Handle("GET /hosts", protected(hostHandler.List))
+	apiMux.Handle("POST /hosts", protected(hostHandler.Create))
+	// The {id} subtree mount: the "/hosts/{id}" exact pattern and
+	// its "/{id}/" subtree twin both hand the host sub-mux to the
+	// access middleware — and nothing else does, so "/hosts/"
+	// (the slashed form) never reaches RequireHostAccess with an
 	// empty id: it falls to the API catch-all's JSON 404. StripPrefix
-	// drops the /machines literal on the way in, so the sub-mux's
+	// drops the /hosts literal on the way in, so the sub-mux's
 	// patterns are rooted at {id}.
-	machineSubtree := jwtAuth(perUserLimit(appmiddleware.RequireMachineAccess(machineRepo, accessRepo)(
-		http.StripPrefix("/machines", machineMux))))
-	apiMux.Handle("/machines/{id}", machineSubtree)
-	apiMux.Handle("/machines/{id}/", machineSubtree)
+	hostSubtree := jwtAuth(perUserLimit(appmiddleware.RequireHostAccess(hostRepo, accessRepo)(
+		http.StripPrefix("/hosts", hostMux))))
+	apiMux.Handle("/hosts/{id}", hostSubtree)
+	apiMux.Handle("/hosts/{id}/", hostSubtree)
 
 	// Quadlets — the compose conversion endpoint is the first
-	// quadlets route OUTSIDE the machine subtree (spec #336):
-	// conversion touches no machine data, so any authenticated user
-	// may call it — no RequireMachineAccess, no write gate. It sits
-	// beside /machines and /users.
+	// quadlets route OUTSIDE the host subtree (spec #336):
+	// conversion touches no host data, so any authenticated user
+	// may call it — no RequireHostAccess, no write gate. It sits
+	// beside /hosts and /users.
 	apiMux.Handle("POST /quadlets/convert-compose", protected(quadletHandler.ConvertCompose))
 
 	// Users — the list endpoint is available to any authenticated
@@ -589,7 +589,7 @@ func New(cfg *config.Config) (*App, error) {
 	// in users.UserService.List). Creating users, changing roles, and
 	// resetting passwords stay admin-only (090-01, 162, 165), the role
 	// change with the self-lockout guard and the password reset with
-	// revoke-all-sessions in the service. All sit beside /machines,
+	// revoke-all-sessions in the service. All sit beside /hosts,
 	// not inside it.
 	apiMux.Handle("GET /users", protected(userHandler.List))
 	apiMux.Handle("POST /users", protectedAdmin(userHandler.Create))
@@ -687,7 +687,7 @@ func (a *App) Close() error {
 // first real POST /api/auth/login can fly.
 //
 // Returning the ID lets the harness seed additional users and reference
-// them by ID downstream — e.g. the machines CRUD/access slice (080-04)
+// them by ID downstream — e.g. the hosts CRUD/access slice (080-04)
 // needs a second user's ID to exercise grant/revoke without minting a
 // token for that user.
 //

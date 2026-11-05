@@ -15,11 +15,11 @@ backend/
 │       └── main.go              # Entry point, server startup, dependency wiring
 ├── internal/
 │   ├── domain/
-│   │   ├── machines/           # Machine management domain
-│   │   │   ├── handler.go      # HTTP handlers for machine endpoints
-│   │   │   ├── service.go      # Business logic for machines
-│   │   │   ├── repository.go   # Database operations for machines
-│   │   │   └── types.go        # Machine-specific types
+│   │   ├── hosts/              # Host management domain
+│   │   │   ├── handler.go      # HTTP handlers for host endpoints
+│   │   │   ├── service.go      # Business logic for hosts
+│   │   │   ├── repository.go   # Database operations for hosts
+│   │   │   └── types.go        # Host-specific types
 │   │   ├── containers/          # Container management domain
 │   │   │   ├── handler.go
 │   │   │   ├── service.go
@@ -61,7 +61,7 @@ backend/
 │   │   ├── errors.go           # Custom error types
 │   │   └── handlers.go         # HTTP error response helpers
 │   └── models/                 # Database models
-│       ├── machine.go
+│       ├── host.go
 │       ├── user.go
 │       └── access.go
 ├── pkg/
@@ -94,9 +94,9 @@ backend/
 | `SESSION_TTL_DAYS` | `30` | No | Days a login's refresh session stays redeemable |
 | `SESSION_REMEMBER_TTL_DAYS` | `90` | No | Days a "remember this device" login's refresh session stays redeemable (must be >= `SESSION_TTL_DAYS`) |
 | `SSH_IDLE_TIMEOUT_SECONDS` | `900` | No | SSH connection idle timeout (15 minutes) |
-| `MAX_CONCURRENT_MACHINES` | `100` | No | Maximum concurrent machine connections |
-| `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | No | Timeout for machine connection test during registration |
-| `MACHINE_HOST_BLOCK_PRIVATE_RANGES` | `false` | No | Opt-in egress block on the machine registration/update probe target: reject hostnames whose IP (literal or resolved) falls in loopback, RFC1918, link-local, CGNAT, IPv6 ULA, or unspecified ranges with 400 `HOST_NOT_ALLOWED` (unresolvable fails closed). Off by default — LAN/localhost podman hosts are the primary use case |
+| `MAX_CONCURRENT_HOSTS` | `100` | No | Maximum concurrent host connections |
+| `HOST_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | No | Timeout for host connection test during registration |
+| `HOST_BLOCK_PRIVATE_RANGES` | `false` | No | Opt-in egress block on the host registration/update probe target: reject hostnames whose IP (literal or resolved) falls in loopback, RFC1918, link-local, CGNAT, IPv6 ULA, or unspecified ranges with 400 `HOST_NOT_ALLOWED` (unresolvable fails closed). Off by default — LAN/localhost podman hosts are the primary use case |
 | `RATE_LIMIT_REQUESTS_PER_USER_PER_MINUTE` | `60` | No | Rate limit: requests per minute per user |
 | `RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE` | `10` | No | Rate limit: login/refresh requests per minute per client IP |
 | `RATE_LIMIT_AUTH_FAILURE_BUDGET` | `5` | No | Failed password attempts allowed per window before throttling (HTTP 429) |
@@ -123,8 +123,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Machines table
-CREATE TABLE IF NOT EXISTS machines (
+-- Hosts table
+CREATE TABLE IF NOT EXISTS hosts (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     owner_id TEXT NOT NULL,
@@ -140,22 +140,22 @@ CREATE TABLE IF NOT EXISTS machines (
     FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- Machine access permissions
-CREATE TABLE IF NOT EXISTS machine_access (
-    machine_id TEXT NOT NULL,
+-- Host access permissions
+CREATE TABLE IF NOT EXISTS host_access (
+    host_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
     permission TEXT NOT NULL CHECK(permission IN ('read', 'write', 'admin')),
     granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (machine_id, user_id),
-    FOREIGN KEY (machine_id) REFERENCES machines(id) ON DELETE CASCADE,
+    PRIMARY KEY (host_id, user_id),
+    FOREIGN KEY (host_id) REFERENCES hosts(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- Indexes for performance
-CREATE INDEX IF NOT EXISTS idx_machines_owner_id ON machines(owner_id);
-CREATE INDEX IF NOT EXISTS idx_machines_name ON machines(name);
-CREATE INDEX IF NOT EXISTS idx_machine_access_machine_id ON machine_access(machine_id);
-CREATE INDEX IF NOT EXISTS idx_machine_access_user_id ON machine_access(user_id);
+CREATE INDEX IF NOT EXISTS idx_hosts_owner_id ON hosts(owner_id);
+CREATE INDEX IF NOT EXISTS idx_hosts_name ON hosts(name);
+CREATE INDEX IF NOT EXISTS idx_host_access_host_id ON host_access(host_id);
+CREATE INDEX IF NOT EXISTS idx_host_access_user_id ON host_access(user_id);
 ```
 
 ### Database Models (Go)
@@ -169,8 +169,8 @@ type User struct {
     CreatedAt    time.Time `json:"createdAt"`
 }
 
-// models/machine.go
-type Machine struct {
+// models/host.go
+type Host struct {
     ID                string         `json:"id" gorm:"primaryKey"`
     Name              string         `json:"name" gorm:"not null"`
     OwnerID           string         `json:"ownerId" gorm:"not null;index"`
@@ -187,8 +187,8 @@ type Machine struct {
 }
 
 // models/access.go
-type MachineAccess struct {
-    MachineID  string    `json:"machineId" gorm:"primaryKey"`
+type HostAccess struct {
+    HostID  string    `json:"hostId" gorm:"primaryKey"`
     UserID     string    `json:"userId" gorm:"primaryKey"`
     User       *User     `json:"user,omitempty" gorm:"foreignKey:UserID"`
     Permission string    `json:"permission" gorm:"not null;check:permission IN ('read', 'write', 'admin')"`
@@ -217,36 +217,36 @@ connection errors themselves.
 type Manager interface {
     // WithConnection hands fn a live podman connection context and
     // releases it when fn returns. Dial failures are warn-logged here
-    // (op, machineID, userID, cause) and returned as the 502 sentinel
+    // (op, hostID, userID, cause) and returned as the 502 sentinel
     // appErrors.ErrConnectionFailed — callers never map it.
-    WithConnection(ctx context.Context, userID, machineID, op string,
+    WithConnection(ctx context.Context, userID, hostID, op string,
         fn func(connCtx context.Context) error) error
-    // ProbeMachine: live status probe of a persisted machine, bounded by
-    // MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS; any error means offline.
-    ProbeMachine(machineID, userID string) error
+    // ProbeHost: live status probe of a persisted host, bounded by
+    // HOST_CONNECTION_TEST_TIMEOUT_SECONDS; any error means offline.
+    ProbeHost(hostID, userID string) error
     // TestConnection: registration-time probe against raw credentials
-    // (the machine row does not exist yet), bounded by the same timeout.
+    // (the host row does not exist yet), bounded by the same timeout.
     TestConnection(ctx context.Context, hostname string, port int,
         sshUsername, sshPrivateKey, podmanSocketPath string) error
-    // RemoveMachine invalidates a machine's cached connection; the SSH
+    // RemoveHost invalidates a host's cached connection; the SSH
     // session closes once in-flight calls finish.
-    RemoveMachine(machineID string)
+    RemoveHost(hostID string)
     Stop()
 }
 ```
 
-The manager owns everything the dial needs: the machine repository
+The manager owns everything the dial needs: the host repository
 (lookup), the encryption service (key decrypt), the cache size limit
-(`MAX_CONCURRENT_MACHINES`), and the probe timeout
-(`MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS`).
+(`MAX_CONCURRENT_HOSTS`), and the probe timeout
+(`HOST_CONNECTION_TEST_TIMEOUT_SECONDS`).
 
 ### Connection Lifecycle
 
-1. **Request arrives** for machine `X` via `WithConnection`
+1. **Request arrives** for host `X` via `WithConnection`
 2. **Cache hit**: reference count is bumped, the cached connection is served
 3. **Cache miss**: a pending entry is registered and the dial runs outside
-   the manager lock (dials to different machines do not serialize);
-   concurrent cold acquisitions for the same machine wait on the pending
+   the manager lock (dials to different hosts do not serialize);
+   concurrent cold acquisitions for the same host wait on the pending
    entry and share the one dial
 4. **Cache full**: the least recently used idle connection is evicted
    (soft cap: when every entry is in flight, the dial proceeds)
@@ -255,7 +255,7 @@ The manager owns everything the dial needs: the machine repository
 6. **Request completes**: the `WithConnection` closure returns and its
    release func drops the reference count
 7. **Teardown is real**: LRU eviction, the idle-timeout cleanup
-   (15 minutes), and `RemoveMachine` close the SSH session through the
+   (15 minutes), and `RemoveHost` close the SSH session through the
    fork's close handle; removal is graceful (the entry leaves the map at
    once, the handle closes when the last in-flight callback returns)
 
@@ -361,61 +361,61 @@ func GetUserIDFromContext(ctx context.Context) (string, error)
 | GET | `/api/auth/status` | Check if user is authenticated, return user info. For an anonymous caller it also reports `needsSetup` (`true` while the users table is empty) | No |
 | POST | `/api/setup/user` | First-run setup: create the instance's first admin and sign the caller in; 409 `SETUP_COMPLETED` once a user exists | No |
 
-### Machines
+### Hosts
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| POST | `/api/machines` | Register new machine (with connection test) | Yes |
-| GET | `/api/machines` | List all machines user has access to | Yes |
-| GET | `/api/machines/{id}` | Get machine details | Yes |
-| PUT | `/api/machines/{id}` | Update machine connection details | Yes |
-| DELETE | `/api/machines/{id}` | Remove machine | Yes |
-| GET | `/api/machines/{id}/access` | List users with access to machine | Yes |
-| POST | `/api/machines/{id}/access` | Grant access to another user | Yes |
-| DELETE | `/api/machines/{id}/access/{userId}` | Revoke access from user | Yes |
+| POST | `/api/hosts` | Register new host (with connection test) | Yes |
+| GET | `/api/hosts` | List all hosts user has access to | Yes |
+| GET | `/api/hosts/{id}` | Get host details | Yes |
+| PUT | `/api/hosts/{id}` | Update host connection details | Yes |
+| DELETE | `/api/hosts/{id}` | Remove host | Yes |
+| GET | `/api/hosts/{id}/access` | List users with access to host | Yes |
+| POST | `/api/hosts/{id}/access` | Grant access to another user | Yes |
+| DELETE | `/api/hosts/{id}/access/{userId}` | Revoke access from user | Yes |
 
 ### Containers
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| GET | `/api/machines/{id}/containers` | List containers on machine | Yes |
-| POST | `/api/machines/{id}/containers` | Create container | Yes |
-| GET | `/api/machines/{id}/containers/{containerId}` | Get container details | Yes |
-| POST | `/api/machines/{id}/containers/{containerId}/start` | Start container | Yes |
-| POST | `/api/machines/{id}/containers/{containerId}/stop` | Stop container | Yes |
-| DELETE | `/api/machines/{id}/containers/{containerId}` | Remove container | Yes |
+| GET | `/api/hosts/{id}/containers` | List containers on host | Yes |
+| POST | `/api/hosts/{id}/containers` | Create container | Yes |
+| GET | `/api/hosts/{id}/containers/{containerId}` | Get container details | Yes |
+| POST | `/api/hosts/{id}/containers/{containerId}/start` | Start container | Yes |
+| POST | `/api/hosts/{id}/containers/{containerId}/stop` | Stop container | Yes |
+| DELETE | `/api/hosts/{id}/containers/{containerId}` | Remove container | Yes |
 
 ### Images
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| GET | `/api/machines/{id}/images` | List images on machine | Yes |
-| POST | `/api/machines/{id}/images/pull` | Pull image (streaming with progress) | Yes |
-| DELETE | `/api/machines/{id}/images/{imageId}` | Remove image | Yes |
+| GET | `/api/hosts/{id}/images` | List images on host | Yes |
+| POST | `/api/hosts/{id}/images/pull` | Pull image (streaming with progress) | Yes |
+| DELETE | `/api/hosts/{id}/images/{imageId}` | Remove image | Yes |
 
 ### Quadlets
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| GET | `/api/machines/{id}/quadlets` | List all quadlets on machine | Yes |
-| POST | `/api/machines/{id}/quadlets` | Create new quadlet | Yes |
-| GET | `/api/machines/{id}/quadlets/{quadletId}` | Get quadlet details | Yes |
-| PUT | `/api/machines/{id}/quadlets/{quadletId}` | Update quadlet content | Yes |
-| DELETE | `/api/machines/{id}/quadlets/{quadletId}` | Remove quadlet | Yes |
-| POST | `/api/machines/{id}/quadlets/{quadletId}/start` | Start quadlet | Yes |
-| POST | `/api/machines/{id}/quadlets/{quadletId}/stop` | Stop quadlet | Yes |
-| POST | `/api/machines/{id}/quadlets/{quadletId}/restart` | Restart quadlet | Yes |
-| GET | `/api/machines/{id}/quadlets/{quadletId}/logs` | Get quadlet logs | Yes |
-| POST | `/api/machines/{id}/quadlets/{quadletId}/generate` | Generate quadlet from resource | Yes |
-| POST | `/api/machines/{id}/quadlets/import` | Import quadlets from directory | Yes |
+| GET | `/api/hosts/{id}/quadlets` | List all quadlets on host | Yes |
+| POST | `/api/hosts/{id}/quadlets` | Create new quadlet | Yes |
+| GET | `/api/hosts/{id}/quadlets/{quadletId}` | Get quadlet details | Yes |
+| PUT | `/api/hosts/{id}/quadlets/{quadletId}` | Update quadlet content | Yes |
+| DELETE | `/api/hosts/{id}/quadlets/{quadletId}` | Remove quadlet | Yes |
+| POST | `/api/hosts/{id}/quadlets/{quadletId}/start` | Start quadlet | Yes |
+| POST | `/api/hosts/{id}/quadlets/{quadletId}/stop` | Stop quadlet | Yes |
+| POST | `/api/hosts/{id}/quadlets/{quadletId}/restart` | Restart quadlet | Yes |
+| GET | `/api/hosts/{id}/quadlets/{quadletId}/logs` | Get quadlet logs | Yes |
+| POST | `/api/hosts/{id}/quadlets/{quadletId}/generate` | Generate quadlet from resource | Yes |
+| POST | `/api/hosts/{id}/quadlets/import` | Import quadlets from directory | Yes |
 
 ### Secrets
 
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
-| GET | `/api/machines/{id}/secrets` | List secret metadata on machine | Yes |
-| GET | `/api/machines/{id}/secrets/{secretId}` | Inspect secret; `?reveal=true` (admin-only) includes the value | Yes |
-| POST | `/api/machines/{id}/secrets` | Create secret (name + value; write level) | Yes |
+| GET | `/api/hosts/{id}/secrets` | List secret metadata on host | Yes |
+| GET | `/api/hosts/{id}/secrets/{secretId}` | Inspect secret; `?reveal=true` (admin-only) includes the value | Yes |
+| POST | `/api/hosts/{id}/secrets` | Create secret (name + value; write level) | Yes |
 
 See [description_secrets_api.md](description_secrets_api.md) for the full contract. Secret deletion is planned (slice 160-04); updates are a conscious non-goal (podman secrets are immutable).
 
@@ -430,10 +430,10 @@ See [description_secrets_api.md](description_secrets_api.md) for the full contra
 package errors
 
 var (
-    // Machines
-    ErrMachineNotFound        = NewAppError("MACHINE_NOT_FOUND", "Machine not found", http.StatusNotFound)
-    ErrMachineAlreadyExists   = NewAppError("MACHINE_ALREADY_EXISTS", "Machine with this name already exists", http.StatusBadRequest)
-    ErrConnectionFailed       = NewAppError("CONNECTION_FAILED", "Failed to connect to machine", http.StatusBadRequest)
+    // Hosts
+    ErrHostNotFound        = NewAppError("HOST_NOT_FOUND", "Host not found", http.StatusNotFound)
+    ErrHostAlreadyExists   = NewAppError("HOST_ALREADY_EXISTS", "Host with this name already exists", http.StatusBadRequest)
+    ErrConnectionFailed       = NewAppError("CONNECTION_FAILED", "Failed to connect to host", http.StatusBadRequest)
     ErrConnectionTestTimeout = NewAppError("CONNECTION_TEST_TIMEOUT", "Connection test timed out", http.StatusBadRequest)
     
     // Auth
@@ -635,7 +635,7 @@ func RateLimitMiddleware(rl *RateLimiter) func(http.Handler) http.Handler {
 ```go
 // internal/domain/images/handler.go
 func (h *ImageHandler) HandlePullImage(w http.ResponseWriter, r *http.Request) {
-    machineID := r.PathValue("id")
+    hostID := r.PathValue("id")
     userID := GetUserIDFromContext(r.Context())
     
     // Parse request
@@ -646,21 +646,21 @@ func (h *ImageHandler) HandlePullImage(w http.ResponseWriter, r *http.Request) {
     }
     
     // Verify access
-    if !h.machineService.UserHasAccess(userID, machineID) {
-        respondWithError(w, http.StatusForbidden, "ACCESS_DENIED", "User does not have access to this machine")
+    if !h.hostService.UserHasAccess(userID, hostID) {
+        respondWithError(w, http.StatusForbidden, "ACCESS_DENIED", "User does not have access to this host")
         return
     }
     
     // Get connection
-    conn, err := h.connectionManager.GetConnection(r.Context(), machineID, userID)
+    conn, err := h.connectionManager.GetConnection(r.Context(), hostID, userID)
     if err != nil {
         respondWithError(w, http.StatusInternalServerError, "CONNECTION_FAILED", err.Error())
         return
     }
     
     // Mark connection as active (prevent idle timeout)
-    defer h.connectionManager MarkIdle(machineID)
-    h.connectionManager.MarkActive(machineID)
+    defer h.connectionManager MarkIdle(hostID)
+    h.connectionManager.MarkActive(hostID)
     
     // Set up streaming response
     w.Header().Set("Content-Type", "application/json")
@@ -692,7 +692,7 @@ func (h *ImageHandler) HandlePullImage(w http.ResponseWriter, r *http.Request) {
                 writeJSONLine(w, flusher, OperationEvent{
                     OperationID: operationID,
                     Type:        "complete",
-                    MachineID:   machineID,
+                    HostID:   hostID,
                     State:       map[string]interface{}{"status": "completed"},
                     Timestamp:   time.Now().UTC().Format(time.RFC3339),
                 })
@@ -717,7 +717,7 @@ func (h *ImageHandler) HandlePullImage(w http.ResponseWriter, r *http.Request) {
             writeJSONLine(w, flusher, OperationEvent{
                 OperationID: operationID,
                 Type:        "progress",
-                MachineID:   machineID,
+                HostID:   hostID,
                 State: map[string]interface{}{
                     "current":   progress.Current,
                     "total":     progress.Total,
@@ -739,10 +739,10 @@ func writeJSONLine(w http.ResponseWriter, f http.Flusher, data interface{}) {
 
 ---
 
-## Machine Registration Flow
+## Host Registration Flow
 
 Before the synchronous connection probe, the opt-in host policy
-(`MACHINE_HOST_BLOCK_PRIVATE_RANGES`, default `false`) gates the probe
+(`HOST_BLOCK_PRIVATE_RANGES`, default `false`) gates the probe
 target: when enabled, the hostname — an IP literal checked directly, a
 name through every resolved IP — is rejected with 400 `HOST_NOT_ALLOWED`
 when any address falls in loopback (127.0.0.0/8, ::1), RFC1918
@@ -756,7 +756,7 @@ or false, no DNS resolution is added and registration behaves exactly as
 before (pentest 2026-11-01, finding 1).
 
 A failed probe answers 400 `CONNECTION_FAILED` with a STATIC message
-("Failed to connect to machine during registration — check the hostname,
+("Failed to connect to host during registration — check the hostname,
 port, SSH username, private key, and podman socket path"): the raw dial
 error is an internal port-scan/SSRF oracle, so no probe detail reaches
 the client — the full cause is logged server-side with the request ID.
@@ -764,11 +764,11 @@ The residual pure timing oracle (fast-fail vs `CONNECTION_TEST_TIMEOUT`)
 is accepted.
 
 ```go
-// internal/domain/machines/handler.go
-func (h *MachineHandler) HandleCreateMachine(w http.ResponseWriter, r *http.Request) {
+// internal/domain/hosts/handler.go
+func (h *HostHandler) HandleCreateHost(w http.ResponseWriter, r *http.Request) {
     userID := GetUserIDFromContext(r.Context())
     
-    var req CreateMachineRequest
+    var req CreateHostRequest
     if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
         respondWithError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
         return
@@ -781,8 +781,8 @@ func (h *MachineHandler) HandleCreateMachine(w http.ResponseWriter, r *http.Requ
     }
     
     // Check name uniqueness for user
-    if h.machineService.NameExistsForUser(userID, req.Name) {
-        respondWithError(w, http.StatusBadRequest, "MACHINE_ALREADY_EXISTS", "Machine with this name already exists")
+    if h.hostService.NameExistsForUser(userID, req.Name) {
+        respondWithError(w, http.StatusBadRequest, "HOST_ALREADY_EXISTS", "Host with this name already exists")
         return
     }
     
@@ -814,12 +814,12 @@ func (h *MachineHandler) HandleCreateMachine(w http.ResponseWriter, r *http.Requ
         // oracle (pentest 2026-11-01, finding 1); the cause is logged
         // server-side with the request ID.
         respondWithError(w, http.StatusBadRequest, "CONNECTION_FAILED",
-            "Failed to connect to machine during registration — check the hostname, port, SSH username, private key, and podman socket path")
+            "Failed to connect to host during registration — check the hostname, port, SSH username, private key, and podman socket path")
         return
     }
     
-    // Create machine
-    machine := &models.Machine{
+    // Create host
+    host := &models.Host{
         ID:               uuid.New().String(),
         Name:             req.Name,
         OwnerID:          userID,
@@ -832,18 +832,18 @@ func (h *MachineHandler) HandleCreateMachine(w http.ResponseWriter, r *http.Requ
         PodmanSocketPath: req.PodmanSocketPath,
     }
     
-    if err := h.machineRepo.Create(machine); err != nil {
+    if err := h.hostRepo.Create(host); err != nil {
         respondWithError(w, http.StatusInternalServerError, "CREATION_FAILED", err.Error())
         return
     }
     
     // Grant owner access
-    access := &models.MachineAccess{
-        MachineID:  machine.ID,
+    access := &models.HostAccess{
+        HostID:  host.ID,
         UserID:     userID,
         Permission: models.PermissionAdmin,
     }
-    if err := h.machineAccessRepo.Create(access); err != nil {
+    if err := h.hostAccessRepo.Create(access); err != nil {
         respondWithError(w, http.StatusInternalServerError, "CREATION_FAILED", err.Error())
         return
     }
@@ -851,7 +851,7 @@ func (h *MachineHandler) HandleCreateMachine(w http.ResponseWriter, r *http.Requ
     // Return success
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusCreated)
-    json.NewEncoder(w).Encode(MachineResponse{FromModel(machine)})
+    json.NewEncoder(w).Encode(HostResponse{FromModel(host)})
 }
 ```
 
@@ -983,29 +983,29 @@ func main() {
     
     // Initialize repositories
     userRepo := repositories.NewUserRepository(db)
-    machineRepo := repositories.NewMachineRepository(db)
-    accessRepo := repositories.NewMachineAccessRepository(db)
+    hostRepo := repositories.NewHostRepository(db)
+    accessRepo := repositories.NewHostAccessRepository(db)
     
     // Initialize connection manager
     connectionManager := connections.NewConnectionManager(
-        machineRepo,
+        hostRepo,
         encryption,
         config.Connections.MaxConcurrent,
         config.Connections.TestTimeoutSeconds,
     )
     
     // Initialize services
-    machineService := services.NewMachineService(machineRepo, accessRepo, connectionManager, encryption)
+    hostService := services.NewHostService(hostRepo, accessRepo, connectionManager, encryption)
     containerService := services.NewContainerService(connectionManager)
     imageService := services.NewImageService(connectionManager)
     quadletService := services.NewQuadletService(connectionManager)
     
     // Initialize handlers
     authHandler := handlers.NewAuthHandler(authService, userRepo)
-    machineHandler := handlers.NewMachineHandler(machineService)
-    containerHandler := handlers.NewContainerHandler(containerService, machineService)
-    imageHandler := handlers.NewImageHandler(imageService, machineService)
-    quadletHandler := handlers.NewQuadletHandler(quadletService, machineService)
+    hostHandler := handlers.NewHostHandler(hostService)
+    containerHandler := handlers.NewContainerHandler(containerService, hostService)
+    imageHandler := handlers.NewImageHandler(imageService, hostService)
+    quadletHandler := handlers.NewQuadletHandler(quadletService, hostService)
     
     // Initialize middleware
     rateLimiter := middleware.NewRateLimiter(
@@ -1017,7 +1017,7 @@ func main() {
     // patterns (issue #451). The global middleware chain is applied
     // by wrapping the root mux, outermost first.
     apiMux := http.NewServeMux()
-    machineMux := http.NewServeMux()
+    hostMux := http.NewServeMux()
     
     // Auth routes (per-route auth rate limit). Logout stays outside
     // the group: it is idempotent, so there is nothing to brute-force.
@@ -1026,21 +1026,21 @@ func main() {
     apiMux.HandleFunc("GET /auth/status", authHandler.Status)
     
     // Protected routes: JWT auth + per-user rate limit wrap each
-    // handler (or a whole sub-mux, as with the machine subtree).
-    apiMux.Handle("GET /machines", protected(machineHandler.List))
-    apiMux.Handle("POST /machines", protected(machineHandler.Create))
+    // handler (or a whole sub-mux, as with the host subtree).
+    apiMux.Handle("GET /hosts", protected(hostHandler.List))
+    apiMux.Handle("POST /hosts", protected(hostHandler.Create))
     
-    // Machine subtree: RequireMachineAccess wraps the whole sub-mux,
+    // Host subtree: RequireHostAccess wraps the whole sub-mux,
     // mounted behind StripPrefix so its patterns are rooted at {id}.
-    machineMux.HandleFunc("GET /{id}", machineHandler.Get)
-    machineMux.HandleFunc("PUT /{id}", machineHandler.Update)
-    machineMux.HandleFunc("DELETE /{id}", machineHandler.Delete)
-    machineMux.HandleFunc("GET /{id}/access", machineHandler.ListAccess)
-    machineMux.HandleFunc("POST /{id}/access", machineHandler.GrantAccess)
-    machineMux.HandleFunc("DELETE /{id}/access/{userId}", machineHandler.RevokeAccess)
+    hostMux.HandleFunc("GET /{id}", hostHandler.Get)
+    hostMux.HandleFunc("PUT /{id}", hostHandler.Update)
+    hostMux.HandleFunc("DELETE /{id}", hostHandler.Delete)
+    hostMux.HandleFunc("GET /{id}/access", hostHandler.ListAccess)
+    hostMux.HandleFunc("POST /{id}/access", hostHandler.GrantAccess)
+    hostMux.HandleFunc("DELETE /{id}/access/{userId}", hostHandler.RevokeAccess)
     
     // Containers — one sub-mux per domain family, mounted on the
-    // machine sub-mux with the exact + subtree twin. The family
+    // host sub-mux with the exact + subtree twin. The family
     // sub-mux sees the full path (no prefix stripping), so its
     // patterns keep the /{id}/containers prefix; it carries its own
     // "/" JSON-404 catch-all. Images, quadlets, secrets, volumes,
@@ -1053,8 +1053,8 @@ func main() {
     containersMux.Handle("POST /{id}/containers/{containerId}/stop", requireWrite(containerHandler.Stop))
     containersMux.Handle("DELETE /{id}/containers/{containerId}", requireWrite(containerHandler.Delete))
     containersMux.HandleFunc("/", apiNotFound)
-    machineMux.Handle("/{id}/containers", containersMux)
-    machineMux.Handle("/{id}/containers/", containersMux)
+    hostMux.Handle("/{id}/containers", containersMux)
+    hostMux.Handle("/{id}/containers/", containersMux)
     
     // Images
     imagesMux := http.NewServeMux()
@@ -1062,8 +1062,8 @@ func main() {
     imagesMux.Handle("POST /{id}/images/pull", requireWrite(imageHandler.Pull))
     imagesMux.Handle("DELETE /{id}/images/{imageId}", requireWrite(imageHandler.Delete))
     imagesMux.HandleFunc("/", apiNotFound)
-    machineMux.Handle("/{id}/images", imagesMux)
-    machineMux.Handle("/{id}/images/", imagesMux)
+    hostMux.Handle("/{id}/images", imagesMux)
+    hostMux.Handle("/{id}/images/", imagesMux)
     
     // Quadlets
     quadletsMux := http.NewServeMux()
@@ -1079,21 +1079,21 @@ func main() {
     quadletsMux.HandleFunc("GET /{id}/quadlets/{quadletId}/logs", quadletHandler.GetLogs)
     quadletsMux.HandleFunc("POST /{id}/quadlets/{quadletId}/generate", quadletHandler.Generate)
     quadletsMux.HandleFunc("/", apiNotFound)
-    machineMux.Handle("/{id}/quadlets", quadletsMux)
-    machineMux.Handle("/{id}/quadlets/", quadletsMux)
+    hostMux.Handle("/{id}/quadlets", quadletsMux)
+    hostMux.Handle("/{id}/quadlets/", quadletsMux)
     
     // Unknown /api/* paths answer a 404 JSON envelope, never the SPA.
-    machineMux.HandleFunc("/", apiNotFound)
+    hostMux.HandleFunc("/", apiNotFound)
     apiMux.HandleFunc("/", apiNotFound)
     
-    // Mount the machine subtree behind RequireMachineAccess.
-    // StripPrefix drops the /machines literal, so the sub-mux's
+    // Mount the host subtree behind RequireHostAccess.
+    // StripPrefix drops the /hosts literal, so the sub-mux's
     // patterns are rooted at {id}; the two mount patterns match
     // only when an {id} segment is present.
-    apiMux.Handle("/machines/{id}", jwtAuth(perUserLimit(
-        requireMachineAccess(http.StripPrefix("/machines", machineMux)))))
-    apiMux.Handle("/machines/{id}/", jwtAuth(perUserLimit(
-        requireMachineAccess(http.StripPrefix("/machines", machineMux)))))
+    apiMux.Handle("/hosts/{id}", jwtAuth(perUserLimit(
+        requireHostAccess(http.StripPrefix("/hosts", hostMux)))))
+    apiMux.Handle("/hosts/{id}/", jwtAuth(perUserLimit(
+        requireHostAccess(http.StripPrefix("/hosts", hostMux)))))
     
     // Root mux: /api/* to the API, everything else to the web UI.
     rootMux := http.NewServeMux()
@@ -1191,20 +1191,20 @@ require (
 
 ### Unit Tests
 ```go
-// Example: machines/service_test.go
-func TestMachineService_Create(t *testing.T) {
+// Example: hosts/service_test.go
+func TestHostService_Create(t *testing.T) {
     // Setup
-    mockRepo := &MockMachineRepository{}
-    mockAccessRepo := &MockMachineAccessRepository{}
+    mockRepo := &MockHostRepository{}
+    mockAccessRepo := &MockHostAccessRepository{}
     mockConnManager := &MockConnectionManager{}
     mockEncryption := &MockEncryptionService{}
     
-    service := NewMachineService(mockRepo, mockAccessRepo, mockConnManager, mockEncryption)
+    service := NewHostService(mockRepo, mockAccessRepo, mockConnManager, mockEncryption)
     
     // Test
     ctx := context.Background()
-    req := &CreateMachineRequest{
-        Name:        "test-machine",
+    req := &CreateHostRequest{
+        Name:        "test-host",
         Hostname:    "localhost",
         SSHUsername: "user",
         SSHPrivateKey: "-----BEGIN RSA PRIVATE KEY-----",
@@ -1221,19 +1221,19 @@ func TestMachineService_Create(t *testing.T) {
     mockAccessRepo.On("Create", ctx, mock.Anything).Return(nil)
     
     // Execute
-    machine, err := service.Create(ctx, "user-123", req)
+    host, err := service.Create(ctx, "user-123", req)
     
     // Assert
     assert.NoError(t, err)
-    assert.NotNil(t, machine)
+    assert.NotNil(t, host)
     mockRepo.AssertExpectations(t)
 }
 ```
 
 ### Integration Tests
 ```go
-// tests/integration/machines_test.go
-func TestMachineRegistration_Integration(t *testing.T) {
+// tests/integration/hosts_test.go
+func TestHostRegistration_Integration(t *testing.T) {
     // Setup test container with Podman
     ctx := context.Background()
     
@@ -1247,16 +1247,16 @@ func TestMachineRegistration_Integration(t *testing.T) {
     defer teardownTestDB(db)
     
     // Create repositories and services
-    machineRepo := repositories.NewMachineRepository(db)
+    hostRepo := repositories.NewHostRepository(db)
     // ... setup other dependencies
     
     // Create test user
     userID := "test-user-123"
     // ... insert test user
     
-    // Test machine registration
-    req := &CreateMachineRequest{
-        Name:           "test-machine",
+    // Test host registration
+    req := &CreateHostRequest{
+        Name:           "test-host",
         Hostname:       getContainerIP(containerID),
         Port:           22,
         SSHUsername:    "root",
@@ -1264,17 +1264,17 @@ func TestMachineRegistration_Integration(t *testing.T) {
         PodmanSocketPath: "/run/podman/podman.sock",
     }
     
-    machine, err := machineService.Create(ctx, userID, req)
+    host, err := hostService.Create(ctx, userID, req)
     assert.NoError(t, err)
-    assert.NotNil(t, machine)
+    assert.NotNil(t, host)
     
     // Verify connection works
-    conn, err := connectionManager.GetConnection(ctx, machine.ID, userID)
+    conn, err := connectionManager.GetConnection(ctx, host.ID, userID)
     assert.NoError(t, err)
     assert.NotNil(t, conn)
     
     // Verify we can list containers
-    containers, err := containerService.List(ctx, machine.ID, userID)
+    containers, err := containerService.List(ctx, host.ID, userID)
     assert.NoError(t, err)
     // ... assertions
 }
@@ -1287,7 +1287,7 @@ func TestMachineRegistration_Integration(t *testing.T) {
 1. **Health Check Endpoint**: Should we add `/api/health` for Kubernetes/container orchestration?
 2. **Prometheus Metrics**: Should we add `/api/metrics` endpoint for monitoring?
 3. **OpenAPI/Swagger**: Should we generate OpenAPI specification for the API?
-4. **API Versioning**: Should we add version prefix (e.g., `/api/v1/machines`)?
+4. **API Versioning**: Should we add version prefix (e.g., `/api/v1/hosts`)?
 
 ---
 

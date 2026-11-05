@@ -24,10 +24,10 @@ func TestNetworkService_Inspect_ReturnsInspectReport(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "frontend")
+	got, err := service.Inspect(context.Background(), "user", "host", "frontend")
 
 	require.NoError(t, err)
-	assert.Equal(t, "frontend", inspectedName, "the requested network must reach the machine")
+	assert.Equal(t, "frontend", inspectedName, "the requested network must reach the host")
 	assert.Equal(t, report, got)
 }
 
@@ -42,7 +42,7 @@ func TestNetworkService_Inspect_MissingNetworkIsAnError(t *testing.T) {
 		}
 		service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Inspect(context.Background(), "user", "machine", "ghost-net")
+		got, err := service.Inspect(context.Background(), "user", "host", "ghost-net")
 
 		require.Error(t, err)
 		assert.Equal(t, entities.NetworkInspectReport{}, got)
@@ -57,7 +57,7 @@ func TestNetworkService_Inspect_MissingNetworkIsAnError(t *testing.T) {
 		}
 		service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Inspect(context.Background(), "user", "machine", "ghost-net")
+		got, err := service.Inspect(context.Background(), "user", "host", "ghost-net")
 
 		require.Error(t, err)
 		assert.Equal(t, entities.NetworkInspectReport{}, got)
@@ -73,7 +73,7 @@ func TestNetworkService_Inspect_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "frontend")
+	got, err := service.Inspect(context.Background(), "user", "host", "frontend")
 
 	require.Error(t, err)
 	assert.Equal(t, entities.NetworkInspectReport{}, got)
@@ -88,7 +88,7 @@ func TestNetworkService_Inspect_ZeroReportsWithPerItemErrorWrapsCause(t *testing
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "frontend")
+	got, err := service.Inspect(context.Background(), "user", "host", "frontend")
 
 	require.Error(t, err)
 	assert.Equal(t, entities.NetworkInspectReport{}, got)
@@ -105,7 +105,7 @@ func TestNetworkService_Inspect_ZeroReportsWithoutErrorsIsAnomaly(t *testing.T) 
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(context.Background(), "user", "machine", "frontend")
+	got, err := service.Inspect(context.Background(), "user", "host", "frontend")
 
 	require.Error(t, err)
 	assert.Equal(t, entities.NetworkInspectReport{}, got)
@@ -120,7 +120,7 @@ func TestNetworkService_Inspect_ZeroReportsWithoutErrorsIsAnomaly(t *testing.T) 
 func TestNetworkService_Inspect_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewNetworkService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	_, err := service.Inspect(context.Background(), "user", "machine", "frontend")
+	_, err := service.Inspect(context.Background(), "user", "host", "frontend")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	var appErr *appErrors.AppError

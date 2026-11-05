@@ -6,9 +6,9 @@ Part of the [API contract](description_api.md). See the main document for base U
 
 ## Image Endpoints
 
-### GET /api/machines/{id}/images
+### GET /api/hosts/{id}/images
 
-List all images on a machine.
+List all images on a host.
 
 **Authentication:** Required
 
@@ -36,13 +36,13 @@ List all images on a machine.
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/images/pull
+### POST /api/hosts/{id}/images/pull
 
 Pull an image from a registry.
 
@@ -70,7 +70,7 @@ Pull an image from a registry.
 {
   "operationId": "string (uuid)",
   "type": "progress|complete|error",
-  "machineId": "string (uuid)",
+  "hostId": "string (uuid)",
   "state": {
     "current": integer,
     "total": integer,
@@ -99,7 +99,7 @@ For type: `complete`:
 {
   "operationId": "string (uuid)",
   "type": "complete",
-  "machineId": "string (uuid)",
+  "hostId": "string (uuid)",
   "state": {
     "status": "completed"
   },
@@ -121,9 +121,9 @@ For type: `complete`:
 
 ---
 
-### POST /api/machines/{id}/images/prune
+### POST /api/hosts/{id}/images/prune
 
-Remove all unused images on a machine in one call — tagged or not, the equivalent of `podman image prune -a`. Images in use by containers are untouched.
+Remove all unused images on a host in one call — tagged or not, the equivalent of `podman image prune -a`. Images in use by containers are untouched.
 
 **Authentication:** Required
 
@@ -145,15 +145,15 @@ One entry per removed image with its ID and reclaimed size (bytes). An empty arr
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED` (read-level users)
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### DELETE /api/machines/{id}/images/{imageId}
+### DELETE /api/hosts/{id}/images/{imageId}
 
-Remove an image from a machine.
+Remove an image from a host.
 
 **Authentication:** Required
 
@@ -167,19 +167,19 @@ Remove an image from a machine.
 - 400: `IMAGE_USED_BY_CONTAINERS` (if force not set)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `IMAGE_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/images/{imageId}
+### GET /api/hosts/{id}/images/{imageId}
 
-Get one image's detail on a machine: the list fields combined with the inspect report's config fields.
+Get one image's detail on a host: the list fields combined with the inspect report's config fields.
 
 **Authentication:** Required
 
-**Permission:** `read` (any grantee of the machine)
+**Permission:** `read` (any grantee of the host)
 
 **Response (Success - 200):**
 ```json
@@ -205,19 +205,19 @@ Get one image's detail on a machine: the list fields combined with the inspect r
 - 400: `MISSING_IMAGE_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `IMAGE_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/images/{imageId}/inspect
+### GET /api/hosts/{id}/images/{imageId}/inspect
 
-Inspect one image on a machine. The response is the raw podman inspect report as the top-level JSON body — no curated DTO; the field names are podman's own.
+Inspect one image on a host. The response is the raw podman inspect report as the top-level JSON body — no curated DTO; the field names are podman's own.
 
 **Authentication:** Required
 
-**Permission:** `read` (any grantee of the machine)
+**Permission:** `read` (any grantee of the host)
 
 **Response (Success - 200):**
 The raw podman image inspect report, e.g.:
@@ -236,23 +236,23 @@ The raw podman image inspect report, e.g.:
 - 400: `MISSING_IMAGE_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `IMAGE_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/images/{imageId}/export
+### GET /api/hosts/{id}/images/{imageId}/export
 
-Download an image as a tar archive (issue 401): the machine's podman
+Download an image as a tar archive (issue 401): the host's podman
 streams the image's docker-archive straight into the response — no
 server-side buffering, no size cap (the transfer bound exists to protect
-the cross-machine copy's in-process pipe; the browser consumes this
+the cross-host copy's in-process pipe; the browser consumes this
 stream directly, and cancellation rides the request context).
 
 **Authentication:** Required
 
-**Access:** Any user with a machine-access row for `{id}` (read level):
+**Access:** Any user with a host-access row for `{id}` (read level):
 a download mutates nothing, exactly like the volume export.
 
 **Response (Success - 200):**
@@ -271,32 +271,32 @@ download.
 - 400: `MISSING_IMAGE_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row)
-- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `IMAGE_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/images/{imageId}/copy-preview
+### GET /api/hosts/{id}/images/{imageId}/copy-preview
 
-Preview an image copy to another machine (issue 375): the one fact the
-copy dialog must show before confirming — whether the target machine
+Preview an image copy to another host (issue 375): the one fact the
+copy dialog must show before confirming — whether the target host
 already holds the image by ID. Information, never a block: the load is
 idempotent (images are content-addressed), so confirming stays possible
 either way.
 
 **Authentication:** Required
 
-Read-level access on the source machine suffices (the endpoint mutates
+Read-level access on the source host suffices (the endpoint mutates
 nothing). The caller additionally needs **at least read access on the
-target machine**: the target's image store is read server-side, and a
+target host**: the target's image store is read server-side, and a
 caller without target access gets the standard `ACCESS_DENIED` error —
-never a false preview. An unknown target machine ID answers
+never a false preview. An unknown target host ID answers
 `ACCESS_DENIED` the same way (no access row can exist for it);
-`MACHINE_NOT_FOUND` is reserved for the source machine in the path.
+`HOST_NOT_FOUND` is reserved for the source host in the path.
 
 **Query Parameters:**
-- `targetMachineId` (string, required): ID of the target machine the
+- `targetHostId` (string, required): ID of the target host the
   preview refers to.
 
 **Response (Success - 200):**
@@ -306,25 +306,25 @@ never a false preview. An unknown target machine ID answers
 }
 ```
 
-- `present`: true exactly when the target machine already holds the
+- `present`: true exactly when the target host already holds the
   image by ID. The copy is copy-only and idempotent — a present target
   image never refuses anything, the flag only informs the dialog.
 
 **Response (Error):**
-- 400: `MISSING_IMAGE_ID`, `MISSING_TARGET_MACHINE_ID`
+- 400: `MISSING_IMAGE_ID`, `MISSING_TARGET_HOST_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row on the source, or below-read level
   on the target)
-- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND` (the source image vanished)
+- 404: `HOST_NOT_FOUND`, `IMAGE_NOT_FOUND` (the source image vanished)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED` (source or target unreachable)
 
 ---
 
-### POST /api/machines/{id}/images/{imageId}/copy
+### POST /api/hosts/{id}/images/{imageId}/copy
 
-Copy an image to another machine (issue 375): the source machine's
-podman streams the image's archive into the target machine's podman as a
+Copy an image to another host (issue 375): the source host's
+podman streams the image's archive into the target host's podman as a
 live-streamed transfer. **Copy-only** — no move mode, no `force`, no
 source removal; the source image is never touched. The full image ID is
 the wire's image reference; the archive preserves the image's tags.
@@ -349,20 +349,20 @@ the plain error envelope.
 
 **Authentication:** Required
 
-**Write-level access on the source machine is required** (the transfer
+**Write-level access on the source host is required** (the transfer
 mutates remote state through it). The caller additionally needs **at
-least write access on the target machine**: route middleware only sees
-the source machine, so the target's level is checked server-side against
+least write access on the target host**: route middleware only sees
+the source host, so the target's level is checked server-side against
 the access store BEFORE any podman call — a below-write grantee (or a
 caller with no target row) gets the standard `ACCESS_DENIED` riding the
 stream's terminal error event, with nothing transferred. An unknown
-target machine ID answers `ACCESS_DENIED` the same way;
-`MACHINE_NOT_FOUND` is reserved for the source machine in the path.
+target host ID answers `ACCESS_DENIED` the same way;
+`HOST_NOT_FOUND` is reserved for the source host in the path.
 
 **Request:**
 ```json
 {
-  "targetMachineId": "string (required)"
+  "targetHostId": "string (required)"
 }
 ```
 
@@ -370,7 +370,7 @@ target machine ID answers `ACCESS_DENIED` the same way;
 stream begins, `phase: "bytes"` as the streamed count crosses each MiB
 (carrying `bytes`), `phase: "done"` when the load finished (carrying the
 total `bytes`). All events share one `operationId`, the source
-`machineId`, the `image` ID, and a `timestamp`.
+`hostId`, the `image` ID, and a `timestamp`.
 
 **Terminal events:** on success one `type: "complete"` event carrying the
 transfer envelope in `result`:
@@ -379,8 +379,8 @@ transfer envelope in `result`:
 {
   "id": "string (the copied image's full ID)",
   "status": "copied",
-  "sourceMachineId": "string",
-  "targetMachineId": "string",
+  "sourceHostId": "string",
+  "targetHostId": "string",
   "bytes": integer,
   "names": ["string"]
 }
@@ -407,8 +407,8 @@ itself answers 200):
 
 **Response (Error)** — plain envelope, before the stream begins:
 - 400: `MISSING_IMAGE_ID`, `INVALID_REQUEST` (malformed body),
-  `VALIDATION_FAILED` (missing `targetMachineId`)
+  `VALIDATION_FAILED` (missing `targetHostId`)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row on the source)
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`

@@ -33,13 +33,13 @@ import { useFieldArray, useForm } from "react-hook-form";
 
 interface CreatePodDialogProps {
 	mutation: MutationSlice<CreatePodInput>;
-	machineId: string;
+	hostId: string;
 	onClose: () => void;
 }
 
 // Create-pod dialog: a form dialog (the shared mutation-dialog preset)
 // with sections for the name, the networks the pod's infra container
-// joins (the shared checkbox list over the machine's networks), named
+// joins (the shared checkbox list over the host's networks), named
 // volumes and bind mounts (the shared row-editor module — the dialog
 // keeps the row shapes, options, and copy), labels (the shared key/value
 // editor), and the resource limits (the shared resource-limit inputs,
@@ -50,11 +50,11 @@ interface CreatePodDialogProps {
 // (buildCreatePodInput); the dialog keeps form ownership only.
 export function CreatePodDialog({
 	mutation,
-	machineId,
+	hostId,
 	onClose,
 }: CreatePodDialogProps) {
-	const { data: networks } = useNetworks(machineId);
-	const { data: volumes } = useVolumes(machineId);
+	const { data: networks } = useNetworks(hostId);
+	const { data: volumes } = useVolumes(hostId);
 	const { register, control, handleSubmit, watch, setValue, formState } =
 		useForm<PodFormValues>({
 			defaultValues: {

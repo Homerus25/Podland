@@ -20,14 +20,14 @@ import (
 )
 
 // inspectRequest serves GET
-// /api/machines/{id}/containers/{containerId}/inspect through the handler
+// /api/hosts/{id}/containers/{containerId}/inspect through the handler
 // with an authenticated test identity.
 func inspectRequest(handler http.HandlerFunc, containerID string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/containers/" + containerID + "/inspect",
+		Path:      "/api/hosts/test-host/containers/" + containerID + "/inspect",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+		URLParams: map[string]string{"id": "test-host", "containerId": containerID},
 	})
 }
 
@@ -89,9 +89,9 @@ func TestContainerHandler_Inspect_MissingContainerIDAnswers400(t *testing.T) {
 
 	w := testutils.Perform(newTestHandler(engine).Inspect, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/containers//inspect",
+		Path:      "/api/hosts/test-host/containers//inspect",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 
 	require.Equal(t, http.StatusBadRequest, w.Code, "a missing containerId must answer 400")
@@ -102,12 +102,12 @@ func TestContainerHandler_Inspect_MissingContainerIDAnswers400(t *testing.T) {
 }
 
 // containersAccessRouter mirrors app.go's mounting of the containers
-// inspect route: GET /api/machines/{id}/containers/{containerId}/inspect
-// rides the RequireMachineAccess subtree at read level (no requireWrite).
-func containersAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *ContainerService) http.Handler {
+// inspect route: GET /api/hosts/{id}/containers/{containerId}/inspect
+// rides the RequireHostAccess subtree at read level (no requireWrite).
+func containersAccessRouter(hostRepo *testutils.MockHostRepository, accessRepo *testutils.MockHostAccessRepository, service *ContainerService) http.Handler {
 	r := http.NewServeMux()
-	r.Handle("GET /api/machines/{id}/containers/{containerId}/inspect",
-		appmiddleware.RequireMachineAccess(machineRepo, accessRepo)(http.HandlerFunc(NewContainerHandler(service).Inspect)))
+	r.Handle("GET /api/hosts/{id}/containers/{containerId}/inspect",
+		appmiddleware.RequireHostAccess(hostRepo, accessRepo)(http.HandlerFunc(NewContainerHandler(service).Inspect)))
 	return r
 }
 
@@ -119,23 +119,23 @@ func requestAsUser(method, target, userID string) *http.Request {
 }
 
 // TestContainerHandler_Inspect_ReadLevelGranteeReachesRoute pins the
-// route mounting: GET /api/machines/{id}/containers/{containerId}/inspect
-// rides the RequireMachineAccess subtree at read level (no requireWrite),
+// route mounting: GET /api/hosts/{id}/containers/{containerId}/inspect
+// rides the RequireHostAccess subtree at read level (no requireWrite),
 // so a read-level grantee reaches the handler.
 func TestContainerHandler_Inspect_ReadLevelGranteeReachesRoute(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	accessRepo := testutils.NewMockMachineAccessRepository()
-	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
+	hostRepo := testutils.NewMockHostRepository()
+	hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+	accessRepo := testutils.NewMockHostAccessRepository()
+	accessRepo.AddAccess("host-1", "reader-1", models.PermissionRead, time.Now())
 	engine := &fakeContainerEngine{
 		inspectFn: func(string) ([]*entities.ContainerInspectReport, []error, error) {
 			return []*entities.ContainerInspectReport{{InspectContainerData: &define.InspectContainerData{ID: "c-1", Name: "/web"}}}, nil, nil
 		},
 	}
-	router := containersAccessRouter(machineRepo, accessRepo, NewContainerService(fakeEngineProvider{engine: engine}))
+	router := containersAccessRouter(hostRepo, accessRepo, NewContainerService(fakeEngineProvider{engine: engine}))
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/containers/c-1/inspect", "reader-1"))
+	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/hosts/host-1/containers/c-1/inspect", "reader-1"))
 
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "a read-level grantee must reach the raw inspect endpoint")
 }

@@ -29,21 +29,18 @@ describe("quadletMovePreview", () => {
 			query: null,
 		};
 		server.use(
-			http.get(
-				"*/api/machines/m-1/quadlets/web/move-preview",
-				({ request }) => {
-					const url = new URL(request.url);
-					captured.path = url.pathname;
-					captured.query = url.searchParams;
-					return HttpResponse.json(quadletMovePreviewFixture());
-				},
-			),
+			http.get("*/api/hosts/m-1/quadlets/web/move-preview", ({ request }) => {
+				const url = new URL(request.url);
+				captured.path = url.pathname;
+				captured.query = url.searchParams;
+				return HttpResponse.json(quadletMovePreviewFixture());
+			}),
 		);
 
 		const preview = await quadletMovePreview("m-1", "web", "m-2");
 
-		expect(captured.path).toBe("/api/machines/m-1/quadlets/web/move-preview");
-		expect(captured.query?.get("targetMachineId")).toBe("m-2");
+		expect(captured.path).toBe("/api/hosts/m-1/quadlets/web/move-preview");
+		expect(captured.query?.get("targetHostId")).toBe("m-2");
 		expect(preview).toEqual(quadletMovePreviewFixture());
 	});
 
@@ -52,7 +49,7 @@ describe("quadletMovePreview", () => {
 			volumes: [quadletMoveCompanionVolumeFixture("differs")],
 		});
 		server.use(
-			http.get("*/api/machines/m-1/quadlets/web/move-preview", () =>
+			http.get("*/api/hosts/m-1/quadlets/web/move-preview", () =>
 				HttpResponse.json(companionPreview),
 			),
 		);
@@ -79,7 +76,7 @@ describe("quadletMovePreview", () => {
 			],
 		});
 		server.use(
-			http.get("*/api/machines/m-1/quadlets/web/move-preview", () =>
+			http.get("*/api/hosts/m-1/quadlets/web/move-preview", () =>
 				HttpResponse.json(dataPreview),
 			),
 		);
@@ -110,7 +107,7 @@ describe("quadletMovePreview", () => {
 			],
 		});
 		server.use(
-			http.get("*/api/machines/m-1/quadlets/web/move-preview", () =>
+			http.get("*/api/hosts/m-1/quadlets/web/move-preview", () =>
 				HttpResponse.json(secretPreview),
 			),
 		);
@@ -125,21 +122,21 @@ describe("moveQuadlet", () => {
 	it("POSTs the transfer body to the move endpoint and returns the envelope", async () => {
 		let body: unknown;
 		server.use(
-			http.post("*/api/machines/m-1/quadlets/web/move", async ({ request }) => {
+			http.post("*/api/hosts/m-1/quadlets/web/move", async ({ request }) => {
 				body = await request.json();
 				return HttpResponse.json(quadletMoveResultFixture());
 			}),
 		);
 
 		const result = await moveQuadlet("m-1", "web", {
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
 		});
 
 		expect(body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
@@ -150,7 +147,7 @@ describe("moveQuadlet", () => {
 	it("sends no stop/force flags for a copy — they are move-mode vocabulary", async () => {
 		let body: unknown;
 		server.use(
-			http.post("*/api/machines/m-1/quadlets/web/move", async ({ request }) => {
+			http.post("*/api/hosts/m-1/quadlets/web/move", async ({ request }) => {
 				body = await request.json();
 				return HttpResponse.json(
 					quadletMoveResultFixture({ status: "copied" }),
@@ -159,18 +156,18 @@ describe("moveQuadlet", () => {
 		);
 
 		const result = await moveQuadlet("m-1", "web", {
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "copy",
 		});
 
-		expect(body).toEqual({ targetMachineId: "m-2", mode: "copy" });
+		expect(body).toEqual({ targetHostId: "m-2", mode: "copy" });
 		expect(result.status).toBe("copied");
 	});
 
 	it("sends transferVolumeQuadlets when the caller sets it (issue 217)", async () => {
 		const bodies: unknown[] = [];
 		server.use(
-			http.post("*/api/machines/m-1/quadlets/web/move", async ({ request }) => {
+			http.post("*/api/hosts/m-1/quadlets/web/move", async ({ request }) => {
 				bodies.push(await request.json());
 				return HttpResponse.json(
 					quadletMoveResultFixture({ status: "copied" }),
@@ -179,26 +176,26 @@ describe("moveQuadlet", () => {
 		);
 
 		await moveQuadlet("m-1", "web", {
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "copy",
 			transferVolumeQuadlets: true,
 		});
 		await moveQuadlet("m-1", "web", {
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			transferVolumeQuadlets: false,
 		});
 
 		expect(bodies).toEqual([
-			{ targetMachineId: "m-2", mode: "copy", transferVolumeQuadlets: true },
-			{ targetMachineId: "m-2", mode: "move", transferVolumeQuadlets: false },
+			{ targetHostId: "m-2", mode: "copy", transferVolumeQuadlets: true },
+			{ targetHostId: "m-2", mode: "move", transferVolumeQuadlets: false },
 		]);
 	});
 
 	it("sends migrateVolumeData and overwriteVolumes when the caller sets them (issue 214)", async () => {
 		const bodies: unknown[] = [];
 		server.use(
-			http.post("*/api/machines/m-1/quadlets/web/move", async ({ request }) => {
+			http.post("*/api/hosts/m-1/quadlets/web/move", async ({ request }) => {
 				bodies.push(await request.json());
 				return HttpResponse.json(
 					quadletMoveResultFixture({
@@ -218,7 +215,7 @@ describe("moveQuadlet", () => {
 		);
 
 		const result = await moveQuadlet("m-1", "web", {
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "copy",
 			migrateVolumeData: true,
 			overwriteVolumes: true,
@@ -226,7 +223,7 @@ describe("moveQuadlet", () => {
 
 		expect(bodies).toEqual([
 			{
-				targetMachineId: "m-2",
+				targetHostId: "m-2",
 				mode: "copy",
 				migrateVolumeData: true,
 				overwriteVolumes: true,
@@ -240,7 +237,7 @@ describe("moveQuadlet", () => {
 	it("sends transferSecrets when the caller sets it and passes the secretTransfer block back (issue 215)", async () => {
 		const bodies: unknown[] = [];
 		server.use(
-			http.post("*/api/machines/m-1/quadlets/web/move", async ({ request }) => {
+			http.post("*/api/hosts/m-1/quadlets/web/move", async ({ request }) => {
 				bodies.push(await request.json());
 				return HttpResponse.json(
 					quadletMoveResultFixture({
@@ -262,13 +259,13 @@ describe("moveQuadlet", () => {
 		);
 
 		const result = await moveQuadlet("m-1", "web", {
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "copy",
 			transferSecrets: true,
 		});
 
 		expect(bodies).toEqual([
-			{ targetMachineId: "m-2", mode: "copy", transferSecrets: true },
+			{ targetHostId: "m-2", mode: "copy", transferSecrets: true },
 		]);
 		expect(result.secretTransfer?.secrets).toEqual([
 			{ name: "db-password", outcome: "transferred" },
@@ -284,7 +281,7 @@ describe("moveQuadlet", () => {
 describe("moveQuadletStreamUrl", () => {
 	it("builds the full move-stream URL for the fetch transport (issue 214)", () => {
 		expect(moveQuadletStreamUrl("m-1", "web")).toBe(
-			"/api/machines/m-1/quadlets/web/move",
+			"/api/hosts/m-1/quadlets/web/move",
 		);
 	});
 });
@@ -299,7 +296,7 @@ describe("buildMoveInput", () => {
 	// @/test/factories): one migratable podman volume fresh on the target,
 	// no companions, no secrets.
 	const baseFacts: QuadletMoveFacts = {
-		targetMachineId: "m-2",
+		targetHostId: "m-2",
 		companions: false,
 		migratable: true,
 		anyExistsOnTarget: false,
@@ -331,7 +328,7 @@ describe("buildMoveInput", () => {
 	// The body the default dialog state produces in move mode — every guard
 	// row starts from it and expects only its flag deltas.
 	const bareMove: QuadletMoveInput = {
-		targetMachineId: "m-2",
+		targetHostId: "m-2",
 		mode: "move",
 		stop: true,
 		force: false,
@@ -345,11 +342,8 @@ describe("buildMoveInput", () => {
 	});
 
 	const modeFlagRows: [QuadletMoveMode, QuadletMoveInput][] = [
-		[
-			"move",
-			{ targetMachineId: "m-2", mode: "move", stop: false, force: true },
-		],
-		["copy", { targetMachineId: "m-2", mode: "copy" }],
+		["move", { targetHostId: "m-2", mode: "move", stop: false, force: true }],
+		["copy", { targetHostId: "m-2", mode: "copy" }],
 	];
 
 	it.each(modeFlagRows)(
@@ -507,7 +501,7 @@ describe("buildMoveInput", () => {
 
 		expect(stream).toBe(true);
 		expect(input).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
@@ -526,7 +520,7 @@ describe("buildMoveInput", () => {
 
 		expect(stream).toBe(true);
 		expect(input).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "copy",
 			migrateVolumeData: true,
 		});

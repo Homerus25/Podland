@@ -29,10 +29,10 @@ func NewContainerHandler(service *ContainerService) *ContainerHandler {
 
 // List handles listing containers
 func (h *ContainerHandler) List(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerListResult, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (ContainerListResult, error) {
 		opts := parseContainerListOptions(r)
 
-		containers, err := h.service.List(ctx, userID, machineID, opts)
+		containers, err := h.service.List(ctx, userID, hostID, opts)
 		if err != nil {
 			return ContainerListResult{}, err
 		}
@@ -66,7 +66,7 @@ func parseContainerListOptions(r *http.Request) entities.ContainerListOptions {
 
 // Create handles creating a container
 func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*ContainerCreateResponse, error) {
+	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, hostID string) (*ContainerCreateResponse, error) {
 		var request ContainerCreateRequest
 		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
@@ -82,7 +82,7 @@ func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		report, err := h.service.Create(ctx, userID, machineID, request)
+		report, err := h.service.Create(ctx, userID, hostID, request)
 		if err != nil {
 			return nil, err
 		}
@@ -94,13 +94,13 @@ func (h *ContainerHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Get handles getting a container by ID
 func (h *ContainerHandler) Get(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerGetResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (ContainerGetResponse, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 		if guard != nil {
 			return ContainerGetResponse{}, guard
 		}
 
-		containerData, err := h.service.Get(ctx, userID, machineID, containerID)
+		containerData, err := h.service.Get(ctx, userID, hostID, containerID)
 		if err != nil {
 			return ContainerGetResponse{}, err
 		}
@@ -111,13 +111,13 @@ func (h *ContainerHandler) Get(w http.ResponseWriter, r *http.Request) {
 // Inspect handles returning a container's raw podman inspect report.
 // The report is the top-level JSON body — no DTO mapping, unlike Get.
 func (h *ContainerHandler) Inspect(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*entities.ContainerInspectReport, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*entities.ContainerInspectReport, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		return h.service.Inspect(ctx, userID, machineID, containerID)
+		return h.service.Inspect(ctx, userID, hostID, containerID)
 	})
 }
 
@@ -125,13 +125,13 @@ func (h *ContainerHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 // container's identity; the response DTO's state and timestamp are
 // stamped here, at mapping time.
 func (h *ContainerHandler) Start(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerStartResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*ContainerStartResponse, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		result, err := h.service.Start(ctx, userID, machineID, containerID)
+		result, err := h.service.Start(ctx, userID, hostID, containerID)
 		if err != nil {
 			return nil, err
 		}
@@ -144,13 +144,13 @@ func (h *ContainerHandler) Start(w http.ResponseWriter, r *http.Request) {
 // container's identity; the response DTO's state and timestamp are
 // stamped here, at mapping time.
 func (h *ContainerHandler) Stop(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerStopResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*ContainerStopResponse, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		result, err := h.service.Stop(ctx, userID, machineID, containerID)
+		result, err := h.service.Stop(ctx, userID, hostID, containerID)
 		if err != nil {
 			return nil, err
 		}
@@ -164,13 +164,13 @@ func (h *ContainerHandler) Stop(w http.ResponseWriter, r *http.Request) {
 // stamped here, at mapping time. The endpoint accepts no timeout or
 // force parameters — podman's default timeout applies.
 func (h *ContainerHandler) Restart(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*ContainerRestartResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*ContainerRestartResponse, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		result, err := h.service.Restart(ctx, userID, machineID, containerID)
+		result, err := h.service.Restart(ctx, userID, hostID, containerID)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +184,7 @@ func (h *ContainerHandler) Restart(w http.ResponseWriter, r *http.Request) {
 // so the request carries no name-regex tag. The response is the same
 // detail DTO the GET answers, mapped from the post-rename inspect.
 func (h *ContainerHandler) Rename(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerGetResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (ContainerGetResponse, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 		if guard != nil {
 			return ContainerGetResponse{}, guard
@@ -195,7 +195,7 @@ func (h *ContainerHandler) Rename(w http.ResponseWriter, r *http.Request) {
 			return ContainerGetResponse{}, appErr
 		}
 
-		report, err := h.service.Rename(ctx, userID, machineID, containerID, request.Name)
+		report, err := h.service.Rename(ctx, userID, hostID, containerID, request.Name)
 		if err != nil {
 			return ContainerGetResponse{}, err
 		}
@@ -210,7 +210,7 @@ func (h *ContainerHandler) Rename(w http.ResponseWriter, r *http.Request) {
 // guards that cannot be struct tags live in the update builder behind
 // the service.
 func (h *ContainerHandler) Update(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerGetResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (ContainerGetResponse, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 		if guard != nil {
 			return ContainerGetResponse{}, guard
@@ -221,7 +221,7 @@ func (h *ContainerHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return ContainerGetResponse{}, appErr
 		}
 
-		report, err := h.service.Update(ctx, userID, machineID, containerID, request)
+		report, err := h.service.Update(ctx, userID, hostID, containerID, request)
 		if err != nil {
 			return ContainerGetResponse{}, err
 		}
@@ -231,7 +231,7 @@ func (h *ContainerHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles deleting a container
 func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, hostID string) (struct{}, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 		if guard != nil {
 			return struct{}{}, guard
@@ -239,17 +239,17 @@ func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 		force := web.QueryBool(r, "force", false)
 
-		return struct{}{}, h.service.Delete(ctx, userID, machineID, containerID, force)
+		return struct{}{}, h.service.Delete(ctx, userID, hostID, containerID, force)
 	})
 }
 
-// Prune handles removing all stopped containers on a machine. Route-level
-// RequireMachinePermission(write) (app.go) gates it at write; podman
+// Prune handles removing all stopped containers on a host. Route-level
+// RequireHostPermission(write) (app.go) gates it at write; podman
 // leaves running containers alone. Returns 200 with one report entry per
 // removed container (ID, reclaimed size, any per-container error).
 func (h *ContainerHandler) Prune(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]ContainerPruneResponse, error) {
-		prunes, err := h.service.Prune(ctx, userID, machineID)
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]ContainerPruneResponse, error) {
+		prunes, err := h.service.Prune(ctx, userID, hostID)
 		if err != nil {
 			return nil, err
 		}
@@ -258,12 +258,12 @@ func (h *ContainerHandler) Prune(w http.ResponseWriter, r *http.Request) {
 }
 
 // Stats handles the all-stats literal route: one one-shot snapshot for
-// every running container on the machine. Nothing running is a legal
+// every running container on the host. Nothing running is a legal
 // empty snapshot (200 with an empty array), and the route stays at the
 // subtree's read level like list/get/logs.
 func (h *ContainerHandler) Stats(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerStatsResult, error) {
-		stats, err := h.service.Stats(ctx, userID, machineID, nil, true)
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (ContainerStatsResult, error) {
+		stats, err := h.service.Stats(ctx, userID, hostID, nil, true)
 		if err != nil {
 			return ContainerStatsResult{}, err
 		}
@@ -276,13 +276,13 @@ func (h *ContainerHandler) Stats(w http.ResponseWriter, r *http.Request) {
 // unknown or known-but-not-running, which podman's own stats handler
 // refuses alike — answers the domain's 404 sentinel.
 func (h *ContainerHandler) ContainerStats(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (ContainerStatsResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (ContainerStatsResponse, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 		if guard != nil {
 			return ContainerStatsResponse{}, guard
 		}
 
-		stats, err := h.service.Stats(ctx, userID, machineID, []string{containerID}, false)
+		stats, err := h.service.Stats(ctx, userID, hostID, []string{containerID}, false)
 		if err != nil {
 			return ContainerStatsResponse{}, err
 		}

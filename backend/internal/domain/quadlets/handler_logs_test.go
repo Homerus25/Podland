@@ -35,7 +35,7 @@ func logsRequestWithBase(base context.Context, target string) *http.Request {
 	req := httptest.NewRequest("GET", target, nil)
 	ctx := context.WithValue(base, contextutils.UserIDContextKey, "user123")
 	req = req.WithContext(ctx)
-	req.SetPathValue("id", "machine123")
+	req.SetPathValue("id", "host123")
 	req.SetPathValue("quadletId", "web.container")
 	return req
 }
@@ -52,7 +52,7 @@ func logsHandler(engine *fakeQuadletEngine, logsFn func(containerName string, op
 }
 
 // TestQuadletHandler_GetLogs_Success tests successful buffered log retrieval
-// through the real service: the quadlet is resolved on the machine, the
+// through the real service: the quadlet is resolved on the host, the
 // buffered service call receives the right target and window through the
 // HTTP surface, and its managed container's logs land in the response.
 func TestQuadletHandler_GetLogs_Success(t *testing.T) {
@@ -65,7 +65,7 @@ func TestQuadletHandler_GetLogs_Success(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?since=2024-01-01T00:00:00Z&tail=3"))
+	handler.GetLogs(w, logsRequest("/api/hosts/host123/quadlets/web.container/logs?since=2024-01-01T00:00:00Z&tail=3"))
 
 	require.Equal(t, http.StatusOK, w.Code, "Should return 200 on success")
 	assert.Equal(t, "systemd-web", got.Name,
@@ -90,7 +90,7 @@ func TestQuadletHandler_GetLogs_BufferedCancellationAnswers504(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	handler.GetLogs(w, logsRequestWithBase(ctx, "/api/machines/machine123/quadlets/web.container/logs"))
+	handler.GetLogs(w, logsRequestWithBase(ctx, "/api/hosts/host123/quadlets/web.container/logs"))
 
 	assert.Equal(t, http.StatusGatewayTimeout, w.Code,
 		"a cancelled buffered fetch must answer the 504 cancellation sentinel, not a wrapped 500")
@@ -117,7 +117,7 @@ func TestQuadletHandler_GetLogs_StreamingHappyPath(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?follow=true&since=2024-01-01T00:00:00Z&tail=0"))
+	handler.GetLogs(w, logsRequest("/api/hosts/host123/quadlets/web.container/logs?follow=true&since=2024-01-01T00:00:00Z&tail=0"))
 
 	require.Equal(t, http.StatusOK, w.Code, "Should return 200 on streaming success")
 	assert.Equal(t, "systemd-web", got.Name,
@@ -142,7 +142,7 @@ func TestQuadletHandler_GetLogs_NonStreamingUnchanged(t *testing.T) {
 	})
 
 	w := httptest.NewRecorder()
-	handler.GetLogs(w, logsRequest("/api/machines/machine123/quadlets/web.container/logs?follow=false"))
+	handler.GetLogs(w, logsRequest("/api/hosts/host123/quadlets/web.container/logs?follow=false"))
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var got QuadletLogsResponse

@@ -27,7 +27,7 @@ func TestContainerService_Stats_ForwardsAllOptions(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Stats(context.Background(), "user", "machine", nil, true)
+	got, err := service.Stats(context.Background(), "user", "host", nil, true)
 
 	require.NoError(t, err)
 	require.Len(t, got, 1)
@@ -47,7 +47,7 @@ func TestContainerService_Stats_ForwardsTargetOptions(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Stats(context.Background(), "user", "machine", []string{"container-123"}, false)
+	got, err := service.Stats(context.Background(), "user", "host", []string{"container-123"}, false)
 
 	require.NoError(t, err)
 	require.Len(t, got, 1)
@@ -69,7 +69,7 @@ func TestContainerService_Stats_MapsMissingContainerTo404(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Stats(context.Background(), "user", "machine", []string{"container-123"}, false)
+	got, err := service.Stats(context.Background(), "user", "host", []string{"container-123"}, false)
 
 	// WithMessage copies the sentinel (AppError has no Is), so the
 	// classification asserts on the AppError's code, not the chain.
@@ -92,7 +92,7 @@ func TestContainerService_Stats_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Stats(context.Background(), "user", "machine", nil, true)
+	got, err := service.Stats(context.Background(), "user", "host", nil, true)
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -106,7 +106,7 @@ func TestContainerService_Stats_WrapsEngineFailure(t *testing.T) {
 func TestContainerService_Stats_ConnectionFailureAnswers502(t *testing.T) {
 	service := NewContainerService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	got, err := service.Stats(context.Background(), "user", "machine", nil, true)
+	got, err := service.Stats(context.Background(), "user", "host", nil, true)
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, got)

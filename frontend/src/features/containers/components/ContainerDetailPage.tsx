@@ -22,7 +22,7 @@ import type { ContainerDetail } from "@features/containers/services/containersAp
 import {
 	type CapabilityGate,
 	useCapabilityGate,
-} from "@features/machines/hooks/useCapabilityGate";
+} from "@features/hosts/hooks/useCapabilityGate";
 import { DetailPage } from "@shared/components/DetailPage";
 import {
 	DetailList,
@@ -49,12 +49,12 @@ import { RenameContainerDialog } from "./RenameContainerDialog";
 // row renders neither control, rather than flashing the read-only hint
 // at a write-capable caller.
 function ContainerOverview({
-	machineId,
+	hostId,
 	container,
 	renameAccess,
 	onRename,
 }: {
-	machineId: string;
+	hostId: string;
 	container: ContainerDetail;
 	renameAccess: CapabilityGate;
 	onRename: () => void;
@@ -122,7 +122,7 @@ function ContainerOverview({
 						{container.imageId ? (
 							<ChakraLink
 								as={ReactRouterLink}
-								to={detailPath(machineId, "images", container.imageId)}
+								to={detailPath(hostId, "images", container.imageId)}
 								color="blue.500"
 								data-testid="container-image-link"
 							>
@@ -141,7 +141,7 @@ function ContainerOverview({
 								<>
 									<ChakraLink
 										as={ReactRouterLink}
-										to={detailPath(machineId, "volumes", volume.name)}
+										to={detailPath(hostId, "volumes", volume.name)}
 										color="blue.500"
 										data-testid={`container-volume-link-${volume.name}`}
 									>
@@ -213,7 +213,7 @@ function ContainerOverview({
 							renderItem={(secret) => (
 								<ChakraLink
 									as={ReactRouterLink}
-									to={detailPath(machineId, "secrets", secret.name)}
+									to={detailPath(hostId, "secrets", secret.name)}
 									color="blue.500"
 									data-testid={`container-secret-link-${secret.name}`}
 								>
@@ -280,25 +280,25 @@ function ContainerOverview({
 // shared freshness factory's one-shot flavor, so every visit refetches;
 // the raw inspect report fetches lazily on the
 // first "Show inspect JSON" click, never on page mount. The capability
-// gate (the machines feature's hook) answers the per-caller facts both
+// gate (the hosts feature's hook) answers the per-caller facts both
 // gated affordances render from; the overview itself is readable at read
 // level.
 export function ContainerDetailPage() {
-	const { machineId, containerId } = useParams<{
-		machineId: string;
+	const { hostId, containerId } = useParams<{
+		hostId: string;
 		containerId: string;
 	}>();
-	const query = useContainer(machineId!, containerId!);
+	const query = useContainer(hostId!, containerId!);
 	const [revealed, setRevealed] = useState(false);
 	const [renaming, setRenaming] = useState(false);
 	const [statsOpen, setStatsOpen] = useState(false);
 	const [editingConfig, setEditingConfig] = useState(false);
-	const inspectQuery = useContainerInspect(machineId!, containerId!, {
+	const inspectQuery = useContainerInspect(hostId!, containerId!, {
 		enabled: revealed,
 	});
-	const gate = useCapabilityGate(machineId!, "manage-containers");
-	const rename = useRenameContainer(machineId!, containerId!);
-	const update = useUpdateContainer(machineId!, containerId!);
+	const gate = useCapabilityGate(hostId!, "manage-containers");
+	const rename = useRenameContainer(hostId!, containerId!);
+	const update = useUpdateContainer(hostId!, containerId!);
 	const container = query.data;
 
 	return (
@@ -346,7 +346,7 @@ export function ContainerDetailPage() {
 							</Button>
 						</HStack>
 						<ContainerOverview
-							machineId={machineId!}
+							hostId={hostId!}
 							container={container}
 							renameAccess={gate}
 							onRename={() => setRenaming(true)}
@@ -356,7 +356,7 @@ export function ContainerDetailPage() {
 			</DetailPage>
 			{statsOpen ? (
 				<ContainerStatsDialog
-					machineId={machineId!}
+					hostId={hostId!}
 					containerId={containerId!}
 					onClose={() => setStatsOpen(false)}
 				/>

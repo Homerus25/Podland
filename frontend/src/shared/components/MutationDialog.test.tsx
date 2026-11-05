@@ -875,16 +875,16 @@ describe("FormFooter standalone", () => {
 				</form>
 				<FormFooter
 					formId="solo-form"
-					submitLabel="Save machine"
-					submitTestId="machine-form-save"
+					submitLabel="Save host"
+					submitTestId="host-form-save"
 					pending={false}
 					onCancel={onCancel}
 				/>
 			</>,
 		);
 
-		const submit = screen.getByTestId("machine-form-save");
-		expect(submit).toHaveTextContent("Save machine");
+		const submit = screen.getByTestId("host-form-save");
+		expect(submit).toHaveTextContent("Save host");
 		expect(submit).toBeEnabled();
 
 		await user.click(submit);
@@ -901,24 +901,24 @@ describe("FormFooter standalone", () => {
 				<form id="solo-form" />
 				<FormFooter
 					formId="solo-form"
-					submitLabel="Save machine"
-					submitTestId="machine-form-save"
+					submitLabel="Save host"
+					submitTestId="host-form-save"
 					pending={false}
 					onCancel={onCancel}
-					cancelTestId="machine-form-cancel"
+					cancelTestId="host-form-cancel"
 				/>
 			</>,
 		);
 
-		expect(screen.getByTestId("machine-form-cancel")).toBeEnabled();
+		expect(screen.getByTestId("host-form-cancel")).toBeEnabled();
 	});
 
 	it("applies the one submit policy and drops cancel without an onCancel", () => {
 		const footer = (props: { pending: boolean; onCancel?: boolean }) => (
 			<FormFooter
 				formId="solo-form"
-				submitLabel="Save machine"
-				submitTestId="machine-form-save"
+				submitLabel="Save host"
+				submitTestId="host-form-save"
 				pending={props.pending}
 				onCancel={props.onCancel ? vi.fn() : undefined}
 			/>
@@ -929,7 +929,7 @@ describe("FormFooter standalone", () => {
 				{footer({ pending: true, onCancel: true })}
 			</>,
 		);
-		expect(screen.getByTestId("machine-form-save")).toBeDisabled();
+		expect(screen.getByTestId("host-form-save")).toBeDisabled();
 		expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
 
 		view.rerender(
@@ -938,7 +938,7 @@ describe("FormFooter standalone", () => {
 				{footer({ pending: false, onCancel: true })}
 			</>,
 		);
-		expect(screen.getByTestId("machine-form-save")).toBeEnabled();
+		expect(screen.getByTestId("host-form-save")).toBeEnabled();
 
 		view.rerender(
 			<FormValidityScope formState={{ isValid: false, isSubmitting: false }}>
@@ -946,7 +946,7 @@ describe("FormFooter standalone", () => {
 				{footer({ pending: false, onCancel: true })}
 			</FormValidityScope>,
 		);
-		expect(screen.getByTestId("machine-form-save")).toBeDisabled();
+		expect(screen.getByTestId("host-form-save")).toBeDisabled();
 
 		view.rerender(
 			<FormValidityScope formState={{ isValid: true, isSubmitting: true }}>
@@ -954,7 +954,7 @@ describe("FormFooter standalone", () => {
 				{footer({ pending: false, onCancel: true })}
 			</FormValidityScope>,
 		);
-		expect(screen.getByTestId("machine-form-save")).toBeDisabled();
+		expect(screen.getByTestId("host-form-save")).toBeDisabled();
 
 		view.rerender(
 			<>

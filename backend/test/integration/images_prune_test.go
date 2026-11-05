@@ -16,13 +16,13 @@ import (
 )
 
 // Test_Integration_Images_Prune is the image prune vertical slice
-// (220-01) against POST /api/machines/{id}/images/prune. It seeds an
+// (220-01) against POST /api/hosts/{id}/images/prune. It seeds an
 // unused image (pulled and tagged run-scoped, proving the registry
 // path) plus an in-use image (busybox, held by a running container),
 // prunes, and verifies the report entries and survival via the list
 // endpoint:
 //
-//	POST /api/machines/{id}/images/prune → 200, entry per removed image
+//	POST /api/hosts/{id}/images/prune → 200, entry per removed image
 //
 // Isolation model matches the images slice (080-02): run-scoped tag for
 // assertions/cleanup, per-test t.Cleanup, and the shared suite sweep.
@@ -31,13 +31,13 @@ func Test_Integration_Images_Prune(t *testing.T) {
 	registerImagesSweep()
 	registerContainersSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 	unusedRef := "localhost/it-" + suite.RunID + "-prune-alpine:latest"
 	unusedNeedle := "it-" + suite.RunID + "-prune-alpine"
 	containerName := "it-" + suite.RunID + "-prune-c"
 
-	busyboxPreexisted := imageRepoPresent(t, machineID, "docker.io/library/busybox")
-	alpinePreexisted := imageRepoPresent(t, machineID, "docker.io/library/alpine")
+	busyboxPreexisted := imageRepoPresent(t, hostID, "docker.io/library/busybox")
+	alpinePreexisted := imageRepoPresent(t, hostID, "docker.io/library/alpine")
 
 	// Fixtures: busybox (in use, must survive) and alpine (unused,
 	// must be pruned). Pulls are idempotent test scaffolding over the
@@ -73,12 +73,12 @@ func Test_Integration_Images_Prune(t *testing.T) {
 
 	// Capture both images' IDs before pruning so we can match them
 	// against the prune report (after pruning the unused one is gone).
-	unusedID := findRunScopedImageID(t, machineID, unusedNeedle)
-	busyboxID := findRunScopedImageID(t, machineID, "docker.io/library/busybox")
+	unusedID := findRunScopedImageID(t, hostID, unusedNeedle)
+	busyboxID := findRunScopedImageID(t, hostID, "docker.io/library/busybox")
 
 	// --- AC: prune returns 200 with a report entry per removed image --
 	resp, err := suite.AuthenticatedClient().Post(
-		suite.ServerURL+"/api/machines/"+machineID+"/images/prune", "application/json", nil)
+		suite.ServerURL+"/api/hosts/"+hostID+"/images/prune", "application/json", nil)
 	require.NoError(t, err, "POST prune must connect to the in-process server")
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
@@ -93,7 +93,7 @@ func Test_Integration_Images_Prune(t *testing.T) {
 	reported := map[string]bool{}
 	for _, entry := range report {
 		reported[entry.ID] = true
-		assert.Empty(t, entry.Error, "prune must not report errors on a healthy machine")
+		assert.Empty(t, entry.Error, "prune must not report errors on a healthy host")
 	}
 
 	// --- AC: the unused image is reported; the in-use image is not ----
@@ -103,8 +103,8 @@ func Test_Integration_Images_Prune(t *testing.T) {
 		"in-use image must not be reported as removed")
 
 	// --- AC: the unused image is gone; the in-use image survives ------
-	requireNoRunScopedImage(t, machineID, unusedNeedle)
-	assert.True(t, imageRepoPresent(t, machineID, "docker.io/library/busybox"),
+	requireNoRunScopedImage(t, hostID, unusedNeedle)
+	assert.True(t, imageRepoPresent(t, hostID, "docker.io/library/busybox"),
 		"in-use image must survive the prune")
 }
 
@@ -123,13 +123,13 @@ func Test_Integration_Images_Prune_AccessControl(t *testing.T) {
 	t.Run("ReadLevelUserGets403", func(t *testing.T) {
 		client := levelUserClient(t, models.PermissionRead)
 		expectAPIError(t, client, http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/images/prune",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/images/prune",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		expectAPIError(t, noAccessUserClient(t), http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/images/prune",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/images/prune",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 }

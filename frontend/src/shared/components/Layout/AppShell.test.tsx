@@ -48,15 +48,15 @@ describe("app shell", () => {
 		).toBeInTheDocument();
 		expect(screen.getByText("alice")).toBeInTheDocument();
 		expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
-		expect(screen.getByRole("link", { name: "Machines" })).toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "Hosts" })).toBeInTheDocument();
 		expect(
 			screen.queryByRole("button", { name: "Toggle navigation" }),
 		).not.toBeInTheDocument();
 
-		await userEvent.click(screen.getByRole("link", { name: "Machines" }));
+		await userEvent.click(screen.getByRole("link", { name: "Hosts" }));
 
 		expect(
-			await screen.findByRole("heading", { name: "Machines" }),
+			await screen.findByRole("heading", { name: "Hosts" }),
 		).toBeInTheDocument();
 	});
 });
@@ -91,7 +91,7 @@ describe("mobile navigation drawer", () => {
 
 		expect(toggle).toHaveAttribute("aria-expanded", "true");
 		expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
-		expect(screen.getByRole("link", { name: "Machines" })).toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "Hosts" })).toBeInTheDocument();
 
 		await userEvent.click(toggle);
 
@@ -110,11 +110,11 @@ describe("mobile navigation drawer", () => {
 		).toBeInTheDocument();
 		const toggle = await openDrawer();
 
-		await userEvent.click(screen.getByRole("link", { name: "Machines" }));
+		await userEvent.click(screen.getByRole("link", { name: "Hosts" }));
 
 		expect(toggle).toHaveAttribute("aria-expanded", "false");
 		expect(
-			await screen.findByRole("heading", { name: "Machines" }),
+			await screen.findByRole("heading", { name: "Hosts" }),
 		).toBeInTheDocument();
 	});
 

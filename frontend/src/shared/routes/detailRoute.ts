@@ -1,8 +1,8 @@
 // The detail-route kit owns the resource-detail navigation family (spec
-// 301): the resource kind union, the one detail-path builder, the machine
+// 301): the resource kind union, the one detail-path builder, the host
 // tab path the detail pages' back button falls back to, and the
 // history-awareness predicate that back button rides. It mirrors the logs
-// route kit (@shared/logs/logRoute): machine-scoped URL construction is
+// route kit (@shared/logs/logRoute): host-scoped URL construction is
 // single-owned and percent-encodes every segment (the C11 discipline),
 // and the router decodes params on the far side, so the round trip is safe.
 import { useLocation } from "react-router-dom";
@@ -14,22 +14,22 @@ export type DetailResource =
 	| "networks"
 	| "secrets";
 
-// The one builder of resource detail paths: machineId and id are
+// The one builder of resource detail paths: hostId and id are
 // percent-encoded (an id containing `/` used to break the route match
 // silently), the resource rides bare as the route's path segment.
 export function detailPath(
-	machineId: string,
+	hostId: string,
 	resource: DetailResource,
 	id: string,
 ): string {
-	return `/machines/${encodeURIComponent(machineId)}/${resource}/${encodeURIComponent(id)}`;
+	return `/hosts/${encodeURIComponent(hostId)}/${resource}/${encodeURIComponent(id)}`;
 }
 
-// The machine detail page path with the tab the detail page's back button
-// falls back to (?tab=<resource>, the spec 297 deep link); the machineId is
-// percent-encoded like every machine-scoped segment.
-export function machineTabPath(machineId: string, tab: string): string {
-	return `/machines/${encodeURIComponent(machineId)}?tab=${tab}`;
+// The host detail page path with the tab the detail page's back button
+// falls back to (?tab=<resource>, the spec 297 deep link); the hostId is
+// percent-encoded like every host-scoped segment.
+export function hostTabPath(hostId: string, tab: string): string {
+	return `/hosts/${encodeURIComponent(hostId)}?tab=${tab}`;
 }
 
 // The router contract the history-aware back button rides (spec 373): a
@@ -44,8 +44,8 @@ export function useHasInAppHistory(): boolean {
 
 // The create-container page's path (spec 341): the one builder of the
 // containers area's create route, percent-encoded like every
-// machine-scoped segment. The static `new` segment ranks above the
+// host-scoped segment. The static `new` segment ranks above the
 // `:containerId` detail segment in the router, so both routes coexist.
-export function containerCreatePath(machineId: string): string {
-	return `/machines/${encodeURIComponent(machineId)}/containers/new`;
+export function containerCreatePath(hostId: string): string {
+	return `/hosts/${encodeURIComponent(hostId)}/containers/new`;
 }

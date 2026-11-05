@@ -11,7 +11,7 @@ import (
 )
 
 // MockEncryptionService implements a mock encryption service for testing.
-// Mirrors the machines domain's sshKeyEncryptor seam: SSH-key encryption
+// Mirrors the hosts domain's sshKeyEncryptor seam: SSH-key encryption
 // only, since that is the only capability any test exercises through it.
 type MockEncryptionService struct {
 	encryptSSHError error
@@ -53,8 +53,8 @@ func (m *MockEncryptionService) EncryptSSHKey(privateKey string) ([]byte, string
 // MockTestConnectionCall records a single TestConnection invocation so
 // tests can assert the probe received the expected (defaulted) raw
 // credentials. Defined locally (rather than reusing a domain type) so
-// testutils does not import the machines package and create a test
-// import cycle with the white-box machines tests.
+// testutils does not import the hosts package and create a test
+// import cycle with the white-box hosts tests.
 type MockTestConnectionCall struct {
 	Hostname         string
 	Port             int
@@ -72,24 +72,24 @@ type MockConnectionManager struct {
 	probeErr            error
 	probeCalls          []MockProbeCall
 	withConnectionCalls []MockWithConnectionCall
-	removeMachineCalls  []string
+	removeHostCalls     []string
 }
 
 // MockWithConnectionCall records a single WithConnection invocation.
 type MockWithConnectionCall struct {
-	Op        string
-	MachineID string
-	UserID    string
+	Op     string
+	HostID string
+	UserID string
 }
 
 // The mock satisfies the full connections.Manager seam so services can
 // depend on the interface in production wiring and tests.
 var _ connections.Manager = (*MockConnectionManager)(nil)
 
-// MockProbeCall records a single ProbeMachine invocation.
+// MockProbeCall records a single ProbeHost invocation.
 type MockProbeCall struct {
-	MachineID string
-	UserID    string
+	HostID string
+	UserID string
 }
 
 func NewMockConnectionManager() *MockConnectionManager {
@@ -97,7 +97,7 @@ func NewMockConnectionManager() *MockConnectionManager {
 }
 
 // NewMockConnectionManagerWithProbeError returns a MockConnectionManager
-// whose ProbeMachine always fails with the given error. Use this to
+// whose ProbeHost always fails with the given error. Use this to
 // exercise the live status probe's failure branch (probe error and probe
 // timeout both map to "offline").
 func NewMockConnectionManagerWithProbeError(probeErr error) *MockConnectionManager {
@@ -122,7 +122,7 @@ func mockConnectionContext() context.Context {
 // NewMockConnectionManagerWithTestError returns a MockConnectionManager
 // whose TestConnection always fails with the given error. Use this to
 // exercise the registration connection-test failure branch in
-// MachineService.Create (the machine must not be persisted and Create
+// HostService.Create (the host must not be persisted and Create
 // must surface ErrConnectionTestFailed).
 func NewMockConnectionManagerWithTestError(testErr error) *MockConnectionManager {
 	return &MockConnectionManager{
@@ -134,8 +134,8 @@ func NewMockConnectionManagerWithTestError(testErr error) *MockConnectionManager
 // production contract: an injected acquisition error short-circuits fn and
 // crosses as-is (the 502 mapping is the production manager's job),
 // otherwise fn's error propagates untouched.
-func (m *MockConnectionManager) WithConnection(ctx context.Context, userID, machineID, op string, fn func(connCtx context.Context) error) error {
-	m.withConnectionCalls = append(m.withConnectionCalls, MockWithConnectionCall{Op: op, MachineID: machineID, UserID: userID})
+func (m *MockConnectionManager) WithConnection(ctx context.Context, userID, hostID, op string, fn func(connCtx context.Context) error) error {
+	m.withConnectionCalls = append(m.withConnectionCalls, MockWithConnectionCall{Op: op, HostID: hostID, UserID: userID})
 	if m.acquireErr != nil {
 		return m.acquireErr
 	}
@@ -150,18 +150,18 @@ func (m *MockConnectionManager) WithConnectionCalls() []MockWithConnectionCall {
 	return out
 }
 
-// RemoveMachine records the invalidation. MachineService.Delete must call
+// RemoveHost records the invalidation. HostService.Delete must call
 // it after a successful DB delete; the recording lets service tests pin
 // the teardown ordering and the failed-delete-evicts-nothing rule.
-func (m *MockConnectionManager) RemoveMachine(machineID string) {
-	m.removeMachineCalls = append(m.removeMachineCalls, machineID)
+func (m *MockConnectionManager) RemoveHost(hostID string) {
+	m.removeHostCalls = append(m.removeHostCalls, hostID)
 }
 
-// RemoveMachineCalls returns a snapshot of every RemoveMachine invocation,
+// RemoveHostCalls returns a snapshot of every RemoveHost invocation,
 // in call order.
-func (m *MockConnectionManager) RemoveMachineCalls() []string {
-	out := make([]string, len(m.removeMachineCalls))
-	copy(out, m.removeMachineCalls)
+func (m *MockConnectionManager) RemoveHostCalls() []string {
+	out := make([]string, len(m.removeHostCalls))
+	copy(out, m.removeHostCalls)
 	return out
 }
 
@@ -170,14 +170,14 @@ func (m *MockConnectionManager) RemoveMachineCalls() []string {
 func (m *MockConnectionManager) Stop() {
 }
 
-// ProbeMachine records the call and returns the injected error. The
-// default — no error set — is success (the machine is online).
-func (m *MockConnectionManager) ProbeMachine(machineID, userID string) error {
-	m.probeCalls = append(m.probeCalls, MockProbeCall{MachineID: machineID, UserID: userID})
+// ProbeHost records the call and returns the injected error. The
+// default — no error set — is success (the host is online).
+func (m *MockConnectionManager) ProbeHost(hostID, userID string) error {
+	m.probeCalls = append(m.probeCalls, MockProbeCall{HostID: hostID, UserID: userID})
 	return m.probeErr
 }
 
-// ProbeCalls returns a snapshot of every ProbeMachine invocation.
+// ProbeCalls returns a snapshot of every ProbeHost invocation.
 func (m *MockConnectionManager) ProbeCalls() []MockProbeCall {
 	out := make([]MockProbeCall, len(m.probeCalls))
 	copy(out, m.probeCalls)
@@ -186,7 +186,7 @@ func (m *MockConnectionManager) ProbeCalls() []MockProbeCall {
 
 // TestConnection records the probe arguments and returns the injected
 // error. The default — no error set — is success (nil), so existing
-// happy-path machine-service tests keep passing once Create calls the
+// happy-path host-service tests keep passing once Create calls the
 // probe.
 func (m *MockConnectionManager) TestConnection(ctx context.Context, hostname string, port int, sshUsername, sshPrivateKey, podmanSocketPath string) error {
 	m.testConnectionCalls = append(m.testConnectionCalls, MockTestConnectionCall{
@@ -217,10 +217,10 @@ func (m *MockConnectionManager) TestConnectionCalls() []MockTestConnectionCall {
 type MockSSHExec struct {
 	execResult sshexec.ExecResult
 	execError  error
-	execFunc   func(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error)
+	execFunc   func(ctx context.Context, hostID, userID, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error)
 	execCalls  []MockSSHExecCall
 
-	streamFunc   func(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error)
+	streamFunc   func(ctx context.Context, hostID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error)
 	streamResult *sshexec.ExecResult
 	streamError  error
 	streamCalls  []MockSSHExecStreamCall
@@ -228,21 +228,21 @@ type MockSSHExec struct {
 
 // MockSSHExecCall records a single Exec invocation, for assertion in tests.
 type MockSSHExecCall struct {
-	MachineID string
-	UserID    string
-	Command   string
-	Opts      sshexec.ExecOptions
+	HostID  string
+	UserID  string
+	Command string
+	Opts    sshexec.ExecOptions
 }
 
 // MockSSHExecStreamCall records a single ExecStream invocation, for
 // assertion in tests. Lines holds every output line the mock emitted, in
 // emission order.
 type MockSSHExecStreamCall struct {
-	MachineID string
-	UserID    string
-	Command   string
-	Opts      sshexec.ExecOptions
-	Lines     []sshexec.OutputLine
+	HostID  string
+	UserID  string
+	Command string
+	Opts    sshexec.ExecOptions
+	Lines   []sshexec.OutputLine
 }
 
 // NewMockSSHExec returns a MockSSHExec whose Exec succeeds with a zero
@@ -283,27 +283,27 @@ func NewMockSSHExecWithStreamError(err error) *MockSSHExec {
 // NewMockSSHExecWithStreamFunc returns a MockSSHExec that delegates each
 // ExecStream to the supplied function, so streaming tests can script exact
 // line emission and per-call results.
-func NewMockSSHExecWithStreamFunc(f func(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error)) *MockSSHExec {
+func NewMockSSHExecWithStreamFunc(f func(ctx context.Context, hostID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error)) *MockSSHExec {
 	return &MockSSHExec{streamFunc: f}
 }
 
 // NewMockSSHExecWithFunc returns a MockSSHExec that delegates each Exec to
 // the supplied function. Use this when a test needs to vary behaviour across
 // calls (e.g. first call returns "already running", second returns success).
-func NewMockSSHExecWithFunc(f func(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error)) *MockSSHExec {
+func NewMockSSHExecWithFunc(f func(ctx context.Context, hostID, userID, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error)) *MockSSHExec {
 	return &MockSSHExec{execFunc: f}
 }
 
 // Exec implements sshexec.SSHExecInterface.
-func (m *MockSSHExec) Exec(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+func (m *MockSSHExec) Exec(ctx context.Context, hostID, userID, command string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
 	m.execCalls = append(m.execCalls, MockSSHExecCall{
-		MachineID: machineID,
-		UserID:    userID,
-		Command:   command,
-		Opts:      opts,
+		HostID:  hostID,
+		UserID:  userID,
+		Command: command,
+		Opts:    opts,
 	})
 	if m.execFunc != nil {
-		return m.execFunc(ctx, machineID, userID, command, opts)
+		return m.execFunc(ctx, hostID, userID, command, opts)
 	}
 	if m.execError != nil {
 		return sshexec.ExecResult{}, m.execError
@@ -318,17 +318,17 @@ func (m *MockSSHExec) Exec(ctx context.Context, machineID, userID, command strin
 // configured Exec result/error — emitting the result's captured stdout and
 // stderr lines through onLine (stdout first, then stderr) so callers that
 // only configured Exec behaviour still work.
-func (m *MockSSHExec) ExecStream(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
+func (m *MockSSHExec) ExecStream(ctx context.Context, hostID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
 	call := MockSSHExecStreamCall{
-		MachineID: machineID,
-		UserID:    userID,
-		Command:   command,
-		Opts:      opts,
+		HostID:  hostID,
+		UserID:  userID,
+		Command: command,
+		Opts:    opts,
 	}
 	defer func() { m.streamCalls = append(m.streamCalls, call) }()
 
 	if m.streamFunc != nil {
-		result, err := m.streamFunc(ctx, machineID, userID, command, opts, func(line sshexec.OutputLine) {
+		result, err := m.streamFunc(ctx, hostID, userID, command, opts, func(line sshexec.OutputLine) {
 			call.Lines = append(call.Lines, line)
 			onLine(line)
 		})
@@ -387,9 +387,9 @@ func (m *MockSSHExec) CallCount() int {
 	return len(m.execCalls)
 }
 
-// Helper function to create a test machine service with all mock dependencies
-// Note: This returns individual mock components that can be used to create a MachineService
-// The MachineService itself is created by the caller to maintain proper package boundaries
-func NewTestMachineServiceComponents() (*MockMachineRepository, *MockMachineAccessRepository, *MockConnectionManager, *MockEncryptionService) {
-	return NewMockMachineRepository(), NewMockMachineAccessRepository(), NewMockConnectionManager(), NewMockEncryptionService()
+// Helper function to create a test host service with all mock dependencies
+// Note: This returns individual mock components that can be used to create a HostService
+// The HostService itself is created by the caller to maintain proper package boundaries
+func NewTestHostServiceComponents() (*MockHostRepository, *MockHostAccessRepository, *MockConnectionManager, *MockEncryptionService) {
+	return NewMockHostRepository(), NewMockHostAccessRepository(), NewMockConnectionManager(), NewMockEncryptionService()
 }

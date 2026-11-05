@@ -1,5 +1,5 @@
 import { Button, Td, Tr } from "@chakra-ui/react";
-import { can } from "@features/machines/permissions";
+import { can } from "@features/hosts/permissions";
 import { ConnectDialog } from "@features/networks/components/ConnectDialog";
 import { CreateNetworkDialog } from "@features/networks/components/CreateNetworkDialog";
 import {
@@ -11,13 +11,13 @@ import type { NetworkSummary } from "@features/networks/services/networksApi";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 // The prune adapter over PruneReportDialog, the twin of the containers
-// one: the module owns the machinery, this adapter hands over the noun
+// one: the module owns the plumbing, this adapter hands over the noun
 // and the two entry accessors that make a network entry a report row.
 // Podman's network prune report keys entries by name and carries no
 // size, so the reclaimed column renders an em dash like the pods one.
@@ -40,22 +40,22 @@ function PruneNetworksModal({
 }
 
 // The Networks tab body. Create, connect, and prune are write-gated
-// backend routes (issue 255), so the adapter takes the machine and gates
+// backend routes (issue 255), so the adapter takes the host and gates
 // on manage-networks: below write level ResourceList swaps the toolbar
 // for the canonical read hint and the rows drop their connect button. The
-// toolbar/triad/table machinery and the derived testids are ResourceList's;
+// toolbar/triad/table plumbing and the derived testids are ResourceList's;
 // this adapter owns only the columns, the row, and the create dialog. The
 // row's connect button opens the one connect dialog (issue 274) with the
 // network fixed — the dialog owns the ritual: its options and the mutation.
 // Clicking the row navigates to the network's detail page (spec 301); the
 // connect button stops propagation so it never also fires the row action.
-export function NetworkList({ machine }: { machine: Machine }) {
-	const machineId = machine.id;
+export function NetworkList({ host }: { host: Host }) {
+	const hostId = host.id;
 	const navigate = useNavigate();
-	const { data: networks, isPending, error } = useNetworks(machineId);
-	const createNetwork = useCreateNetwork(machineId);
-	const pruneNetworks = usePruneNetworks(machineId);
-	const canManage = can(machine, "manage-networks");
+	const { data: networks, isPending, error } = useNetworks(hostId);
+	const createNetwork = useCreateNetwork(hostId);
+	const pruneNetworks = usePruneNetworks(hostId);
+	const canManage = can(host, "manage-networks");
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [pendingConnect, setPendingConnect] = useState<NetworkSummary | null>(
@@ -82,7 +82,7 @@ export function NetworkList({ machine }: { machine: Machine }) {
 						data-testid="network-row"
 						cursor="pointer"
 						onClick={() =>
-							navigate(detailPath(machineId, "networks", network.name))
+							navigate(detailPath(hostId, "networks", network.name))
 						}
 					>
 						<Td fontFamily="mono">{network.name}</Td>
@@ -131,7 +131,7 @@ export function NetworkList({ machine }: { machine: Machine }) {
 			/>
 			{isCreateOpen ? (
 				<CreateNetworkDialog
-					machineId={machineId}
+					hostId={hostId}
 					mutation={createNetwork}
 					onClose={() => setIsCreateOpen(false)}
 				/>
@@ -144,7 +144,7 @@ export function NetworkList({ machine }: { machine: Machine }) {
 			) : null}
 			{pendingConnect ? (
 				<ConnectDialog
-					machineId={machineId}
+					hostId={hostId}
 					network={pendingConnect}
 					onClose={() => setPendingConnect(null)}
 				/>

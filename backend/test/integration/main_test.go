@@ -60,8 +60,8 @@ var logf = log.Printf
 //     ENCRYPTION_KEY — fully isolated from the dev DB.
 //  5. Seed one user via the seeding seam (bcrypt) and exercise the real
 //     POST /api/auth/login; capture the token from the JSON body.
-//  6. Register the test host once via POST /api/machines — the same
-//     public path any machine takes; the backend never learns the
+//  6. Register the test host once via POST /api/hosts — the same
+//     public path any host takes; the backend never learns the
 //     container exists.
 //  7. Run the tests.
 //  8. Teardown: httptest server close → app.Close → remove temp dirs →
@@ -212,9 +212,9 @@ func run(m *testing.M) int {
 	// --- Step 3: register the podman connection ---------------------
 	// The connection is what the CLI test helpers and the readiness
 	// probe dial through; the backend itself only ever sees the
-	// machine registered via the public API (step 6).
+	// host registered via the public API (step 6).
 	connectionName := envOr("PODLAND_TEST_CONNECTION_NAME", testhostConnectionDefault)
-	suite.MachineName = connectionName
+	suite.HostName = connectionName
 	if err := registerPodmanConnection(connectionName, identityPath, target); err != nil {
 		return failFast("register podman system connection", err)
 	}
@@ -295,9 +295,9 @@ func run(m *testing.M) int {
 	logf("integration: logged in as %q (id=%s)", username, ownerUserID)
 
 	// Seed a second user — never logged in, but its ID is needed by
-	// downstream slices (080-04 machines CRUD/access) as the grantee
-	// target for POST /api/machines/{id}/access. The user exists only
-	// to satisfy the machine_access(user_id) FK; no token is captured
+	// downstream slices (080-04 hosts CRUD/access) as the grantee
+	// target for POST /api/hosts/{id}/access. The user exists only
+	// to satisfy the host_access(user_id) FK; no token is captured
 	// because the ACs exercise grant/revoke as the owner, not as the
 	// grantee.
 	otherUsername := "it-" + suite.RunID + "-other"
@@ -307,13 +307,13 @@ func run(m *testing.M) int {
 	}
 	suite.OtherUserID = otherUserID
 
-	// --- Step 7: register the test host as a machine -----------------
+	// --- Step 7: register the test host as a host -----------------
 	keyMaterial, err := os.ReadFile(identityPath)
 	if err != nil {
 		return failFast(fmt.Sprintf("read SSH identity %s", identityPath), err)
 	}
 
-	machineID, err := registerMachine(suite.ServerURL, token, machineRegistration{
+	hostID, err := registerHost(suite.ServerURL, token, hostRegistration{
 		Name:    "it-" + suite.RunID + "-" + connectionName,
 		Host:    target.Host,
 		Port:    target.Port,
@@ -322,17 +322,17 @@ func run(m *testing.M) int {
 		SSHKey:  string(keyMaterial),
 	})
 	if err != nil {
-		return failFast("registerMachine", err)
+		return failFast("registerHost", err)
 	}
-	suite.MachineID = machineID
+	suite.HostID = hostID
 	// Stash the reachable target so downstream slices can register
-	// additional throwaway machines against the same host via
-	// RegisterReachableMachine. Required since 080-05: a throwaway
+	// additional throwaway hosts against the same host via
+	// RegisterReachableHost. Required since 080-05: a throwaway
 	// pointing at an unreachable host can no longer be registered.
 	goodTarget := target
 	goodTarget.SSHKey = string(keyMaterial)
-	suite.goodMachineRegistration = goodTarget
-	logf("integration: machine registered: id=%s", machineID)
+	suite.goodHostRegistration = goodTarget
+	logf("integration: host registered: id=%s", hostID)
 
 	// --- Step 8: run the tests ---------------------------------------
 	// Teardown runs via the deferred teardownOnce above.
@@ -360,7 +360,7 @@ func (s *Suite) teardown() {
 
 // errPodmanNotFound is the sentinel used when the podman binary is not
 // on PATH. TestMain maps this to a clean skip rather than a fatal
-// failure, so `go test -tags=integration` on a machine without podman
+// failure, so `go test -tags=integration` on a host without podman
 // exits 0.
 var errPodmanNotFound = errors.New("podman binary not found on PATH")
 
@@ -498,13 +498,13 @@ func realLogin(baseURL, username, password string) (string, error) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 7: register machine
+// Step 7: register host
 // ---------------------------------------------------------------------------
 
-// machineRegistration is the request body for POST /api/machines,
-// flattened for the test's convenience. registerMachine converts it to
+// hostRegistration is the request body for POST /api/hosts,
+// flattened for the test's convenience. registerHost converts it to
 // the JSON the handler expects.
-type machineRegistration struct {
+type hostRegistration struct {
 	Name    string
 	Host    string
 	Port    int
@@ -513,12 +513,12 @@ type machineRegistration struct {
 	SSHKey  string
 }
 
-// registerMachine POSTs to /api/machines as the seeded user and returns
-// the new machine's UUID from the response body. This is the canonical
+// registerHost POSTs to /api/hosts as the seeded user and returns
+// the new host's UUID from the response body. This is the canonical
 // registration path — encryption-at-rest, owner-access grant, the lot —
-// exercised exactly once per run for the shared machine, and once per
-// throwaway via RegisterReachableMachine.
-func registerMachine(baseURL, token string, req machineRegistration) (string, error) {
+// exercised exactly once per run for the shared host, and once per
+// throwaway via RegisterReachableHost.
+func registerHost(baseURL, token string, req hostRegistration) (string, error) {
 	body, err := json.Marshal(map[string]any{
 		"name":             req.Name,
 		"hostname":         req.Host,
@@ -531,7 +531,7 @@ func registerMachine(baseURL, token string, req machineRegistration) (string, er
 		return "", err
 	}
 
-	httpReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/machines/", bytes.NewReader(body))
+	httpReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/hosts/", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -540,12 +540,12 @@ func registerMachine(baseURL, token string, req machineRegistration) (string, er
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("POST /api/machines: %w", err)
+		return "", fmt.Errorf("POST /api/hosts: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		raw, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("register machine returned %d: %s", resp.StatusCode, string(raw))
+		return "", fmt.Errorf("register host returned %d: %s", resp.StatusCode, string(raw))
 	}
 
 	var created struct {
@@ -560,12 +560,12 @@ func registerMachine(baseURL, token string, req machineRegistration) (string, er
 	return created.ID, nil
 }
 
-// RegisterReachableMachine registers a SECOND machine pointing at the
-// same reachable target as the shared good machine, returning its ID.
+// RegisterReachableHost registers a SECOND host pointing at the
+// same reachable target as the shared good host, returning its ID.
 // The caller owns cleanup (register a t.Cleanup that DELETEs the ID via
-// the API, as the machines slice does).
+// the API, as the hosts slice does).
 //
-// Why this exists: 080-05 made MachineService.Create probe the target at
+// Why this exists: 080-05 made HostService.Create probe the target at
 // registration, so a throwaway pointing at an unreachable host (the
 // original 080-04 bad-host pattern) is now rejected with 400 and never
 // persisted. Slices that need a mutable throwaway (PUT / access /
@@ -575,15 +575,15 @@ func registerMachine(baseURL, token string, req machineRegistration) (string, er
 //
 // The name should include suite.RunID so the suite sweep can find any
 // leftover if the caller's own t.Cleanup does not fire.
-func (s *Suite) RegisterReachableMachine(t *testing.T, name string) string {
+func (s *Suite) RegisterReachableHost(t *testing.T, name string) string {
 	t.Helper()
-	id, err := registerMachine(s.ServerURL, s.Token, machineRegistration{
+	id, err := registerHost(s.ServerURL, s.Token, hostRegistration{
 		Name:    name,
-		Host:    s.goodMachineRegistration.Host,
-		Port:    s.goodMachineRegistration.Port,
-		SSHUser: s.goodMachineRegistration.SSHUser,
-		Socket:  s.goodMachineRegistration.Socket,
-		SSHKey:  s.goodMachineRegistration.SSHKey,
+		Host:    s.goodHostRegistration.Host,
+		Port:    s.goodHostRegistration.Port,
+		SSHUser: s.goodHostRegistration.SSHUser,
+		Socket:  s.goodHostRegistration.Socket,
+		SSHKey:  s.goodHostRegistration.SSHKey,
 	})
 	if err != nil {
 		t.Fatalf("register reachable throwaway %q against the suite's test host: %v", name, err)

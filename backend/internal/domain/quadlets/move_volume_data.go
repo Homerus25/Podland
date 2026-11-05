@@ -15,7 +15,7 @@ import (
 // resolution derivation both the preview and the plan read (issue 230) —
 // built on the shared transfer kit's quadlet reference seam (§19, issue
 // 242) — the migration plan projected from that derivation, the
-// target-emptiness and size preflight, and the machine-to-machine data
+// target-emptiness and size preflight, and the host-to-host data
 // phase itself. The data splice and the emptiness probe are the shared
 // transfer kit's too (§19): this file maps their outcomes onto the quadlet
 // move's wire vocabulary, the kit owns the pipe.
@@ -31,7 +31,7 @@ type volumeRef struct {
 	Source string
 	Kind   string
 	// PodmanVolume is the podman volume the reference resolves to on the
-	// source machine; "" until the derivation fills it, and always "" for
+	// source host; "" until the derivation fills it, and always "" for
 	// host bind paths.
 	PodmanVolume string
 	// QuadletFile is the companion .volume quadlet file the source names
@@ -68,8 +68,8 @@ func parseQuadletVolumes(content string) []volumeRef {
 }
 
 // resolvedVolume is one resolved podman volume's facts (issue 230, §18):
-// the name both machines address it by, the FIRST reference (file order)
-// that resolved to it, and the source machine's inspect — nil means the
+// the name both hosts address it by, the FIRST reference (file order)
+// that resolved to it, and the source host's inspect — nil means the
 // volume does not exist there (a dangling reference).
 type resolvedVolume struct {
 	Name        string
@@ -93,7 +93,7 @@ type volumeResolution struct {
 // the shared transfer kit's reference-resolution seam (§19, issue 242) —
 // the same resolution the volumes move preview reads — consuming the
 // companion contents the caller fetched once, never re-Printing, and
-// inspects each resolved volume on the source machine once, deduplicated
+// inspects each resolved volume on the source host once, deduplicated
 // by resolved name with the first reference winning the volume fact.
 // Host bind paths stay unresolved and out of the volume facts. The dedup
 // key is the resolved name for the volume level and nothing at the ref
@@ -150,7 +150,7 @@ func volumeMigrationFailed(name string, err error) error {
 
 // volumeMigrationPlanEntry is one planned volume data migration: the
 // reference as written in the quadlet and the podman volume it resolves to
-// on BOTH machines (the transfer carries no rename). QuadletFile names the
+// on BOTH hosts (the transfer carries no rename). QuadletFile names the
 // companion .volume quadlet that defined the reference, "" for a bare name.
 // SourceExists records the source volume's presence at plan time — the
 // data phase re-inspects, but preflight uses it to leave references whose
@@ -192,8 +192,8 @@ func deriveVolumeMigrationPlan(resolution volumeResolution) []volumeMigrationPla
 // volume content size for the target either. Errors are AppErrors: 409
 // VOLUME_MIGRATION_TARGET_NOT_EMPTY naming the volume, 500
 // VOLUME_MIGRATION_FAILED for engine failures.
-func (s *QuadletTransferService) preflightVolumeMigration(ctx context.Context, userID, targetMachineID string, plan []volumeMigrationPlanEntry, overwrite bool) error {
-	return s.engines.WithEngine(ctx, userID, targetMachineID, "quadlets.MoveVolumePreflight", func(e QuadletEngine) error {
+func (s *QuadletTransferService) preflightVolumeMigration(ctx context.Context, userID, targetHostID string, plan []volumeMigrationPlanEntry, overwrite bool) error {
+	return s.engines.WithEngine(ctx, userID, targetHostID, "quadlets.MoveVolumePreflight", func(e QuadletEngine) error {
 		for _, entry := range plan {
 			if !entry.SourceExists {
 				continue
@@ -220,16 +220,16 @@ func (s *QuadletTransferService) preflightVolumeMigration(ctx context.Context, u
 
 // migrateVolumeData runs the data phase (issue 214, §18): one outcome per
 // planned volume, in plan order. Two connection leases stand open at once —
-// the export reads the source machine while the import writes the target —
+// the export reads the source host while the import writes the target —
 // so the nested WithEngine is deliberate. Any volume's failure fails the
 // whole phase: nothing has been installed yet, the caller returns the error
-// and the transfer stays a no-op on both machines' quadlet sets.
-func (s *QuadletTransferService) migrateVolumeData(ctx context.Context, userID, sourceMachineID, targetMachineID string, plan []volumeMigrationPlanEntry, onProgress func(QuadletMoveEvent)) ([]QuadletMoveVolumeOutcome, error) {
+// and the transfer stays a no-op on both hosts' quadlet sets.
+func (s *QuadletTransferService) migrateVolumeData(ctx context.Context, userID, sourceHostID, targetHostID string, plan []volumeMigrationPlanEntry, onProgress func(QuadletMoveEvent)) ([]QuadletMoveVolumeOutcome, error) {
 	outcomes := []QuadletMoveVolumeOutcome{}
-	err := s.engines.WithEngine(ctx, userID, sourceMachineID, "quadlets.MoveVolumeDataSource", func(src QuadletEngine) error {
-		return s.engines.WithEngine(ctx, userID, targetMachineID, "quadlets.MoveVolumeDataTarget", func(tgt QuadletEngine) error {
+	err := s.engines.WithEngine(ctx, userID, sourceHostID, "quadlets.MoveVolumeDataSource", func(src QuadletEngine) error {
+		return s.engines.WithEngine(ctx, userID, targetHostID, "quadlets.MoveVolumeDataTarget", func(tgt QuadletEngine) error {
 			for _, entry := range plan {
-				outcome, err := s.migrateOneVolume(ctx, src, tgt, sourceMachineID, entry, onProgress)
+				outcome, err := s.migrateOneVolume(ctx, src, tgt, sourceHostID, entry, onProgress)
 				if err != nil {
 					return err
 				}
@@ -244,7 +244,7 @@ func (s *QuadletTransferService) migrateVolumeData(ctx context.Context, userID, 
 	return outcomes, nil
 }
 
-// migrateOneVolume carries one volume's data from the source machine into
+// migrateOneVolume carries one volume's data from the source host into
 // the target (issue 214, §18): the target volume is created if absent, then
 // the shared transfer kit's splice streams the data across (§19) — podman's
 // export on the source into podman's import on the target, the kit's
@@ -252,12 +252,12 @@ func (s *QuadletTransferService) migrateVolumeData(ctx context.Context, userID, 
 // every 1 MiB actually streamed. The source volume may have vanished since
 // the plan was derived; a dangling reference then skips with a visible
 // outcome instead of failing the transfer.
-func (s *QuadletTransferService) migrateOneVolume(ctx context.Context, src, tgt QuadletEngine, machineID string, entry volumeMigrationPlanEntry, onProgress func(QuadletMoveEvent)) (QuadletMoveVolumeOutcome, error) {
+func (s *QuadletTransferService) migrateOneVolume(ctx context.Context, src, tgt QuadletEngine, hostID string, entry volumeMigrationPlanEntry, onProgress func(QuadletMoveEvent)) (QuadletMoveVolumeOutcome, error) {
 	emit := func(phase string, bytes int64, reason string) {
 		if onProgress != nil {
 			// OperationID stays empty: the streaming handler stamps its
 			// own (the images Pull arrangement).
-			onProgress(NewQuadletMoveVolumeEvent("", machineID, phase, entry.Ref, entry.PodmanVolume, bytes, reason))
+			onProgress(NewQuadletMoveVolumeEvent("", hostID, phase, entry.Ref, entry.PodmanVolume, bytes, reason))
 		}
 	}
 

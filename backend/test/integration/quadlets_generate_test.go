@@ -16,14 +16,14 @@ import (
 
 // Test_Integration_Quadlets_Generate is the quadlet generate vertical slice
 // for the real-podman integration suite (PRD 080-11). Unlike the other
-// quadlet slices, generate never touches the remote machine's quadlet
+// quadlet slices, generate never touches the remote host's quadlet
 // store: the service inspects an existing container (or pod) over the
 // podman API and converts it to `.container`/`.pod` content **locally in
 // the backend** (generateContainerQuadlet / generatePodQuadlet — not
 // podman's own converter). The slice proves that inspect + local-render
 // path end-to-end:
 //
-//	POST /api/machines/{id}/quadlets/{quadletId}/generate
+//	POST /api/hosts/{id}/quadlets/{quadletId}/generate
 //	     body {resourceId, resourceType} → 200 {…, state: "unknown", content}
 //
 // QUIRK (documented in 070-08): the {quadletId} path param is effectively
@@ -37,7 +37,7 @@ import (
 // it via the podman connection. The pod path (if practical) creates a
 // throwaway pod over the CLI — the backend exposes no pod API — with the
 // same t.Cleanup + sweep backstop. Nothing is installed on the remote
-// machine by generate itself, so there is no quadlet to clean up.
+// host by generate itself, so there is no quadlet to clean up.
 func Test_Integration_Quadlets_Generate(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerContainersSweep()
@@ -46,11 +46,11 @@ func Test_Integration_Quadlets_Generate(t *testing.T) {
 	// Generate itself only inspects the source resource, but the
 	// no-side-effect assertions compare the quadlet list before/after —
 	// and podman's quadlet list dials the user systemd over DBus on the
-	// machine. Hosts without a user systemd manager (the systemd-free
+	// host. Hosts without a user systemd manager (the systemd-free
 	// container test host) skip here.
 	requireUserSystemd(t)
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// `podman create` does not auto-pull; the source container needs the
 	// image present. Reuse the containers slice's idempotent helper.
@@ -77,7 +77,7 @@ func Test_Integration_Quadlets_Generate(t *testing.T) {
 	// inspect works on a never-started container — see PRD tech notes).
 	// Parent-level setup like the lifecycle slice: createContainer's
 	// asserts are fatal, so no t.Failed guard is needed after it.
-	containerID = createContainer(t, machineID, containerCreateBody{
+	containerID = createContainer(t, hostID, containerCreateBody{
 		Name:    containerName,
 		Image:   "busybox:latest",
 		Command: []string{"sh", "-c", "sleep 600"},
@@ -85,9 +85,9 @@ func Test_Integration_Quadlets_Generate(t *testing.T) {
 
 	// --- AC #1/#2: generate from the real container; nothing installed --
 	t.Run("GenerateFromContainer", func(t *testing.T) {
-		before := listQuadletNames(t, machineID)
+		before := listQuadletNames(t, hostID)
 
-		generated := generateQuadlet(t, machineID, "ignored-path-param", quadletGenerateBody{
+		generated := generateQuadlet(t, hostID, "ignored-path-param", quadletGenerateBody{
 			ResourceID:   containerName,
 			ResourceType: "container",
 		})
@@ -112,15 +112,15 @@ func Test_Integration_Quadlets_Generate(t *testing.T) {
 		require.Contains(t, generated.Content, "busybox",
 			"container quadlet content must reference the source image")
 
-		// No files installed on the remote machine: the quadlet list is
+		// No files installed on the remote host: the quadlet list is
 		// unchanged by a generate.
-		require.Equal(t, before, listQuadletNames(t, machineID),
-			"generate must not install anything on the remote machine")
+		require.Equal(t, before, listQuadletNames(t, hostID),
+			"generate must not install anything on the remote host")
 	})
 
 	// --- AC #3: generate for a missing container → 404 ------------------
 	t.Run("MissingContainerReturns404", func(t *testing.T) {
-		generateQuadletExpectError(t, machineID, "ignored-path-param", quadletGenerateBody{
+		generateQuadletExpectError(t, hostID, "ignored-path-param", quadletGenerateBody{
 			ResourceID:   "it-" + suite.RunID + "-no-such-container",
 			ResourceType: "container",
 		},
@@ -141,9 +141,9 @@ func Test_Integration_Quadlets_Generate(t *testing.T) {
 		t.Cleanup(func() { removePod(t, podName) })
 		createPod(t, podName)
 
-		before := listQuadletNames(t, machineID)
+		before := listQuadletNames(t, hostID)
 
-		generated := generateQuadlet(t, machineID, "ignored-path-param", quadletGenerateBody{
+		generated := generateQuadlet(t, hostID, "ignored-path-param", quadletGenerateBody{
 			ResourceID:   podName,
 			ResourceType: "pod",
 		})
@@ -162,8 +162,8 @@ func Test_Integration_Quadlets_Generate(t *testing.T) {
 		require.Contains(t, generated.Content, "PodName="+podName,
 			"pod quadlet content must reference the source pod")
 
-		require.Equal(t, before, listQuadletNames(t, machineID),
-			"generate must not install anything on the remote machine")
+		require.Equal(t, before, listQuadletNames(t, hostID),
+			"generate must not install anything on the remote host")
 	})
 }
 
@@ -194,12 +194,12 @@ type quadletGenerateResponse struct {
 //
 // quadletID is the (service-ignored) path param — see the quirk note on
 // the test. Passing anything but "" exercises the route.
-func generateQuadlet(t *testing.T, machineID, quadletID string, body quadletGenerateBody) quadletGenerateResponse {
+func generateQuadlet(t *testing.T, hostID, quadletID string, body quadletGenerateBody) quadletGenerateResponse {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/" + quadletID + "/generate"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/" + quadletID + "/generate"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
 	require.NoError(t, err, "POST /quadlets/{id}/generate must connect to the in-process server")
 	defer resp.Body.Close()
@@ -215,14 +215,14 @@ func generateQuadlet(t *testing.T, machineID, quadletID string, body quadletGene
 }
 
 // generateQuadletExpectError POSTs /quadlets/{quadletId}/generate and
-// asserts the expected HTTP status plus the machine-readable error code
+// asserts the expected HTTP status plus the parseable error code
 // from the {"error":{code,message}} envelope.
-func generateQuadletExpectError(t *testing.T, machineID, quadletID string, body quadletGenerateBody, wantStatus int, wantCode, context string) {
+func generateQuadletExpectError(t *testing.T, hostID, quadletID string, body quadletGenerateBody, wantStatus int, wantCode, context string) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/" + quadletID + "/generate"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/" + quadletID + "/generate"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
 	require.NoError(t, err, "%s: POST /quadlets/{id}/generate must connect", context)
 	defer resp.Body.Close()
@@ -285,13 +285,13 @@ func registerPodsSweep() {
 	})
 }
 
-// sweepRunScopedPods lists every pod on the machine and force-removes any
+// sweepRunScopedPods lists every pod on the host and force-removes any
 // whose name mentions the runID. See registerPodsSweep for the dedicated
 // sweep rationale.
 func sweepRunScopedPods(runID string) {
 	out, err := podmanConnRun("pod", "ps", "--format", "{{.Name}}")
 	if err != nil {
-		// Best-effort: a failed list (e.g. machine already stopped) is
+		// Best-effort: a failed list (e.g. host already stopped) is
 		// not a fatal teardown problem.
 		return
 	}

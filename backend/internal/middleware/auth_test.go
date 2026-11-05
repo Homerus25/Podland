@@ -51,7 +51,7 @@ func TestJWTMiddleware_RejectionCodes(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			observed = ""
-			req := httptest.NewRequest("GET", "/api/machines", nil)
+			req := httptest.NewRequest("GET", "/api/hosts", nil)
 			if tc.authHeader != "" {
 				req.Header.Set("Authorization", tc.authHeader)
 			}

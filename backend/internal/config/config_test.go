@@ -219,7 +219,7 @@ func TestLoad_VolumeUploadMaxBytes(t *testing.T) {
 	assert.Equal(t, int64(2<<30), cfg.Volumes.MaxUploadBytes, "garbage values must fall back to the default")
 }
 
-// TestLoad_ImageTransferMaxBytes pins the cross-machine image copy's
+// TestLoad_ImageTransferMaxBytes pins the cross-host image copy's
 // transfer bound: default 10 GiB (the kit's DefaultMaxImageTransferBytes
 // — images are routinely larger than the volume transfer's 2 GiB),
 // honored override, and fallback to the default on garbage.
@@ -239,26 +239,26 @@ func TestLoad_ImageTransferMaxBytes(t *testing.T) {
 	assert.Equal(t, int64(10<<30), cfg.Images.MaxTransferBytes, "garbage values must fall back to the default")
 }
 
-// TestLoad_MachineHostBlockPrivateRanges pins the machine host policy's
+// TestLoad_HostBlockPrivateRanges pins the host policy's
 // opt-in flag (pentest 2026-11-01 finding 1): the private-range block is
 // OFF by default — Podland's primary use case is LAN/localhost podman
 // hosts — honored when set, and garbage falls back to the default.
-func TestLoad_MachineHostBlockPrivateRanges(t *testing.T) {
-	t.Setenv("MACHINE_HOST_BLOCK_PRIVATE_RANGES", "")
+func TestLoad_HostBlockPrivateRanges(t *testing.T) {
+	t.Setenv("HOST_BLOCK_PRIVATE_RANGES", "")
 	cfg, err := Load()
 	require.NoError(t, err)
-	assert.False(t, cfg.Machines.HostBlockPrivateRanges,
+	assert.False(t, cfg.Hosts.HostBlockPrivateRanges,
 		"the private-range block must default to OFF — LAN/localhost hosts are the primary use case")
 
-	t.Setenv("MACHINE_HOST_BLOCK_PRIVATE_RANGES", "true")
+	t.Setenv("HOST_BLOCK_PRIVATE_RANGES", "true")
 	cfg, err = Load()
 	require.NoError(t, err)
-	assert.True(t, cfg.Machines.HostBlockPrivateRanges, "env override must be honored")
+	assert.True(t, cfg.Hosts.HostBlockPrivateRanges, "env override must be honored")
 
-	t.Setenv("MACHINE_HOST_BLOCK_PRIVATE_RANGES", "not-a-bool")
+	t.Setenv("HOST_BLOCK_PRIVATE_RANGES", "not-a-bool")
 	cfg, err = Load()
 	require.NoError(t, err)
-	assert.False(t, cfg.Machines.HostBlockPrivateRanges, "garbage values must fall back to the default")
+	assert.False(t, cfg.Hosts.HostBlockPrivateRanges, "garbage values must fall back to the default")
 }
 
 // TestLoad_HSTSMaxAgeSeconds pins the security-headers middleware's HSTS

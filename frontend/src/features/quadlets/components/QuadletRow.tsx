@@ -26,7 +26,7 @@ import { useState } from "react";
 // unset and therefore omitted from the request), so confirming untouched
 // sends no query parameters. The gray confirm opts out of the preset's
 // destructive red — stopping a unit is routine, not danger — and the footer
-// machinery (reset lifecycle, close-on-success, pending wiring, error region
+// plumbing (reset lifecycle, close-on-success, pending wiring, error region
 // above the body) is the module's.
 function LifecycleOptionsModal({
 	quadlet,
@@ -87,7 +87,7 @@ function LifecycleOptionsModal({
 // Each row owns its lifecycle mutation instances, so pending state and
 // errors are scoped to the affected quadlet and other rows stay usable.
 export function QuadletRow({
-	machineId,
+	hostId,
 	quadlet,
 	canManage,
 	onEdit,
@@ -95,7 +95,7 @@ export function QuadletRow({
 	onDelete,
 	onShowLogs,
 }: {
-	machineId: string;
+	hostId: string;
 	quadlet: QuadletSummary;
 	canManage: boolean;
 	onEdit: (quadlet: QuadletSummary) => void;
@@ -103,9 +103,9 @@ export function QuadletRow({
 	onDelete: (quadlet: QuadletSummary) => void;
 	onShowLogs: (quadlet: QuadletSummary) => void;
 }) {
-	const startQuadlet = useStartQuadlet(machineId);
-	const stopQuadlet = useStopQuadlet(machineId);
-	const restartQuadlet = useRestartQuadlet(machineId);
+	const startQuadlet = useStartQuadlet(hostId);
+	const stopQuadlet = useStopQuadlet(hostId);
+	const restartQuadlet = useRestartQuadlet(hostId);
 	// Stop and restart both run through the options modal; this remembers
 	// which one is open (null = none).
 	const [pendingAction, setPendingAction] = useState<"stop" | "restart" | null>(

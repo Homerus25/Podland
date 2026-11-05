@@ -15,44 +15,44 @@ import (
 )
 
 // fakeAccessRepo is the function-field fake for the permission.PermissionGetter
-// seam — the access store the cross-machine copy gates the target machine
+// seam — the access store the cross-host copy gates the target host
 // on. An unarmed lookup panics, so an unexpected gate check fails the
 // test loudly.
 type fakeAccessRepo struct {
-	getPermissionFn func(machineID, userID string) (string, error)
+	getPermissionFn func(hostID, userID string) (string, error)
 }
 
-func (f *fakeAccessRepo) GetPermission(machineID, userID string) (string, error) {
+func (f *fakeAccessRepo) GetPermission(hostID, userID string) (string, error) {
 	if f.getPermissionFn == nil {
 		panic("unexpected PermissionGetter.GetPermission call")
 	}
-	return f.getPermissionFn(machineID, userID)
+	return f.getPermissionFn(hostID, userID)
 }
 
-// allowTargetRead answers read on the target machine — the minimum the
+// allowTargetRead answers read on the target host — the minimum the
 // preview requires.
-func allowTargetRead(machineID, userID string) (string, error) {
-	if machineID == "machine-b" {
+func allowTargetRead(hostID, userID string) (string, error) {
+	if hostID == "host-b" {
 		return models.PermissionRead, nil
 	}
 	return models.PermissionAdmin, nil
 }
 
-// allowTargetWrite answers write on the target machine — the minimum the
+// allowTargetWrite answers write on the target host — the minimum the
 // copy requires.
-func allowTargetWrite(machineID, userID string) (string, error) {
-	if machineID == "machine-b" {
+func allowTargetWrite(hostID, userID string) (string, error) {
+	if hostID == "host-b" {
 		return models.PermissionWrite, nil
 	}
 	return models.PermissionAdmin, nil
 }
 
-// newCopyTestService builds the service over per-machine fake engines
+// newCopyTestService builds the service over per-host fake engines
 // (the multi-lease shape the copy exercises) and the given access store.
 func newCopyTestService(source, target *fakeImageEngine, access *fakeAccessRepo) *ImageService {
 	return NewImageService(fakeEngineProvider{engines: map[string]ImageEngine{
-		"machine-a": source,
-		"machine-b": target,
+		"host-a": source,
+		"host-b": target,
 	}}).
 		WithAccessRepo(access)
 }
@@ -63,7 +63,7 @@ const copyImageID = "sha256:abc123"
 // copyArchive is the export payload the source fixture streams.
 var copyArchive = bytes.Repeat([]byte("x"), 3<<20)
 
-// copySourceFixture is the source machine's engine: the image exists and
+// copySourceFixture is the source host's engine: the image exists and
 // exports its archive.
 func copySourceFixture() *fakeImageEngine {
 	return &fakeImageEngine{
@@ -77,7 +77,7 @@ func copySourceFixture() *fakeImageEngine {
 	}
 }
 
-// copyTargetFixture is the target machine's engine: it holds nothing,
+// copyTargetFixture is the target host's engine: it holds nothing,
 // loads consume the archive and answer the load's names.
 func copyTargetFixture() *fakeImageEngine {
 	return &fakeImageEngine{
@@ -99,7 +99,7 @@ func TestImageService_CopyPreview_ReportsAbsentTarget(t *testing.T) {
 	service := newCopyTestService(copySourceFixture(), copyTargetFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	got, err := service.CopyPreview(context.Background(), "user", "machine-a", copyImageID, "machine-b")
+	got, err := service.CopyPreview(context.Background(), "user", "host-a", copyImageID, "host-b")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -114,7 +114,7 @@ func TestImageService_CopyPreview_ReportsPresentTarget(t *testing.T) {
 	service := newCopyTestService(copySourceFixture(), target,
 		&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	got, err := service.CopyPreview(context.Background(), "user", "machine-a", copyImageID, "machine-b")
+	got, err := service.CopyPreview(context.Background(), "user", "host-a", copyImageID, "host-b")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -130,7 +130,7 @@ func TestImageService_CopyPreview_MissingSourceImageIs404(t *testing.T) {
 	service := newCopyTestService(source, copyTargetFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	_, err := service.CopyPreview(context.Background(), "user", "machine-a", "sha256:gone", "machine-b")
+	_, err := service.CopyPreview(context.Background(), "user", "host-a", "sha256:gone", "host-b")
 
 	require.Error(t, err)
 	assert.Equal(t, appErrors.ErrImageNotFound, err)
@@ -149,7 +149,7 @@ func TestImageService_CopyPreview_TargetAccessDeniedIs403(t *testing.T) {
 			return "", nil
 		}})
 
-	_, err := service.CopyPreview(context.Background(), "user", "machine-a", copyImageID, "machine-b")
+	_, err := service.CopyPreview(context.Background(), "user", "host-a", copyImageID, "host-b")
 
 	require.Error(t, err)
 	assert.Equal(t, appErrors.ErrAccessDenied, err)
@@ -159,7 +159,7 @@ func TestImageService_CopyPreview_SourceUnreachableIsConnectionFailed(t *testing
 	service := NewImageService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}).
 		WithAccessRepo(&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	_, err := service.CopyPreview(context.Background(), "user", "machine-a", copyImageID, "machine-b")
+	_, err := service.CopyPreview(context.Background(), "user", "host-a", copyImageID, "host-b")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 }
@@ -170,13 +170,13 @@ func TestImageService_CopyPreview_SourceUnreachableIsConnectionFailed(t *testing
 // preview's answer is the connection failure, never a false fact.
 func TestImageService_CopyPreview_TargetUnreachableIsConnectionFailed(t *testing.T) {
 	service := NewImageService(fakeEngineProvider{
-		engines: map[string]ImageEngine{"machine-a": copySourceFixture()},
+		engines: map[string]ImageEngine{"host-a": copySourceFixture()},
 		engineErrs: map[string]error{
-			"machine-b": appErrors.ErrConnectionFailed,
+			"host-b": appErrors.ErrConnectionFailed,
 		},
 	}).WithAccessRepo(&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	_, err := service.CopyPreview(context.Background(), "user", "machine-a", copyImageID, "machine-b")
+	_, err := service.CopyPreview(context.Background(), "user", "host-a", copyImageID, "host-b")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 }
@@ -198,7 +198,7 @@ func TestImageService_Copy_StreamsArchiveAndReportsNames(t *testing.T) {
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
 	var phases []string
-	got, err := service.Copy(context.Background(), "user", "machine-a", copyImageID, "machine-b",
+	got, err := service.Copy(context.Background(), "user", "host-a", copyImageID, "host-b",
 		func(event ImageCopyEvent) { phases = append(phases, event.Phase) })
 
 	require.NoError(t, err)
@@ -206,8 +206,8 @@ func TestImageService_Copy_StreamsArchiveAndReportsNames(t *testing.T) {
 	assert.Equal(t, int64(len(copyArchive)), loaded, "the archive crossed the splice")
 	assert.Equal(t, copyImageID, got.ID)
 	assert.Equal(t, ImageCopyStatusCopied, got.Status)
-	assert.Equal(t, "machine-a", got.SourceMachineID)
-	assert.Equal(t, "machine-b", got.TargetMachineID)
+	assert.Equal(t, "host-a", got.SourceHostID)
+	assert.Equal(t, "host-b", got.TargetHostID)
 	assert.Equal(t, int64(len(copyArchive)), got.Bytes, "the envelope reports the bytes streamed")
 	assert.Equal(t, []string{"registry.example/app:latest"}, got.Names, "the load's names ride the envelope")
 	require.Equal(t, ImageCopyPhaseStart, phases[0], "the stream opens with start")
@@ -229,7 +229,7 @@ func TestImageService_Copy_TargetAlreadyHoldingImageSucceeds(t *testing.T) {
 	service := newCopyTestService(copySourceFixture(), target,
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	got, err := service.Copy(context.Background(), "user", "machine-a", copyImageID, "machine-b", nil)
+	got, err := service.Copy(context.Background(), "user", "host-a", copyImageID, "host-b", nil)
 
 	require.NoError(t, err, "an already-present target image is never a refusal")
 	require.NotNil(t, got)
@@ -245,7 +245,7 @@ func TestImageService_Copy_MissingSourceImageIs404(t *testing.T) {
 	service := newCopyTestService(source, copyTargetFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	_, err := service.Copy(context.Background(), "user", "machine-a", "sha256:gone", "machine-b", nil)
+	_, err := service.Copy(context.Background(), "user", "host-a", "sha256:gone", "host-b", nil)
 
 	require.Error(t, err)
 	assert.Equal(t, appErrors.ErrImageNotFound, err)
@@ -262,7 +262,7 @@ func TestImageService_Copy_TargetAccessDeniedIs403(t *testing.T) {
 	service := newCopyTestService(source, copyTargetFixture(),
 		&fakeAccessRepo{getPermissionFn: allowTargetRead})
 
-	_, err := service.Copy(context.Background(), "user", "machine-a", copyImageID, "machine-b", nil)
+	_, err := service.Copy(context.Background(), "user", "host-a", copyImageID, "host-b", nil)
 
 	require.Error(t, err)
 	assert.Equal(t, appErrors.ErrAccessDenied, err)
@@ -272,7 +272,7 @@ func TestImageService_Copy_SourceUnreachableIsConnectionFailed(t *testing.T) {
 	service := NewImageService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}).
 		WithAccessRepo(&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	_, err := service.Copy(context.Background(), "user", "machine-a", copyImageID, "machine-b", nil)
+	_, err := service.Copy(context.Background(), "user", "host-a", copyImageID, "host-b", nil)
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 }
@@ -285,7 +285,7 @@ func TestImageService_Copy_BoundTripsIs413(t *testing.T) {
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite}).
 		WithMaxImageTransferBytes(1 << 20)
 
-	_, err := service.Copy(context.Background(), "user", "machine-a", copyImageID, "machine-b", nil)
+	_, err := service.Copy(context.Background(), "user", "host-a", copyImageID, "host-b", nil)
 
 	require.Error(t, err)
 	appErr, ok := err.(*appErrors.AppError)
@@ -306,7 +306,7 @@ func TestImageService_Copy_LoadFailureIsTransferFailed(t *testing.T) {
 	service := newCopyTestService(copySourceFixture(), target,
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	_, err := service.Copy(context.Background(), "user", "machine-a", copyImageID, "machine-b", nil)
+	_, err := service.Copy(context.Background(), "user", "host-a", copyImageID, "host-b", nil)
 
 	require.Error(t, err)
 	appErr, ok := err.(*appErrors.AppError)
@@ -330,7 +330,7 @@ func TestImageService_Copy_CancelledContextRidesBare(t *testing.T) {
 	service := newCopyTestService(copySourceFixture(), target,
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite})
 
-	_, err := service.Copy(ctx, "user", "machine-a", copyImageID, "machine-b", nil)
+	_, err := service.Copy(ctx, "user", "host-a", copyImageID, "host-b", nil)
 
 	require.Error(t, err)
 	assert.Equal(t, context.Canceled, err, "the cancellation rides bare — no narration wrapped")

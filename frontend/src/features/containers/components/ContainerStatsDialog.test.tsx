@@ -13,13 +13,13 @@ import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function mockAllStats(responder: () => ReturnType<typeof HttpResponse.json>) {
-	server.use(http.get("*/api/machines/m-1/containers/stats", responder));
+	server.use(http.get("*/api/hosts/m-1/containers/stats", responder));
 }
 
 function mockContainerStats(
 	responder: () => ReturnType<typeof HttpResponse.json>,
 ) {
-	server.use(http.get("*/api/machines/m-1/containers/c-1/stats", responder));
+	server.use(http.get("*/api/hosts/m-1/containers/c-1/stats", responder));
 }
 
 // The pages mount the dialog conditionally (mount is open, unmount is
@@ -33,7 +33,7 @@ function StatsDialogHost({ containerId }: { containerId?: string }) {
 			</button>
 			{open ? (
 				<ContainerStatsDialog
-					machineId="m-1"
+					hostId="m-1"
 					containerId={containerId}
 					onClose={() => setOpen(false)}
 				/>
@@ -130,14 +130,14 @@ describe("ContainerStatsDialog", () => {
 
 	it("renders the error envelope's code and message in the error region", async () => {
 		mockAllStats(() =>
-			errorResponse(403, "ACCESS_DENIED", "no access to this machine"),
+			errorResponse(403, "ACCESS_DENIED", "no access to this host"),
 		);
 		renderStatsDialog();
 		await openDialog();
 
 		const error = await screen.findByTestId("container-stats-error");
 		expect(error).toHaveTextContent("ACCESS_DENIED");
-		expect(error).toHaveTextContent("no access to this machine");
+		expect(error).toHaveTextContent("no access to this host");
 		expect(
 			screen.queryByTestId("container-stats-table"),
 		).not.toBeInTheDocument();

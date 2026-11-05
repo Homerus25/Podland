@@ -29,7 +29,7 @@ func TestPodService_GetLogs_MapsMissingPodTo404(t *testing.T) {
 	}
 	service := NewPodService(fakeEngineProvider{engine: engine})
 
-	got, err := service.GetLogs(context.Background(), "user", "machine", "pod-123", time.Time{}, 0)
+	got, err := service.GetLogs(context.Background(), "user", "host", "pod-123", time.Time{}, 0)
 
 	require.ErrorIs(t, err, appErrors.ErrPodNotFound)
 	assert.Nil(t, got)
@@ -43,7 +43,7 @@ func TestPodService_GetLogsWithStream_MapsMissingPodTo404(t *testing.T) {
 	}
 	service := NewPodService(fakeEngineProvider{engine: engine})
 
-	err := service.GetLogsWithStream(context.Background(), "user", "machine", "pod-123", time.Time{}, 0,
+	err := service.GetLogsWithStream(context.Background(), "user", "host", "pod-123", time.Time{}, 0,
 		func(streaming.LogEvent) {})
 
 	require.ErrorIs(t, err, appErrors.ErrPodNotFound)
@@ -66,7 +66,7 @@ func TestPodService_GetLogsWithStream_ReturnsPromptlyOnCancel(t *testing.T) {
 
 	testutils.RequirePromptReturnOnCancel(t, "GetLogsWithStream", started,
 		func(ctx context.Context) error {
-			return service.GetLogsWithStream(ctx, "user", "machine", "pod-123", time.Time{}, 0,
+			return service.GetLogsWithStream(ctx, "user", "host", "pod-123", time.Time{}, 0,
 				func(streaming.LogEvent) {})
 		})
 }

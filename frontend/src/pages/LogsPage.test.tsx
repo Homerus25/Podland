@@ -56,7 +56,7 @@ beforeEach(() => {
 describe("LogsPage download", () => {
 	it("fetches the full history and saves it as {name}-logs.txt", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/containers/c-1/logs", () =>
+			http.get("*/api/hosts/m-1/containers/c-1/logs", () =>
 				HttpResponse.json({
 					id: "c-1",
 					logs: "full-line-1\nfull-line-2\n",
@@ -77,7 +77,7 @@ describe("LogsPage download", () => {
 
 	it("falls back to the target id, sanitized, when no name traveled", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/containers/*/logs", () =>
+			http.get("*/api/hosts/m-1/containers/*/logs", () =>
 				HttpResponse.json({ id: "acme/app", logs: "line\n" }),
 			),
 		);
@@ -97,7 +97,7 @@ describe("LogsPage download", () => {
 
 	it("serves the quadlet kind through the quadlet logs endpoint", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/quadlets/q-1/logs", () =>
+			http.get("*/api/hosts/m-1/quadlets/q-1/logs", () =>
 				HttpResponse.json({ id: "q-1", logs: "quadlet-line\n" }),
 			),
 		);
@@ -115,7 +115,7 @@ describe("LogsPage download", () => {
 
 	it("serves the pod kind through the pod logs endpoint", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/pods/p-1/logs", () =>
+			http.get("*/api/hosts/m-1/pods/p-1/logs", () =>
 				HttpResponse.json({ id: "p-1", logs: "pod-line\n" }),
 			),
 		);
@@ -136,7 +136,7 @@ describe("LogsPage download", () => {
 		// fetch (no tail param) is held open until the test resolves it.
 		let resolveDownload: ((logs: string) => void) | undefined;
 		server.use(
-			http.get("*/api/machines/m-1/containers/c-1/logs", ({ request }) => {
+			http.get("*/api/hosts/m-1/containers/c-1/logs", ({ request }) => {
 				if (new URL(request.url).searchParams.has("tail")) {
 					return HttpResponse.json({ id: "c-1", logs: "tail-line\n" });
 				}
@@ -162,7 +162,7 @@ describe("LogsPage download", () => {
 
 	it("toasts the API error and downloads nothing when the fetch fails", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/containers/c-1/logs", () =>
+			http.get("*/api/hosts/m-1/containers/c-1/logs", () =>
 				errorResponse(404, "CONTAINER_NOT_FOUND", "no such container"),
 			),
 		);
@@ -188,7 +188,7 @@ describe("LogsPage download", () => {
 		// history. The download saves the full text while the viewer keeps
 		// displaying its tail.
 		server.use(
-			http.get("*/api/machines/m-1/containers/c-1/logs", ({ request }) =>
+			http.get("*/api/hosts/m-1/containers/c-1/logs", ({ request }) =>
 				HttpResponse.json(
 					new URL(request.url).searchParams.has("tail")
 						? { id: "c-1", logs: "tail-line\n" }

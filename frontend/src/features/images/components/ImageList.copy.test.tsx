@@ -2,20 +2,20 @@ import { CopyImageDialog } from "@features/images/components/CopyImageDialog";
 import { ImageList } from "@features/images/components/ImageList";
 import { useImages } from "@features/images/hooks/useImages";
 import type { ImageCopyPreview } from "@features/images/services/imagesApi";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	hostFixture,
 	imageCopyCompleteEventFixture,
 	imageCopyErrorEventFixture,
 	imageCopyEventFixture,
 	imageCopyPreviewFixture,
 	imageCopyResultFixture,
 	imageFixture,
-	machineFixture,
 } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
@@ -24,17 +24,17 @@ import { liveNdjsonResponse, ndjsonResponse } from "@/test/stream";
 // The image copy surface's domain assertions (issue 376), mirroring the
 // volumes move suite: the row button and its navigation stop, the
 // already-present fact as information, the copy-only body, the live
-// progress and stay-open report, the both-machines refetch, and the
+// progress and stay-open report, the both-hosts refetch, and the
 // too-large hint. The skeleton behavior (the hidden radio, the Copy
 // confirm) is pinned once in the TransferDialog preset's suite.
 
 const image = imageFixture();
 const encodedImageId = encodeURIComponent(image.id);
 
-const source = machineFixture();
-const staging = machineFixture({ id: "m-2", name: "staging-01" });
-const backup = machineFixture({ id: "m-4", name: "backup-01" });
-const readOnly = machineFixture({
+const source = hostFixture();
+const staging = hostFixture({ id: "m-2", name: "staging-01" });
+const backup = hostFixture({ id: "m-4", name: "backup-01" });
+const readOnly = hostFixture({
 	id: "m-3",
 	name: "laptop-01",
 	permission: "read",
@@ -56,24 +56,24 @@ function resetCounters() {
 	targetImageFetches = 0;
 }
 
-function imagesHandler(machineId: "m-1" | "m-2") {
-	return http.get(`*/api/machines/${machineId}/images`, () => {
-		if (machineId === "m-1") sourceImageFetches++;
+function imagesHandler(hostId: "m-1" | "m-2") {
+	return http.get(`*/api/hosts/${hostId}/images`, () => {
+		if (hostId === "m-1") sourceImageFetches++;
 		else targetImageFetches++;
-		return HttpResponse.json(machineId === "m-1" ? [image] : []);
+		return HttpResponse.json(hostId === "m-1" ? [image] : []);
 	});
 }
 
-function machinesHandler(machines: Machine[]) {
-	return http.get("*/api/machines", () => HttpResponse.json(machines));
+function hostsHandler(hosts: Host[]) {
+	return http.get("*/api/hosts", () => HttpResponse.json(hosts));
 }
 
 function previewHandler(overrides: Partial<ImageCopyPreview> = {}) {
 	return http.get(
-		`*/api/machines/m-1/images/${encodedImageId}/copy-preview`,
+		`*/api/hosts/m-1/images/${encodedImageId}/copy-preview`,
 		({ request }) => {
 			previewTargets.push(
-				new URL(request.url).searchParams.get("targetMachineId") ?? "",
+				new URL(request.url).searchParams.get("targetHostId") ?? "",
 			);
 			return HttpResponse.json(imageCopyPreviewFixture(overrides));
 		},
@@ -87,7 +87,7 @@ function previewHandler(overrides: Partial<ImageCopyPreview> = {}) {
 function copyStreamHandler(events: Record<string, unknown>[], live = false) {
 	const chunks = events.map((event) => `${JSON.stringify(event)}\n`);
 	return http.post(
-		`*/api/machines/m-1/images/${encodedImageId}/copy`,
+		`*/api/hosts/m-1/images/${encodedImageId}/copy`,
 		async ({ request }) => {
 			copyRequests.count++;
 			copyRequests.body = (await request.json()) as Record<string, unknown>;
@@ -103,8 +103,8 @@ function LocationProbe() {
 	return <div data-testid="location">{location.pathname}</div>;
 }
 
-// The target machine's image list is not rendered by the source list; the
-// probe mounts its query so the both-machines refetch is observable
+// The target host's image list is not rendered by the source list; the
+// probe mounts its query so the both-hosts refetch is observable
 // through MSW.
 function TargetImagesProbe() {
 	useImages("m-2");
@@ -117,7 +117,7 @@ async function openCopyDialog(
 	server.use(
 		imagesHandler("m-1"),
 		imagesHandler("m-2"),
-		machinesHandler([source, staging, readOnly, backup]),
+		hostsHandler([source, staging, readOnly, backup]),
 		previewHandler(previewOverrides),
 		copyStreamHandler([
 			imageCopyCompleteEventFixture(imageCopyResultFixture()),
@@ -126,15 +126,15 @@ async function openCopyDialog(
 	renderWithQuery(
 		<>
 			<LocationProbe />
-			<ImageList machine={source} />
+			<ImageList host={source} />
 			<TargetImagesProbe />
 		</>,
-		{ chakra: true, router: { initialEntries: ["/machines/m-1"] } },
+		{ chakra: true, router: { initialEntries: ["/hosts/m-1"] } },
 	);
 	const user = userEvent.setup();
 	await user.click(
 		await screen.findByRole("button", {
-			name: "Copy docker.io/library/nginx:1.27 to another machine",
+			name: "Copy docker.io/library/nginx:1.27 to another host",
 		}),
 	);
 	expect(await screen.findByTestId("modal")).toBeInTheDocument();
@@ -153,22 +153,20 @@ async function openCopyDialogReadyToConfirm(
 	return user;
 }
 
-describe("ImageList copy to machine", () => {
+describe("ImageList copy to host", () => {
 	beforeEach(resetCounters);
 
-	it("hides the Copy to machine action below the manage-images capability", async () => {
+	it("hides the Copy to host action below the manage-images capability", async () => {
 		server.use(imagesHandler("m-1"));
 		renderWithQuery(
-			<ImageList
-				machine={machineFixture({ permission: "read", isOwner: false })}
-			/>,
+			<ImageList host={hostFixture({ permission: "read", isOwner: false })} />,
 			{ chakra: true, router: true },
 		);
 
 		expect(await screen.findByTestId("image-row")).toBeInTheDocument();
 		expect(
 			screen.queryByRole("button", {
-				name: "Copy docker.io/library/nginx:1.27 to another machine",
+				name: "Copy docker.io/library/nginx:1.27 to another host",
 			}),
 		).not.toBeInTheDocument();
 	});
@@ -177,10 +175,10 @@ describe("ImageList copy to machine", () => {
 		await openCopyDialog();
 
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
-		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
 	});
 
-	it("offers one dialog listing only manageable machines, source excluded", async () => {
+	it("offers one dialog listing only manageable hosts, source excluded", async () => {
 		await openCopyDialog();
 
 		const select = screen.getByTestId("move-target-select");
@@ -216,14 +214,14 @@ describe("ImageList copy to machine", () => {
 		await user.click(screen.getByTestId("confirm-move-button"));
 
 		await waitFor(() => expect(copyRequests.count).toBe(1));
-		expect(copyRequests.body).toEqual({ targetMachineId: "m-2" });
+		expect(copyRequests.body).toEqual({ targetHostId: "m-2" });
 	});
 
-	it("streams with live progress, narrates the stay-open report, and refetches both machines' image lists", async () => {
+	it("streams with live progress, narrates the stay-open report, and refetches both hosts' image lists", async () => {
 		server.use(
 			imagesHandler("m-1"),
 			imagesHandler("m-2"),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(),
 			copyStreamHandler(
 				[
@@ -238,15 +236,15 @@ describe("ImageList copy to machine", () => {
 		renderWithQuery(
 			<>
 				<LocationProbe />
-				<ImageList machine={source} />
+				<ImageList host={source} />
 				<TargetImagesProbe />
 			</>,
-			{ chakra: true, router: { initialEntries: ["/machines/m-1"] } },
+			{ chakra: true, router: { initialEntries: ["/hosts/m-1"] } },
 		);
 		const user = userEvent.setup();
 		await user.click(
 			await screen.findByRole("button", {
-				name: "Copy docker.io/library/nginx:1.27 to another machine",
+				name: "Copy docker.io/library/nginx:1.27 to another host",
 			}),
 		);
 		await waitFor(() =>
@@ -258,7 +256,7 @@ describe("ImageList copy to machine", () => {
 		await user.click(screen.getByTestId("confirm-move-button"));
 
 		await waitFor(() => expect(copyRequests.count).toBe(1));
-		expect(copyRequests.body).toEqual({ targetMachineId: "m-2" });
+		expect(copyRequests.body).toEqual({ targetHostId: "m-2" });
 
 		// Progress rendered while the stream ran, then the terminal report
 		// narrated in place instead of closing — the byte count is the
@@ -273,7 +271,7 @@ describe("ImageList copy to machine", () => {
 		expect(names).toHaveTextContent("docker.io/library/nginx:1.27");
 		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
 
-		// The transfer touched two machines: both image lists refetch from
+		// The transfer touched two hosts: both image lists refetch from
 		// the server's answer, not from closure assumptions.
 		await waitFor(() => {
 			expect(sourceImageFetches).toBeGreaterThan(beforeSource);
@@ -316,14 +314,14 @@ describe("CopyImageDialog report", () => {
 
 	it("narrates a completed copy without a loaded-names block when the load reported none", async () => {
 		server.use(
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(),
 			copyStreamHandler([
 				imageCopyCompleteEventFixture(imageCopyResultFixture({ names: [] })),
 			]),
 		);
 		renderWithQuery(
-			<CopyImageDialog machine={source} image={image} onClose={() => {}} />,
+			<CopyImageDialog host={source} image={image} onClose={() => {}} />,
 			{ chakra: true, router: true },
 		);
 		const user = userEvent.setup();

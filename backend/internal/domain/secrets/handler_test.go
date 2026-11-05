@@ -22,7 +22,7 @@ import (
 // tests).
 type adminRepo struct{}
 
-func (adminRepo) GetPermission(machineID, userID string) (string, error) {
+func (adminRepo) GetPermission(hostID, userID string) (string, error) {
 	return models.PermissionAdmin, nil
 }
 
@@ -105,14 +105,14 @@ func mustParseSecretTime(value string) time.Time {
 }
 
 func listRequest() *http.Request {
-	req := httptest.NewRequest("GET", "/api/machines/machine123/secrets", nil)
+	req := httptest.NewRequest("GET", "/api/hosts/host123/secrets", nil)
 	ctx := context.WithValue(req.Context(), contextutils.UserIDContextKey, "user123")
 	req = req.WithContext(ctx)
-	req.SetPathValue("id", "machine123")
+	req.SetPathValue("id", "host123")
 	return req
 }
 
-// --- Inspect (GET /api/machines/{id}/secrets/{secretId}) ---
+// --- Inspect (GET /api/hosts/{id}/secrets/{secretId}) ---
 
 // TestSecretHandler_Get_MetadataOnly pins the happy path of a metadata
 // inspect: 200 with the metadata JSON and NO secretData field — even when
@@ -127,7 +127,7 @@ func TestSecretHandler_Get_MetadataOnly(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	newTestHandler(engine).Get(rr, getRequest("/api/machines/machine123/secrets/3f2e1d0c"))
+	newTestHandler(engine).Get(rr, getRequest("/api/hosts/host123/secrets/3f2e1d0c"))
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.JSONEq(t, `{
@@ -146,13 +146,13 @@ func TestSecretHandler_Get_MetadataOnly(t *testing.T) {
 func TestSecretHandler_Get_RevealReturnsValue(t *testing.T) {
 	engine := &fakeSecretEngine{
 		inspectFn: func(name string, reveal bool) (*entities.SecretInfoReport, error) {
-			assert.True(t, reveal, "?reveal=true must reach the machine lookup as a reveal")
+			assert.True(t, reveal, "?reveal=true must reach the host lookup as a reveal")
 			return secretFixture("3f2e1d0c", "db-password", mustParseSecretTime("2026-01-02T15:04:05Z"), "hunter2"), nil
 		},
 	}
 
 	rr := httptest.NewRecorder()
-	newTestHandler(engine).Get(rr, getRequest("/api/machines/machine123/secrets/db-password?reveal=true"))
+	newTestHandler(engine).Get(rr, getRequest("/api/hosts/host123/secrets/db-password?reveal=true"))
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.JSONEq(t, `{
@@ -180,9 +180,9 @@ func TestSecretHandler_Get_RevealParamDecoding(t *testing.T) {
 	handler := newTestHandler(engine)
 
 	for _, target := range []string{
-		"/api/machines/machine123/secrets/db-password?reveal=true",
-		"/api/machines/machine123/secrets/db-password?reveal=false",
-		"/api/machines/machine123/secrets/3f2e1d0c",
+		"/api/hosts/host123/secrets/db-password?reveal=true",
+		"/api/hosts/host123/secrets/db-password?reveal=false",
+		"/api/hosts/host123/secrets/3f2e1d0c",
 	} {
 		rr := httptest.NewRecorder()
 		handler.Get(rr, getRequest(target))
@@ -190,63 +190,63 @@ func TestSecretHandler_Get_RevealParamDecoding(t *testing.T) {
 	}
 
 	assert.Equal(t, []bool{true, false, false}, gotReveals,
-		"only ?reveal=true may reach the machine as a reveal request")
+		"only ?reveal=true may reach the host as a reveal request")
 }
 
 func getRequest(target string) *http.Request {
 	req := httptest.NewRequest("GET", target, nil)
 	ctx := context.WithValue(req.Context(), contextutils.UserIDContextKey, "user123")
 	req = req.WithContext(ctx)
-	req.SetPathValue("id", "machine123")
+	req.SetPathValue("id", "host123")
 	req.SetPathValue("secretId", "db-password")
 	return req
 }
 
 // TestSecretHandler_Get_ReadLevelGranteeReachesInspectRoute pins the
-// route mounting: GET /api/machines/{id}/secrets/{secretId} rides the
-// RequireMachineAccess subtree, so a read-level grantee reaches the
+// route mounting: GET /api/hosts/{id}/secrets/{secretId} rides the
+// RequireHostAccess subtree, so a read-level grantee reaches the
 // inspect handler (metadata is visible at read; the reveal gate is the
 // service's, not the route's).
 func TestSecretHandler_Get_ReadLevelGranteeReachesInspectRoute(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	accessRepo := testutils.NewMockMachineAccessRepository()
-	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
+	hostRepo := testutils.NewMockHostRepository()
+	hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+	accessRepo := testutils.NewMockHostAccessRepository()
+	accessRepo.AddAccess("host-1", "reader-1", models.PermissionRead, time.Now())
 	engine := &fakeSecretEngine{
 		inspectFn: func(name string, reveal bool) (*entities.SecretInfoReport, error) {
 			return secretFixture("3f2e1d0c", "db-password", time.Time{}, ""), nil
 		},
 	}
-	router := secretsAccessRouter(machineRepo, accessRepo, newTestHandler(engine).service)
+	router := secretsAccessRouter(hostRepo, accessRepo, newTestHandler(engine).service)
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/secrets/db-password", "reader-1"))
+	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/hosts/host-1/secrets/db-password", "reader-1"))
 
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "a read-level grantee must reach the inspect endpoint")
 	assert.NotContains(t, w.Body.String(), "secretData",
 		"the metadata answer must not carry a secretData field")
 }
 
-// --- Create (POST /api/machines/{id}/secrets) ---
+// --- Create (POST /api/hosts/{id}/secrets) ---
 
 // newCreateRequest builds a POST secrets request with the given JSON body,
-// carrying the given user ID and machine ID the way the mounted route
+// carrying the given user ID and host ID the way the mounted route
 // would extract them.
-func newCreateRequest(userID, machineID, body string) *http.Request {
-	req := httptest.NewRequest("POST", "/api/machines/"+machineID+"/secrets", strings.NewReader(body))
+func newCreateRequest(userID, hostID, body string) *http.Request {
+	req := httptest.NewRequest("POST", "/api/hosts/"+hostID+"/secrets", strings.NewReader(body))
 	ctx := req.Context()
 	if userID != "" {
 		ctx = context.WithValue(ctx, contextutils.UserIDContextKey, userID)
 	}
 	req = req.WithContext(ctx)
-	req.SetPathValue("id", machineID)
+	req.SetPathValue("id", hostID)
 	return req
 }
 
 // TestSecretHandler_Create_HappyPath pins the create contract through the
 // real service: 201 with only {id} in the body, the name forwarded
 // TRIMMED, and the value forwarded byte-identical (significant whitespace
-// intact) into the machine's create call.
+// intact) into the host's create call.
 func TestSecretHandler_Create_HappyPath(t *testing.T) {
 	var gotName, gotValue string
 	engine := &fakeSecretEngine{
@@ -257,15 +257,15 @@ func TestSecretHandler_Create_HappyPath(t *testing.T) {
 	}
 
 	rr := httptest.NewRecorder()
-	newTestHandler(engine).Create(rr, newCreateRequest("user123", "machine123",
+	newTestHandler(engine).Create(rr, newCreateRequest("user123", "host123",
 		`{"name":"  db-password  ","value":"  hunter2 \nnext line\n"}`))
 
 	assert.Equal(t, http.StatusCreated, rr.Code, "a successful create must answer 201")
 	assert.JSONEq(t, `{"id":"3f2e1d0c"}`, rr.Body.String(),
 		"the create response must carry the created ID only — never the value")
-	assert.Equal(t, "db-password", gotName, "the trimmed name must reach the machine")
+	assert.Equal(t, "db-password", gotName, "the trimmed name must reach the host")
 	assert.Equal(t, "  hunter2 \nnext line\n", gotValue,
-		"the value must reach the machine byte-identical — never trimmed")
+		"the value must reach the host byte-identical — never trimmed")
 }
 
 // TestSecretHandler_Create_MaxSizeValueStillPasses pins the interplay of
@@ -284,18 +284,18 @@ func TestSecretHandler_Create_MaxSizeValueStillPasses(t *testing.T) {
 
 	maxValue := strings.Repeat("v", 1048576)
 	rr := httptest.NewRecorder()
-	newTestHandler(engine).Create(rr, newCreateRequest("user123", "machine123",
+	newTestHandler(engine).Create(rr, newCreateRequest("user123", "host123",
 		`{"name":"db-password","value":"`+maxValue+`"}`))
 
 	assert.Equal(t, http.StatusCreated, rr.Code,
 		"a 1 MiB value is the largest legitimate create and must pass the global body cap")
 	assert.Equal(t, maxValue, gotValue,
-		"the max-size value must reach the machine byte-identical")
+		"the max-size value must reach the host byte-identical")
 }
 
 // TestSecretHandler_Create_ValidationFailures pins the 400 contract: a
 // missing/oversized/pattern-breaking name or an empty/oversized value is
-// refused with VALIDATION_FAILED before the machine is asked (body
+// refused with VALIDATION_FAILED before the host is asked (body
 // decoding itself is pinned once by web.Decode). The engine stays
 // unarmed: any create reaching it panics the test.
 func TestSecretHandler_Create_ValidationFailures(t *testing.T) {
@@ -330,7 +330,7 @@ func TestSecretHandler_Create_ValidationFailures(t *testing.T) {
 			engine := &fakeSecretEngine{}
 
 			rr := httptest.NewRecorder()
-			newTestHandler(engine).Create(rr, newCreateRequest("user123", "machine123", tt.body))
+			newTestHandler(engine).Create(rr, newCreateRequest("user123", "host123", tt.body))
 
 			assert.Equal(t, http.StatusBadRequest, rr.Code, "invalid input must be refused with 400")
 			assert.Contains(t, rr.Body.String(), tt.expectCode, "error body should carry the %s code", tt.expectCode)
@@ -346,7 +346,7 @@ func TestSecretHandler_Create_RejectsValueWithoutEchoingIt(t *testing.T) {
 	engine := &fakeSecretEngine{}
 
 	rr := httptest.NewRecorder()
-	newTestHandler(engine).Create(rr, newCreateRequest("user123", "machine123",
+	newTestHandler(engine).Create(rr, newCreateRequest("user123", "host123",
 		`{"name":"-bad-name","value":"top-secret-payload"}`))
 
 	assert.Equal(t, http.StatusBadRequest, rr.Code)
@@ -357,7 +357,7 @@ func TestSecretHandler_Create_RejectsValueWithoutEchoingIt(t *testing.T) {
 // TestSecretHandler_Create_WriteGate pins the route mounting for the
 // create route: POST /secrets is gated at write level, so a read-level
 // grantee (who keeps metadata visibility) is refused with 403 in
-// middleware — the machine is never asked to store anything — while
+// middleware — the host is never asked to store anything — while
 // write- and admin-level grantees reach the handler.
 func TestSecretHandler_Create_WriteGate(t *testing.T) {
 	tests := []struct {
@@ -372,10 +372,10 @@ func TestSecretHandler_Create_WriteGate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			machineRepo := testutils.NewMockMachineRepository()
-			machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-			accessRepo := testutils.NewMockMachineAccessRepository()
-			accessRepo.AddAccess("machine-1", "grantee-1", tt.level, time.Now())
+			hostRepo := testutils.NewMockHostRepository()
+			hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+			accessRepo := testutils.NewMockHostAccessRepository()
+			accessRepo.AddAccess("host-1", "grantee-1", tt.level, time.Now())
 			called := false
 			engine := &fakeSecretEngine{
 				createFn: func(name, value string) (*entities.SecretCreateReport, error) {
@@ -383,9 +383,9 @@ func TestSecretHandler_Create_WriteGate(t *testing.T) {
 					return &entities.SecretCreateReport{ID: "3f2e1d0c"}, nil
 				},
 			}
-			router := secretsAccessRouter(machineRepo, accessRepo, newTestHandler(engine).service)
+			router := secretsAccessRouter(hostRepo, accessRepo, newTestHandler(engine).service)
 
-			req := httptest.NewRequest("POST", "/api/machines/machine-1/secrets",
+			req := httptest.NewRequest("POST", "/api/hosts/host-1/secrets",
 				strings.NewReader(`{"name":"db-password","value":"hunter2"}`))
 			req = req.WithContext(contextutils.SetUserID(req.Context(), "grantee-1"))
 			w := httptest.NewRecorder()
@@ -403,26 +403,26 @@ func TestSecretHandler_Create_WriteGate(t *testing.T) {
 	}
 }
 
-// --- Route wiring: the RequireMachineAccess subtree is the read gate ---
+// --- Route wiring: the RequireHostAccess subtree is the read gate ---
 //
 // These tests mount the secrets route on a chi subtree exactly the way
-// internal/app/app.go does (RequireMachineAccess at the /machines/{id}
+// internal/app/app.go does (RequireHostAccess at the /hosts/{id}
 // subtree level, r.Get("/secrets", ...)) so the access semantics the
 // contract promises are exercised through the real URL-param extraction:
-// unknown machine → 404 MACHINE_NOT_FOUND, known machine without an
+// unknown host → 404 HOST_NOT_FOUND, known host without an
 // access row → 403 ACCESS_DENIED, and a read-level grantee through to the
 // handler (metadata is visible at read).
 
 // secretsAccessRouter mirrors app.go's mounting of the secrets routes.
-func secretsAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *SecretService) http.Handler {
-	machineAccess := appmiddleware.RequireMachineAccess(machineRepo, accessRepo)
-	requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
+func secretsAccessRouter(hostRepo *testutils.MockHostRepository, accessRepo *testutils.MockHostAccessRepository, service *SecretService) http.Handler {
+	hostAccess := appmiddleware.RequireHostAccess(hostRepo, accessRepo)
+	requireWrite := appmiddleware.RequireHostPermission(hostRepo, accessRepo, models.PermissionWrite)
 	r := http.NewServeMux()
-	r.Handle("GET /api/machines/{id}/secrets", machineAccess(http.HandlerFunc(NewSecretHandler(service).List)))
-	r.Handle("POST /api/machines/{id}/secrets", machineAccess(requireWrite(http.HandlerFunc(NewSecretHandler(service).Create))))
-	r.Handle("GET /api/machines/{id}/secrets/{secretId}", machineAccess(http.HandlerFunc(NewSecretHandler(service).Get)))
-	r.Handle("GET /api/machines/{id}/secrets/{secretId}/inspect", machineAccess(http.HandlerFunc(NewSecretHandler(service).Inspect)))
-	r.Handle("DELETE /api/machines/{id}/secrets/{secretId}", machineAccess(requireWrite(http.HandlerFunc(NewSecretHandler(service).Delete))))
+	r.Handle("GET /api/hosts/{id}/secrets", hostAccess(http.HandlerFunc(NewSecretHandler(service).List)))
+	r.Handle("POST /api/hosts/{id}/secrets", hostAccess(requireWrite(http.HandlerFunc(NewSecretHandler(service).Create))))
+	r.Handle("GET /api/hosts/{id}/secrets/{secretId}", hostAccess(http.HandlerFunc(NewSecretHandler(service).Get)))
+	r.Handle("GET /api/hosts/{id}/secrets/{secretId}/inspect", hostAccess(http.HandlerFunc(NewSecretHandler(service).Inspect)))
+	r.Handle("DELETE /api/hosts/{id}/secrets/{secretId}", hostAccess(requireWrite(http.HandlerFunc(NewSecretHandler(service).Delete))))
 	return r
 }
 
@@ -433,52 +433,52 @@ func requestAsUser(method, target, userID string) *http.Request {
 	return req.WithContext(contextutils.SetUserID(req.Context(), userID))
 }
 
-func TestSecretHandler_List_UnknownMachineIsNotFound(t *testing.T) {
+func TestSecretHandler_List_UnknownHostIsNotFound(t *testing.T) {
 	engine := &fakeSecretEngine{
 		listFn: func() ([]*entities.SecretInfoReport, error) {
 			return nil, nil
 		},
 	}
-	router := secretsAccessRouter(testutils.NewMockMachineRepository(), testutils.NewMockMachineAccessRepository(), newTestHandler(engine).service)
+	router := secretsAccessRouter(testutils.NewMockHostRepository(), testutils.NewMockHostAccessRepository(), newTestHandler(engine).service)
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/no-such-machine/secrets", "owner-1"))
+	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/hosts/no-such-host/secrets", "owner-1"))
 
-	assert.Equal(t, http.StatusNotFound, w.Result().StatusCode, "unknown machine must be rejected with 404")
-	assert.Contains(t, w.Body.String(), "MACHINE_NOT_FOUND", "error body should carry the MACHINE_NOT_FOUND code")
+	assert.Equal(t, http.StatusNotFound, w.Result().StatusCode, "unknown host must be rejected with 404")
+	assert.Contains(t, w.Body.String(), "HOST_NOT_FOUND", "error body should carry the HOST_NOT_FOUND code")
 }
 
 func TestSecretHandler_List_UserWithoutAccessIsForbidden(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
+	hostRepo := testutils.NewMockHostRepository()
+	hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
 	engine := &fakeSecretEngine{
 		listFn: func() ([]*entities.SecretInfoReport, error) {
 			return nil, nil
 		},
 	}
-	router := secretsAccessRouter(machineRepo, testutils.NewMockMachineAccessRepository(), newTestHandler(engine).service)
+	router := secretsAccessRouter(hostRepo, testutils.NewMockHostAccessRepository(), newTestHandler(engine).service)
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/secrets", "stranger-1"))
+	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/hosts/host-1/secrets", "stranger-1"))
 
 	assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "caller without an access row must be rejected with 403")
 	assert.Contains(t, w.Body.String(), "ACCESS_DENIED", "error body should carry the ACCESS_DENIED code")
 }
 
 func TestSecretHandler_List_ReadLevelGranteeReachesHandler(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	accessRepo := testutils.NewMockMachineAccessRepository()
-	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
+	hostRepo := testutils.NewMockHostRepository()
+	hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+	accessRepo := testutils.NewMockHostAccessRepository()
+	accessRepo.AddAccess("host-1", "reader-1", models.PermissionRead, time.Now())
 	engine := &fakeSecretEngine{
 		listFn: func() ([]*entities.SecretInfoReport, error) {
 			return nil, nil
 		},
 	}
-	router := secretsAccessRouter(machineRepo, accessRepo, newTestHandler(engine).service)
+	router := secretsAccessRouter(hostRepo, accessRepo, newTestHandler(engine).service)
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/secrets", "reader-1"))
+	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/hosts/host-1/secrets", "reader-1"))
 
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "secret metadata is visible at read level")
 }
@@ -495,10 +495,10 @@ func TestSecretHandler_Delete_Success(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("DELETE", "/api/machines/machine123/secrets/db-password", nil)
+	req := httptest.NewRequest("DELETE", "/api/hosts/host123/secrets/db-password", nil)
 	ctx := context.WithValue(req.Context(), contextutils.UserIDContextKey, "user123")
 	req = req.WithContext(ctx)
-	req.SetPathValue("id", "machine123")
+	req.SetPathValue("id", "host123")
 	req.SetPathValue("secretId", "db-password")
 
 	rr := httptest.NewRecorder()
@@ -510,10 +510,10 @@ func TestSecretHandler_Delete_Success(t *testing.T) {
 }
 
 // TestSecretHandler_Delete_RouteLevelGating pins the mounted-route contract
-// for delete (the DELETE route rides RequireMachinePermission(write), so a
+// for delete (the DELETE route rides RequireHostPermission(write), so a
 // read-level grantee is refused 403 before the handler runs, a write-level
-// grantee goes through, and an unknown machine is 404'd by
-// RequireMachineAccess).
+// grantee goes through, and an unknown host is 404'd by
+// RequireHostAccess).
 func TestSecretHandler_Delete_RouteLevelGating(t *testing.T) {
 	newRouter := func() (http.Handler, *int) {
 		calls := 0
@@ -523,18 +523,18 @@ func TestSecretHandler_Delete_RouteLevelGating(t *testing.T) {
 				return nil
 			},
 		}
-		machineRepo := testutils.NewMockMachineRepository()
-		machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-		accessRepo := testutils.NewMockMachineAccessRepository()
-		accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
-		accessRepo.AddAccess("machine-1", "writer-1", models.PermissionWrite, time.Now())
-		return secretsAccessRouter(machineRepo, accessRepo, newTestHandler(engine).service), &calls
+		hostRepo := testutils.NewMockHostRepository()
+		hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+		accessRepo := testutils.NewMockHostAccessRepository()
+		accessRepo.AddAccess("host-1", "reader-1", models.PermissionRead, time.Now())
+		accessRepo.AddAccess("host-1", "writer-1", models.PermissionWrite, time.Now())
+		return secretsAccessRouter(hostRepo, accessRepo, newTestHandler(engine).service), &calls
 	}
 
 	t.Run("read-level grantee is forbidden", func(t *testing.T) {
 		router, calls := newRouter()
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, requestAsUser(http.MethodDelete, "/api/machines/machine-1/secrets/db-password", "reader-1"))
+		router.ServeHTTP(w, requestAsUser(http.MethodDelete, "/api/hosts/host-1/secrets/db-password", "reader-1"))
 		assert.Equal(t, http.StatusForbidden, w.Result().StatusCode, "a read-level grantee must be refused")
 		assert.Zero(t, *calls, "a refused delete must never reach the handler")
 	})
@@ -542,16 +542,16 @@ func TestSecretHandler_Delete_RouteLevelGating(t *testing.T) {
 	t.Run("write-level grantee goes through", func(t *testing.T) {
 		router, calls := newRouter()
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, requestAsUser(http.MethodDelete, "/api/machines/machine-1/secrets/db-password", "writer-1"))
+		router.ServeHTTP(w, requestAsUser(http.MethodDelete, "/api/hosts/host-1/secrets/db-password", "writer-1"))
 		assert.Equal(t, http.StatusNoContent, w.Result().StatusCode, "a write-level grantee must reach the 204")
 		assert.Equal(t, 1, *calls, "the handler must run once for a write-level grantee")
 	})
 
-	t.Run("unknown machine is not found", func(t *testing.T) {
+	t.Run("unknown host is not found", func(t *testing.T) {
 		router, calls := newRouter()
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, requestAsUser(http.MethodDelete, "/api/machines/no-such-machine/secrets/db-password", "writer-1"))
-		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode, "an unknown machine must be refused before the handler")
-		assert.Zero(t, *calls, "a 404 machine must never reach the handler")
+		router.ServeHTTP(w, requestAsUser(http.MethodDelete, "/api/hosts/no-such-host/secrets/db-password", "writer-1"))
+		assert.Equal(t, http.StatusNotFound, w.Result().StatusCode, "an unknown host must be refused before the handler")
+		assert.Zero(t, *calls, "a 404 host must never reach the handler")
 	})
 }

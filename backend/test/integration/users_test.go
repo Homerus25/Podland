@@ -303,7 +303,7 @@ func TestUsers_List_AdminGetsFullShape(t *testing.T) {
 // TestUsers_List_UserGetsMinimalShape asserts the regular-user
 // contract: every entry carries exactly id and username — role and
 // createdAt are absent — and admins are discoverable, enough for the
-// machine-sharing picker.
+// host-sharing picker.
 func TestUsers_List_UserGetsMinimalShape(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 

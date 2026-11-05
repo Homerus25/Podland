@@ -14,16 +14,16 @@ import (
 
 // Test_Integration_Quadlets_ListFilters is the quadlet list-filter vertical
 // slice for the real-podman integration suite. It proves the query-parameter
-// filtering of GET /api/machines/{id}/quadlets end-to-end through handler →
+// filtering of GET /api/hosts/{id}/quadlets end-to-end through handler →
 // service → podman QuadletList (contract at doku/description_quadlets_api.md:15-17):
 //
-//	GET /api/machines/{id}/quadlets?resource=<type>  → only that resource type
-//	GET /api/machines/{id}/quadlets?name=<substr>    → case-insensitive substring
-//	GET /api/machines/{id}/quadlets?resource&name    → both filters AND-ed
+//	GET /api/hosts/{id}/quadlets?resource=<type>  → only that resource type
+//	GET /api/hosts/{id}/quadlets?name=<substr>    → case-insensitive substring
+//	GET /api/hosts/{id}/quadlets?resource&name    → both filters AND-ed
 //
 // Fixture: two run-scoped quadlets with distinct resources AND distinct name
 // substrings (`-lf-web` container, `-lf-data` volume), so every filter
-// dimension has both a positive and a negative example on the machine.
+// dimension has both a positive and a negative example on the host.
 // Nothing here starts a unit, so the busybox prerequisite of the other
 // quadlet slices is not needed — install only writes the file and reloads
 // systemd.
@@ -35,12 +35,12 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 	registerQuadletsSweep()
 
 	// The fixtures are installed through the quadlet create endpoint,
-	// which dials the user systemd over DBus on the machine (podman's
+	// which dials the user systemd over DBus on the host (podman's
 	// own requirement); hosts without a user systemd manager (the
 	// systemd-free container test host) skip here.
 	requireUserSystemd(t)
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	containerName := "it-" + suite.RunID + "-lf-web"
 	volumeName := "it-" + suite.RunID + "-lf-data"
@@ -48,16 +48,16 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 	// Registered before create so it runs even if a later phase fails. The
 	// deleteQuadlet helper accepts 404 (idempotent) for the abort case.
 	t.Cleanup(func() {
-		deleteQuadlet(t, machineID, containerName+".container")
-		deleteQuadlet(t, machineID, volumeName+".volume")
+		deleteQuadlet(t, hostID, containerName+".container")
+		deleteQuadlet(t, hostID, volumeName+".volume")
 	})
 
-	createQuadlet(t, machineID, quadletCreateBody{
+	createQuadlet(t, hostID, quadletCreateBody{
 		Name:     containerName,
 		Resource: "container",
 		Content:  runnableContainerQuadletContent,
 	})
-	createQuadlet(t, machineID, quadletCreateBody{
+	createQuadlet(t, hostID, quadletCreateBody{
 		Name:     volumeName,
 		Resource: "volume",
 		Content:  "[Volume]\nDriver=local\n",
@@ -66,7 +66,7 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 	// Prove the fixtures are visible unfiltered first, so the filter
 	// assertions below can't pass vacuously through a broken list endpoint.
 	t.Run("UnfilteredListShowsBothFixtures", func(t *testing.T) {
-		entries := listQuadletsFiltered(t, machineID, nil)
+		entries := listQuadletsFiltered(t, hostID, nil)
 		names := quadletEntryNames(entries)
 		require.Contains(t, names, containerName+".container",
 			"unfiltered list must include the container fixture")
@@ -76,7 +76,7 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 
 	// --- AC #1: resource filter narrows by resource type ---------------
 	t.Run("ResourceFilterNarrowsByResourceType", func(t *testing.T) {
-		entries := listQuadletsFiltered(t, machineID, url.Values{"resource": {"container"}})
+		entries := listQuadletsFiltered(t, hostID, url.Values{"resource": {"container"}})
 		names := quadletEntryNames(entries)
 		require.Contains(t, names, containerName+".container",
 			"resource=container must include the container fixture")
@@ -87,7 +87,7 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 				"resource=container must only return container quadlets")
 		}
 
-		entries = listQuadletsFiltered(t, machineID, url.Values{"resource": {"volume"}})
+		entries = listQuadletsFiltered(t, hostID, url.Values{"resource": {"volume"}})
 		names = quadletEntryNames(entries)
 		require.Contains(t, names, volumeName+".volume",
 			"resource=volume must include the volume fixture")
@@ -101,14 +101,14 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 
 	// --- AC #2: name filter is a case-insensitive substring match ------
 	t.Run("NameFilterMatchesSubstringCaseInsensitively", func(t *testing.T) {
-		entries := listQuadletsFiltered(t, machineID, url.Values{"name": {"lf-web"}})
+		entries := listQuadletsFiltered(t, hostID, url.Values{"name": {"lf-web"}})
 		names := quadletEntryNames(entries)
 		require.Contains(t, names, containerName+".container",
 			"name=lf-web must include the container fixture")
 		require.NotContains(t, names, volumeName+".volume",
 			"name=lf-web must exclude the volume fixture")
 
-		entries = listQuadletsFiltered(t, machineID, url.Values{"name": {"LF-DATA"}})
+		entries = listQuadletsFiltered(t, hostID, url.Values{"name": {"LF-DATA"}})
 		names = quadletEntryNames(entries)
 		require.Contains(t, names, volumeName+".volume",
 			"name=LF-DATA must still match the volume fixture (case-insensitive)")
@@ -120,7 +120,7 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 	t.Run("CombinedFiltersAreAnded", func(t *testing.T) {
 		// `lf-data` matches the volume fixture by name, but resource=container
 		// excludes it: the intersection of both filters is empty.
-		entries := listQuadletsFiltered(t, machineID, url.Values{
+		entries := listQuadletsFiltered(t, hostID, url.Values{
 			"resource": {"container"},
 			"name":     {"lf-data"},
 		})
@@ -128,7 +128,7 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 			"resource=container AND name=lf-data must match nothing (the only lf-data quadlet is a volume)")
 
 		// Both filters agreeing must still return the quadlet.
-		entries = listQuadletsFiltered(t, machineID, url.Values{
+		entries = listQuadletsFiltered(t, hostID, url.Values{
 			"resource": {"container"},
 			"name":     {"lf-web"},
 		})
@@ -139,7 +139,7 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 
 	// --- AC #4: a filter with no matches returns an empty list ---------
 	t.Run("NoMatchReturnsEmptyList", func(t *testing.T) {
-		entries := listQuadletsFiltered(t, machineID, url.Values{
+		entries := listQuadletsFiltered(t, hostID, url.Values{
 			"name": {"it-" + suite.RunID + "-lf-nosuchquadlet"},
 		})
 		require.Empty(t, entries,
@@ -151,10 +151,10 @@ func Test_Integration_Quadlets_ListFilters(t *testing.T) {
 // returns the decoded entries. A nil query lists unfiltered. The response is
 // a bare JSON array ([]QuadletListResponse) matching the other quadlet
 // helpers; an all-filtered-out list may decode as nil.
-func listQuadletsFiltered(t *testing.T, machineID string, query url.Values) []quadletListResponse {
+func listQuadletsFiltered(t *testing.T, hostID string, query url.Values) []quadletListResponse {
 	t.Helper()
 
-	listURL := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/"
+	listURL := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/"
 	if len(query) > 0 {
 		listURL += "?" + query.Encode()
 	}

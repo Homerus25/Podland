@@ -12,7 +12,7 @@ import (
 	"github.com/Homerus25/podland/backend/internal/transfer"
 )
 
-// Cross-machine image copy (issue 375, architecture-decisions §19): the
+// Cross-host image copy (issue 375, architecture-decisions §19): the
 // shared transfer kit owns the export→load splice; this file owns the
 // images domain's composition around it — the preview's already-present
 // fact, the copy's source existence gate, and the mapping onto the wire
@@ -24,21 +24,21 @@ import (
 // answers "copied" — there is no move mode.
 const ImageCopyStatusCopied = "copied"
 
-// ImageCopyRequest is the body of the cross-machine image copy endpoint
+// ImageCopyRequest is the body of the cross-host image copy endpoint
 // (POST .../images/{imageId}/copy, issue 375). Copy-only: no mode, no
 // force — the source is never touched.
 type ImageCopyRequest struct {
-	// TargetMachineID is the machine the image is transferred to. Required.
-	TargetMachineID string `json:"targetMachineId" validate:"required,min=1"`
+	// TargetHostID is the host the image is transferred to. Required.
+	TargetHostID string `json:"targetHostId" validate:"required,min=1"`
 }
 
 // ImageCopyPreviewResponse answers the copy dialog's one fact (GET
 // .../images/{imageId}/copy-preview, issue 375): whether the target
-// machine already holds the image by ID. Information, never a block —
+// host already holds the image by ID. Information, never a block —
 // the load is idempotent (content-addressed), so confirming stays
 // possible either way.
 type ImageCopyPreviewResponse struct {
-	// Present reports whether the target machine already holds the
+	// Present reports whether the target host already holds the
 	// image by ID.
 	Present bool `json:"present"`
 }
@@ -47,15 +47,15 @@ type ImageCopyPreviewResponse struct {
 // (issue 375).
 type ImageCopyResponse struct {
 	// ID of the copied image (the full image ID — the wire's image
-	// reference; identical on both machines).
+	// reference; identical on both hosts).
 	ID string `json:"id"`
 	// Status of the transfer: "copied".
 	Status string `json:"status"`
-	// SourceMachineID is the machine the image was transferred from.
-	SourceMachineID string `json:"sourceMachineId"`
-	// TargetMachineID is the machine the image was loaded on.
-	TargetMachineID string `json:"targetMachineId"`
-	// Bytes is the archive actually streamed across machines.
+	// SourceHostID is the host the image was transferred from.
+	SourceHostID string `json:"sourceHostId"`
+	// TargetHostID is the host the image was loaded on.
+	TargetHostID string `json:"targetHostId"`
+	// Bytes is the archive actually streamed across hosts.
 	Bytes int64 `json:"bytes"`
 	// Names are the image names the target's load reported (the tags
 	// the load applied). Never nil — a load without names renders an
@@ -92,12 +92,12 @@ type ImageCopyError struct {
 // 375). Progress events carry Phase (plus Bytes where the phase has it);
 // the terminal complete event carries the transfer envelope; the
 // terminal error event carries the mapped code/message. All events
-// share operationId, machineId, and timestamp — the volume move event
+// share operationId, hostId, and timestamp — the volume move event
 // shape (issue 238).
 type ImageCopyEvent struct {
 	OperationID string             `json:"operationId"`
 	Type        string             `json:"type"`
-	MachineID   string             `json:"machineId"`
+	HostID      string             `json:"hostId"`
 	Image       string             `json:"image,omitempty"`
 	Phase       string             `json:"phase,omitempty"`
 	Bytes       int64              `json:"bytes,omitempty"`
@@ -107,11 +107,11 @@ type ImageCopyEvent struct {
 }
 
 // NewImageCopyProgressEvent wraps one data-phase progress event.
-func NewImageCopyProgressEvent(operationID, machineID, imageID, phase string, bytes int64) ImageCopyEvent {
+func NewImageCopyProgressEvent(operationID, hostID, imageID, phase string, bytes int64) ImageCopyEvent {
 	return ImageCopyEvent{
 		OperationID: operationID,
 		Type:        ImageCopyEventTypeImage,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Image:       imageID,
 		Phase:       phase,
 		Bytes:       bytes,
@@ -121,29 +121,29 @@ func NewImageCopyProgressEvent(operationID, machineID, imageID, phase string, by
 
 // NewImageCopyCompleteEvent builds the terminal complete event carrying
 // the transfer envelope.
-func NewImageCopyCompleteEvent(operationID, machineID string, result ImageCopyResponse) ImageCopyEvent {
+func NewImageCopyCompleteEvent(operationID, hostID string, result ImageCopyResponse) ImageCopyEvent {
 	return ImageCopyEvent{
 		OperationID: operationID,
 		Type:        ImageCopyEventTypeComplete,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Result:      &result,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
 // NewImageCopyErrorEvent builds the terminal error event.
-func NewImageCopyErrorEvent(operationID, machineID, code, message string) ImageCopyEvent {
+func NewImageCopyErrorEvent(operationID, hostID, code, message string) ImageCopyEvent {
 	return ImageCopyEvent{
 		OperationID: operationID,
 		Type:        ImageCopyEventTypeError,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Error:       &ImageCopyError{Code: code, Message: message},
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
-// WithAccessRepo wires the machine-access store the cross-machine copy
-// (issue 375) gates the target machine on, and returns the service for
+// WithAccessRepo wires the host-access store the cross-host copy
+// (issue 375) gates the target host on, and returns the service for
 // chaining. Production wiring always sets it; calling a copy path on a
 // service without it is a wiring bug and panics at the gate.
 func (s *ImageService) WithAccessRepo(accessRepo permission.PermissionGetter) *ImageService {
@@ -169,30 +169,30 @@ func (s *ImageService) imageTransferLimit() int64 {
 	return transfer.ImageBoundOrDefault(s.maxImageTransferBytes)
 }
 
-// CopyPreview answers whether the target machine already holds the image
+// CopyPreview answers whether the target host already holds the image
 // by ID (issue 375, doku/description_images_api.md). The fact is
 // information for the dialog, never a block: the load is idempotent
 // (content-addressed), so a present target image does not refuse
 // anything.
 //
 // Access: the route's subtree middleware already proved the caller holds
-// an access row on the source machine — read level suffices, this
-// endpoint mutates nothing. The target machine is a service-side gate
-// (route middleware only sees the route's machine): the caller's stored
+// an access row on the source host — read level suffices, this
+// endpoint mutates nothing. The target host is a service-side gate
+// (route middleware only sees the route's host): the caller's stored
 // level must be at least read, checked against the access store BEFORE
 // any podman call, so a caller without target access gets the standard
 // 403 ACCESS_DENIED and never a false preview.
-func (s *ImageService) CopyPreview(ctx context.Context, userID, machineID, imageID, targetMachineID string) (*ImageCopyPreviewResponse, error) {
+func (s *ImageService) CopyPreview(ctx context.Context, userID, hostID, imageID, targetHostID string) (*ImageCopyPreviewResponse, error) {
 	// The target gate fires before the connection lease (the volumes
 	// move-preview's shape): a lookup failure is 500, a level below
 	// read — an absent row included — is 403, per
 	// permission.RequireLevel's single-owner contract.
-	if err := permission.RequireLevel(s.accessRepo, targetMachineID, userID, models.PermissionRead); err != nil {
+	if err := permission.RequireLevel(s.accessRepo, targetHostID, userID, models.PermissionRead); err != nil {
 		return nil, err
 	}
 
 	// Source lease: the image must exist (404) before the target is read.
-	exists, err := s.imageExists(ctx, userID, machineID, imageID)
+	exists, err := s.imageExists(ctx, userID, hostID, imageID)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +204,7 @@ func (s *ImageService) CopyPreview(ctx context.Context, userID, machineID, image
 	// the engine's exists check — a not-found there is the fact
 	// (absent), not an error.
 	var present bool
-	err = s.engines.WithEngine(ctx, userID, targetMachineID, "images.CopyPreviewTarget", func(e ImageEngine) error {
+	err = s.engines.WithEngine(ctx, userID, targetHostID, "images.CopyPreviewTarget", func(e ImageEngine) error {
 		present, err = e.Exists(imageID)
 		return err
 	})
@@ -215,30 +215,30 @@ func (s *ImageService) CopyPreview(ctx context.Context, userID, machineID, image
 	return &ImageCopyPreviewResponse{Present: present}, nil
 }
 
-// Copy transfers an image to another machine (issue 375, §19): the
+// Copy transfers an image to another host (issue 375, §19): the
 // source's export spliced through the shared transfer kit into the
 // target's load, with live byte progress. Copy-only — the source is
 // never touched; there is no move mode, no force, no mode on the wire.
 //
 // Access: the route's write-level middleware proved the caller may
-// mutate the SOURCE machine; the TARGET machine is a service-side gate
-// (route middleware only sees the route's machine): the caller's stored
+// mutate the SOURCE host; the TARGET host is a service-side gate
+// (route middleware only sees the route's host): the caller's stored
 // level must be at least write, checked against the access store BEFORE
 // any podman call.
 //
 // Copy answers through the NDJSON stream (the handler always streams);
 // onProgress is the transport's feed.
-func (s *ImageService) Copy(ctx context.Context, userID, machineID, imageID, targetMachineID string, onProgress func(ImageCopyEvent)) (*ImageCopyResponse, error) {
+func (s *ImageService) Copy(ctx context.Context, userID, hostID, imageID, targetHostID string, onProgress func(ImageCopyEvent)) (*ImageCopyResponse, error) {
 	// The target gate fires before any connection lease (the volumes
 	// move's shape): a lookup failure is 500, a level below write — an
 	// absent row included — is 403, per permission.RequireLevel's
 	// single-owner contract.
-	if err := permission.RequireLevel(s.accessRepo, targetMachineID, userID, models.PermissionWrite); err != nil {
+	if err := permission.RequireLevel(s.accessRepo, targetHostID, userID, models.PermissionWrite); err != nil {
 		return nil, err
 	}
 
 	// Source lease: the image must exist (404) before anything streams.
-	exists, err := s.imageExists(ctx, userID, machineID, imageID)
+	exists, err := s.imageExists(ctx, userID, hostID, imageID)
 	if err != nil {
 		return nil, err
 	}
@@ -247,18 +247,18 @@ func (s *ImageService) Copy(ctx context.Context, userID, machineID, imageID, tar
 	}
 
 	// Data phase (§19): two connection leases stand open at once — the
-	// export reads the source machine while the load writes the target
+	// export reads the source host while the load writes the target
 	// — so the nested WithEngine is deliberate, the volumes data
 	// phase's arrangement. The kit's splice streams the archive across
 	// with live byte progress.
 	var response *ImageCopyResponse
-	err = s.engines.WithEngine(ctx, userID, machineID, "images.CopySource", func(src ImageEngine) error {
-		return s.engines.WithEngine(ctx, userID, targetMachineID, "images.CopyTarget", func(tgt ImageEngine) error {
+	err = s.engines.WithEngine(ctx, userID, hostID, "images.CopySource", func(src ImageEngine) error {
+		return s.engines.WithEngine(ctx, userID, targetHostID, "images.CopyTarget", func(tgt ImageEngine) error {
 			emit := func(phase string, bytes int64) {
 				if onProgress != nil {
 					// OperationID stays empty: the streaming handler
 					// stamps its own (the volumes move's arrangement).
-					onProgress(NewImageCopyProgressEvent("", machineID, imageID, phase, bytes))
+					onProgress(NewImageCopyProgressEvent("", hostID, imageID, phase, bytes))
 				}
 			}
 
@@ -269,12 +269,12 @@ func (s *ImageService) Copy(ctx context.Context, userID, machineID, imageID, tar
 			if err == nil {
 				emit(ImageCopyPhaseDone, count)
 				response = &ImageCopyResponse{
-					ID:              imageID,
-					Status:          ImageCopyStatusCopied,
-					SourceMachineID: machineID,
-					TargetMachineID: targetMachineID,
-					Bytes:           count,
-					Names:           names,
+					ID:           imageID,
+					Status:       ImageCopyStatusCopied,
+					SourceHostID: hostID,
+					TargetHostID: targetHostID,
+					Bytes:        count,
+					Names:        names,
 				}
 				return nil
 			}
@@ -282,7 +282,7 @@ func (s *ImageService) Copy(ctx context.Context, userID, machineID, imageID, tar
 			// No rollback, by design: images are content-addressed, so
 			// a failed load leaves already-transferred layers on the
 			// target and a retry skips them (idempotence) — there is
-			// no partial-state poisoning and no rollback machinery
+			// no partial-state poisoning and no rollback plumbing
 			// (the volumes splice's rollback exists only because a
 			// half-populated volume would block a retry with a false
 			// collision; an image never does).
@@ -310,11 +310,11 @@ func (s *ImageService) Copy(ctx context.Context, userID, machineID, imageID, tar
 	return response, nil
 }
 
-// imageExists answers whether the image exists on the machine through
+// imageExists answers whether the image exists on the host through
 // the engine's exists seam.
-func (s *ImageService) imageExists(ctx context.Context, userID, machineID, imageID string) (bool, error) {
+func (s *ImageService) imageExists(ctx context.Context, userID, hostID, imageID string) (bool, error) {
 	exists := false
-	err := s.engines.WithEngine(ctx, userID, machineID, "images.ImageExists", func(e ImageEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "images.ImageExists", func(e ImageEngine) error {
 		present, err := e.Exists(imageID)
 		if err != nil {
 			return err

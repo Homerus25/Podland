@@ -21,11 +21,11 @@ const ProgressWriteDeadline = 10 * time.Minute
 
 // OperationContext is the operation identity the kit mints per request
 // and hands to every domain callback: the operation ID for event stamping
-// plus the caller and machine identities the subtree middleware already
+// plus the caller and host identities the subtree middleware already
 // validated.
 type OperationContext struct {
 	OperationID string
-	MachineID   string
+	HostID      string
 	UserID      string
 }
 
@@ -57,7 +57,7 @@ type ProgressConfig[Event, Result any] struct {
 // entry point for progress streams (§20). It owns the whole ritual —
 // operationID minting, the operation slog line (assembled from the
 // handler's operation name and attrs over the kit's
-// requestID/machineID/operationID base), the 10-minute write-deadline
+// requestID/hostID/operationID base), the 10-minute write-deadline
 // extension, the streaming envelope (headers, writer, identity), and the
 // run loop — and hands the minted operation context to every domain
 // callback. A handler shrinks to its pre-stream ritual (URL-param guards,
@@ -76,7 +76,7 @@ func HandleProgress[Event, Result any](w http.ResponseWriter, r *http.Request, o
 	logArgs := make([]any, 0, len(attrs)+3)
 	logArgs = append(logArgs,
 		slog.String("requestID", contextutils.GetRequestID(r.Context())),
-		slog.String("machineID", r.PathValue("id")),
+		slog.String("hostID", r.PathValue("id")),
 		slog.String("operationID", operationID))
 	for _, attr := range attrs {
 		logArgs = append(logArgs, attr)
@@ -92,7 +92,7 @@ func HandleProgress[Event, Result any](w http.ResponseWriter, r *http.Request, o
 		return
 	}
 
-	op := OperationContext{OperationID: operationID, MachineID: stream.MachineID, UserID: stream.UserID}
+	op := OperationContext{OperationID: operationID, HostID: stream.HostID, UserID: stream.UserID}
 
 	run(r.Context(), stream.Writer, streamConfig[Event, Result]{
 		Operation: func(ctx context.Context, onProgress func(Event)) (Result, error) {

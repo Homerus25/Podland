@@ -131,7 +131,7 @@ type fakeEngineProvider struct {
 	opRecorder func(op string)
 }
 
-func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e PodEngine) error) error {
+func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e PodEngine) error) error {
 	if p.opRecorder != nil {
 		p.opRecorder(op)
 	}

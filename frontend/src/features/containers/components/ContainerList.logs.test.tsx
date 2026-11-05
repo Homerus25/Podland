@@ -6,7 +6,7 @@ import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
-import { containerFixture, machineFixture } from "@/test/factories";
+import { containerFixture, hostFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -14,12 +14,12 @@ function renderContainerList() {
 	renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId"
-				element={<ContainerList machine={machineFixture()} />}
+				path="/hosts/:hostId"
+				element={<ContainerList host={hostFixture()} />}
 			/>
 			<Route path={LOG_ROUTE_PATTERN} element={<LogsPage />} />
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1"] } },
 	);
 }
 
@@ -27,14 +27,14 @@ describe("ContainerList logs", () => {
 	it("wires a list row's logs button to the container logs endpoint and renders its history", async () => {
 		const requestedPaths: string[] = [];
 		server.use(
-			http.get("*/api/machines/m-1/containers", () =>
+			http.get("*/api/hosts/m-1/containers", () =>
 				HttpResponse.json({
 					containers: [containerFixture()],
 					total: 1,
 					timestamp: "2026-08-26T00:00:00Z",
 				}),
 			),
-			http.get("*/api/machines/m-1/containers/c-1/logs", ({ request }) => {
+			http.get("*/api/hosts/m-1/containers/c-1/logs", ({ request }) => {
 				requestedPaths.push(new URL(request.url).pathname);
 				return HttpResponse.json({
 					id: "c-1",
@@ -58,7 +58,7 @@ describe("ContainerList logs", () => {
 		expect(screen.getByText(/hist-line-2/)).toBeInTheDocument();
 		expect(requestedPaths.length).toBeGreaterThan(0);
 		for (const path of requestedPaths) {
-			expect(path).toBe("/api/machines/m-1/containers/c-1/logs");
+			expect(path).toBe("/api/hosts/m-1/containers/c-1/logs");
 		}
 	});
 });

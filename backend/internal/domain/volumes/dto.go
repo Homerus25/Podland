@@ -22,7 +22,7 @@ type VolumeResponse struct {
 	Labels map[string]string `json:"labels"`
 	// Driver options used when creating the volume; always present, {} when empty
 	Options map[string]string `json:"options"`
-	// Mountpoint of the volume on the machine
+	// Mountpoint of the volume on the host
 	Mountpoint string `json:"mountpoint"`
 	// Size/usage, when podman reports it
 	Size *int64 `json:"size,omitempty"`
@@ -51,7 +51,7 @@ func FromPodmanVolume(report *entities.VolumeListReport) VolumeResponse {
 	return response
 }
 
-// VolumeCreateRequest is the POST /api/machines/{id}/volumes body.
+// VolumeCreateRequest is the POST /api/hosts/{id}/volumes body.
 // Name is optional: an empty name creates an anonymous volume whose
 // generated name podman reports back. Name-format validation is podman's
 // job — invalid names surface as client errors from the service.
@@ -92,7 +92,7 @@ type VolumeInspectResponse struct {
 	Labels map[string]string `json:"labels"`
 	// Driver options used when creating the volume; always present, {} when empty
 	Options map[string]string `json:"options"`
-	// Mountpoint of the volume on the machine
+	// Mountpoint of the volume on the host
 	Mountpoint string `json:"mountpoint"`
 	// Size/usage, when podman reports it
 	Size *int64 `json:"size,omitempty"`
@@ -173,20 +173,20 @@ const (
 // Transfer status labels for the volume copy/move endpoint (issue 238):
 // copy answers "copied"; move answers "moved", or "partial" when the data
 // landed but the source removal failed (the volume then exists on both
-// machines).
+// hosts).
 const (
 	VolumeMoveStatusCopied  = "copied"
 	VolumeMoveStatusMoved   = "moved"
 	VolumeMoveStatusPartial = "partial"
 )
 
-// VolumeMoveRequest is the body of the cross-machine volume copy/move
+// VolumeMoveRequest is the body of the cross-host volume copy/move
 // endpoint (POST .../volumes/{volumeName}/move, issue 238). The name is
 // preserved: the target volume carries the source's name, no rename, no
-// within-machine duplicate.
+// within-host duplicate.
 type VolumeMoveRequest struct {
-	// TargetMachineID is the machine the volume is transferred to. Required.
-	TargetMachineID string `json:"targetMachineId" validate:"required,min=1"`
+	// TargetHostID is the host the volume is transferred to. Required.
+	TargetHostID string `json:"targetHostId" validate:"required,min=1"`
 	// Mode selects the transfer semantics. "copy" creates the target
 	// volume and carries the data; "move" additionally removes the source
 	// after the data landed. Required.
@@ -202,41 +202,41 @@ type VolumeMoveRequest struct {
 // (issue 238). Status carries the outcome: "copied" for a completed copy,
 // "moved" for a completed move, and "partial" when a move's data landed
 // but the source removal failed — the volume then exists on both
-// machines, and Error carries the removal failure's detail.
+// hosts, and Error carries the removal failure's detail.
 type VolumeMoveResponse struct {
-	// Name of the transferred volume (identical on both machines — the
+	// Name of the transferred volume (identical on both hosts — the
 	// transfer carries no rename).
 	Name string `json:"name"`
 	// Status of the transfer: "copied", "moved", or "partial".
 	Status string `json:"status"`
-	// SourceMachineID is the machine the volume was transferred from.
-	SourceMachineID string `json:"sourceMachineId"`
-	// TargetMachineID is the machine the volume was created on.
-	TargetMachineID string `json:"targetMachineId"`
-	// Bytes is the volume data actually streamed across machines.
+	// SourceHostID is the host the volume was transferred from.
+	SourceHostID string `json:"sourceHostId"`
+	// TargetHostID is the host the volume was created on.
+	TargetHostID string `json:"targetHostId"`
+	// Bytes is the volume data actually streamed across hosts.
 	Bytes int64 `json:"bytes"`
 	// Error details why the source removal failed when Status is
-	// "partial" — the volume exists on both machines and the source side
+	// "partial" — the volume exists on both hosts and the source side
 	// must be cleaned up manually. Empty otherwise.
 	Error string `json:"error,omitempty"`
 }
 
 // VolumeMovePreviewResponse answers everything the copy/move dialog must
 // show before confirming (GET .../volumes/{volumeName}/move-preview,
-// issue 238): whether the target machine already holds a same-named
+// issue 238): whether the target host already holds a same-named
 // volume (a collision blocks the confirm), whether a container on the
-// source machine uses the volume (a move needs force), and which source
+// source host uses the volume (a move needs force), and which source
 // quadlets reference it (a warning — the confirm stays allowed).
 type VolumeMovePreviewResponse struct {
-	// Collision reports a same-named volume on the target machine. The
+	// Collision reports a same-named volume on the target host. The
 	// transfer never overwrites: the backend re-checks at execution time
 	// and answers 409 VOLUME_ALREADY_EXISTS.
 	Collision bool `json:"collision"`
-	// InUse reports a container on the SOURCE machine mounting the
+	// InUse reports a container on the SOURCE host mounting the
 	// volume. A move refuses with 409 VOLUME_IN_USE unless force is set;
 	// a copy proceeds regardless.
 	InUse bool `json:"inUse"`
-	// ReferencingQuadlets lists the source machine's quadlet files whose
+	// ReferencingQuadlets lists the source host's quadlet files whose
 	// `Volume=` lines resolve to the volume — a warning, never a block.
 	ReferencingQuadlets []VolumeMoveQuadletRef `json:"referencingQuadlets"`
 }
@@ -252,7 +252,7 @@ type VolumeMoveQuadletRef struct {
 // result onto the preview's wire rows (§19, issue 259): the kit owns the
 // list → print → match ritual and answers file-ordered quadlet file
 // names, never nil; this maps them onto the wire DTO. The result is
-// never nil, so a machine without referencing quadlets renders an empty
+// never nil, so a host without referencing quadlets renders an empty
 // JSON array, not null.
 func toVolumeMoveQuadletRefs(names []string) []VolumeMoveQuadletRef {
 	refs := make([]VolumeMoveQuadletRef, 0, len(names))
@@ -291,12 +291,12 @@ type VolumeMoveError struct {
 // (issue 238). Progress events carry Phase (plus Bytes where the phase
 // has it); the terminal complete event carries the transfer envelope;
 // the terminal error event carries the mapped code/message. All events
-// share operationId, machineId, and timestamp — the quadlet move event
+// share operationId, hostId, and timestamp — the quadlet move event
 // shape (issue 214).
 type VolumeMoveEvent struct {
 	OperationID string              `json:"operationId"`
 	Type        string              `json:"type"`
-	MachineID   string              `json:"machineId"`
+	HostID      string              `json:"hostId"`
 	Volume      string              `json:"volume,omitempty"`
 	Phase       string              `json:"phase,omitempty"`
 	Bytes       int64               `json:"bytes,omitempty"`
@@ -306,11 +306,11 @@ type VolumeMoveEvent struct {
 }
 
 // NewVolumeMoveProgressEvent wraps one data-phase progress event.
-func NewVolumeMoveProgressEvent(operationID, machineID, volume, phase string, bytes int64) VolumeMoveEvent {
+func NewVolumeMoveProgressEvent(operationID, hostID, volume, phase string, bytes int64) VolumeMoveEvent {
 	return VolumeMoveEvent{
 		OperationID: operationID,
 		Type:        VolumeMoveEventTypeVolume,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Volume:      volume,
 		Phase:       phase,
 		Bytes:       bytes,
@@ -320,22 +320,22 @@ func NewVolumeMoveProgressEvent(operationID, machineID, volume, phase string, by
 
 // NewVolumeMoveCompleteEvent builds the terminal complete event carrying
 // the transfer envelope.
-func NewVolumeMoveCompleteEvent(operationID, machineID string, result VolumeMoveResponse) VolumeMoveEvent {
+func NewVolumeMoveCompleteEvent(operationID, hostID string, result VolumeMoveResponse) VolumeMoveEvent {
 	return VolumeMoveEvent{
 		OperationID: operationID,
 		Type:        VolumeMoveEventTypeComplete,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Result:      &result,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
 // NewVolumeMoveErrorEvent builds the terminal error event.
-func NewVolumeMoveErrorEvent(operationID, machineID, code, message string) VolumeMoveEvent {
+func NewVolumeMoveErrorEvent(operationID, hostID, code, message string) VolumeMoveEvent {
 	return VolumeMoveEvent{
 		OperationID: operationID,
 		Type:        VolumeMoveEventTypeError,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Error:       &VolumeMoveError{Code: code, Message: message},
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}

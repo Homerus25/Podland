@@ -13,7 +13,7 @@ import { Route, Routes, useSearchParams } from "react-router-dom";
 import { expect } from "vitest";
 import {
 	containerFixture,
-	machineFixture,
+	hostFixture,
 	networkFixture,
 	podFixture,
 	secretFixture,
@@ -67,7 +67,7 @@ export function resetCounters() {
 }
 
 export function containersHandler(containers: () => ContainerSummary[]) {
-	return http.get("*/api/machines/m-1/containers", () => {
+	return http.get("*/api/hosts/m-1/containers", () => {
 		listRequests.count++;
 		return HttpResponse.json({
 			containers: containers(),
@@ -77,26 +77,26 @@ export function containersHandler(containers: () => ContainerSummary[]) {
 	});
 }
 
-// The create page fetches the machine's networks, volumes, and secrets to
+// The create page fetches the host's networks, volumes, and secrets to
 // populate its dropdowns and checkbox lists (spec 313 ticket #317); the
 // counters prove the requests travel through the MSW handlers.
 export function optionListHandlers() {
 	return [
-		http.get("*/api/machines/m-1/networks", () => {
+		http.get("*/api/hosts/m-1/networks", () => {
 			optionRequests.networks++;
 			return HttpResponse.json([
 				networkFixture(),
 				networkFixture({ name: "other-net", subnets: ["10.89.0.0/16"] }),
 			]);
 		}),
-		http.get("*/api/machines/m-1/volumes", () => {
+		http.get("*/api/hosts/m-1/volumes", () => {
 			optionRequests.volumes++;
 			return HttpResponse.json([
 				volumeFixture(),
 				volumeFixture({ name: "pgdata" }),
 			]);
 		}),
-		http.get("*/api/machines/m-1/secrets", () => {
+		http.get("*/api/hosts/m-1/secrets", () => {
 			optionRequests.secrets++;
 			return HttpResponse.json([
 				secretFixture(),
@@ -105,7 +105,7 @@ export function optionListHandlers() {
 		}),
 		// The pod selector's option list (spec 356): the pods list endpoint
 		// the create page fetches on mount.
-		http.get("*/api/machines/m-1/pods", () => {
+		http.get("*/api/hosts/m-1/pods", () => {
 			optionRequests.pods++;
 			return HttpResponse.json({
 				pods: [podFixture(), podFixture({ id: "p-2", name: "db-pod" })],
@@ -117,7 +117,7 @@ export function optionListHandlers() {
 }
 
 export function createHandler(status = 201, body?: JsonBodyType) {
-	return http.post("*/api/machines/m-1/containers", async ({ request }) => {
+	return http.post("*/api/hosts/m-1/containers", async ({ request }) => {
 		createRequests.count++;
 		createRequests.body = await request.json();
 		if (status !== 201) return HttpResponse.json(body, { status });
@@ -140,7 +140,7 @@ export function createHandler(status = 201, body?: JsonBodyType) {
 // caller hands the built NDJSON response (ndjsonResponse /
 // abortableNdjsonResponse from @/test/stream).
 export function pullStreamHandler(response: HttpResponse<DefaultBodyType>) {
-	return http.post("*/api/machines/m-1/images/pull", async ({ request }) => {
+	return http.post("*/api/hosts/m-1/images/pull", async ({ request }) => {
 		pullRequests.count++;
 		pullRequests.body = await request.json();
 		return response;
@@ -152,7 +152,7 @@ export function pullStreamHandler(response: HttpResponse<DefaultBodyType>) {
 // container's ID (the create handler answers with "c-new"), so a request
 // here proves the chain carries the create response's ID.
 export function startHandler(status = 200, body?: JsonBodyType) {
-	return http.post("*/api/machines/m-1/containers/c-new/start", () => {
+	return http.post("*/api/hosts/m-1/containers/c-new/start", () => {
 		startRequests.count++;
 		if (status !== 200) return HttpResponse.json(body, { status });
 		return new HttpResponse(null, { status: 200 });
@@ -172,7 +172,7 @@ export function setupCreatePage(create = createHandler()) {
 	);
 }
 
-// The machine detail page's containers-tab stand-in at the create page's
+// The host detail page's containers-tab stand-in at the create page's
 // return target: the real ContainerList (so a navigate-back exercises the
 // tab's fresh list fetch) behind a marker exposing the ?tab= param the
 // page's cancel/success navigation carries.
@@ -181,7 +181,7 @@ function ContainersTab() {
 	return (
 		<div>
 			<span data-testid="containers-tab">{searchParams.get("tab")}</span>
-			<ContainerList machine={machineFixture()} />
+			<ContainerList host={hostFixture()} />
 		</div>
 	);
 }
@@ -189,9 +189,9 @@ function ContainersTab() {
 function renderCreateRoutes(initialEntry: string) {
 	renderWithQuery(
 		<Routes>
-			<Route path="/machines/:machineId" element={<ContainersTab />} />
+			<Route path="/hosts/:hostId" element={<ContainersTab />} />
 			<Route
-				path="/machines/:machineId/containers/new"
+				path="/hosts/:hostId/containers/new"
 				element={<CreateContainerPage />}
 			/>
 		</Routes>,
@@ -206,12 +206,12 @@ function renderCreateRoutes(initialEntry: string) {
 
 // Renders the containers tab first, the way the user arrives at the page.
 export function renderContainersTab() {
-	renderCreateRoutes("/machines/m-1");
+	renderCreateRoutes("/hosts/m-1");
 }
 
 // Renders the create page directly, for tests that only exercise the form.
 export function renderCreatePage() {
-	renderCreateRoutes("/machines/m-1/containers/new");
+	renderCreateRoutes("/hosts/m-1/containers/new");
 }
 
 export type User = ReturnType<typeof userEvent.setup>;

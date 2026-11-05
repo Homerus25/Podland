@@ -17,30 +17,30 @@ import (
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// allStatsRequest serves GET /api/machines/{id}/containers/stats (the
+// allStatsRequest serves GET /api/hosts/{id}/containers/stats (the
 // all-stats literal route) through the handler with an authenticated test
 // identity.
 func allStatsRequest(stats http.HandlerFunc) *httptest.ResponseRecorder {
 	return testutils.Perform(stats, testutils.Request{
 		Method: http.MethodGet,
-		Path:   "/api/machines/test-machine/containers/stats",
+		Path:   "/api/hosts/test-host/containers/stats",
 		UserID: "test-user",
 		URLParams: map[string]string{
-			"id": "test-machine",
+			"id": "test-host",
 		},
 	})
 }
 
 // containerStatsRequest serves GET
-// /api/machines/{id}/containers/{containerId}/stats through the handler
+// /api/hosts/{id}/containers/{containerId}/stats through the handler
 // with an authenticated test identity.
 func containerStatsRequest(stats http.HandlerFunc, containerID string) *httptest.ResponseRecorder {
 	return testutils.Perform(stats, testutils.Request{
 		Method: http.MethodGet,
-		Path:   "/api/machines/test-machine/containers/" + containerID + "/stats",
+		Path:   "/api/hosts/test-host/containers/" + containerID + "/stats",
 		UserID: "test-user",
 		URLParams: map[string]string{
-			"id":          "test-machine",
+			"id":          "test-host",
 			"containerId": containerID,
 		},
 	})
@@ -163,10 +163,10 @@ func TestContainerHandler_ContainerStats_MissingContainerIDAnswers400(t *testing
 
 	w := testutils.Perform(newTestHandler(engine).ContainerStats, testutils.Request{
 		Method: http.MethodGet,
-		Path:   "/api/machines/test-machine/containers//stats",
+		Path:   "/api/hosts/test-host/containers//stats",
 		UserID: "test-user",
 		URLParams: map[string]string{
-			"id": "test-machine",
+			"id": "test-host",
 		},
 	})
 
@@ -232,20 +232,20 @@ func TestContainerHandler_ContainerStats_EmptySnapshotAnswers404(t *testing.T) {
 // --- Route wiring: the containers subtree serves stats at read level ---
 //
 // These tests mount the containers routes on a ServeMux exactly the way
-// internal/app/app.go does (RequireMachineAccess wrapping the routes,
+// internal/app/app.go does (RequireHostAccess wrapping the routes,
 // the literal GET /stats winning over the /{containerId} wildcard by
 // ServeMux precedence, the per-container GET /stats beside /logs and
 // /inspect) so the read-level gate and the literal-route win the ACs
 // promise are exercised through the real middleware.
 
-func statsAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, handler *ContainerHandler) http.Handler {
-	machineAccess := appmiddleware.RequireMachineAccess(machineRepo, accessRepo)
+func statsAccessRouter(hostRepo *testutils.MockHostRepository, accessRepo *testutils.MockHostAccessRepository, handler *ContainerHandler) http.Handler {
+	hostAccess := appmiddleware.RequireHostAccess(hostRepo, accessRepo)
 	r := http.NewServeMux()
 	// The literal /stats route must beat the /{containerId} wildcard or
 	// an all-stats call gets swallowed as a container named "stats".
-	r.Handle("GET /api/machines/{id}/containers/stats", machineAccess(http.HandlerFunc(handler.Stats)))
-	r.Handle("GET /api/machines/{id}/containers/{containerId}", machineAccess(http.HandlerFunc(handler.Get)))
-	r.Handle("GET /api/machines/{id}/containers/{containerId}/stats", machineAccess(http.HandlerFunc(handler.ContainerStats)))
+	r.Handle("GET /api/hosts/{id}/containers/stats", hostAccess(http.HandlerFunc(handler.Stats)))
+	r.Handle("GET /api/hosts/{id}/containers/{containerId}", hostAccess(http.HandlerFunc(handler.Get)))
+	r.Handle("GET /api/hosts/{id}/containers/{containerId}/stats", hostAccess(http.HandlerFunc(handler.ContainerStats)))
 	return r
 }
 
@@ -261,21 +261,21 @@ func statsRequestAsUser(router http.Handler, method, target, userID string) *htt
 // read-level gate through the real middleware: a read-level grantee
 // reaches both stats routes, like list/get/logs — no write gate.
 func TestContainerHandler_Stats_ReadLevelGranteeReachesBothRoutes(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	accessRepo := testutils.NewMockMachineAccessRepository()
-	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
+	hostRepo := testutils.NewMockHostRepository()
+	hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+	accessRepo := testutils.NewMockHostAccessRepository()
+	accessRepo.AddAccess("host-1", "reader-1", models.PermissionRead, time.Now())
 	engine := &fakeContainerEngine{
 		statsFn: func([]string, bool) ([]define.ContainerStats, error) {
 			return []define.ContainerStats{runningContainerStats()}, nil
 		},
 	}
-	router := statsAccessRouter(machineRepo, accessRepo, newTestHandler(engine))
+	router := statsAccessRouter(hostRepo, accessRepo, newTestHandler(engine))
 
-	w := statsRequestAsUser(router, http.MethodGet, "/api/machines/machine-1/containers/stats", "reader-1")
+	w := statsRequestAsUser(router, http.MethodGet, "/api/hosts/host-1/containers/stats", "reader-1")
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "a read-level grantee must reach the all-stats route")
 
-	w = statsRequestAsUser(router, http.MethodGet, "/api/machines/machine-1/containers/container-123/stats", "reader-1")
+	w = statsRequestAsUser(router, http.MethodGet, "/api/hosts/host-1/containers/container-123/stats", "reader-1")
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "a read-level grantee must reach the per-container stats route")
 }
 
@@ -285,10 +285,10 @@ func TestContainerHandler_Stats_ReadLevelGranteeReachesBothRoutes(t *testing.T) 
 // handler (a swallowed route would fall into the {containerId} subtree
 // and answer 404, not a stats envelope).
 func TestContainerHandler_Stats_LiteralRouteWins(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	accessRepo := testutils.NewMockMachineAccessRepository()
-	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
+	hostRepo := testutils.NewMockHostRepository()
+	hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+	accessRepo := testutils.NewMockHostAccessRepository()
+	accessRepo.AddAccess("host-1", "reader-1", models.PermissionRead, time.Now())
 	engine := &fakeContainerEngine{
 		statsFn: func([]string, bool) ([]define.ContainerStats, error) {
 			return []define.ContainerStats{runningContainerStats()}, nil
@@ -296,9 +296,9 @@ func TestContainerHandler_Stats_LiteralRouteWins(t *testing.T) {
 	}
 	// inspectFn stays unarmed: a swallowed route would resolve the
 	// "stats" container through Get and panic on the unarmed inspect.
-	router := statsAccessRouter(machineRepo, accessRepo, newTestHandler(engine))
+	router := statsAccessRouter(hostRepo, accessRepo, newTestHandler(engine))
 
-	w := statsRequestAsUser(router, http.MethodGet, "/api/machines/machine-1/containers/stats", "reader-1")
+	w := statsRequestAsUser(router, http.MethodGet, "/api/hosts/host-1/containers/stats", "reader-1")
 
 	require.Equal(t, http.StatusOK, w.Result().StatusCode, "the literal /stats route must win over the {containerId} subtree")
 	var body ContainerStatsResult

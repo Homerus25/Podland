@@ -48,7 +48,7 @@ func TestQuadletService_List_ReturnsFilteredQuadlets(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.List(context.Background(), "user", "machine", ListFilters{Resource: "pod"})
+	got, err := service.List(context.Background(), "user", "host", ListFilters{Resource: "pod"})
 
 	require.NoError(t, err)
 	require.Len(t, got, 1)
@@ -64,7 +64,7 @@ func TestQuadletService_List_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.List(context.Background(), "user", "machine", ListFilters{})
+	got, err := service.List(context.Background(), "user", "host", ListFilters{})
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -82,7 +82,7 @@ func TestQuadletService_Get_ReturnsContentWithMetadata(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.Get(context.Background(), "user", "machine", "web.container")
+	got, err := service.Get(context.Background(), "user", "host", "web.container")
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -103,7 +103,7 @@ func TestQuadletService_Get_MissingQuadletIs404(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.Get(context.Background(), "user", "machine", "web.container")
+	got, err := service.Get(context.Background(), "user", "host", "web.container")
 
 	require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	assert.Nil(t, got)
@@ -122,10 +122,10 @@ func TestQuadletService_Create_InstallsUnderResourceExtension(t *testing.T) {
 	}
 	// A successful install is followed by the daemon-reload (scoped to the
 	// registered SSH user's manager), so the service needs a (succeeding)
-	// SSH exec and machine lookup wired.
+	// SSH exec and host lookup wired.
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core"))
 
-	got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+	got, err := service.Create(context.Background(), "user", "host", QuadletCreateRequest{
 		Name:     "web",
 		Resource: "container",
 		Content:  "[Container]\nImage=nginx\n",
@@ -153,7 +153,7 @@ func TestQuadletService_Create_MapsAlreadyExists(t *testing.T) {
 		}
 		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-		got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+		got, err := service.Create(context.Background(), "user", "host", QuadletCreateRequest{
 			Name: "web", Resource: "container", Content: "c",
 		})
 
@@ -173,7 +173,7 @@ func TestQuadletService_Create_MapsAlreadyExists(t *testing.T) {
 		}
 		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-		got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+		got, err := service.Create(context.Background(), "user", "host", QuadletCreateRequest{
 			Name: "web", Resource: "container", Content: "c",
 		})
 
@@ -184,7 +184,7 @@ func TestQuadletService_Create_MapsAlreadyExists(t *testing.T) {
 
 // TestQuadletService_Create_ReloadsUserSystemdOverSSH pins the daemon-reload
 // contract: every successful install is followed by exactly one
-// `systemctl --user daemon-reload` over the machine's SSH exec, against the
+// `systemctl --user daemon-reload` over the host's SSH exec, against the
 // same user manager the lifecycle actions address. Without it, a quadlet
 // created against a podman socket whose service reloads a different systemd
 // manager (e.g. the system manager for a rootful socket) lists fine but
@@ -198,7 +198,7 @@ func TestQuadletService_Create_ReloadsUserSystemdOverSSH(t *testing.T) {
 	sshExec := testutils.NewMockSSHExec()
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
 
-	got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+	got, err := service.Create(context.Background(), "user", "host", QuadletCreateRequest{
 		Name: "web", Resource: "container", Content: "c",
 	})
 
@@ -208,12 +208,12 @@ func TestQuadletService_Create_ReloadsUserSystemdOverSSH(t *testing.T) {
 	call := sshExec.Calls()[0]
 	assert.Equal(t, "systemctl", call.Command)
 	assert.Equal(t, []string{"--user", "daemon-reload"}, call.Opts.Args)
-	assert.Equal(t, "machine", call.MachineID)
+	assert.Equal(t, "host", call.HostID)
 	assert.Equal(t, "user", call.UserID)
 }
 
 // TestQuadletService_Create_ReloadsSystemManagerForRoot pins the root half
-// of the reload scoping: a machine registered with a root SSH login gets a
+// of the reload scoping: a host registered with a root SSH login gets a
 // plain `systemctl daemon-reload` (system manager) — `--user` would target
 // a user manager that does not own root's units.
 func TestQuadletService_Create_ReloadsSystemManagerForRoot(t *testing.T) {
@@ -225,7 +225,7 @@ func TestQuadletService_Create_ReloadsSystemManagerForRoot(t *testing.T) {
 	sshExec := testutils.NewMockSSHExec()
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("root"))
 
-	got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+	got, err := service.Create(context.Background(), "user", "host", QuadletCreateRequest{
 		Name: "web", Resource: "container", Content: "c",
 	})
 
@@ -256,7 +256,7 @@ func TestQuadletService_Create_ReloadFailureFailsCreate(t *testing.T) {
 			lookupForUser("core"),
 		)
 
-		got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+		got, err := service.Create(context.Background(), "user", "host", QuadletCreateRequest{
 			Name: "web", Resource: "container", Content: "c",
 		})
 
@@ -274,7 +274,7 @@ func TestQuadletService_Create_ReloadFailureFailsCreate(t *testing.T) {
 			lookupForUser("core"),
 		)
 
-		got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+		got, err := service.Create(context.Background(), "user", "host", QuadletCreateRequest{
 			Name: "web", Resource: "container", Content: "c",
 		})
 
@@ -296,7 +296,7 @@ func TestQuadletService_Create_InstallFailureSkipsReload(t *testing.T) {
 	sshExec := testutils.NewMockSSHExec()
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
 
-	got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+	got, err := service.Create(context.Background(), "user", "host", QuadletCreateRequest{
 		Name: "web", Resource: "container", Content: "c",
 	})
 
@@ -316,7 +316,7 @@ func TestQuadletService_Create_NilSSHExec(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.Create(context.Background(), "user", "machine", QuadletCreateRequest{
+	got, err := service.Create(context.Background(), "user", "host", QuadletCreateRequest{
 		Name: "web", Resource: "container", Content: "c",
 	})
 
@@ -361,7 +361,7 @@ func TestQuadletService_Update_ReplacesViaRemoveThenInstall(t *testing.T) {
 	})
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
 
-	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+	got, err := service.Update(context.Background(), "user", "host", "web.container", QuadletUpdateRequest{
 		Content: "[Container]\nImage=nginx:1.25\n",
 	})
 
@@ -402,7 +402,7 @@ func TestQuadletService_Update_InstallFailureLeavesQuadletRemoved(t *testing.T) 
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+	got, err := service.Update(context.Background(), "user", "host", "web.container", QuadletUpdateRequest{
 		Content: "[Container]\nImage=nginx:1.25\n",
 	})
 
@@ -417,11 +417,11 @@ func TestQuadletService_Update_MissingQuadletIs404BeforeAnyMutation(t *testing.T
 			return nil, nil
 		},
 		// removeFn/installFn stay unarmed: a missing quadlet must not
-		// touch the machine.
+		// touch the host.
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+	got, err := service.Update(context.Background(), "user", "host", "web.container", QuadletUpdateRequest{
 		Content: "c",
 	})
 
@@ -462,7 +462,7 @@ func TestQuadletService_Update_ReportCarriedNotFoundStillInstalls(t *testing.T) 
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core"))
 
-	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+	got, err := service.Update(context.Background(), "user", "host", "web.container", QuadletUpdateRequest{
 		Content: "[Container]\nImage=nginx:1.25\n",
 	})
 
@@ -501,7 +501,7 @@ func TestQuadletService_Update_ReportCarriedRemoveFailureStillInstalls(t *testin
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core"))
 
-	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+	got, err := service.Update(context.Background(), "user", "host", "web.container", QuadletUpdateRequest{
 		Content: "[Container]\nImage=nginx:1.25\n",
 	})
 
@@ -534,7 +534,7 @@ func TestQuadletService_Update_CallLevelNotFoundIs404(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.Update(context.Background(), "user", "machine", "web.container", QuadletUpdateRequest{
+	got, err := service.Update(context.Background(), "user", "host", "web.container", QuadletUpdateRequest{
 		Content: "c",
 	})
 
@@ -552,7 +552,7 @@ func TestQuadletService_Delete_PreconditionsRunBeforeRemove(t *testing.T) {
 		}
 		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+		err := service.Delete(context.Background(), "user", "host", "web.container", false, true)
 
 		require.ErrorIs(t, err, appErrors.ErrQuadletNotFound)
 	})
@@ -567,7 +567,7 @@ func TestQuadletService_Delete_PreconditionsRunBeforeRemove(t *testing.T) {
 		// The SSH exec stays unarmed too: a refused delete must not stop.
 		service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), nil)
 
-		err := service.Delete(context.Background(), "user", "machine", "web.container", false, false)
+		err := service.Delete(context.Background(), "user", "host", "web.container", false, false)
 
 		require.ErrorIs(t, err, appErrors.ErrQuadletResourceRunning)
 	})
@@ -594,7 +594,7 @@ func TestQuadletService_Delete_PreconditionsRunBeforeRemove(t *testing.T) {
 		})
 		service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
 
-		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+		err := service.Delete(context.Background(), "user", "host", "web.container", false, true)
 
 		require.NoError(t, err)
 		assert.Equal(t, []string{"list", "systemctl", "remove"}, order,
@@ -615,7 +615,7 @@ func TestQuadletService_Delete_PreconditionsRunBeforeRemove(t *testing.T) {
 		})
 		service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
 
-		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+		err := service.Delete(context.Background(), "user", "host", "web.container", false, true)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to stop quadlet before remove")
@@ -638,7 +638,7 @@ func TestQuadletService_Delete_PreconditionsRunBeforeRemove(t *testing.T) {
 		// The SSH exec stays unarmed: force deletes must not spend a stop.
 		service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), nil)
 
-		err := service.Delete(context.Background(), "user", "machine", "web.container", true, true)
+		err := service.Delete(context.Background(), "user", "host", "web.container", true, true)
 
 		require.NoError(t, err)
 		assert.Equal(t, []string{"list", "remove"}, order)
@@ -658,7 +658,7 @@ func TestQuadletService_Delete_MapsRemoveRefusals(t *testing.T) {
 		}
 		service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-		err := service.Delete(context.Background(), "user", "machine", "web.container", false, true)
+		err := service.Delete(context.Background(), "user", "host", "web.container", false, true)
 
 		require.ErrorIs(t, err, appErrors.ErrQuadletResourceRunning)
 	})
@@ -671,7 +671,7 @@ func TestQuadletService_Delete_MapsRemoveRefusals(t *testing.T) {
 func TestQuadletService_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewQuadletService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}, nil, nil)
 
-	got, err := service.List(context.Background(), "user", "machine", ListFilters{})
+	got, err := service.List(context.Background(), "user", "host", ListFilters{})
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, got)

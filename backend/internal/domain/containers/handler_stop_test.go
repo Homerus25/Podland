@@ -16,14 +16,14 @@ import (
 )
 
 // stopRequest serves POST
-// /api/machines/{id}/containers/{containerId}/stop through the handler
+// /api/hosts/{id}/containers/{containerId}/stop through the handler
 // with an authenticated test identity.
 func stopRequest(handler http.HandlerFunc, containerID string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/containers/" + containerID + "/stop",
+		Path:      "/api/hosts/test-host/containers/" + containerID + "/stop",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+		URLParams: map[string]string{"id": "test-host", "containerId": containerID},
 	})
 }
 

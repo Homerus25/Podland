@@ -17,7 +17,7 @@ func corsProbe(t *testing.T, allowedOrigins []string, method, origin string) *ht
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	req := httptest.NewRequest(method, "/api/machines", nil)
+	req := httptest.NewRequest(method, "/api/hosts", nil)
 	if origin != "" {
 		req.Header.Set("Origin", origin)
 	}

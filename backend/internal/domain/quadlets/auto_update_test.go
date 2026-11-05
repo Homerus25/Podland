@@ -43,12 +43,12 @@ func TestQuadletService_AutoUpdate_CommandAssembly(t *testing.T) {
 			mockSSH := testutils.NewMockSSHExecWithStreamResult(sshexec.ExecResult{Stdout: "[]", ExitCode: 0})
 			svc := newAutoUpdateService(mockSSH)
 
-			_, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", tt.dryRun, tt.filter, func(AutoUpdateEvent) {})
+			_, err := svc.AutoUpdate(context.Background(), "user-1", "host-1", tt.dryRun, tt.filter, func(AutoUpdateEvent) {})
 
 			require.NoError(t, err)
 			require.Len(t, mockSSH.StreamCalls(), 1)
 			call := mockSSH.StreamCalls()[0]
-			assert.Equal(t, "machine-1", call.MachineID)
+			assert.Equal(t, "host-1", call.HostID)
 			assert.Equal(t, "user-1", call.UserID)
 			assert.Equal(t, "podman", call.Command)
 			assert.Equal(t, tt.wantArgs, call.Opts.Args)
@@ -57,7 +57,7 @@ func TestQuadletService_AutoUpdate_CommandAssembly(t *testing.T) {
 }
 
 func TestQuadletService_AutoUpdate_LinesForwardedInArrivalOrder(t *testing.T) {
-	mockSSH := testutils.NewMockSSHExecWithStreamFunc(func(ctx context.Context, machineID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
+	mockSSH := testutils.NewMockSSHExecWithStreamFunc(func(ctx context.Context, hostID, userID, command string, opts sshexec.ExecOptions, onLine func(sshexec.OutputLine)) (sshexec.ExecResult, error) {
 		onLine(sshexec.OutputLine{Stream: sshexec.StdoutStream, Text: "line-1"})
 		onLine(sshexec.OutputLine{Stream: sshexec.StderrStream, Text: "err-1"})
 		onLine(sshexec.OutputLine{Stream: sshexec.StdoutStream, Text: "line-2"})
@@ -66,14 +66,14 @@ func TestQuadletService_AutoUpdate_LinesForwardedInArrivalOrder(t *testing.T) {
 	svc := newAutoUpdateService(mockSSH)
 
 	var got []AutoUpdateEvent
-	_, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(event AutoUpdateEvent) {
+	_, err := svc.AutoUpdate(context.Background(), "user-1", "host-1", false, "", func(event AutoUpdateEvent) {
 		got = append(got, event)
 	})
 
 	require.NoError(t, err)
 	require.Len(t, got, 4, "the empty plan event plus three log events")
 	assert.Equal(t, AutoUpdateEventTypePlan, got[0].Type)
-	assert.Empty(t, got[0].Plan, "an empty machine answers an empty plan")
+	assert.Empty(t, got[0].Plan, "an empty host answers an empty plan")
 	wantLogs := []struct{ stream, line string }{
 		{"stdout", "line-1"},
 		{"stderr", "err-1"},
@@ -92,7 +92,7 @@ func TestQuadletService_AutoUpdate_ParsesReportExitZero(t *testing.T) {
 	mockSSH := testutils.NewMockSSHExecWithStreamResult(sshexec.ExecResult{Stdout: stdout, ExitCode: 0})
 	svc := newAutoUpdateService(mockSSH)
 
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(AutoUpdateEvent) {})
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "host-1", false, "", func(AutoUpdateEvent) {})
 
 	require.NoError(t, err)
 	assert.Equal(t, AutoUpdateCompleted, report.Overall)
@@ -112,7 +112,7 @@ func TestQuadletService_AutoUpdate_NonZeroExitWithFailuresIsData(t *testing.T) {
 	mockSSH := testutils.NewMockSSHExecWithStreamResult(sshexec.ExecResult{Stdout: stdout, ExitCode: 3})
 	svc := newAutoUpdateService(mockSSH)
 
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(AutoUpdateEvent) {})
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "host-1", false, "", func(AutoUpdateEvent) {})
 
 	require.NoError(t, err)
 	assert.Equal(t, AutoUpdateWithFailures, report.Overall)
@@ -128,7 +128,7 @@ func TestQuadletService_AutoUpdate_DryRunReportsPendingAndDryRunOverall(t *testi
 	mockSSH := testutils.NewMockSSHExecWithStreamResult(sshexec.ExecResult{Stdout: stdout, ExitCode: 0})
 	svc := newAutoUpdateService(mockSSH)
 
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", true, "", func(AutoUpdateEvent) {})
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "host-1", true, "", func(AutoUpdateEvent) {})
 
 	require.NoError(t, err)
 	assert.Equal(t, AutoUpdateDryRun, report.Overall)
@@ -140,7 +140,7 @@ func TestQuadletService_AutoUpdate_UnparsableOutputCompletesWithoutError(t *test
 	mockSSH := testutils.NewMockSSHExecWithStreamResult(sshexec.ExecResult{Stdout: "not json at all", ExitCode: 0})
 	svc := newAutoUpdateService(mockSSH)
 
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(AutoUpdateEvent) {})
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "host-1", false, "", func(AutoUpdateEvent) {})
 
 	require.NoError(t, err)
 	assert.Equal(t, AutoUpdateUnparsable, report.Overall)
@@ -151,7 +151,7 @@ func TestQuadletService_AutoUpdate_SSHErrorPropagates(t *testing.T) {
 	mockSSH := testutils.NewMockSSHExecWithStreamError(errors.New("dial failed"))
 	svc := newAutoUpdateService(mockSSH)
 
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(AutoUpdateEvent) {})
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "host-1", false, "", func(AutoUpdateEvent) {})
 
 	require.Error(t, err)
 	assert.Equal(t, AutoUpdateReport{}, report)
@@ -360,7 +360,7 @@ func TestMatchPullingUnit(t *testing.T) {
 // --- The plan and pulling events on the service seam (issue 448) ---
 
 // autoUpdatePlanEngine builds the function-field fake for the plan build:
-// a machine with two .container quadlets (one registry-policy unit with a
+// a host with two .container quadlets (one registry-policy unit with a
 // short image name, one unreadable file), a policy-less .container, a
 // .volume file, and one .container whose systemd name must be derived
 // because podman reports no UnitName.
@@ -408,7 +408,7 @@ func TestQuadletService_AutoUpdate_EmitsPlanPullingAndLogEvents(t *testing.T) {
 	svc := NewQuadletService(fakeEngineProvider{engine: autoUpdatePlanEngine()}, mockSSH, lookupForUser("core"))
 
 	var got []AutoUpdateEvent
-	_, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(event AutoUpdateEvent) {
+	_, err := svc.AutoUpdate(context.Background(), "user-1", "host-1", false, "", func(event AutoUpdateEvent) {
 		got = append(got, event)
 	})
 
@@ -449,7 +449,7 @@ func TestQuadletService_AutoUpdate_FilteredRunNarrowsPlan(t *testing.T) {
 	svc := NewQuadletService(fakeEngineProvider{engine: autoUpdatePlanEngine()}, mockSSH, lookupForUser("core"))
 
 	var got []AutoUpdateEvent
-	_, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "cache.service", func(event AutoUpdateEvent) {
+	_, err := svc.AutoUpdate(context.Background(), "user-1", "host-1", false, "cache.service", func(event AutoUpdateEvent) {
 		got = append(got, event)
 	})
 
@@ -475,7 +475,7 @@ func TestQuadletService_AutoUpdate_PlanBuildFailureDegradesToEmptyPlan(t *testin
 	svc := NewQuadletService(fakeEngineProvider{engine: engine}, mockSSH, lookupForUser("core"))
 
 	var got []AutoUpdateEvent
-	report, err := svc.AutoUpdate(context.Background(), "user-1", "machine-1", false, "", func(event AutoUpdateEvent) {
+	report, err := svc.AutoUpdate(context.Background(), "user-1", "host-1", false, "", func(event AutoUpdateEvent) {
 		got = append(got, event)
 	})
 

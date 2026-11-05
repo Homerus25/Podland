@@ -24,10 +24,10 @@ func TestNetworkService_Get_ReturnsMappedDetail(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "frontend")
+	got, err := service.Get(context.Background(), "user", "host", "frontend")
 
 	require.NoError(t, err)
-	assert.Equal(t, "frontend", inspectedName, "the requested network must reach the machine")
+	assert.Equal(t, "frontend", inspectedName, "the requested network must reach the host")
 	assert.Equal(t, NetworkDetailResponse{
 		Name:      "frontend",
 		ID:        "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
@@ -51,7 +51,7 @@ func TestNetworkService_Get_MissingNetworkIsAnError(t *testing.T) {
 		}
 		service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Get(context.Background(), "user", "machine", "ghost-net")
+		got, err := service.Get(context.Background(), "user", "host", "ghost-net")
 
 		require.Error(t, err)
 		assert.Equal(t, NetworkDetailResponse{}, got)
@@ -66,7 +66,7 @@ func TestNetworkService_Get_MissingNetworkIsAnError(t *testing.T) {
 		}
 		service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Get(context.Background(), "user", "machine", "ghost-net")
+		got, err := service.Get(context.Background(), "user", "host", "ghost-net")
 
 		require.Error(t, err)
 		assert.Equal(t, NetworkDetailResponse{}, got)
@@ -82,7 +82,7 @@ func TestNetworkService_Get_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewNetworkService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "frontend")
+	got, err := service.Get(context.Background(), "user", "host", "frontend")
 
 	require.Error(t, err)
 	assert.Equal(t, NetworkDetailResponse{}, got)
@@ -97,7 +97,7 @@ func TestNetworkService_Get_WrapsEngineFailure(t *testing.T) {
 func TestNetworkService_Get_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewNetworkService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	_, err := service.Get(context.Background(), "user", "machine", "frontend")
+	_, err := service.Get(context.Background(), "user", "host", "frontend")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	var appErr *appErrors.AppError

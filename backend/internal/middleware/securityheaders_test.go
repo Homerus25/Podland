@@ -45,7 +45,7 @@ func TestSecurityHeaders_SetOnErrorResponse(t *testing.T) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/machines", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/hosts", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 

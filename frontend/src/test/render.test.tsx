@@ -46,10 +46,10 @@ describe("renderWithQuery", () => {
 
 	it("honors initialEntries in the router object form", () => {
 		renderWithQuery(<LocationProbe />, {
-			router: { initialEntries: ["/machines/m-1"] },
+			router: { initialEntries: ["/hosts/m-1"] },
 		});
 
-		expect(screen.getByTestId("location")).toHaveTextContent("/machines/m-1");
+		expect(screen.getByTestId("location")).toHaveTextContent("/hosts/m-1");
 	});
 
 	it("wraps the app theme under the chakra flag", () => {

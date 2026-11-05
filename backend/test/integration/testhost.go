@@ -20,14 +20,14 @@ import (
 )
 
 // The container test host: a privileged, systemd-booted Fedora container
-// that stands in for a podman machine (image built by `make
+// that stands in for a podman host (image built by `make
 // testhost-build` from test/integration/testhost/Dockerfile). Everything
 // the harness knows about that host lives in this file: the run
 // contract, the per-run identity, and the connection registration the
 // CLI test helpers dial through.
 //
 // The backend product code is deliberately unaware of the container —
-// the harness registers it through the same public API as any machine.
+// the harness registers it through the same public API as any host.
 const (
 	// testhostImage must match TESTHOST_IMAGE in the backend Makefile.
 	testhostImage = "podland-testhost"
@@ -52,16 +52,16 @@ const (
 
 	// testhostConnectionDefault is the `podman system connection` name
 	// registered per run (overridable via PODLAND_TEST_CONNECTION_NAME).
-	// Suite.MachineName carries it to every `podman --connection` helper.
+	// Suite.HostName carries it to every `podman --connection` helper.
 	testhostConnectionDefault = "podland-it"
 )
 
 // testhostSpec is one testhost instance's run contract: the fixed
 // container name, published loopback port, and volume pair that make
 // colliding runs fail loudly instead of racing over shared storage.
-// Two instances exist: the primary (machine A, booted by TestMain) and
-// the second host (machine B, booted lazily by
-// Suite.RegisterSecondMachine — see secondhost_test.go).
+// Two instances exist: the primary (host A, booted by TestMain) and
+// the second host (host B, booted lazily by
+// Suite.RegisterSecondHost — see secondhost_test.go).
 type testhostSpec struct {
 	container   string
 	port        int
@@ -69,7 +69,7 @@ type testhostSpec struct {
 	storeVolume string // rootless podman image cache
 }
 
-// primaryTesthost is machine A: the host every existing slice runs
+// primaryTesthost is host A: the host every existing slice runs
 // against, booted during TestMain setup.
 var primaryTesthost = testhostSpec{
 	container:   testhostContainer,
@@ -78,11 +78,11 @@ var primaryTesthost = testhostSpec{
 	storeVolume: testhostStoreVolume,
 }
 
-// secondTesthost is machine B: same image and boot contract as the
+// secondTesthost is host B: same image and boot contract as the
 // primary, but with its own container name, published port, store
 // volume and host-key volume — its podman state is genuinely
-// independent of machine A's. Booted only when a test first asks for
-// machine B, so single-machine runs never pay for it.
+// independent of host A's. Booted only when a test first asks for
+// host B, so single-host runs never pay for it.
 var secondTesthost = testhostSpec{
 	container:   testhostContainer + "-2",
 	port:        testhostPort + 1,

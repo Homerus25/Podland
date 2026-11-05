@@ -22,15 +22,15 @@ import (
 // SSH-exec + systemd path end-to-end — the concern the 080 master
 // explicitly deferred to this slice:
 //
-//	POST /api/machines/{id}/quadlets/{name}/start   → 200, unit reaches running
-//	POST /api/machines/{id}/quadlets/{name}/stop    → 200, unit leaves running
-//	POST /api/machines/{id}/quadlets/{name}/restart → 200, unit back to running
+//	POST /api/hosts/{id}/quadlets/{name}/start   → 200, unit reaches running
+//	POST /api/hosts/{id}/quadlets/{name}/stop    → 200, unit leaves running
+//	POST /api/hosts/{id}/quadlets/{name}/restart → 200, unit back to running
 //
 // These endpoints run `systemctl <action> <unit>` over SSH via the
 // sshexec service wired into app.New — scoped to the registered SSH
 // user's manager (`--user`) unless that login is root, in which case the
 // system manager owns the units — so this is the only slice that
-// exercises the SSH-exec infrastructure against the real machine.
+// exercises the SSH-exec infrastructure against the real host.
 //
 // State verification policy (same reasoning as waitForContainerState in
 // the containers slice): every transition is verified by polling
@@ -61,10 +61,10 @@ func Test_Integration_Quadlets_Lifecycle(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerQuadletsSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// The lifecycle actions shell out to `systemctl` over SSH as the
-	// machine's registered SSH user, so the machine must (a) accept SSH
+	// host's registered SSH user, so the host must (a) accept SSH
 	// with the registered identity and (b) have a functioning systemd
 	// manager for that user's scope — the user instance for a non-root
 	// login, the system instance for root. If the target can't, skip
@@ -74,7 +74,7 @@ func Test_Integration_Quadlets_Lifecycle(t *testing.T) {
 	// Quadlet start does not auto-pull; busybox must pre-exist.
 	ensureBusyboxImage(t)
 
-	// Run-scoped name: the file on the remote machine becomes
+	// Run-scoped name: the file on the remote host becomes
 	// `<name>.container`, the systemd unit `<name>.service`, and the
 	// spawned container `systemd-<name>` (podman quadlet naming).
 	quadletName := "it-" + suite.RunID + "-life"
@@ -87,12 +87,12 @@ func Test_Integration_Quadlets_Lifecycle(t *testing.T) {
 	// cleanup goes through the API (force delete stops a still-running
 	// unit server-side) plus a CLI `rm -f` of the spawned container.
 	t.Cleanup(func() {
-		forceDeleteQuadlet(t, machineID, quadletName+".container")
+		forceDeleteQuadlet(t, hostID, quadletName+".container")
 		removeSpawnedContainer(t, quadletName)
 	})
 
 	// --- Setup: create the runnable quadlet --------------------------
-	createQuadlet(t, machineID, quadletCreateBody{
+	createQuadlet(t, hostID, quadletCreateBody{
 		Name:     quadletName,
 		Resource: "container",
 		Content:  runnableContainerQuadletContent,
@@ -103,10 +103,10 @@ func Test_Integration_Quadlets_Lifecycle(t *testing.T) {
 	// long enough for a timeout=1 stop to give up waiting (504).
 	slowQuadletName := "it-" + suite.RunID + "-slow"
 	t.Cleanup(func() {
-		forceDeleteQuadlet(t, machineID, slowQuadletName+".container")
+		forceDeleteQuadlet(t, hostID, slowQuadletName+".container")
 		removeSpawnedContainer(t, slowQuadletName)
 	})
-	createQuadlet(t, machineID, quadletCreateBody{
+	createQuadlet(t, hostID, quadletCreateBody{
 		Name:     slowQuadletName,
 		Resource: "container",
 		Content: `[Container]
@@ -120,7 +120,7 @@ StopTimeout=30
 	t.Run("LifecycleOnMissingQuadletReturns404", func(t *testing.T) {
 		missing := "it-" + suite.RunID + "-missing.container"
 		for _, action := range []string{"start", "stop", "restart"} {
-			quadletLifecycleExpectError(t, machineID, missing, action, nil,
+			quadletLifecycleExpectError(t, hostID, missing, action, nil,
 				http.StatusNotFound, "QUADLET_NOT_FOUND",
 				"lifecycle on a missing quadlet")
 		}
@@ -128,8 +128,8 @@ StopTimeout=30
 
 	// --- AC: start transitions the quadlet to running ----------------
 	t.Run("StartTransitionsToRunning", func(t *testing.T) {
-		startQuadlet(t, machineID, quadletName+".container")
-		waitForQuadletRunning(t, machineID, quadletName+".container",
+		startQuadlet(t, hostID, quadletName+".container")
+		waitForQuadletRunning(t, hostID, quadletName+".container",
 			"start must transition the quadlet to running")
 	})
 	if t.Failed() {
@@ -138,7 +138,7 @@ StopTimeout=30
 
 	// --- AC: second start returns QUADLET_ALREADY_RUNNING (400) ------
 	t.Run("SecondStartReturnsAlreadyRunning", func(t *testing.T) {
-		quadletLifecycleExpectError(t, machineID, quadletName+".container", "start", nil,
+		quadletLifecycleExpectError(t, hostID, quadletName+".container", "start", nil,
 			http.StatusBadRequest, "QUADLET_ALREADY_RUNNING",
 			"second start on a running quadlet")
 	})
@@ -159,11 +159,11 @@ StopTimeout=30
 	// part; the QUADLET_STOP_TIMED_OUT sentinel is pinned at the service
 	// seam (internal/domain/quadlets).
 	t.Run("StopTimeoutExpiryReturns504", func(t *testing.T) {
-		startQuadlet(t, machineID, slowQuadletName+".container")
-		waitForQuadletRunning(t, machineID, slowQuadletName+".container",
+		startQuadlet(t, hostID, slowQuadletName+".container")
+		waitForQuadletRunning(t, hostID, slowQuadletName+".container",
 			"the slow-stopping fixture must reach running before the timed stop")
 
-		resp, raw := doQuadletLifecycle(t, machineID, slowQuadletName+".container", "stop",
+		resp, raw := doQuadletLifecycle(t, hostID, slowQuadletName+".container", "stop",
 			url.Values{"timeout": {"1"}})
 		require.Equalf(t, http.StatusGatewayTimeout, resp.StatusCode,
 			"slow-stopping fixture stopped with timeout=1: expected 504, got %d. body: %s",
@@ -179,9 +179,9 @@ StopTimeout=30
 
 	// --- AC: a normal unit stopped with a timeout stops and answers 200
 	t.Run("StopWithTimeoutReturns200", func(t *testing.T) {
-		quadletLifecycleAction(t, machineID, quadletName+".container", "stop",
+		quadletLifecycleAction(t, hostID, quadletName+".container", "stop",
 			url.Values{"timeout": {"30"}})
-		waitForQuadletNotRunning(t, machineID, quadletName+".container",
+		waitForQuadletNotRunning(t, hostID, quadletName+".container",
 			"a normal-unit stop with a timeout param must still transition out of running")
 	})
 	if t.Failed() {
@@ -192,14 +192,14 @@ StopTimeout=30
 	t.Run("RestartReturnsToRunning", func(t *testing.T) {
 		// The timeout stop above left the unit stopped; restart preconditions
 		// on running, so bring it back first.
-		startQuadlet(t, machineID, quadletName+".container")
-		waitForQuadletRunning(t, machineID, quadletName+".container",
+		startQuadlet(t, hostID, quadletName+".container")
+		waitForQuadletRunning(t, hostID, quadletName+".container",
 			"re-start after the timeout stop must reach running")
 
-		restarted := quadletLifecycleAction(t, machineID, quadletName+".container", "restart", nil)
+		restarted := quadletLifecycleAction(t, hostID, quadletName+".container", "restart", nil)
 		require.NotEmpty(t, restarted.RestartedAt,
 			"restart response must include restartedAt")
-		waitForQuadletRunning(t, machineID, quadletName+".container",
+		waitForQuadletRunning(t, hostID, quadletName+".container",
 			"restart must return the quadlet to running")
 	})
 	if t.Failed() {
@@ -208,8 +208,8 @@ StopTimeout=30
 
 	// --- AC: stop transitions the quadlet out of running ----------------
 	t.Run("StopTransitionsOutOfRunning", func(t *testing.T) {
-		quadletLifecycleAction(t, machineID, quadletName+".container", "stop", nil)
-		waitForQuadletNotRunning(t, machineID, quadletName+".container",
+		quadletLifecycleAction(t, hostID, quadletName+".container", "stop", nil)
+		waitForQuadletNotRunning(t, hostID, quadletName+".container",
 			"stop must transition the quadlet out of running")
 	})
 	if t.Failed() {
@@ -218,7 +218,7 @@ StopTimeout=30
 
 	// --- AC: second stop returns QUADLET_NOT_RUNNING (400) ------------
 	t.Run("SecondStopReturnsNotRunning", func(t *testing.T) {
-		quadletLifecycleExpectError(t, machineID, quadletName+".container", "stop", nil,
+		quadletLifecycleExpectError(t, hostID, quadletName+".container", "stop", nil,
 			http.StatusBadRequest, "QUADLET_NOT_RUNNING",
 			"second stop on a non-running quadlet")
 	})
@@ -230,11 +230,11 @@ StopTimeout=30
 	// Re-start first so the refusal is doing real work (a stopped quadlet
 	// deletes without force regardless of stop).
 	t.Run("DeleteOnRunningWithStopFalseReturns400", func(t *testing.T) {
-		startQuadlet(t, machineID, quadletName+".container")
-		waitForQuadletRunning(t, machineID, quadletName+".container",
+		startQuadlet(t, hostID, quadletName+".container")
+		waitForQuadletRunning(t, hostID, quadletName+".container",
 			"re-start before the stop=false delete must reach running")
 
-		status, raw := deleteQuadletWithQuery(t, machineID, quadletName+".container",
+		status, raw := deleteQuadletWithQuery(t, hostID, quadletName+".container",
 			url.Values{"stop": {"false"}})
 		require.Equalf(t, http.StatusBadRequest, status,
 			"delete running quadlet with stop=false: expected 400, got %d. body: %s",
@@ -253,12 +253,12 @@ StopTimeout=30
 	// --- AC: DELETE on a running quadlet with the default stop stops
 	// through the seam then removes (204) ------------------------------
 	t.Run("DeleteOnRunningWithDefaultStopReturns204", func(t *testing.T) {
-		status, raw := deleteQuadletWithQuery(t, machineID, quadletName+".container", nil)
+		status, raw := deleteQuadletWithQuery(t, hostID, quadletName+".container", nil)
 		require.Equalf(t, http.StatusNoContent, status,
 			"delete running quadlet with default stop: expected 204, got %d. body: %s",
 			status, string(raw))
 
-		requireQuadletNotListed(t, machineID, quadletName+".container",
+		requireQuadletNotListed(t, hostID, quadletName+".container",
 			"stop-then-remove must take the quadlet out of the quadlet list")
 	})
 	if t.Failed() {
@@ -271,22 +271,22 @@ StopTimeout=30
 	// re-create it and bring it back to running first — the force must
 	// remove over a genuinely running resource.
 	t.Run("DeleteOnRunningWithForceReturns204", func(t *testing.T) {
-		createQuadlet(t, machineID, quadletCreateBody{
+		createQuadlet(t, hostID, quadletCreateBody{
 			Name:     quadletName,
 			Resource: "container",
 			Content:  runnableContainerQuadletContent,
 		})
-		startQuadlet(t, machineID, quadletName+".container")
-		waitForQuadletRunning(t, machineID, quadletName+".container",
+		startQuadlet(t, hostID, quadletName+".container")
+		waitForQuadletRunning(t, hostID, quadletName+".container",
 			"re-start before force delete must reach running")
 
-		status, raw := deleteQuadletWithQuery(t, machineID, quadletName+".container",
+		status, raw := deleteQuadletWithQuery(t, hostID, quadletName+".container",
 			url.Values{"force": {"true"}})
 		require.Equalf(t, http.StatusNoContent, status,
 			"delete running quadlet with force: expected 204, got %d. body: %s",
 			status, string(raw))
 
-		requireQuadletNotListed(t, machineID, quadletName+".container",
+		requireQuadletNotListed(t, hostID, quadletName+".container",
 			"force-deleted quadlet must not appear in the quadlet list")
 	})
 }
@@ -295,24 +295,24 @@ StopTimeout=30
 // Prerequisite probe: user systemd over SSH
 // ---------------------------------------------------------------------------
 
-// requireUserSystemd skips the calling test unless the machine's user
+// requireUserSystemd skips the calling test unless the host's user
 // systemd answers over SSH — the transport every lifecycle action uses.
 // The probe dials with the exact coordinates the backend registered the
-// machine with (suite.goodMachineRegistration), so what it probes is
+// host with (suite.goodHostRegistration), so what it probes is
 // what the sshexec service will actually hit. Skips (never fails) when
 // the target can't support user systemd units, per the PRD.
 func requireUserSystemd(t *testing.T) {
 	t.Helper()
 	if !userSystemdAvailable() {
-		t.Skip("machine user systemd unusable (is-system-running did not answer running/degraded)")
+		t.Skip("host user systemd unusable (is-system-running did not answer running/degraded)")
 	}
 }
 
 // userSystemdAvailable is the boolean probe behind requireUserSystemd:
-// it dials the shared good machine's SSH target (see
+// it dials the shared good host's SSH target (see
 // userSystemdAvailableOn) and checks whether its user systemd answers.
 func userSystemdAvailable() bool {
-	return userSystemdAvailableOn(suite.goodMachineRegistration)
+	return userSystemdAvailableOn(suite.goodHostRegistration)
 }
 
 // userSystemdAvailableOn probes an arbitrary target the same way: it
@@ -321,11 +321,11 @@ func userSystemdAvailable() bool {
 // "degraded" — proof that SSH works and a systemd manager answers for
 // the registered user (readable system-manager queries serve any login;
 // the backend's own scope choice rides on the registered SSH user). The quadlet
-// API surface needs this on the machine (podman's quadlet list/install/
+// API surface needs this on the host (podman's quadlet list/install/
 // remove dial the user systemd over DBus), so callers gate or skip
 // quadlet coverage on the result — e.g. on the systemd-free container
 // test host, or on the second test host via
-// SecondMachine.Target. Returns false for an unusable or unreachable
+// SecondHost.Target. Returns false for an unusable or unreachable
 // target.
 func userSystemdAvailableOn(target reachableTarget) bool {
 	key, err := ssh.ParsePrivateKey([]byte(target.SSHKey))
@@ -378,16 +378,16 @@ type quadletLifecycleResponse struct {
 
 // startQuadlet POSTs /quadlets/{name}/start and asserts 200 with the
 // expected response shape.
-func startQuadlet(t *testing.T, machineID, quadletName string) quadletLifecycleResponse {
+func startQuadlet(t *testing.T, hostID, quadletName string) quadletLifecycleResponse {
 	t.Helper()
-	return quadletLifecycleAction(t, machineID, quadletName, "start", nil)
+	return quadletLifecycleAction(t, hostID, quadletName, "start", nil)
 }
 
 // quadletLifecycleAction POSTs /quadlets/{name}/{action} (with optional
 // query params) and asserts 200 with the expected response shape.
-func quadletLifecycleAction(t *testing.T, machineID, quadletName, action string, query url.Values) quadletLifecycleResponse {
+func quadletLifecycleAction(t *testing.T, hostID, quadletName, action string, query url.Values) quadletLifecycleResponse {
 	t.Helper()
-	resp, raw := doQuadletLifecycle(t, machineID, quadletName, action, query)
+	resp, raw := doQuadletLifecycle(t, hostID, quadletName, action, query)
 	require.Equalf(t, http.StatusOK, resp.StatusCode,
 		"%s quadlet: expected 200, got %d. body: %s", action, resp.StatusCode, string(raw))
 
@@ -403,9 +403,9 @@ func quadletLifecycleAction(t *testing.T, machineID, quadletName, action string,
 
 // quadletLifecycleExpectError POSTs /quadlets/{name}/{action} and asserts
 // the given HTTP status and error envelope code.
-func quadletLifecycleExpectError(t *testing.T, machineID, quadletName, action string, query url.Values, wantStatus int, wantCode, msg string) {
+func quadletLifecycleExpectError(t *testing.T, hostID, quadletName, action string, query url.Values, wantStatus int, wantCode, msg string) {
 	t.Helper()
-	resp, raw := doQuadletLifecycle(t, machineID, quadletName, action, query)
+	resp, raw := doQuadletLifecycle(t, hostID, quadletName, action, query)
 	require.Equalf(t, wantStatus, resp.StatusCode,
 		"%s: expected %d, got %d. body: %s", msg, wantStatus, resp.StatusCode, string(raw))
 
@@ -417,9 +417,9 @@ func quadletLifecycleExpectError(t *testing.T, machineID, quadletName, action st
 }
 
 // doQuadletLifecycle issues the POST and returns the raw response/body.
-func doQuadletLifecycle(t *testing.T, machineID, quadletName, action string, query url.Values) (*http.Response, []byte) {
+func doQuadletLifecycle(t *testing.T, hostID, quadletName, action string, query url.Values) (*http.Response, []byte) {
 	t.Helper()
-	u := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/" + quadletName + "/" + action
+	u := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/" + quadletName + "/" + action
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -445,9 +445,9 @@ func baseName(quadletName string) string {
 // deleteQuadletWithQuery DELETEs /quadlets/{name} with optional query
 // params and returns the raw status and body without asserting either —
 // the DELETE subtests and cleanup build their own expectations on top.
-func deleteQuadletWithQuery(t *testing.T, machineID, quadletName string, query url.Values) (int, []byte) {
+func deleteQuadletWithQuery(t *testing.T, hostID, quadletName string, query url.Values) (int, []byte) {
 	t.Helper()
-	u := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/" + quadletName + "/"
+	u := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/" + quadletName + "/"
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -464,9 +464,9 @@ func deleteQuadletWithQuery(t *testing.T, machineID, quadletName string, query u
 // 204 (removed, stops a running unit server-side) or 404 (already gone).
 // Used by per-test cleanup only; the happy-path DELETE assertions live in
 // the test body.
-func forceDeleteQuadlet(t *testing.T, machineID, quadletName string) {
+func forceDeleteQuadlet(t *testing.T, hostID, quadletName string) {
 	t.Helper()
-	status, raw := deleteQuadletWithQuery(t, machineID, quadletName,
+	status, raw := deleteQuadletWithQuery(t, hostID, quadletName,
 		url.Values{"force": {"true"}})
 	if status != http.StatusNoContent && status != http.StatusNotFound {
 		t.Logf("cleanup delete quadlet %s: unexpected %d. body: %s (sweep is the backstop)",
@@ -501,12 +501,12 @@ const quadletPollInterval = 500 * time.Millisecond
 // waitForQuadletRunning polls GET /quadlets/{name} until state=="running"
 // or the timeout elapses. GET's QuadletList-derived state is the source
 // of truth (see slice header).
-func waitForQuadletRunning(t *testing.T, machineID, quadletName, msg string) {
+func waitForQuadletRunning(t *testing.T, hostID, quadletName, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(quadletStatePollTimeout)
 	var last string
 	for time.Now().Before(deadline) {
-		last = getQuadlet(t, machineID, quadletName).State
+		last = getQuadlet(t, hostID, quadletName).State
 		if last == "running" {
 			t.Logf("quadlet %s reached state=running", quadletName)
 			return
@@ -527,12 +527,12 @@ func waitForQuadletRunning(t *testing.T, machineID, quadletName, msg string) {
 // parseStateFromStatus has no branch that matches it (dto.go:163-180).
 // Waiting for a literal "stopped" would hang forever, so the observable
 // contract here is "no longer running".
-func waitForQuadletNotRunning(t *testing.T, machineID, quadletName, msg string) string {
+func waitForQuadletNotRunning(t *testing.T, hostID, quadletName, msg string) string {
 	t.Helper()
 	deadline := time.Now().Add(quadletStatePollTimeout)
 	var last string
 	for time.Now().Before(deadline) {
-		last = getQuadlet(t, machineID, quadletName).State
+		last = getQuadlet(t, hostID, quadletName).State
 		if last != "running" {
 			t.Logf("quadlet %s left running (state=%q)", quadletName, last)
 			return last

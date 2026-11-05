@@ -5,12 +5,12 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
-import { containerFixture, machineFixture } from "@/test/factories";
+import { containerFixture, hostFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 function containersHandler(containers: ContainerSummary[]) {
-	return http.get("*/api/machines/m-1/containers", () =>
+	return http.get("*/api/hosts/m-1/containers", () =>
 		HttpResponse.json({
 			containers,
 			total: containers.length,
@@ -25,7 +25,7 @@ function lifecycleHandler(
 	delayMs = 0,
 ) {
 	return http.post(
-		`*/api/machines/m-1/containers/${containerId}/${action}`,
+		`*/api/hosts/m-1/containers/${containerId}/${action}`,
 		async () => {
 			if (delayMs > 0)
 				await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -35,7 +35,7 @@ function lifecycleHandler(
 }
 
 function renderContainerList() {
-	renderWithQuery(<ContainerList machine={machineFixture()} />, {
+	renderWithQuery(<ContainerList host={hostFixture()} />, {
 		router: true,
 	});
 }
@@ -77,7 +77,7 @@ describe("ContainerList lifecycle", () => {
 		const requests: { method: string; pathname: string }[] = [];
 		server.use(
 			containersHandler([containerFixture({ id: "c-3", names: ["/runner"] })]),
-			http.post("*/api/machines/m-1/containers/c-3/restart", ({ request }) => {
+			http.post("*/api/hosts/m-1/containers/c-3/restart", ({ request }) => {
 				requests.push({
 					method: request.method,
 					pathname: new URL(request.url).pathname,
@@ -94,7 +94,7 @@ describe("ContainerList lifecycle", () => {
 		await waitFor(() => expect(requests).toHaveLength(1));
 		expect(requests[0]).toEqual({
 			method: "POST",
-			pathname: "/api/machines/m-1/containers/c-3/restart",
+			pathname: "/api/hosts/m-1/containers/c-3/restart",
 		});
 	});
 
@@ -125,7 +125,7 @@ describe("ContainerList lifecycle", () => {
 	it("shows the row-level error envelope when the restart fails", async () => {
 		server.use(
 			containersHandler([containerFixture({ id: "c-1", names: ["/runner"] })]),
-			http.post("*/api/machines/m-1/containers/c-1/restart", () =>
+			http.post("*/api/hosts/m-1/containers/c-1/restart", () =>
 				errorResponse(
 					400,
 					"CONTAINER_NOT_RUNNING",
@@ -152,7 +152,7 @@ describe("ContainerList lifecycle", () => {
 			containersHandler([
 				containerFixture({ id: "c-1", names: ["/sleepy"], state: "exited" }),
 			]),
-			http.post("*/api/machines/m-1/containers/c-1/start", ({ request }) => {
+			http.post("*/api/hosts/m-1/containers/c-1/start", ({ request }) => {
 				requests.push({
 					method: request.method,
 					pathname: new URL(request.url).pathname,
@@ -167,7 +167,7 @@ describe("ContainerList lifecycle", () => {
 		await waitFor(() => expect(requests).toHaveLength(1));
 		expect(requests[0]).toEqual({
 			method: "POST",
-			pathname: "/api/machines/m-1/containers/c-1/start",
+			pathname: "/api/hosts/m-1/containers/c-1/start",
 		});
 	});
 
@@ -175,7 +175,7 @@ describe("ContainerList lifecycle", () => {
 		const requests: { method: string; pathname: string }[] = [];
 		server.use(
 			containersHandler([containerFixture({ id: "c-2", names: ["/runner"] })]),
-			http.post("*/api/machines/m-1/containers/c-2/stop", ({ request }) => {
+			http.post("*/api/hosts/m-1/containers/c-2/stop", ({ request }) => {
 				requests.push({
 					method: request.method,
 					pathname: new URL(request.url).pathname,
@@ -190,7 +190,7 @@ describe("ContainerList lifecycle", () => {
 		await waitFor(() => expect(requests).toHaveLength(1));
 		expect(requests[0]).toEqual({
 			method: "POST",
-			pathname: "/api/machines/m-1/containers/c-2/stop",
+			pathname: "/api/hosts/m-1/containers/c-2/stop",
 		});
 	});
 
@@ -221,7 +221,7 @@ describe("ContainerList lifecycle", () => {
 	it("invalidates the containers query on restart success so the list refetches", async () => {
 		const listRequests: string[] = [];
 		server.use(
-			http.get("*/api/machines/m-1/containers", () => {
+			http.get("*/api/hosts/m-1/containers", () => {
 				listRequests.push("list");
 				return HttpResponse.json({
 					containers: [
@@ -235,7 +235,7 @@ describe("ContainerList lifecycle", () => {
 					timestamp: "2026-08-26T00:00:00Z",
 				});
 			}),
-			http.post("*/api/machines/m-1/containers/c-1/restart", () =>
+			http.post("*/api/hosts/m-1/containers/c-1/restart", () =>
 				HttpResponse.json({ id: "c-1" }),
 			),
 		);
@@ -253,7 +253,7 @@ describe("ContainerList lifecycle", () => {
 	it("invalidates the containers query on success so the new state renders", async () => {
 		let started = false;
 		server.use(
-			http.get("*/api/machines/m-1/containers", () =>
+			http.get("*/api/hosts/m-1/containers", () =>
 				HttpResponse.json({
 					containers: [
 						containerFixture({
@@ -266,7 +266,7 @@ describe("ContainerList lifecycle", () => {
 					timestamp: "2026-08-26T00:00:00Z",
 				}),
 			),
-			http.post("*/api/machines/m-1/containers/c-1/start", () => {
+			http.post("*/api/hosts/m-1/containers/c-1/start", () => {
 				started = true;
 				return HttpResponse.json({ id: "c-1" });
 			}),
@@ -288,7 +288,7 @@ describe("ContainerList lifecycle", () => {
 			containersHandler([
 				containerFixture({ id: "c-1", names: ["/sleepy"], state: "exited" }),
 			]),
-			http.post("*/api/machines/m-1/containers/c-1/start", () =>
+			http.post("*/api/hosts/m-1/containers/c-1/start", () =>
 				errorResponse(
 					409,
 					"CONTAINER_START_FAILED",

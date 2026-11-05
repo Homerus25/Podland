@@ -97,14 +97,14 @@ describe("CreateContainerPage", () => {
 		expect(createRequests.count).toBe(0);
 	});
 
-	it("offers the create action on an empty machine and creates the first container", async () => {
+	it("offers the create action on an empty host and creates the first container", async () => {
 		resetCounters();
 		let containers: ContainerSummary[] = [];
 		server.use(
 			containersHandler(() => containers),
 			startHandler(),
 			...optionListHandlers(),
-			http.post("*/api/machines/m-1/containers", async ({ request }) => {
+			http.post("*/api/hosts/m-1/containers", async ({ request }) => {
 				createRequests.count++;
 				await request.json();
 				containers = [
@@ -149,7 +149,7 @@ describe("CreateContainerPage", () => {
 			containersHandler(() => containers),
 			startHandler(),
 			...optionListHandlers(),
-			http.post("*/api/machines/m-1/containers", async ({ request }) => {
+			http.post("*/api/hosts/m-1/containers", async ({ request }) => {
 				createRequests.count++;
 				await request.json();
 				containers = [

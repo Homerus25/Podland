@@ -40,7 +40,7 @@ Caller is a regular user:
 **Fields:**
 - Entries are ordered by `username`.
 - Admins receive exactly `id`, `username`, `role`, `createdAt` per user; regular users receive exactly `id`, `username`.
-- The minimal shape exists so machine owners (not necessarily admins) can discover usernames when sharing a machine; role and creation metadata stay admin-only.
+- The minimal shape exists so host owners (not necessarily admins) can discover usernames when sharing a host; role and creation metadata stay admin-only.
 - The caller's role is resolved from the database on every request, so role changes take effect immediately.
 - Password hashes never appear in any response.
 

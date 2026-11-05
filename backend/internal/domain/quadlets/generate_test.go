@@ -124,7 +124,7 @@ func TestQuadletService_Generate_FromContainer(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.Generate(context.Background(), "user", "machine", QuadletGenerateRequest{
+	got, err := service.Generate(context.Background(), "user", "host", QuadletGenerateRequest{
 		ResourceID: "web", ResourceType: "container",
 	})
 
@@ -145,7 +145,7 @@ func TestQuadletService_Generate_FromPod(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, nil, nil)
 
-	got, err := service.Generate(context.Background(), "user", "machine", QuadletGenerateRequest{
+	got, err := service.Generate(context.Background(), "user", "host", QuadletGenerateRequest{
 		ResourceID: "stack", ResourceType: "pod",
 	})
 
@@ -157,10 +157,10 @@ func TestQuadletService_Generate_FromPod(t *testing.T) {
 
 func TestQuadletService_Generate_InvalidResourceType(t *testing.T) {
 	// The engine stays unarmed: an invalid resource type must be refused
-	// without touching the machine.
+	// without touching the host.
 	service := NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, nil)
 
-	got, err := service.Generate(context.Background(), "user", "machine", QuadletGenerateRequest{
+	got, err := service.Generate(context.Background(), "user", "host", QuadletGenerateRequest{
 		ResourceID: "x", ResourceType: "invalid",
 	})
 

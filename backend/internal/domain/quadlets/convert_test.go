@@ -27,7 +27,7 @@ func (f *fakeComposeConverter) Convert(ctx context.Context, composeContent strin
 
 // newConvertTestService builds the lean service over the fake engine with
 // the given converter wired — the shape the ConvertCompose service tests
-// drive. The conversion touches no machine, so the engine stays unarmed.
+// drive. The conversion touches no host, so the engine stays unarmed.
 func newConvertTestService(converter ComposeConverter) *QuadletService {
 	return NewQuadletService(fakeEngineProvider{engine: &fakeQuadletEngine{}}, nil, nil).WithComposeConverter(converter)
 }

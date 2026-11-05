@@ -11,7 +11,7 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
-// SecretEngine is the secrets domain's view of one machine's podman: the
+// SecretEngine is the secrets domain's view of one host's podman: the
 // exact set of secret operations the service performs, in domain vocabulary
 // (plain name/value strings, a reveal flag) and without a context parameter
 // — the connection context lives only inside the production adapter below.
@@ -27,23 +27,23 @@ type SecretEngine interface {
 }
 
 // SecretEngineProvider is the secrets domain's slice of the connection
-// seam: it hands a closure one machine's SecretEngine. It delegates to
+// seam: it hands a closure one host's SecretEngine. It delegates to
 // connections.Manager.WithConnection, which owns acquisition, the
 // warn-and-502-sentinel failure contract, and the op tag.
 type SecretEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretEngine) error) error
+	WithEngine(ctx context.Context, userID, hostID, op string, fn func(e SecretEngine) error) error
 }
 
 // SecretUsageEngineProvider is the secrets domain's slice of the
 // connection seam for the quadlet surface (issue 239): it hands a
-// closure one machine's quadlet reader — the kit's
+// closure one host's quadlet reader — the kit's
 // transfer.QuadletReader (issue 260, §19), the exact reads the
 // copy/move preview's referencing-quadlet scan needs — delegating to
 // connections.Manager. The domain declares no usage-engine interface
 // of its own: the kit's reader IS the width, and the podman adapter
 // below satisfies it structurally.
 type SecretUsageEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e transfer.QuadletReader) error) error
+	WithEngine(ctx context.Context, userID, hostID, op string, fn func(e transfer.QuadletReader) error) error
 }
 
 // NewSecretUsageEngineProvider returns the production usage provider: it
@@ -58,8 +58,8 @@ type connectionUsageEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionUsageEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e transfer.QuadletReader) error) error {
-	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+func (p connectionUsageEngines) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e transfer.QuadletReader) error) error {
+	return p.conn.WithConnection(ctx, userID, hostID, op, func(connCtx context.Context) error {
 		return fn(&podmanSecretUsageEngine{ctx: connCtx})
 	})
 }
@@ -103,8 +103,8 @@ type connectionEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e SecretEngine) error) error {
-	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+func (p connectionEngines) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e SecretEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, hostID, op, func(connCtx context.Context) error {
 		return fn(&podmanSecretEngine{ctx: connCtx})
 	})
 }

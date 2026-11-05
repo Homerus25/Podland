@@ -53,10 +53,10 @@ func TestPodService_Get_ResolvesSingleReport(t *testing.T) {
 	}
 	service := NewPodService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(t.Context(), "user", "machine", "web")
+	got, err := service.Get(t.Context(), "user", "host", "web")
 
 	require.NoError(t, err)
-	assert.Equal(t, "web", gotName, "the URL-param pod must reach the machine")
+	assert.Equal(t, "web", gotName, "the URL-param pod must reach the host")
 	assert.Equal(t, report, got)
 }
 
@@ -70,7 +70,7 @@ func TestPodService_Get_MissingPodAnswers404(t *testing.T) {
 	}
 	service := NewPodService(fakeEngineProvider{engine: engine})
 
-	_, err := service.Get(t.Context(), "user", "machine", "ghost-pod")
+	_, err := service.Get(t.Context(), "user", "host", "ghost-pod")
 
 	require.ErrorIs(t, err, appErrors.ErrPodNotFound)
 }
@@ -86,7 +86,7 @@ func TestPodService_Inspect_ReturnsRawReport(t *testing.T) {
 	}
 	service := NewPodService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Inspect(t.Context(), "user", "machine", "web")
+	got, err := service.Inspect(t.Context(), "user", "host", "web")
 
 	require.NoError(t, err)
 	assert.Equal(t, report, got, "the raw inspect report must cross unmapped")

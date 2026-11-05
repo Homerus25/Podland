@@ -28,7 +28,7 @@ func TestImageHandler_Prune_Success(t *testing.T) {
 		},
 	}
 
-	w := recordPruneRequest(newTestHandler(engine).Prune, "test-machine")
+	w := recordPruneRequest(newTestHandler(engine).Prune, "test-host")
 
 	assert.Equal(t, 200, w.Code, "prune should return 200")
 	var got []ImagePruneResponse
@@ -50,7 +50,7 @@ func TestImageHandler_Prune_EmptyReport(t *testing.T) {
 		},
 	}
 
-	w := recordPruneRequest(newTestHandler(engine).Prune, "test-machine")
+	w := recordPruneRequest(newTestHandler(engine).Prune, "test-host")
 
 	assert.Equal(t, 200, w.Code)
 	var got []ImagePruneResponse
@@ -67,12 +67,12 @@ func TestFromImagePruneReports_NilEntries(t *testing.T) {
 	assert.Equal(t, "sha256:x", got[0].ID)
 }
 
-// recordPruneRequest serves POST /api/machines/{id}/images/prune
+// recordPruneRequest serves POST /api/hosts/{id}/images/prune
 // through the given handler with an authenticated test identity.
-func recordPruneRequest(prune http.HandlerFunc, machineID string) *httptest.ResponseRecorder {
+func recordPruneRequest(prune http.HandlerFunc, hostID string) *httptest.ResponseRecorder {
 	ctx := contextutils.SetUserID(contextutils.SetRequestID(context.Background(), "test-request-id"), "test-user")
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/"+machineID+"/images/prune", nil).WithContext(ctx)
-	req.SetPathValue("id", machineID)
+	req := httptest.NewRequest(http.MethodPost, "/api/hosts/"+hostID+"/images/prune", nil).WithContext(ctx)
+	req.SetPathValue("id", hostID)
 
 	w := httptest.NewRecorder()
 	prune(w, req)

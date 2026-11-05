@@ -14,14 +14,14 @@ import (
 	"github.com/Homerus25/podland/backend/internal/testutils"
 )
 
-// actionRequest serves POST /api/machines/{id}/pods/{podId}/{action}
+// actionRequest serves POST /api/hosts/{id}/pods/{podId}/{action}
 // through the handler with an authenticated test identity.
 func actionRequest(action http.HandlerFunc, podID, actionName string) *httptest.ResponseRecorder {
 	return testutils.Perform(action, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/pods/" + podID + "/" + actionName,
+		Path:      "/api/hosts/test-host/pods/" + podID + "/" + actionName,
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "podId": podID},
+		URLParams: map[string]string{"id": "test-host", "podId": podID},
 	})
 }
 
@@ -40,7 +40,7 @@ func TestPodHandler_Pause_Success(t *testing.T) {
 	w := actionRequest(newTestHandler(engine).Pause, "web", "pause")
 
 	require.Equal(t, http.StatusOK, w.Code, "pause should return 200")
-	assert.Equal(t, "web", gotName, "the URL-param pod must reach the machine")
+	assert.Equal(t, "web", gotName, "the URL-param pod must reach the host")
 	var body PodActionResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), "the top-level body must be the action DTO")
 	assert.Equal(t, "web", body.ID)
@@ -107,19 +107,19 @@ func TestPodHandler_ActionStates(t *testing.T) {
 	}
 }
 
-// removeRequest serves DELETE /api/machines/{id}/pods/{podId}{query}
+// removeRequest serves DELETE /api/hosts/{id}/pods/{podId}{query}
 // through the handler with an authenticated test identity.
 func removeRequest(remove http.HandlerFunc, podID, query string) *httptest.ResponseRecorder {
 	return testutils.Perform(remove, testutils.Request{
 		Method:    http.MethodDelete,
-		Path:      "/api/machines/test-machine/pods/" + podID + query,
+		Path:      "/api/hosts/test-host/pods/" + podID + query,
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "podId": podID},
+		URLParams: map[string]string{"id": "test-host", "podId": podID},
 	})
 }
 
 // TestPodHandler_Remove_NoContent pins the remove contract: 204 with an
-// empty body, and the force query flag crossing to the machine.
+// empty body, and the force query flag crossing to the host.
 func TestPodHandler_Remove_NoContent(t *testing.T) {
 	var gotName string
 	var gotForce bool
@@ -134,7 +134,7 @@ func TestPodHandler_Remove_NoContent(t *testing.T) {
 
 	require.Equal(t, http.StatusNoContent, w.Code, "remove should return 204")
 	assert.Equal(t, "web", gotName)
-	assert.True(t, gotForce, "the force query flag must reach the machine")
+	assert.True(t, gotForce, "the force query flag must reach the host")
 }
 
 // TestPodHandler_Remove_DefaultUnforced pins the force default: a
@@ -162,9 +162,9 @@ func TestPodHandler_Pause_MissingPodID(t *testing.T) {
 
 	w := testutils.Perform(newTestHandler(engine).Pause, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/pods//pause",
+		Path:      "/api/hosts/test-host/pods//pause",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -193,14 +193,14 @@ func TestPodHandler_Pause_MissingPodAnswers404(t *testing.T) {
 	assert.Equal(t, "POD_NOT_FOUND", body.Error.Code)
 }
 
-// pruneRequest serves POST /api/machines/{id}/pods/prune through the
+// pruneRequest serves POST /api/hosts/{id}/pods/prune through the
 // handler with an authenticated test identity.
 func pruneRequest(prune http.HandlerFunc) *httptest.ResponseRecorder {
 	return testutils.Perform(prune, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/pods/prune",
+		Path:      "/api/hosts/test-host/pods/prune",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 }
 

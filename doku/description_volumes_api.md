@@ -6,13 +6,13 @@ Part of the [API contract](description_api.md). See the main document for base U
 
 ## Volume Endpoints
 
-### GET /api/machines/{id}/volumes
+### GET /api/hosts/{id}/volumes
 
-List every volume on a machine, named and anonymous alike.
+List every volume on a host, named and anonymous alike.
 
 **Authentication:** Required
 
-**Access:** Any user with a machine-access row for `{id}` (read level).
+**Access:** Any user with a host-access row for `{id}` (read level).
 
 **Response (Success - 200):**
 ```json
@@ -38,17 +38,17 @@ Notes:
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### GET /api/machines/{id}/volumes/{volumeName}
+### GET /api/hosts/{id}/volumes/{volumeName}
 
 Inspect a single volume by exact name, returning its full configuration.
 
 **Authentication:** Required
 
-**Access:** Any user with a machine-access row for `{id}` (read level).
+**Access:** Any user with a host-access row for `{id}` (read level).
 
 **Response (Success - 200):**
 ```json
@@ -73,13 +73,13 @@ Notes:
 - 400: `MISSING_VOLUME_NAME` (empty volume name)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND` (unknown machine ID), `VOLUME_NOT_FOUND` (unknown volume name)
+- 404: `HOST_NOT_FOUND` (unknown host ID), `VOLUME_NOT_FOUND` (unknown volume name)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### POST /api/machines/{id}/volumes
+### POST /api/hosts/{id}/volumes
 
-Create a volume on the machine. The body accepts the podman create
+Create a volume on the host. The body accepts the podman create
 surface: optional `name` (podman generates one when omitted, yielding an
 anonymous volume), `labels`, `driver` (defaults to podman's `local`),
 and `options` (driver options). Name-format validation is podman's job.
@@ -105,13 +105,13 @@ shape as inspect, including the generated name for anonymous volumes).
 - 400: `INVALID_REQUEST` (malformed body; podman-rejected names/drivers)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
-- 404: `MACHINE_NOT_FOUND`, `VOLUME_NOT_FOUND` (existence re-check)
+- 404: `HOST_NOT_FOUND`, `VOLUME_NOT_FOUND` (existence re-check)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### POST /api/machines/{id}/volumes/prune
+### POST /api/hosts/{id}/volumes/prune
 
-Remove all unused volumes on the machine in one call. Volumes in use by
+Remove all unused volumes on the host in one call. Volumes in use by
 containers are untouched.
 
 **Authentication:** Required
@@ -131,11 +131,11 @@ Notes:
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### GET /api/machines/{id}/volumes/{volumeName}/export
+### GET /api/hosts/{id}/volumes/{volumeName}/export
 
 Stream the volume's contents as a tar archive download. Bytes flow
 straight from the remote podman into the response — no server-side
@@ -143,8 +143,8 @@ buffering, no size cap on the download path.
 
 **Authentication:** Required
 
-**Access:** Any user with a machine-access row for `{id}` (read level):
-users who can read a machine's state can read its data.
+**Access:** Any user with a host-access row for `{id}` (read level):
+users who can read a host's state can read its data.
 
 **Response (Success - 200):**
 - `Content-Type: application/x-tar`
@@ -155,11 +155,11 @@ users who can read a machine's state can read its data.
 - 400: `MISSING_VOLUME_NAME`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row)
-- 404: `MACHINE_NOT_FOUND`, `VOLUME_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `VOLUME_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### POST /api/machines/{id}/volumes/{volumeName}/populate
+### POST /api/hosts/{id}/volumes/{volumeName}/populate
 
 Fill a volume from an upload. Body is `multipart/form-data` in exactly
 one of two shapes:
@@ -191,12 +191,12 @@ enforced while streaming. Temp files are removed on every path.
   traversal in a filename, missing filename)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
-- 404: `MACHINE_NOT_FOUND`, `VOLUME_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `VOLUME_NOT_FOUND`
 - 413: `VOLUME_UPLOAD_TOO_LARGE` (upload exceeded `VOLUME_UPLOAD_MAX_BYTES`)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### DELETE /api/machines/{id}/volumes/{volumeName}
+### DELETE /api/hosts/{id}/volumes/{volumeName}
 
 Remove a volume by exact name. Query flag `force` (default false): with
 `force=true` podman stops dependent containers first and removes the
@@ -223,31 +223,31 @@ carrying podman's message.
 - 400: `MISSING_VOLUME_NAME`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
-- 404: `MACHINE_NOT_FOUND`, `VOLUME_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `VOLUME_NOT_FOUND`
 - 409: `VOLUME_IN_USE` (volume is in use by a container and `force` was
   not set; carries podman's message)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
-### GET /api/machines/{id}/volumes/{volumeName}/move-preview
+### GET /api/hosts/{id}/volumes/{volumeName}/move-preview
 
-Preview a volume copy/move to another machine (issue 238): the facts the
-transfer dialog must show before confirming — whether the target machine
+Preview a volume copy/move to another host (issue 238): the facts the
+transfer dialog must show before confirming — whether the target host
 already holds a same-named volume, whether a container on the source
-machine uses the volume, and which source quadlets reference it.
+host uses the volume, and which source quadlets reference it.
 
 **Authentication:** Required
 
-Read-level access on the source machine suffices (the endpoint mutates
+Read-level access on the source host suffices (the endpoint mutates
 nothing). The caller additionally needs **at least read access on the
-target machine**: the target's volume store is read server-side, and a
+target host**: the target's volume store is read server-side, and a
 caller without target access gets the standard `ACCESS_DENIED` error —
-never a false preview. An unknown target machine ID answers
+never a false preview. An unknown target host ID answers
 `ACCESS_DENIED` the same way (no access row can exist for it);
-`MACHINE_NOT_FOUND` is reserved for the source machine in the path.
+`HOST_NOT_FOUND` is reserved for the source host in the path.
 
 **Query Parameters:**
-- `targetMachineId` (string, required): ID of the target machine the
+- `targetHostId` (string, required): ID of the target host the
   preview refers to.
 
 **Response (Success - 200):**
@@ -259,15 +259,15 @@ never a false preview. An unknown target machine ID answers
 }
 ```
 
-- `collision`: true exactly when the target machine already holds a
+- `collision`: true exactly when the target host already holds a
   volume of the same name. The transfer never overwrites or merges — the
   flag drives the dialog's confirm gate, and the transfer re-checks at
   execution time.
-- `inUse`: true when any container on the source machine mounts the
+- `inUse`: true when any container on the source host mounts the
   volume (derived from every container's user-declared mounts, the source
   token before the first `:` compared exactly). A move refuses an in-use
   source without `force`; a copy is unaffected.
-- `referencingQuadlets`: the source machine's quadlet files whose
+- `referencingQuadlets`: the source host's quadlet files whose
   `Volume=` lines resolve to the volume — a bare name matches directly, a
   `.volume` companion source resolves through its companion file's
   `VolumeName=` (podman's `systemd-<name>` default otherwise), host paths
@@ -275,17 +275,17 @@ never a false preview. An unknown target machine ID answers
   a volume copy/move. Empty is `[]`, never `null`.
 
 **Response (Error):**
-- 400: `MISSING_VOLUME_NAME`, `MISSING_TARGET_MACHINE_ID`
+- 400: `MISSING_VOLUME_NAME`, `MISSING_TARGET_HOST_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row on the source, or below-read level
   on the target)
-- 404: `MACHINE_NOT_FOUND`, `VOLUME_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `VOLUME_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED` (source or target unreachable)
 
-### POST /api/machines/{id}/volumes/{volumeName}/move
+### POST /api/hosts/{id}/volumes/{volumeName}/move
 
-Transfer a volume to another machine (issue 238). Two modes:
+Transfer a volume to another host (issue 238). Two modes:
 
 - **copy** creates the target volume (same name, no rename) and streams
   the source's data into it — always, there is no metadata-only option —
@@ -313,15 +313,15 @@ the rollback ran.
 
 **Authentication:** Required
 
-**Write-level access on the source machine is required** (the transfer
+**Write-level access on the source host is required** (the transfer
 mutates remote state through it). The caller additionally needs **at
-least write access on the target machine**: route middleware only sees the
-source machine, so the target's level is checked server-side against the
+least write access on the target host**: route middleware only sees the
+source host, so the target's level is checked server-side against the
 access store BEFORE any podman call — a below-write grantee (or a caller
 with no target row) gets the standard `ACCESS_DENIED` riding the stream's
-terminal error event, with nothing transferred. An unknown target machine
-ID answers `ACCESS_DENIED` the same way; `MACHINE_NOT_FOUND` is reserved
-for the source machine in the path.
+terminal error event, with nothing transferred. An unknown target host
+ID answers `ACCESS_DENIED` the same way; `HOST_NOT_FOUND` is reserved
+for the source host in the path.
 
 **Move mode semantics:**
 
@@ -329,7 +329,7 @@ for the source machine in the path.
   anything is created on the target — unless `force` is set.
 - A removal failure after the data crossed answers the terminal
   `complete` event with `status: "partial"` and the failure's detail in
-  `error`: the volume then exists on BOTH machines and the source side
+  `error`: the volume then exists on BOTH hosts and the source side
   must be cleaned up manually. There is no rollback of the target's data.
 - A source volume that vanished between the data phase and the removal
   needs no removal — the answer is `status: "moved"`.
@@ -343,7 +343,7 @@ with the 409 `VOLUME_IN_USE` detail.
 **Request:**
 ```json
 {
-  "targetMachineId": "string (required)",
+  "targetHostId": "string (required)",
   "mode": "copy|move (required)",
   "force": "boolean (optional, move mode only, default false)"
 }
@@ -353,7 +353,7 @@ with the 409 `VOLUME_IN_USE` detail.
 stream begins, `phase: "bytes"` as the streamed count crosses each MiB
 (carrying `bytes`), `phase: "done"` when the import finished (carrying
 the total `bytes`). All events share one `operationId`, the source
-`machineId`, the `volume` name, and a `timestamp`.
+`hostId`, the `volume` name, and a `timestamp`.
 
 **Terminal events:** on success one `type: "complete"` event carrying the
 transfer envelope in `result`:
@@ -362,8 +362,8 @@ transfer envelope in `result`:
 {
   "name": "string",
   "status": "copied|moved|partial",
-  "sourceMachineId": "string",
-  "targetMachineId": "string",
+  "sourceHostId": "string",
+  "targetHostId": "string",
   "bytes": integer,
   "error": "string (optional, present only when status is \"partial\")"
 }
@@ -371,7 +371,7 @@ transfer envelope in `result`:
 
 - `bytes`: the data that crossed the export→import splice.
 - `error`: the source removal failure's detail; present only with
-  `"partial"`. Clients must narrate the both-machines state from it.
+  `"partial"`. Clients must narrate the both-hosts state from it.
 
 On failure one `type: "error"` event carrying `error: {code, message}`;
 the status codes ride this event instead of HTTP statuses (the stream
@@ -391,9 +391,9 @@ itself answers 200):
 
 **Response (Error)** — plain envelope, before the stream begins:
 - 400: `MISSING_VOLUME_NAME`, `INVALID_REQUEST` (malformed body),
-  `VALIDATION_FAILED` (missing `targetMachineId`, or a `mode` other than
+  `VALIDATION_FAILED` (missing `targetHostId`, or a `mode` other than
   `"copy"` / `"move"`)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row on the source)
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`

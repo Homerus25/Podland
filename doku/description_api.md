@@ -8,7 +8,7 @@ Endpoint documentation is split by domain:
 
 - [Auth](description_auth_api.md) - Login, logout, token status
 - [Users](description_users_api.md) - User creation (admin-only)
-- [Machines](description_machines_api.md) - Machine CRUD, access management, event stream (SSE)
+- [Hosts](description_hosts_api.md) - Host CRUD, access management, event stream (SSE)
 - [Containers](description_containers_api.md) - Container CRUD, lifecycle, logs
 - [Images](description_images_api.md) - Image listing, pull, removal
 - [Networks](description_networks_api.md) - Network listing (read-only)
@@ -98,8 +98,8 @@ All error responses follow this structure:
 | 400 | `VALIDATION_FAILED`, `INVALID_REQUEST`, `INVALID_SSH_KEY`, `CONTAINER_ALREADY_RUNNING` | Bad request |
 | 401 | `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`, `TOKEN_REVOKED`, `INVALID_CREDENTIALS` | Unauthorized |
 | 403 | `ACCESS_DENIED`, `PERMISSION_DENIED` | Forbidden |
-| 404 | `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`, `IMAGE_NOT_FOUND` | Not found |
-| 409 | `MACHINE_ALREADY_EXISTS` | Conflict |
+| 404 | `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`, `IMAGE_NOT_FOUND` | Not found |
+| 409 | `HOST_ALREADY_EXISTS` | Conflict |
 | 429 | `RATE_LIMIT_EXCEEDED` | Too many requests |
 | 500 | `INTERNAL_ERROR` | Internal server error |
 | 502 | `SERVICE_UNAVAILABLE`, `CONNECTION_FAILED` | Bad gateway |
@@ -109,11 +109,11 @@ All error responses follow this structure:
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `MACHINE_NOT_FOUND` | 404 | Machine does not exist or user lacks access |
-| `MACHINE_ALREADY_EXISTS` | 409 | Machine name already exists for this user |
-| `CONNECTION_FAILED` | 502 | Failed to connect to machine (during registration or operation) |
+| `HOST_NOT_FOUND` | 404 | Host does not exist or user lacks access |
+| `HOST_ALREADY_EXISTS` | 409 | Host name already exists for this user |
+| `CONNECTION_FAILED` | 502 | Failed to connect to host (during registration or operation) |
 | `CONNECTION_TEST_TIMEOUT` | 400 | Connection test timed out during registration |
-| `HOST_NOT_ALLOWED` | 400 | Machine hostname rejected by the instance's opt-in egress block (`MACHINE_HOST_BLOCK_PRIVATE_RANGES`): blocked address range or unresolvable while enabled |
+| `HOST_NOT_ALLOWED` | 400 | Host hostname rejected by the instance's opt-in egress block (`HOST_BLOCK_PRIVATE_RANGES`): blocked address range or unresolvable while enabled |
 | `INVALID_CREDENTIALS` | 401 | Wrong username or password |
 | `TOKEN_MISSING` | 401 | No token provided |
 | `TOKEN_INVALID` | 401 | Malformed or tampered token |
@@ -143,19 +143,19 @@ All error responses follow this structure:
 | `SERVICE_UNAVAILABLE` | 503 | Service temporarily unavailable |
 | `NOT_IMPLEMENTED` | 501 | Endpoint not yet implemented |
 
-### Machine Permission Levels
+### Host Permission Levels
 
-Access to a machine is granted at one of three levels: `read` < `write` < `admin` (owners implicitly hold `admin`). Every endpoint under `/api/machines/{id}` requires at least `read`. Mutating endpoints — container create/delete/start/stop, image pull/delete, quadlet create/import/update/delete/start/stop/restart, secret create — additionally require `write` or above and answer 403 `ACCESS_DENIED` for lower levels. Read-only endpoints (lists, gets, logs, quadlet generate, events, secret metadata list/inspect) remain available at `read`. Secret value reveal (`GET .../secrets/{secretId}?reveal=true`) is the one `admin`-only operation and answers 403 `ACCESS_DENIED` below admin.
+Access to a host is granted at one of three levels: `read` < `write` < `admin` (owners implicitly hold `admin`). Every endpoint under `/api/hosts/{id}` requires at least `read`. Mutating endpoints — container create/delete/start/stop, image pull/delete, quadlet create/import/update/delete/start/stop/restart, secret create — additionally require `write` or above and answer 403 `ACCESS_DENIED` for lower levels. Read-only endpoints (lists, gets, logs, quadlet generate, events, secret metadata list/inspect) remain available at `read`. Secret value reveal (`GET .../secrets/{secretId}?reveal=true`) is the one `admin`-only operation and answers 403 `ACCESS_DENIED` below admin.
 
 ---
 
 ## Examples
 
-### Example: Full Machine Workflow
+### Example: Full Host Workflow
 
-1. **User registers a machine:**
+1. **User registers a host:**
 ```bash
-POST /api/machines
+POST /api/hosts
 {
   "name": "production-server",
   "hostname": "prod.example.com",
@@ -164,14 +164,14 @@ POST /api/machines
 }
 ```
 
-2. **User lists their machines:**
+2. **User lists their hosts:**
 ```bash
-GET /api/machines
+GET /api/hosts
 ```
 
 3. **User pulls an image with progress:**
 ```bash
-POST /api/machines/{machineId}/images/pull
+POST /api/hosts/{hostId}/images/pull
 {
   "image": "nginx:latest"
 }
@@ -179,7 +179,7 @@ POST /api/machines/{machineId}/images/pull
 
 4. **User creates a container:**
 ```bash
-POST /api/machines/{machineId}/containers
+POST /api/hosts/{hostId}/containers
 {
   "name": "web-server",
   "image": "nginx:latest",
@@ -189,12 +189,12 @@ POST /api/machines/{machineId}/containers
 
 5. **User starts the container:**
 ```bash
-POST /api/machines/{machineId}/containers/{containerId}/start
+POST /api/hosts/{hostId}/containers/{containerId}/start
 ```
 
 6. **User subscribes to events:**
 ```bash
-GET /api/machines/{machineId}/events
+GET /api/hosts/{hostId}/events
 ```
 
 ---

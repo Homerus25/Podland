@@ -189,7 +189,7 @@ func parseStateFromStatus(status string) string {
 }
 
 // QuadletGenerateRequest represents a request to generate a quadlet from an existing
-// container or pod on the remote machine.
+// container or pod on the remote host.
 type QuadletGenerateRequest struct {
 	// ID of the container or pod to generate a quadlet from. Required.
 	ResourceID string `json:"resourceId" validate:"required,min=1"`
@@ -349,7 +349,7 @@ const MaxComposeContentBytes = 1 << 20
 
 // QuadletConvertComposeRequest represents a request to convert compose file
 // content into quadlet entries (spec #336). The endpoint is global — not
-// machine-scoped — so the body carries only the compose text.
+// host-scoped — so the body carries only the compose text.
 type QuadletConvertComposeRequest struct {
 	// Compose file content. Required; the 1 MiB body cap is enforced at
 	// the HTTP layer (see MaxComposeContentBytes).
@@ -358,7 +358,7 @@ type QuadletConvertComposeRequest struct {
 
 // QuadletConvertComposeResponse carries the generated quadlet entries in
 // the import endpoint's {name, resource, content} shape, so the frontend
-// can forward the body to the machine-scoped import endpoint unchanged.
+// can forward the body to the host-scoped import endpoint unchanged.
 type QuadletConvertComposeResponse struct {
 	// Generated quadlet entries, sorted by name.
 	Quadlets []QuadletImportEntry `json:"quadlets"`
@@ -374,7 +374,7 @@ const (
 
 // Target-state labels for QuadletMovePreviewVolume.TargetState (issue 217):
 // how the companion .volume quadlet file already named by quadletFile sits
-// on the TARGET machine — absent, byte-identical, or with different
+// on the TARGET host — absent, byte-identical, or with different
 // content. An identical companion is skipped by the transfer (no install,
 // no error); a differing one fails it with 409 QUADLET_ALREADY_EXISTS.
 const (
@@ -385,7 +385,7 @@ const (
 
 // QuadletMovePreviewVolume is one `Volume=` reference in the move/copy
 // preview: the piece of data the transfer leaves behind on the source
-// machine — or, since issue 214, the podman volume whose data may follow
+// host — or, since issue 214, the podman volume whose data may follow
 // the file when the request opts into migration.
 type QuadletMovePreviewVolume struct {
 	// Volume source — the named podman volume or host path, i.e. the
@@ -395,17 +395,17 @@ type QuadletMovePreviewVolume struct {
 	// "hostPath" (host bind path).
 	Kind string `json:"kind"`
 	// QuadletFile names the companion .volume quadlet file on the
-	// source machine the reference resolves to — present exactly when a
+	// source host the reference resolves to — present exactly when a
 	// same-named quadlet file exists on the source (the reference is
 	// dangling otherwise, and the entry stays ordinary). Empty means no
 	// companion (issue 217).
 	QuadletFile string `json:"quadletFile,omitempty"`
-	// TargetState labels the companion's state on the target machine:
+	// TargetState labels the companion's state on the target host:
 	// "absent", "identical", or "differs". Present exactly when
 	// QuadletFile is.
 	TargetState string `json:"targetState,omitempty"`
 	// PodmanVolume is the podman volume the reference resolves to on the
-	// source machine (issue 214): the bare name itself, or
+	// source host (issue 214): the bare name itself, or
 	// `systemd-<name>` for a .volume reference unless the companion file
 	// sets VolumeName=. Present only on volume-kind entries; host paths
 	// never resolve.
@@ -417,7 +417,7 @@ type QuadletMovePreviewVolume struct {
 	// size is distinguishable from zero.
 	SizeBytes *int64 `json:"sizeBytes,omitempty"`
 	// ExistsOnTarget reports whether the resolved podman volume already
-	// exists on the target machine (target volume inspect, issue 214).
+	// exists on the target host (target volume inspect, issue 214).
 	// Volume-kind entries always carry it — false is meaningful (a fresh
 	// target); host-path entries render it false too, it just says
 	// nothing there.
@@ -446,7 +446,7 @@ type QuadletMovePreviewVolume struct {
 // migratable, dangling references carry their reason, existing source
 // volumes are migratable with whatever size the engine reported (nil
 // until an engine reports one). targetStates maps a discovered companion
-// file to its state on the target machine; targetVolumes maps a resolved
+// file to its state on the target host; targetVolumes maps a resolved
 // volume name to the target's inspect (nil inspect = absent). Used once,
 // at MovePreview's response assembly.
 func ToMovePreviewVolumes(resolution volumeResolution, targetStates map[string]string, targetVolumes map[string]*QuadletVolumeInspect) []QuadletMovePreviewVolume {
@@ -496,7 +496,7 @@ type QuadletMovePreviewResponse struct {
 	// discipline (issue 214). Empty (not null) when the quadlet
 	// references none.
 	Secrets []QuadletMovePreviewSecret `json:"secrets"`
-	// Collision is true exactly when the target machine already has a
+	// Collision is true exactly when the target host already has a
 	// quadlet of the same name and resource.
 	Collision bool `json:"collision"`
 	// Running reflects the source quadlet's live state.
@@ -514,7 +514,7 @@ const (
 // Transfer status labels for the move/copy endpoint (issue 207): copy
 // answers "copied"; move mode answers "moved", or "partial" when the target
 // install succeeded but the source removal failed (the quadlet then exists
-// on both machines).
+// on both hosts).
 const (
 	MoveStatusCopied  = "copied"
 	MoveStatusMoved   = "moved"
@@ -527,8 +527,8 @@ const (
 // never touches the source; move mode removes the source quadlet after the
 // install succeeded, honouring the delete flow's stop/force flags.
 type QuadletMoveRequest struct {
-	// TargetMachineID is the machine the quadlet is transferred to. Required.
-	TargetMachineID string `json:"targetMachineId" validate:"required,min=1"`
+	// TargetHostID is the host the quadlet is transferred to. Required.
+	TargetHostID string `json:"targetHostId" validate:"required,min=1"`
 	// Mode selects the transfer semantics. "copy" installs on the target
 	// only; "move" additionally removes the source after the install. Required.
 	Mode string `json:"mode" validate:"required,oneof=copy move"`
@@ -551,7 +551,7 @@ type QuadletMoveRequest struct {
 	// MigrateVolumeData opts the transfer into carrying the referenced
 	// podman volumes' DATA along (issue 214): every volume-kind reference
 	// is resolved from the source content at execution time and exported
-	// from the source machine into the target's volume. Default false —
+	// from the source host into the target's volume. Default false —
 	// data movement is the heavy, consequential act. Setting it also
 	// switches the response transport to NDJSON streaming.
 	MigrateVolumeData bool `json:"migrateVolumeData,omitempty"`
@@ -564,10 +564,10 @@ type QuadletMoveRequest struct {
 	// TransferSecrets opts the transfer into carrying the referenced
 	// podman secrets' VALUES along (issue 215): every `Secret=` reference
 	// is re-derived from the source content at execution time, revealed
-	// on the source machine, and created on the target. Default false —
+	// on the source host, and created on the target. Default false —
 	// a value movement is the consequential act. Requires admin on the
 	// source (the reveal gate stays the single owner of value exposure:
-	// a write-level caller must never move values off a machine) and
+	// a write-level caller must never move values off a host) and
 	// write on the target; orthogonal to transferVolumeQuadlets and
 	// migrateVolumeData. Never removes a secret from the source, any
 	// mode.
@@ -586,7 +586,7 @@ func (r QuadletMoveRequest) WantsVolumeQuadletTransfer() bool {
 // (issue 210). Status carries the outcome: "copied" for a completed copy,
 // "moved" for a completed move, and "partial" when a move's target install
 // succeeded but the source removal failed — the quadlet then exists on both
-// machines, and Error carries the removal failure's detail (issue 211).
+// hosts, and Error carries the removal failure's detail (issue 211).
 type QuadletMoveResponse struct {
 	// Unique identifier for the quadlet (the quadlet name, extension
 	// included — the transfer keeps the source's file name verbatim).
@@ -599,15 +599,15 @@ type QuadletMoveResponse struct {
 	Resource string `json:"resource"`
 	// Status of the transfer: "copied", "moved", or "partial".
 	Status string `json:"status"`
-	// SourceMachineID is the machine the quadlet was transferred from.
-	SourceMachineID string `json:"sourceMachineId"`
-	// TargetMachineID is the machine the quadlet was installed on.
-	TargetMachineID string `json:"targetMachineId"`
+	// SourceHostID is the host the quadlet was transferred from.
+	SourceHostID string `json:"sourceHostId"`
+	// TargetHostID is the host the quadlet was installed on.
+	TargetHostID string `json:"targetHostId"`
 	// Path of the installed file on the target (populated when podman
 	// reports it back).
 	Path string `json:"path,omitempty"`
 	// Error details why the source removal failed when Status is
-	// "partial" — the quadlet exists on both machines and the source side
+	// "partial" — the quadlet exists on both hosts and the source side
 	// must be cleaned up manually. Empty otherwise.
 	Error string `json:"error,omitempty"`
 	// VolumeMigration reports the data phase's per-volume outcomes when
@@ -690,12 +690,12 @@ type MoveError struct {
 // (issue 214). Volume events carry Ref/PodmanVolume/Phase (plus Bytes and
 // Reason where the phase has them); the terminal complete event carries
 // the transfer envelope; the terminal error event carries the mapped
-// code/message. All events share operationId, machineId, and timestamp —
+// code/message. All events share operationId, hostId, and timestamp —
 // the auto-update event shape.
 type QuadletMoveEvent struct {
 	OperationID  string               `json:"operationId"`
 	Type         string               `json:"type"`
-	MachineID    string               `json:"machineId"`
+	HostID       string               `json:"hostId"`
 	Ref          string               `json:"ref,omitempty"`
 	PodmanVolume string               `json:"podmanVolume,omitempty"`
 	Phase        string               `json:"phase,omitempty"`
@@ -707,11 +707,11 @@ type QuadletMoveEvent struct {
 }
 
 // NewQuadletMoveVolumeEvent wraps one data-phase progress event.
-func NewQuadletMoveVolumeEvent(operationID, machineID, phase, ref, podmanVolume string, bytes int64, reason string) QuadletMoveEvent {
+func NewQuadletMoveVolumeEvent(operationID, hostID, phase, ref, podmanVolume string, bytes int64, reason string) QuadletMoveEvent {
 	return QuadletMoveEvent{
 		OperationID:  operationID,
 		Type:         MoveEventTypeVolume,
-		MachineID:    machineID,
+		HostID:       hostID,
 		Ref:          ref,
 		PodmanVolume: podmanVolume,
 		Phase:        phase,
@@ -723,22 +723,22 @@ func NewQuadletMoveVolumeEvent(operationID, machineID, phase, ref, podmanVolume 
 
 // NewQuadletMoveCompleteEvent builds the terminal complete event carrying
 // the transfer envelope.
-func NewQuadletMoveCompleteEvent(operationID, machineID string, result QuadletMoveResponse) QuadletMoveEvent {
+func NewQuadletMoveCompleteEvent(operationID, hostID string, result QuadletMoveResponse) QuadletMoveEvent {
 	return QuadletMoveEvent{
 		OperationID: operationID,
 		Type:        MoveEventTypeComplete,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Result:      &result,
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
 }
 
 // NewQuadletMoveErrorEvent builds the terminal error event.
-func NewQuadletMoveErrorEvent(operationID, machineID, code, message string) QuadletMoveEvent {
+func NewQuadletMoveErrorEvent(operationID, hostID, code, message string) QuadletMoveEvent {
 	return QuadletMoveEvent{
 		OperationID: operationID,
 		Type:        MoveEventTypeError,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Error:       &MoveError{Code: code, Message: message},
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
@@ -757,7 +757,7 @@ const (
 // QuadletMovePreviewSecret is one `Secret=` reference in the move/copy
 // preview (issue 215). The scan is type-generic — every `Secret=` line of
 // the content counts, whatever the quadlet's resource type. The existence
-// claims mean "in the machine's podman secret store" and are only
+// claims mean "in the host's podman secret store" and are only
 // meaningful for kind secret entries; a hostPath entry renders both false
 // (no existence claims), the same way host-path volume entries do.
 type QuadletMovePreviewSecret struct {
@@ -768,11 +768,11 @@ type QuadletMovePreviewSecret struct {
 	// Kind labels the reference: "secret" (a podman secret) or "hostPath"
 	// (an absolute-path source read off the host filesystem).
 	Kind string `json:"kind"`
-	// ExistsOnSource reports whether the source machine's podman secret
+	// ExistsOnSource reports whether the source host's podman secret
 	// store holds this name. A false here is an honest dangling entry,
 	// not an error.
 	ExistsOnSource bool `json:"existsOnSource"`
-	// ExistsOnTarget reports whether the target machine's podman secret
+	// ExistsOnTarget reports whether the target host's podman secret
 	// store holds this name (read through the connection seam, like the
 	// collision check).
 	ExistsOnTarget bool `json:"existsOnTarget"`

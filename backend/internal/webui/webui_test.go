@@ -63,7 +63,7 @@ func TestWebUI_ServesHashedAssetsImmutable(t *testing.T) {
 }
 
 func TestWebUI_FallsBackOnRouteShapedMiss(t *testing.T) {
-	rec := perform(t, webui.New(testBundle()), http.MethodGet, "/machines/xyz")
+	rec := perform(t, webui.New(testBundle()), http.MethodGet, "/hosts/xyz")
 
 	require.Equal(t, http.StatusOK, rec.Code,
 		"client-side routes must get the SPA, not a 404")
@@ -105,7 +105,7 @@ func TestWebUI_HeadRequestsAreServed(t *testing.T) {
 }
 
 func TestWebUI_RejectsNonGetMethods(t *testing.T) {
-	rec := perform(t, webui.New(testBundle()), http.MethodPost, "/machines/xyz")
+	rec := perform(t, webui.New(testBundle()), http.MethodPost, "/hosts/xyz")
 
 	assert.Equal(t, http.StatusMethodNotAllowed, rec.Code,
 		"a POST to a non-API path is a caller bug — refuse it instead of serving HTML")

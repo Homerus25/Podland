@@ -19,7 +19,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 // services; the dependency direction stays features → shared.
 const LOG_SOURCES: Record<
 	LogKind,
-	(machineId: string, targetId: string) => LogSource
+	(hostId: string, targetId: string) => LogSource
 > = {
 	container: containerLogs,
 	quadlet: quadletLogs,
@@ -30,8 +30,8 @@ const LOG_SOURCES: Record<
 // here instead of opening a small modal, so logs get the whole viewport.
 // A friendly display name travels via navigation state when available.
 export function LogsPage() {
-	const { machineId, kind, targetId } = useParams<{
-		machineId: string;
+	const { hostId, kind, targetId } = useParams<{
+		hostId: string;
 		kind: string;
 		targetId: string;
 	}>();
@@ -42,11 +42,11 @@ export function LogsPage() {
 	const [isDownloading, setIsDownloading] = useState(false);
 	const toast = useToast();
 
-	if (!machineId || !targetId || !isLogKind(kind)) {
+	if (!hostId || !targetId || !isLogKind(kind)) {
 		return null;
 	}
 
-	const source = LOG_SOURCES[kind](machineId, targetId);
+	const source = LOG_SOURCES[kind](hostId, targetId);
 
 	// One-shot snapshot download: fetches the entire history through the
 	// source's fetch-all and saves it as a file. It never touches the

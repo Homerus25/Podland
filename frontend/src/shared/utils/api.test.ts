@@ -4,8 +4,8 @@ import {
 	getApiError,
 	getBearerToken,
 	handleUnauthorized,
-	machineApiPath,
-	machineApiUrl,
+	hostApiPath,
+	hostApiUrl,
 	refreshSession,
 	setBearerToken,
 	setSessionExpiredHandler,
@@ -36,38 +36,36 @@ describe("api client", () => {
 	});
 });
 
-describe("machineApiPath", () => {
-	it("encodes every segment, machineId first", () => {
-		expect(machineApiPath("m 1", "containers", "c/1")).toBe(
-			"/machines/m%201/containers/c%2F1",
+describe("hostApiPath", () => {
+	it("encodes every segment, hostId first", () => {
+		expect(hostApiPath("m 1", "containers", "c/1")).toBe(
+			"/hosts/m%201/containers/c%2F1",
 		);
 	});
 
-	it("emits the bare machine path with no extra segments", () => {
-		expect(machineApiPath("m-1")).toBe("/machines/m-1");
+	it("emits the bare host path with no extra segments", () => {
+		expect(hostApiPath("m-1")).toBe("/hosts/m-1");
 	});
 });
 
-describe("machineApiUrl", () => {
+describe("hostApiUrl", () => {
 	afterEach(() => {
 		vi.unstubAllEnvs();
 		vi.resetModules();
 	});
 
 	it("prefixes the default base onto the encoded path", () => {
-		expect(machineApiUrl("m 1", "images", "pull")).toBe(
-			"/api/machines/m%201/images/pull",
+		expect(hostApiUrl("m 1", "images", "pull")).toBe(
+			"/api/hosts/m%201/images/pull",
 		);
 	});
 
 	it("strips a trailing slash from a configured base", async () => {
 		vi.stubEnv("VITE_API_BASE_URL", "https://backend.example/api/");
 		vi.resetModules();
-		const { machineApiUrl: withStubbedBase } = await import(
-			"@shared/utils/api"
-		);
+		const { hostApiUrl: withStubbedBase } = await import("@shared/utils/api");
 		expect(withStubbedBase("m-1", "volumes", "v", "export")).toBe(
-			"https://backend.example/api/machines/m-1/volumes/v/export",
+			"https://backend.example/api/hosts/m-1/volumes/v/export",
 		);
 	});
 
@@ -94,12 +92,10 @@ describe("machineApiUrl", () => {
 
 		vi.stubEnv("VITE_API_BASE_URL", "https://backend.example/api");
 		vi.resetModules();
-		const { machineApiUrl: withStubbedBase } = await import(
-			"@shared/utils/api"
-		);
+		const { hostApiUrl: withStubbedBase } = await import("@shared/utils/api");
 		const requests: URL[] = [];
 		server.use(
-			http.get("*/api/machines/m-1/volumes/shared/export", ({ request }) => {
+			http.get("*/api/hosts/m-1/volumes/shared/export", ({ request }) => {
 				requests.push(new URL(request.url));
 				return HttpResponse.arrayBuffer(new ArrayBuffer(0), {
 					headers: { "Content-Type": "application/x-tar" },
@@ -114,9 +110,7 @@ describe("machineApiUrl", () => {
 
 		expect(requests).toHaveLength(1);
 		expect(requests[0].origin).toBe("https://backend.example");
-		expect(requests[0].pathname).toBe(
-			"/api/machines/m-1/volumes/shared/export",
-		);
+		expect(requests[0].pathname).toBe("/api/hosts/m-1/volumes/shared/export");
 	});
 });
 
@@ -358,9 +352,9 @@ describe("401 policy", () => {
 		});
 	}
 
-	function machinesHandler(respond: (call: number) => Response) {
+	function hostsHandler(respond: (call: number) => Response) {
 		let calls = 0;
-		return http.get("*/api/machines", () => respond(++calls));
+		return http.get("*/api/hosts", () => respond(++calls));
 	}
 
 	function unauthorized(call: number) {
@@ -384,39 +378,39 @@ describe("401 policy", () => {
 	});
 
 	it("refreshes once and replays the 401ing request so it resolves normally", async () => {
-		let machineCalls = 0;
+		let hostCalls = 0;
 		let replayAuthorization: string | null = null;
 		server.use(
 			refreshHandler(),
-			http.get("*/api/machines", ({ request }) => {
-				machineCalls++;
-				if (machineCalls === 1) return unauthorized(machineCalls);
+			http.get("*/api/hosts", ({ request }) => {
+				hostCalls++;
+				if (hostCalls === 1) return unauthorized(hostCalls);
 				replayAuthorization = request.headers.get("authorization");
 				return HttpResponse.json([]);
 			}),
 		);
 		setBearerToken("expired-access-token");
 
-		const response = await api.get("/machines");
+		const response = await api.get("/hosts");
 
 		expect(response.status).toBe(200);
 		expect(refreshCalls).toBe(1);
-		expect(machineCalls).toBe(2);
+		expect(hostCalls).toBe(2);
 		expect(replayAuthorization).toBe("Bearer fresh-access-token");
 	});
 
 	it("shares one refresh across concurrent 401s and replays every queued caller", async () => {
 		server.use(
 			refreshHandler("fresh-access-token", 20),
-			machinesHandler((call) =>
+			hostsHandler((call) =>
 				call <= 2 ? unauthorized(call) : HttpResponse.json([]),
 			),
 		);
 		setBearerToken("expired-access-token");
 
 		const [first, second] = await Promise.all([
-			api.get("/machines"),
-			api.get("/machines"),
+			api.get("/hosts"),
+			api.get("/hosts"),
 		]);
 
 		expect(first.status).toBe(200);
@@ -427,7 +421,7 @@ describe("401 policy", () => {
 	it("fires the seam exactly once and rejects with the original 401 when refresh is rejected", async () => {
 		server.use(
 			rejectedRefreshHandler(),
-			machinesHandler(() => unauthorized(1)),
+			hostsHandler(() => unauthorized(1)),
 		);
 		setBearerToken("expired-access-token");
 		setSessionExpiredHandler(() => {
@@ -436,7 +430,7 @@ describe("401 policy", () => {
 
 		let caught: AxiosError | undefined;
 		try {
-			await api.get("/machines");
+			await api.get("/hosts");
 		} catch (error) {
 			caught = error as AxiosError;
 		}
@@ -455,14 +449,14 @@ describe("401 policy", () => {
 				refreshCalls++;
 				return HttpResponse.error();
 			}),
-			machinesHandler(() => unauthorized(1)),
+			hostsHandler(() => unauthorized(1)),
 		);
 		setBearerToken("expired-access-token");
 		setSessionExpiredHandler(() => {
 			seamCalls++;
 		});
 
-		await expect(api.get("/machines")).rejects.toMatchObject({
+		await expect(api.get("/hosts")).rejects.toMatchObject({
 			response: { status: 401 },
 		});
 		expect(seamCalls).toBe(1);
@@ -471,7 +465,7 @@ describe("401 policy", () => {
 	it("goes straight to session death when the replayed request 401s again", async () => {
 		server.use(
 			refreshHandler(),
-			machinesHandler((call) => unauthorized(call)),
+			hostsHandler((call) => unauthorized(call)),
 		);
 		setBearerToken("expired-access-token");
 		setSessionExpiredHandler(() => {
@@ -480,7 +474,7 @@ describe("401 policy", () => {
 
 		let caught: AxiosError | undefined;
 		try {
-			await api.get("/machines");
+			await api.get("/hosts");
 		} catch (error) {
 			caught = error as AxiosError;
 		}
@@ -518,11 +512,11 @@ describe("401 policy", () => {
 	it("treats seam firing with no handler registered as a no-op", async () => {
 		server.use(
 			rejectedRefreshHandler(),
-			machinesHandler(() => unauthorized(1)),
+			hostsHandler(() => unauthorized(1)),
 		);
 		setBearerToken("expired-access-token");
 
-		await expect(api.get("/machines")).rejects.toMatchObject({
+		await expect(api.get("/hosts")).rejects.toMatchObject({
 			response: { status: 401 },
 		});
 	});
@@ -530,20 +524,20 @@ describe("401 policy", () => {
 	it("re-arms the seam once a new token is installed after session death", async () => {
 		server.use(
 			rejectedRefreshHandler(),
-			machinesHandler(() => unauthorized(1)),
+			hostsHandler(() => unauthorized(1)),
 		);
 		setSessionExpiredHandler(() => {
 			seamCalls++;
 		});
 
 		setBearerToken("first-session-token");
-		await expect(api.get("/machines")).rejects.toMatchObject({
+		await expect(api.get("/hosts")).rejects.toMatchObject({
 			response: { status: 401 },
 		});
 		expect(seamCalls).toBe(1);
 
 		setBearerToken("second-session-token");
-		await expect(api.get("/machines")).rejects.toMatchObject({
+		await expect(api.get("/hosts")).rejects.toMatchObject({
 			response: { status: 401 },
 		});
 		expect(seamCalls).toBe(2);

@@ -16,10 +16,10 @@ export interface PullThenRetry {
 // error fires the caller's post-pull callback exactly once, and a pull
 // that settles with an error fires nothing.
 export function usePullThenRetry(
-	machineId: string,
+	hostId: string,
 	onPulled: () => void,
 ): PullThenRetry {
-	const pullImage = usePullImage(machineId);
+	const pullImage = usePullImage(hostId);
 
 	// A ref, not state: the retry decision must not depend on render
 	// timing. The caller's re-render storm (its own mutation pending

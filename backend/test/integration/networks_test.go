@@ -17,30 +17,30 @@ import (
 )
 
 // Test_Integration_Networks_List is the networks list vertical slice
-// (247). It proves GET /api/machines/{id}/networks against a real
+// (247). It proves GET /api/hosts/{id}/networks against a real
 // podman over the SSH connection seam — not just the fake engine:
 //
-//	GET /api/machines/{id}/networks → 200, JSON array
+//	GET /api/hosts/{id}/networks → 200, JSON array
 //
-// The machine is registered through the public API by TestMain (the
+// The host is registered through the public API by TestMain (the
 // harness boots the test host per the run-scoped-tag isolation model).
 // Assertions pin the DTO contract (name, driver, subnets as CIDR
 // strings, createdAt) on two fixtures: the default bridge network
 // podman pre-creates, and a run-scoped network created via the podman
-// CLI over the machine connection (scaffolding, not the SUT) so the
-// list is proven to reflect the machine's real state. Isolation
+// CLI over the host connection (scaffolding, not the SUT) so the
+// list is proven to reflect the host's real state. Isolation
 // follows the house model: run-scoped name, per-test t.Cleanup,
 // suite sweep for aborts.
 func Test_Integration_Networks_List(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerNetworksSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// --- AC: the default bridge network podman pre-creates appears
 	// with its driver and subnet ----------------------------------------
 	t.Run("DefaultBridgeNetworkListed", func(t *testing.T) {
-		networks := listNetworks(t, machineID)
+		networks := listNetworks(t, hostID)
 
 		var found *networkDTO
 		for i := range networks {
@@ -59,7 +59,7 @@ func Test_Integration_Networks_List(t *testing.T) {
 		assert.NotEmpty(t, found.CreatedAt, "createdAt must be reported")
 	})
 
-	// --- AC: a run-scoped network created over the machine connection
+	// --- AC: a run-scoped network created over the host connection
 	// appears with its configured subnet — the list reflects real podman
 	// state, not a canned default ----------------------------------------
 	t.Run("RunScopedNetworkAppearsInList", func(t *testing.T) {
@@ -80,7 +80,7 @@ func Test_Integration_Networks_List(t *testing.T) {
 			networkName)
 		require.NoError(t, err, "network create must succeed: %s", strings.TrimSpace(out))
 
-		networks := listNetworks(t, machineID)
+		networks := listNetworks(t, hostID)
 
 		var found *networkDTO
 		for i := range networks {
@@ -97,9 +97,9 @@ func Test_Integration_Networks_List(t *testing.T) {
 }
 
 // --- Access-control behavior (middleware, shared with all downstream
-// families): networks rides the same RequireMachineAccess subtree, so
-// a no-access user gets 403 ACCESS_DENIED and an unknown machine ID
-// gets 404 MACHINE_NOT_FOUND, both with the standard error envelope.
+// families): networks rides the same RequireHostAccess subtree, so
+// a no-access user gets 403 ACCESS_DENIED and an unknown host ID
+// gets 404 HOST_NOT_FOUND, both with the standard error envelope.
 func Test_Integration_Networks_AccessControl(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 
@@ -107,14 +107,14 @@ func Test_Integration_Networks_AccessControl(t *testing.T) {
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		expectAPIError(t, client, http.MethodGet,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/networks",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/networks",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
-	t.Run("UnknownMachineGets404", func(t *testing.T) {
+	t.Run("UnknownHostGets404", func(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
-			suite.ServerURL+"/api/machines/00000000-0000-0000-0000-000000000000/networks",
-			"", http.StatusNotFound, "MACHINE_NOT_FOUND")
+			suite.ServerURL+"/api/hosts/00000000-0000-0000-0000-000000000000/networks",
+			"", http.StatusNotFound, "HOST_NOT_FOUND")
 	})
 }
 
@@ -126,12 +126,12 @@ type networkDTO struct {
 	CreatedAt string   `json:"createdAt"`
 }
 
-// listNetworks GETs /api/machines/{id}/networks and decodes the JSON
+// listNetworks GETs /api/hosts/{id}/networks and decodes the JSON
 // array.
-func listNetworks(t *testing.T, machineID string) []networkDTO {
+func listNetworks(t *testing.T, hostID string) []networkDTO {
 	t.Helper()
 
-	resp, err := suite.AuthenticatedClient().Get(suite.ServerURL + "/api/machines/" + machineID + "/networks")
+	resp, err := suite.AuthenticatedClient().Get(suite.ServerURL + "/api/hosts/" + hostID + "/networks")
 	require.NoError(t, err, "GET /networks must connect to the in-process server")
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)

@@ -27,7 +27,7 @@ type moveErrorEnvelope struct {
 }
 
 // newMoveTestHandler builds the handler over the real service with
-// per-machine fake engines, a source-machine usage fake, and a
+// per-host fake engines, a source-host usage fake, and a
 // write-allowing access store — the wiring the move endpoints exercise.
 func newMoveTestHandler(sourceEngine, targetEngine *fakeVolumeEngine, usage *fakeUsageEngine) *VolumeHandler {
 	service := newMoveTestService(sourceEngine, targetEngine, usage,
@@ -50,9 +50,9 @@ func TestVolumeHandler_MovePreview_ReturnsPreview(t *testing.T) {
 
 	w := testutils.Perform(newMoveTestHandler(moveSourceFixture(t), emptyTargetFixture(), usage).MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/volumes/pgdata/move-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/volumes/pgdata/move-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "volumeName": "pgdata"},
+		URLParams: map[string]string{"id": "host-a", "volumeName": "pgdata"},
 	})
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -68,40 +68,40 @@ func TestVolumeHandler_MovePreview_ReturnsPreview(t *testing.T) {
 func TestVolumeHandler_MovePreview_EmptyQuadletsRendersAsArray(t *testing.T) {
 	w := testutils.Perform(newMoveTestHandler(moveSourceFixture(t), emptyTargetFixture(), idleUsageFixture()).MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/volumes/pgdata/move-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/volumes/pgdata/move-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "volumeName": "pgdata"},
+		URLParams: map[string]string{"id": "host-a", "volumeName": "pgdata"},
 	})
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.JSONEq(t, `{"collision":false,"inUse":false,"referencingQuadlets":[]}`, w.Body.String(),
-		"a machine without quadlets must render an empty JSON array, not null")
+		"a host without quadlets must render an empty JSON array, not null")
 }
 
 func TestVolumeHandler_MovePreview_MissingVolumeNameIs400(t *testing.T) {
 	w := testutils.Perform(newMoveTestHandler(&fakeVolumeEngine{}, &fakeVolumeEngine{}, idleUsageFixture()).MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/volumes//move-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/volumes//move-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "volumeName": ""},
+		URLParams: map[string]string{"id": "host-a", "volumeName": ""},
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestVolumeHandler_MovePreview_MissingTargetMachineIDIs400(t *testing.T) {
+func TestVolumeHandler_MovePreview_MissingTargetHostIDIs400(t *testing.T) {
 	w := testutils.Perform(newMoveTestHandler(&fakeVolumeEngine{}, &fakeVolumeEngine{}, idleUsageFixture()).MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/volumes/pgdata/move-preview",
+		Path:      "/api/hosts/host-a/volumes/pgdata/move-preview",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "volumeName": "pgdata"},
+		URLParams: map[string]string{"id": "host-a", "volumeName": "pgdata"},
 	})
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 
 	var errResp moveErrorEnvelope
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
-	assert.Equal(t, "MISSING_TARGET_MACHINE_ID", errResp.Error.Code)
+	assert.Equal(t, "MISSING_TARGET_HOST_ID", errResp.Error.Code)
 }
 
 func TestVolumeHandler_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
@@ -122,9 +122,9 @@ func TestVolumeHandler_MovePreview_TargetAccessDeniedIs403(t *testing.T) {
 
 	w := testutils.Perform(handler.MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/volumes/pgdata/move-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/volumes/pgdata/move-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "volumeName": "pgdata"},
+		URLParams: map[string]string{"id": "host-a", "volumeName": "pgdata"},
 	})
 
 	require.Equal(t, http.StatusForbidden, w.Code)
@@ -141,9 +141,9 @@ func TestVolumeHandler_MovePreview_MissingSourceVolumeIs404(t *testing.T) {
 
 	w := testutils.Perform(newMoveTestHandler(source, emptyTargetFixture(), idleUsageFixture()).MovePreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/volumes/gone/move-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/volumes/gone/move-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "volumeName": "gone"},
+		URLParams: map[string]string{"id": "host-a", "volumeName": "gone"},
 	})
 
 	require.Equal(t, http.StatusNotFound, w.Code)
@@ -174,13 +174,13 @@ func parseMoveNDJSON(t *testing.T, body string) []VolumeMoveEvent {
 }
 
 // moveRequest performs a POST move through the handler with the given
-// JSON body and the standard machine and volume params.
+// JSON body and the standard host and volume params.
 func moveRequest(handler *VolumeHandler, body string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler.Move, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/machine-a/volumes/pgdata/move",
+		Path:      "/api/hosts/host-a/volumes/pgdata/move",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "volumeName": "pgdata"},
+		URLParams: map[string]string{"id": "host-a", "volumeName": "pgdata"},
 		Body:      strings.NewReader(body),
 	})
 }
@@ -195,7 +195,7 @@ func TestVolumeHandler_Move_StreamsNDJSON(t *testing.T) {
 	}
 	handler := newMoveTestHandler(moveSourceFixture(t), target, idleUsageFixture())
 
-	w := moveRequest(handler, `{"targetMachineId":"machine-b","mode":"copy"}`)
+	w := moveRequest(handler, `{"targetHostId":"host-b","mode":"copy"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -205,7 +205,7 @@ func TestVolumeHandler_Move_StreamsNDJSON(t *testing.T) {
 	assert.Equal(t, VolumeMoveEventTypeVolume, events[0].Type)
 	assert.Equal(t, VolumeMovePhaseStart, events[0].Phase)
 	assert.Equal(t, "pgdata", events[0].Volume)
-	assert.Equal(t, "machine-a", events[0].MachineID)
+	assert.Equal(t, "host-a", events[0].HostID)
 	assert.NotEmpty(t, events[0].OperationID, "the transport stamps its operation ID")
 	assert.NotEmpty(t, events[0].Timestamp)
 
@@ -216,21 +216,21 @@ func TestVolumeHandler_Move_StreamsNDJSON(t *testing.T) {
 	require.NotNil(t, events[2].Result)
 	assert.Equal(t, VolumeMoveStatusCopied, events[2].Result.Status)
 	assert.Equal(t, "pgdata", events[2].Result.Name)
-	assert.Equal(t, "machine-a", events[2].Result.SourceMachineID)
-	assert.Equal(t, "machine-b", events[2].Result.TargetMachineID)
+	assert.Equal(t, "host-a", events[2].Result.SourceHostID)
+	assert.Equal(t, "host-b", events[2].Result.TargetHostID)
 	assert.Greater(t, events[2].Result.Bytes, int64(0))
 	assert.NotEmpty(t, imported, "the data crossed the splice")
 
 	for _, event := range events {
 		assert.Equal(t, events[0].OperationID, event.OperationID)
-		assert.Equal(t, "machine-a", event.MachineID)
+		assert.Equal(t, "host-a", event.HostID)
 	}
 }
 
 func TestVolumeHandler_Move_MoveModeCompleteEventIsMoved(t *testing.T) {
 	handler := newMoveTestHandler(movableSourceFixture(t), emptyTargetFixture(), idleUsageFixture())
 
-	w := moveRequest(handler, `{"targetMachineId":"machine-b","mode":"move"}`)
+	w := moveRequest(handler, `{"targetHostId":"host-b","mode":"move"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -247,10 +247,10 @@ func TestVolumeHandler_Move_MissingVolumeNameIs400(t *testing.T) {
 
 	w := testutils.Perform(handler.Move, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/machine-a/volumes//move",
+		Path:      "/api/hosts/host-a/volumes//move",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "volumeName": ""},
-		Body:      strings.NewReader(`{"targetMachineId":"machine-b","mode":"copy"}`),
+		URLParams: map[string]string{"id": "host-a", "volumeName": ""},
+		Body:      strings.NewReader(`{"targetHostId":"host-b","mode":"copy"}`),
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -263,8 +263,8 @@ func TestVolumeHandler_Move_BodyValidationIs400(t *testing.T) {
 		want string
 	}{
 		{name: "malformed JSON", body: `{`, want: "INVALID_REQUEST"},
-		{name: "missing targetMachineId", body: `{"mode":"copy"}`, want: "VALIDATION_FAILED"},
-		{name: "mode other than copy/move", body: `{"targetMachineId":"machine-b","mode":"teleport"}`, want: "VALIDATION_FAILED"},
+		{name: "missing targetHostId", body: `{"mode":"copy"}`, want: "VALIDATION_FAILED"},
+		{name: "mode other than copy/move", body: `{"targetHostId":"host-b","mode":"teleport"}`, want: "VALIDATION_FAILED"},
 	}
 
 	for _, tt := range tests {
@@ -296,7 +296,7 @@ func TestVolumeHandler_Move_CollisionIsTerminalErrorEvent(t *testing.T) {
 	}
 	handler := newMoveTestHandler(moveSourceFixture(t), target, idleUsageFixture())
 
-	w := moveRequest(handler, `{"targetMachineId":"machine-b","mode":"copy"}`)
+	w := moveRequest(handler, `{"targetHostId":"host-b","mode":"copy"}`)
 
 	require.Equal(t, http.StatusOK, w.Code, "the stream itself succeeds; the failure rides the terminal event")
 
@@ -321,7 +321,7 @@ func TestVolumeHandler_Move_RollbackRidesTerminalErrorEvent(t *testing.T) {
 	}
 	handler := newMoveTestHandler(moveSourceFixture(t), target, idleUsageFixture())
 
-	w := moveRequest(handler, `{"targetMachineId":"machine-b","mode":"copy"}`)
+	w := moveRequest(handler, `{"targetHostId":"host-b","mode":"copy"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -346,7 +346,7 @@ func TestVolumeHandler_Move_PartialRidesCompleteEvent(t *testing.T) {
 	}
 	handler := newMoveTestHandler(source, emptyTargetFixture(), idleUsageFixture())
 
-	w := moveRequest(handler, `{"targetMachineId":"machine-b","mode":"move"}`)
+	w := moveRequest(handler, `{"targetHostId":"host-b","mode":"move"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 

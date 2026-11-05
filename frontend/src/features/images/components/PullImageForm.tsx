@@ -13,8 +13,8 @@ import { useState } from "react";
 
 // Pulls an image by reference, rendering the backend's NDJSON progress
 // stream live: status text, a byte progress bar, and a cancel button.
-export function PullImageForm({ machineId }: { machineId: string }) {
-	const { isPulling, progress, error, pull, cancel } = usePullImage(machineId);
+export function PullImageForm({ hostId }: { hostId: string }) {
+	const { isPulling, progress, error, pull, cancel } = usePullImage(hostId);
 	const [imageRef, setImageRef] = useState("");
 
 	return (

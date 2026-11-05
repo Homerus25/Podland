@@ -1,4 +1,5 @@
 import { Box, Button, Td, Text, Tr, useToast } from "@chakra-ui/react";
+import { can } from "@features/hosts/permissions";
 import { CopyImageDialog } from "@features/images/components/CopyImageDialog";
 import { displayTags } from "@features/images/components/imageDisplayTags";
 import { PullImageForm } from "@features/images/components/PullImageForm";
@@ -11,12 +12,11 @@ import {
 	type ImageSummary,
 	imageExportUrl,
 } from "@features/images/services/imagesApi";
-import { can } from "@features/machines/permissions";
 import { ForceConfirmDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { downloadFile } from "@shared/utils/download";
 import {
@@ -55,8 +55,8 @@ function DeleteImageModal({
 			confirm={(force) => ({ imageId: image.id, force })}
 			body={
 				<Text>
-					Delete {displayTags(image)} ({shortImageId(image.id)}) from this
-					machine? This cannot be undone.
+					Delete {displayTags(image)} ({shortImageId(image.id)}) from this host?
+					This cannot be undone.
 				</Text>
 			}
 		/>
@@ -85,22 +85,22 @@ function PruneImagesModal({
 	);
 }
 
-// The Images tab body. The toolbar/triad/table machinery, the plural testids,
+// The Images tab body. The toolbar/triad/table plumbing, the plural testids,
 // and the hint swap are ResourceList's; this adapter owns only the columns,
 // the row, and the pull/prune/delete feature code. The pull form is a write,
 // so it rides the gated toolbar: a flex box first keeps it left-aligned with
 // the prune button right-aligned, and below the write-gated manage capability
 // the module swaps the whole toolbar for the canonical read hint.
-export function ImageList({ machine }: { machine: Machine }) {
-	const machineId = machine.id;
-	const { data: images, isPending, error } = useImages(machineId);
-	const deleteImage = useDeleteImage(machineId);
-	const pruneImages = usePruneImages(machineId);
+export function ImageList({ host }: { host: Host }) {
+	const hostId = host.id;
+	const { data: images, isPending, error } = useImages(hostId);
+	const deleteImage = useDeleteImage(hostId);
+	const pruneImages = usePruneImages(hostId);
 	const [pendingDelete, setPendingDelete] = useState<ImageSummary | null>(null);
 	const [pendingCopy, setPendingCopy] = useState<ImageSummary | null>(null);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [downloadingId, setDownloadingId] = useState<string | null>(null);
-	const canManage = can(machine, "manage-images");
+	const canManage = can(host, "manage-images");
 	const navigate = useNavigate();
 	const toast = useToast();
 
@@ -112,7 +112,7 @@ export function ImageList({ machine }: { machine: Machine }) {
 	const handleDownload = async (image: ImageSummary) => {
 		setDownloadingId(image.id);
 		try {
-			await downloadFile(imageExportUrl(machineId, image.id));
+			await downloadFile(imageExportUrl(hostId, image.id));
 		} catch (error) {
 			// The delete modal's naming composite: tags alone render
 			// "<none>" for an untagged image, so the short ID names it.
@@ -149,7 +149,7 @@ export function ImageList({ machine }: { machine: Machine }) {
 						key={image.id}
 						data-testid="image-row"
 						cursor="pointer"
-						onClick={() => navigate(detailPath(machineId, "images", image.id))}
+						onClick={() => navigate(detailPath(hostId, "images", image.id))}
 					>
 						<Td fontFamily="mono">{displayTags(image)}</Td>
 						<Td fontFamily="mono" color="gray.500">
@@ -175,14 +175,14 @@ export function ImageList({ machine }: { machine: Machine }) {
 									size="xs"
 									colorScheme="blue"
 									variant="outline"
-									aria-label={`Copy ${displayTags(image)} to another machine`}
+									aria-label={`Copy ${displayTags(image)} to another host`}
 									onClick={(event) => {
 										event.stopPropagation();
 										setPendingCopy(image);
 									}}
 									data-testid="copy-image-button"
 								>
-									Copy to machine
+									Copy to host
 								</Button>
 							) : null}
 							<Button
@@ -202,7 +202,7 @@ export function ImageList({ machine }: { machine: Machine }) {
 				)}
 				toolbar={[
 					<Box key="pull-image-form" flex={1}>
-						<PullImageForm machineId={machineId} />
+						<PullImageForm hostId={hostId} />
 					</Box>,
 					<Button
 						key="prune-images-button"
@@ -217,7 +217,7 @@ export function ImageList({ machine }: { machine: Machine }) {
 					</Button>,
 				]}
 				canManage={canManage}
-				emptyMessage="No images on this machine yet. Pull one to get started."
+				emptyMessage="No images on this host yet. Pull one to get started."
 			/>
 			{isPruneOpen ? (
 				<PruneImagesModal
@@ -234,7 +234,7 @@ export function ImageList({ machine }: { machine: Machine }) {
 			) : null}
 			{pendingCopy ? (
 				<CopyImageDialog
-					machine={machine}
+					host={host}
 					image={pendingCopy}
 					onClose={() => setPendingCopy(null)}
 				/>

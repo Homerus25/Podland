@@ -49,7 +49,7 @@ type UserResponse struct {
 }
 
 // UserSummaryResponse is the minimal wire representation of a user:
-// id + username, enough to pick a person when sharing a machine. Every
+// id + username, enough to pick a person when sharing a host. Every
 // authenticated caller receives it; only admins receive the full
 // UserResponse on top (see UserHandler.List).
 type UserSummaryResponse struct {

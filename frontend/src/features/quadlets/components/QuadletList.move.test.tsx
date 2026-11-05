@@ -3,14 +3,14 @@ import type {
 	QuadletMovePreview,
 	QuadletSummary,
 } from "@features/quadlets/services/quadletsApi";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
 import {
-	machineFixture,
+	hostFixture,
 	quadletFixture,
 	quadletMoveCompanionVolumeFixture,
 	quadletMoveDataVolumeFixture,
@@ -51,10 +51,10 @@ const secretPreview = {
 	],
 };
 
-const source = machineFixture();
-const staging = machineFixture({ id: "m-2", name: "staging-01" });
-const backup = machineFixture({ id: "m-4", name: "backup-01" });
-const readOnly = machineFixture({
+const source = hostFixture();
+const staging = hostFixture({ id: "m-2", name: "staging-01" });
+const backup = hostFixture({ id: "m-4", name: "backup-01" });
+const readOnly = hostFixture({
 	id: "m-3",
 	name: "laptop-01",
 	permission: "read",
@@ -75,30 +75,30 @@ function resetCounters() {
 }
 
 function quadletsHandler(quadlets: () => QuadletSummary[]) {
-	return http.get("*/api/machines/m-1/quadlets", () =>
+	return http.get("*/api/hosts/m-1/quadlets", () =>
 		HttpResponse.json(quadlets()),
 	);
 }
 
 // The quadlets list with a fetch counter, for suites that assert the
-// both-machines invalidation as a real refetch (issue 214's stream path).
+// both-hosts invalidation as a real refetch (issue 214's stream path).
 function countingQuadletsHandler(quadlets: () => QuadletSummary[]) {
-	return http.get("*/api/machines/m-1/quadlets", () => {
+	return http.get("*/api/hosts/m-1/quadlets", () => {
 		quadletFetches++;
 		return HttpResponse.json(quadlets());
 	});
 }
 
-function machinesHandler(machines: Machine[]) {
-	return http.get("*/api/machines", () => HttpResponse.json(machines));
+function hostsHandler(hosts: Host[]) {
+	return http.get("*/api/hosts", () => HttpResponse.json(hosts));
 }
 
 function previewHandler(overrides: Partial<QuadletMovePreview> = {}) {
 	return http.get(
-		"*/api/machines/m-1/quadlets/web/move-preview",
+		"*/api/hosts/m-1/quadlets/web/move-preview",
 		({ request }) => {
 			previewTargets.push(
-				new URL(request.url).searchParams.get("targetMachineId") ?? "",
+				new URL(request.url).searchParams.get("targetHostId") ?? "",
 			);
 			return HttpResponse.json(quadletMovePreviewFixture(overrides));
 		},
@@ -110,16 +110,13 @@ function moveHandler(
 	body: JsonBodyType = quadletMoveResultFixture(),
 	onMoved?: () => void,
 ) {
-	return http.post(
-		"*/api/machines/m-1/quadlets/web/move",
-		async ({ request }) => {
-			moveRequests.count++;
-			moveRequests.body = (await request.json()) as Record<string, unknown>;
-			if (status !== 200) return HttpResponse.json(body, { status });
-			onMoved?.();
-			return HttpResponse.json(body);
-		},
-	);
+	return http.post("*/api/hosts/m-1/quadlets/web/move", async ({ request }) => {
+		moveRequests.count++;
+		moveRequests.body = (await request.json()) as Record<string, unknown>;
+		if (status !== 200) return HttpResponse.json(body, { status });
+		onMoved?.();
+		return HttpResponse.json(body);
+	});
 }
 
 // The migrating transport (issue 214): the same endpoint answered as NDJSON
@@ -127,14 +124,11 @@ function moveHandler(
 // own event vocabulary, not the shared stream kit's.
 function moveStreamHandler(events: Record<string, unknown>[], live = false) {
 	const chunks = events.map((event) => `${JSON.stringify(event)}\n`);
-	return http.post(
-		"*/api/machines/m-1/quadlets/web/move",
-		async ({ request }) => {
-			moveRequests.count++;
-			moveRequests.body = (await request.json()) as Record<string, unknown>;
-			return live ? liveNdjsonResponse(chunks, 50) : ndjsonResponse([], chunks);
-		},
-	);
+	return http.post("*/api/hosts/m-1/quadlets/web/move", async ({ request }) => {
+		moveRequests.count++;
+		moveRequests.body = (await request.json()) as Record<string, unknown>;
+		return live ? liveNdjsonResponse(chunks, 50) : ndjsonResponse([], chunks);
+	});
 }
 
 // The live transport spaces its chunks with real timers so the narration
@@ -143,19 +137,19 @@ function moveStreamHandler(events: Record<string, unknown>[], live = false) {
 // test's finds state their own.
 const FIND_TIMEOUT = 5000;
 
-// The shared wiring every dialog test needs: the source list, the machines
+// The shared wiring every dialog test needs: the source list, the hosts
 // directory (the target picker's source), the preview, and the transfer.
 function useMoveHandlers() {
 	server.use(
 		quadletsHandler(() => [web]),
-		machinesHandler([source, staging, readOnly, backup]),
+		hostsHandler([source, staging, readOnly, backup]),
 		previewHandler(),
 		moveHandler(),
 	);
 }
 
 async function openMoveDialog() {
-	renderWithQuery(<QuadletList machine={source} />, { router: true });
+	renderWithQuery(<QuadletList host={source} />, { router: true });
 	const user = userEvent.setup();
 	await user.click(
 		await screen.findByRole("button", { name: "Move or copy web" }),
@@ -166,7 +160,7 @@ async function openMoveDialog() {
 
 async function openMoveDialogWithPreview() {
 	const user = await openMoveDialog();
-	// The default target (first writable machine) previews clean with volumes;
+	// The default target (first writable host) previews clean with volumes;
 	// the dialog needs the resolved warning before it can be driven further.
 	await screen.findByTestId("move-volume-warning");
 	return user;
@@ -194,7 +188,7 @@ describe("QuadletList move/copy", () => {
 		server.use(quadletsHandler(() => [web]));
 		renderWithQuery(
 			<QuadletList
-				machine={machineFixture({ permission: "read", isOwner: false })}
+				host={hostFixture({ permission: "read", isOwner: false })}
 			/>,
 			{ router: true },
 		);
@@ -208,7 +202,7 @@ describe("QuadletList move/copy", () => {
 		expect(screen.getAllByRole("columnheader")).toHaveLength(6);
 	});
 
-	it("offers one dialog listing only writable machines, source excluded", async () => {
+	it("offers one dialog listing only writable hosts, source excluded", async () => {
 		useMoveHandlers();
 		await openMoveDialog();
 
@@ -272,7 +266,7 @@ describe("QuadletList move/copy", () => {
 
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
@@ -284,7 +278,7 @@ describe("QuadletList move/copy", () => {
 		const user = await openMoveDialogWithPreview();
 
 		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's quadlet)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's quadlet)" }),
 		);
 
 		expect(screen.queryByTestId("move-stop-option")).not.toBeInTheDocument();
@@ -300,7 +294,7 @@ describe("QuadletList move/copy", () => {
 
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "copy",
 		});
 	});
@@ -308,7 +302,7 @@ describe("QuadletList move/copy", () => {
 	it("keeps the stranded-data warning in copy mode with the companion option off", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({
 				volumes: [quadletMoveCompanionVolumeFixture("absent"), hostPathVolume],
 			}),
@@ -317,7 +311,7 @@ describe("QuadletList move/copy", () => {
 		const user = await openMoveDialogWithPreview();
 
 		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's quadlet)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's quadlet)" }),
 		);
 		await user.click(
 			screen.getByRole("checkbox", {
@@ -341,7 +335,7 @@ describe("QuadletList move/copy", () => {
 	it("disables confirm on a collision with a clear message", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({ collision: true }),
 			moveHandler(),
 		);
@@ -364,9 +358,9 @@ describe("QuadletList move/copy", () => {
 	it("keeps confirm disabled while the preview is pending", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			http.get(
-				"*/api/machines/m-1/quadlets/web/move-preview",
+				"*/api/hosts/m-1/quadlets/web/move-preview",
 				() => new Promise<Response>(() => {}),
 			),
 		);
@@ -381,8 +375,8 @@ describe("QuadletList move/copy", () => {
 	it("shows a failed preview and keeps confirm disabled", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
-			http.get("*/api/machines/m-1/quadlets/web/move-preview", () =>
+			hostsHandler([source, staging, readOnly, backup]),
+			http.get("*/api/hosts/m-1/quadlets/web/move-preview", () =>
 				HttpResponse.json(
 					errorJson("ACCESS_DENIED", "Access denied", "req-71"),
 					{ status: 403 },
@@ -401,7 +395,7 @@ describe("QuadletList move/copy", () => {
 		let quadlets = [web];
 		server.use(
 			quadletsHandler(() => quadlets),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({ volumes: [] }),
 			moveHandler(200, quadletMoveResultFixture(), () => {
 				quadlets = [];
@@ -455,7 +449,7 @@ describe("QuadletList move/copy", () => {
 	it("surfaces a failed transfer in the error region and stays open", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({ volumes: [] }),
 			moveHandler(403, errorJson("ACCESS_DENIED", "Access denied", "req-72")),
 		);
@@ -483,7 +477,7 @@ describe("QuadletList move/copy", () => {
 	it("offers the companion option when the preview reports companions, defaulting on", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({
 				volumes: [quadletMoveCompanionVolumeFixture("absent"), hostPathVolume],
 			}),
@@ -505,7 +499,7 @@ describe("QuadletList move/copy", () => {
 	it("sends transferVolumeQuadlets: false when the companion option is unchecked", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({
 				volumes: [quadletMoveCompanionVolumeFixture("absent"), hostPathVolume],
 			}),
@@ -530,7 +524,7 @@ describe("QuadletList move/copy", () => {
 
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
@@ -541,7 +535,7 @@ describe("QuadletList move/copy", () => {
 	it("sends transferVolumeQuadlets: true in copy mode when the option stays checked", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({
 				volumes: [quadletMoveCompanionVolumeFixture("absent"), hostPathVolume],
 			}),
@@ -550,7 +544,7 @@ describe("QuadletList move/copy", () => {
 		const user = await openMoveDialogWithPreview();
 
 		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's quadlet)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's quadlet)" }),
 		);
 		await user.click(
 			screen.getByRole("checkbox", {
@@ -564,7 +558,7 @@ describe("QuadletList move/copy", () => {
 
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "copy",
 			transferVolumeQuadlets: true,
 		});
@@ -573,7 +567,7 @@ describe("QuadletList move/copy", () => {
 	it("disables confirm when a companion differs on the target", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({
 				volumes: [quadletMoveCompanionVolumeFixture("differs"), hostPathVolume],
 			}),
@@ -595,7 +589,7 @@ describe("QuadletList move/copy", () => {
 	it("hides the migrate and overwrite options when nothing is migratable", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({
 				volumes: [
 					quadletMoveDataVolumeFixture({
@@ -636,7 +630,7 @@ describe("QuadletList move/copy", () => {
 	it("shows the hot-export caveat when the source is running and migration is checked", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({ running: true }),
 			moveHandler(),
 		);
@@ -656,14 +650,14 @@ describe("QuadletList move/copy", () => {
 	it("runs a checked migration over the NDJSON transport, narrating in place", async () => {
 		server.use(
 			countingQuadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(),
 			moveStreamHandler(
 				[
 					{
 						operationId: "op-1",
 						type: "volume",
-						machineId: "m-1",
+						hostId: "m-1",
 						ref: "pgdata",
 						podmanVolume: "pgdata",
 						phase: "start",
@@ -671,7 +665,7 @@ describe("QuadletList move/copy", () => {
 					{
 						operationId: "op-1",
 						type: "volume",
-						machineId: "m-1",
+						hostId: "m-1",
 						ref: "pgdata",
 						podmanVolume: "pgdata",
 						phase: "done",
@@ -680,7 +674,7 @@ describe("QuadletList move/copy", () => {
 					{
 						operationId: "op-1",
 						type: "volume",
-						machineId: "m-1",
+						hostId: "m-1",
 						ref: "ghost",
 						podmanVolume: "ghost",
 						phase: "skip",
@@ -689,7 +683,7 @@ describe("QuadletList move/copy", () => {
 					{
 						operationId: "op-1",
 						type: "complete",
-						machineId: "m-1",
+						hostId: "m-1",
 						result: quadletMoveResultFixture({
 							status: "moved",
 							volumeMigration: {
@@ -727,7 +721,7 @@ describe("QuadletList move/copy", () => {
 			timeout: FIND_TIMEOUT,
 		});
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
@@ -776,7 +770,7 @@ describe("QuadletList move/copy", () => {
 	it("sends overwriteVolumes only with a checked migration onto an existing target volume", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({
 				volumes: [
 					quadletMoveDataVolumeFixture({ existsOnTarget: true }),
@@ -787,7 +781,7 @@ describe("QuadletList move/copy", () => {
 				{
 					operationId: "op-1",
 					type: "complete",
-					machineId: "m-1",
+					hostId: "m-1",
 					result: quadletMoveResultFixture({
 						status: "copied",
 						volumeMigration: {
@@ -819,7 +813,7 @@ describe("QuadletList move/copy", () => {
 
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
@@ -831,7 +825,7 @@ describe("QuadletList move/copy", () => {
 	it("keeps the plain request unchanged when migration stays unchecked", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({
 				volumes: [
 					quadletMoveDataVolumeFixture({ existsOnTarget: true }),
@@ -846,7 +840,7 @@ describe("QuadletList move/copy", () => {
 
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
@@ -856,13 +850,13 @@ describe("QuadletList move/copy", () => {
 	it("keeps a migrating partial result open", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(),
 			moveStreamHandler([
 				{
 					operationId: "op-1",
 					type: "complete",
-					machineId: "m-1",
+					hostId: "m-1",
 					result: quadletMoveResultFixture({
 						status: "partial",
 						error: "failed to remove quadlet: resource running",
@@ -897,13 +891,13 @@ describe("QuadletList move/copy", () => {
 	it("maps VOLUME_MIGRATION_TARGET_NOT_EMPTY to the overwrite hint and a retryable confirm", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(),
 			moveStreamHandler([
 				{
 					operationId: "op-1",
 					type: "volume",
-					machineId: "m-1",
+					hostId: "m-1",
 					ref: "pgdata",
 					podmanVolume: "pgdata",
 					phase: "start",
@@ -911,7 +905,7 @@ describe("QuadletList move/copy", () => {
 				{
 					operationId: "op-1",
 					type: "error",
-					machineId: "m-1",
+					hostId: "m-1",
 					error: {
 						code: "VOLUME_MIGRATION_TARGET_NOT_EMPTY",
 						message: "target volume pgdata is not empty",
@@ -945,7 +939,7 @@ describe("QuadletList move/copy", () => {
 	it("offers the transfer-secrets option default-off only for an admin caller with a transferable secret (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(secretPreview),
 			moveHandler(),
 		);
@@ -968,7 +962,7 @@ describe("QuadletList move/copy", () => {
 	it("hides the transfer-secrets option when nothing is transferable (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler({
 				secrets: [
 					quadletMovePreviewSecretFixture({
@@ -995,13 +989,13 @@ describe("QuadletList move/copy", () => {
 	it("hides the transfer-secrets option for a non-admin caller (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(secretPreview),
 			moveHandler(),
 		);
 		renderWithQuery(
 			<QuadletList
-				machine={machineFixture({ permission: "write", isOwner: false })}
+				host={hostFixture({ permission: "write", isOwner: false })}
 			/>,
 			{ router: true },
 		);
@@ -1021,7 +1015,7 @@ describe("QuadletList move/copy", () => {
 	it("sends no transferSecrets when the option is offered but stays unchecked (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(secretPreview),
 			moveHandler(),
 		);
@@ -1031,7 +1025,7 @@ describe("QuadletList move/copy", () => {
 
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
@@ -1041,7 +1035,7 @@ describe("QuadletList move/copy", () => {
 	it("sends transferSecrets: true when the option is checked — no transport switch (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(secretPreview),
 			moveHandler(),
 		);
@@ -1053,7 +1047,7 @@ describe("QuadletList move/copy", () => {
 		// The value transfer rides the plain request — no NDJSON, no progress UI.
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
@@ -1064,7 +1058,7 @@ describe("QuadletList move/copy", () => {
 	it("stays open on a plain transfer's secretTransfer outcomes (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(secretPreview),
 			moveHandler(
 				200,
@@ -1109,13 +1103,13 @@ describe("QuadletList move/copy", () => {
 	it("sends transferSecrets and migrateVolumeData on one stream request (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(secretPreview),
 			moveStreamHandler([
 				{
 					operationId: "op-1",
 					type: "complete",
-					machineId: "m-1",
+					hostId: "m-1",
 					result: quadletMoveResultFixture({
 						status: "moved",
 						volumeMigration: {
@@ -1154,7 +1148,7 @@ describe("QuadletList move/copy", () => {
 		// in place — no progress UI of its own for the secrets.
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			stop: true,
 			force: false,
@@ -1169,13 +1163,13 @@ describe("QuadletList move/copy", () => {
 	it("maps SECRET_TRANSFER_FAILED on the stream error to an actionable message naming the secret (issue 222)", async () => {
 		server.use(
 			quadletsHandler(() => [web]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(secretPreview),
 			moveStreamHandler([
 				{
 					operationId: "op-1",
 					type: "error",
-					machineId: "m-1",
+					hostId: "m-1",
 					error: {
 						code: "SECRET_TRANSFER_FAILED",
 						message: "Secret db-password: failed to create secret on target",

@@ -29,11 +29,11 @@ import (
 // wires it in production.
 func serveLogStream(t *testing.T, ctx context.Context, op LogStreamOp) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest("GET", "/api/machines/test-machine/containers/c-123/logs?follow=true", nil).
+	req := httptest.NewRequest("GET", "/api/hosts/test-host/containers/c-123/logs?follow=true", nil).
 		WithContext(ctx)
 	w := httptest.NewRecorder()
 	r := http.NewServeMux()
-	r.HandleFunc("GET /api/machines/{id}/containers/{containerId}/logs", func(w http.ResponseWriter, r *http.Request) {
+	r.HandleFunc("GET /api/hosts/{id}/containers/{containerId}/logs", func(w http.ResponseWriter, r *http.Request) {
 		RunLogStream(w, r, op)
 	})
 	r.ServeHTTP(w, req)
@@ -44,7 +44,7 @@ func authedStreamContext() context.Context {
 	return contextutils.SetUserID(context.Background(), "test-user")
 }
 
-func logStreamOp(stream func(ctx context.Context, userID, machineID string, onEvent func(LogEvent)) error) LogStreamOp {
+func logStreamOp(stream func(ctx context.Context, userID, hostID string, onEvent func(LogEvent)) error) LogStreamOp {
 	return LogStreamOp{
 		Since:  time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC),
 		Tail:   100,
@@ -53,9 +53,9 @@ func logStreamOp(stream func(ctx context.Context, userID, machineID string, onEv
 }
 
 func TestRunLogStreamEmitsEventsThenExactlyOneStreamEnded(t *testing.T) {
-	w := serveLogStream(t, authedStreamContext(), logStreamOp(func(ctx context.Context, userID, machineID string, onEvent func(LogEvent)) error {
+	w := serveLogStream(t, authedStreamContext(), logStreamOp(func(ctx context.Context, userID, hostID string, onEvent func(LogEvent)) error {
 		assert.Equal(t, "test-user", userID, "the stream callback must receive the caller identity")
-		assert.Equal(t, "test-machine", machineID, "the stream callback must receive the machine identity")
+		assert.Equal(t, "test-host", hostID, "the stream callback must receive the host identity")
 		onEvent(LogEvent{Timestamp: "2026-09-01T10:00:00Z", Level: "INFO", Message: "hello"})
 		onEvent(LogEvent{Timestamp: "2026-09-01T10:00:01Z", Level: "ERROR", Message: "broke"})
 		return nil
@@ -80,7 +80,7 @@ func TestRunLogStreamEmitsEventsThenExactlyOneStreamEnded(t *testing.T) {
 
 func TestRunLogStreamBeginFailureReturnsSilently(t *testing.T) {
 	opCalled := false
-	w := serveLogStream(t, context.Background(), logStreamOp(func(ctx context.Context, userID, machineID string, onEvent func(LogEvent)) error {
+	w := serveLogStream(t, context.Background(), logStreamOp(func(ctx context.Context, userID, hostID string, onEvent func(LogEvent)) error {
 		opCalled = true
 		return nil
 	}))
@@ -109,7 +109,7 @@ func TestRunLogStreamMapsAppErrorToCodeMessageErrorEvent(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			w := serveLogStream(t, authedStreamContext(), logStreamOp(func(ctx context.Context, userID, machineID string, onEvent func(LogEvent)) error {
+			w := serveLogStream(t, authedStreamContext(), logStreamOp(func(ctx context.Context, userID, hostID string, onEvent func(LogEvent)) error {
 				onEvent(LogEvent{Timestamp: "2026-09-01T10:00:00Z", Level: "INFO", Message: "hello"})
 				return tc.err
 			}))
@@ -127,7 +127,7 @@ func TestRunLogStreamMapsCancellationToWarnEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(authedStreamContext())
 	cancel()
 
-	w := serveLogStream(t, ctx, logStreamOp(func(ctx context.Context, userID, machineID string, onEvent func(LogEvent)) error {
+	w := serveLogStream(t, ctx, logStreamOp(func(ctx context.Context, userID, hostID string, onEvent func(LogEvent)) error {
 		onEvent(LogEvent{Timestamp: "2026-09-01T10:00:00Z", Level: "INFO", Message: "hello"})
 		<-ctx.Done()
 		return ctx.Err()
@@ -147,7 +147,7 @@ func TestRunLogStreamDefaultsToConnectionFailedAndLogsCauseOnce(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelError})))
 	defer slog.SetDefault(prevHandler)
 
-	w := serveLogStream(t, authedStreamContext(), logStreamOp(func(ctx context.Context, userID, machineID string, onEvent func(LogEvent)) error {
+	w := serveLogStream(t, authedStreamContext(), logStreamOp(func(ctx context.Context, userID, hostID string, onEvent func(LogEvent)) error {
 		onEvent(LogEvent{Timestamp: "2026-09-01T10:00:00Z", Level: "INFO", Message: "hello"})
 		return errors.New("boom: secret cause detail")
 	}))

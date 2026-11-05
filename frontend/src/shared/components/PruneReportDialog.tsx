@@ -98,7 +98,7 @@ export function PruneReportDialog<
 			{report ? (
 				report.length === 0 ? (
 					<Text data-testid="prune-report-empty">
-						Nothing to prune: no unused {plural} on this machine.
+						Nothing to prune: no unused {plural} on this host.
 					</Text>
 				) : (
 					<TableContainer>
@@ -131,7 +131,7 @@ export function PruneReportDialog<
 			) : (
 				<>
 					<Text>
-						All unused {plural} on this machine will be removed. This cannot be
+						All unused {plural} on this host will be removed. This cannot be
 						undone.
 					</Text>
 					<Text mt={2} color="gray.500">

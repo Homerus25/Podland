@@ -19,14 +19,14 @@ import (
 	"go.podman.io/podman/v6/pkg/inspect"
 )
 
-// getRequest serves GET /api/machines/{id}/images/{imageId} through the
+// getRequest serves GET /api/hosts/{id}/images/{imageId} through the
 // handler with an authenticated test identity.
 func getRequest(handler http.HandlerFunc, imageID string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/images/" + imageID,
+		Path:      "/api/hosts/test-host/images/" + imageID,
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "imageId": imageID},
+		URLParams: map[string]string{"id": "test-host", "imageId": imageID},
 	})
 }
 
@@ -112,9 +112,9 @@ func TestImageHandler_Get_MissingParamAnswers400(t *testing.T) {
 
 	w := testutils.Perform(handler.Get, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/images/",
+		Path:      "/api/hosts/test-host/images/",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
@@ -124,33 +124,33 @@ func TestImageHandler_Get_MissingParamAnswers400(t *testing.T) {
 }
 
 // imagesGetAccessRouter mirrors app.go's mounting of the images detail
-// route: GET /api/machines/{id}/images/{imageId} rides the
-// RequireMachineAccess subtree at read level (no requireWrite).
-func imagesGetAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *ImageService) http.Handler {
+// route: GET /api/hosts/{id}/images/{imageId} rides the
+// RequireHostAccess subtree at read level (no requireWrite).
+func imagesGetAccessRouter(hostRepo *testutils.MockHostRepository, accessRepo *testutils.MockHostAccessRepository, service *ImageService) http.Handler {
 	r := http.NewServeMux()
-	r.Handle("GET /api/machines/{id}/images/{imageId}",
-		appmiddleware.RequireMachineAccess(machineRepo, accessRepo)(http.HandlerFunc(NewImageHandler(service).Get)))
+	r.Handle("GET /api/hosts/{id}/images/{imageId}",
+		appmiddleware.RequireHostAccess(hostRepo, accessRepo)(http.HandlerFunc(NewImageHandler(service).Get)))
 	return r
 }
 
 // TestImageHandler_Get_ReadLevelGranteeReachesRoute pins the route
-// mounting: GET /api/machines/{id}/images/{imageId} rides the
-// RequireMachineAccess subtree at read level (no requireWrite), so a
+// mounting: GET /api/hosts/{id}/images/{imageId} rides the
+// RequireHostAccess subtree at read level (no requireWrite), so a
 // read-level grantee reaches the handler.
 func TestImageHandler_Get_ReadLevelGranteeReachesRoute(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	accessRepo := testutils.NewMockMachineAccessRepository()
-	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
+	hostRepo := testutils.NewMockHostRepository()
+	hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+	accessRepo := testutils.NewMockHostAccessRepository()
+	accessRepo.AddAccess("host-1", "reader-1", models.PermissionRead, time.Now())
 	engine := &fakeImageEngine{
 		inspectFn: func(string) ([]*entities.ImageInspectReport, []error, error) {
 			return []*entities.ImageInspectReport{fullInspectReport()}, nil, nil
 		},
 	}
-	router := imagesGetAccessRouter(machineRepo, accessRepo, NewImageService(fakeEngineProvider{engine: engine}))
+	router := imagesGetAccessRouter(hostRepo, accessRepo, NewImageService(fakeEngineProvider{engine: engine}))
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/images/sha256:abc123", "reader-1"))
+	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/hosts/host-1/images/sha256:abc123", "reader-1"))
 
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "a read-level grantee must reach the detail endpoint")
 }

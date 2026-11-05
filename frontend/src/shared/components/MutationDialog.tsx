@@ -22,7 +22,7 @@ export interface MutationSlice<TVariables = unknown> {
 	reset: () => void;
 }
 
-// One owner for the machinery every mutation dialog hand-rolled: the modal
+// One owner for the plumbing every mutation dialog hand-rolled: the modal
 // shell, the reset invariant, close-on-success, the side-effect seams, and
 // the in-modal error region. Consumers render the dialog conditionally, so
 // mount is open and unmount is close; the module passes an always-open
@@ -257,7 +257,7 @@ export function ForceConfirmDialog<TVariables>({
 // The mutation-less confirm preset: composes the plain modal shell, not the
 // mutation core, for confirms that perform a caller-owned action instead of
 // a mutation — gating a stream, opening a view. No pending wiring, no error
-// region, no reset machinery, and no auto-close: the caller closes in
+// region, no reset plumbing, and no auto-close: the caller closes in
 // onConfirm. Label and testid are required, so new adapters state the
 // intent; without a color scheme the button keeps Chakra's neutral look.
 export function ActionDialog({

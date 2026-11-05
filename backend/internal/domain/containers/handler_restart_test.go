@@ -16,14 +16,14 @@ import (
 )
 
 // restartRequest serves POST
-// /api/machines/{id}/containers/{containerId}/restart through the
+// /api/hosts/{id}/containers/{containerId}/restart through the
 // handler with an authenticated test identity.
 func restartRequest(handler http.HandlerFunc, containerID string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/containers/" + containerID + "/restart",
+		Path:      "/api/hosts/test-host/containers/" + containerID + "/restart",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "containerId": containerID},
+		URLParams: map[string]string{"id": "test-host", "containerId": containerID},
 	})
 }
 

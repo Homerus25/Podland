@@ -74,13 +74,13 @@ function InputPhase({
 
 // Preview phase: the generated quadlet files render read-only (name plus
 // content), with the hint that relative bind paths resolve against the
-// quadlet directory on the target machine.
+// quadlet directory on the target host.
 function PreviewPhase({ quadlets }: { quadlets: QuadletImportEntry[] }) {
 	return (
 		<Stack spacing={3}>
 			<Text data-testid="import-relative-path-hint" color="gray.400">
 				Relative bind paths in the generated quadlets resolve against the
-				quadlet directory on the target machine.
+				quadlet directory on the target host.
 			</Text>
 			{quadlets.map((entry) => (
 				<Box
@@ -145,17 +145,17 @@ function ReportPhase({
 }
 
 export function ImportComposeModal({
-	machineId,
+	hostId,
 	onClose,
 }: {
-	machineId: string;
+	hostId: string;
 	onClose: () => void;
 }) {
 	const [phase, setPhase] = useState<ImportPhase>("input");
 	const [content, setContent] = useState("");
 	const [quadlets, setQuadlets] = useState<QuadletImportEntry[]>([]);
 	const convert = useConvertCompose();
-	const install = useImportQuadlets(machineId);
+	const install = useImportQuadlets(hostId);
 
 	// The file picker loads the chosen file's text into the textarea — one
 	// source of truth, so what the user sees is exactly what gets converted.
@@ -172,7 +172,7 @@ export function ImportComposeModal({
 		});
 	};
 
-	// The converted entries forward unchanged to the machine-scoped import
+	// The converted entries forward unchanged to the host-scoped import
 	// endpoint — the convert response's shape is the import request's shape.
 	const runInstall = () => {
 		install.mutate(

@@ -1,7 +1,7 @@
 // Package slogtest is the one owner of the slog capture handler tests use
 // to pin server-side log lines (level, message, attrs) without reading
 // stderr. The third copy of the capture-handler shape (connections,
-// streaming, machines — issue 399) earned the extraction
+// streaming, hosts — issue 399) earned the extraction
 // (docs/backend-conventions.md, cross-domain duplication ruling). It
 // lives in its own leaf package because internal/testutils imports
 // internal/connections, so hosting it there would be an import cycle for

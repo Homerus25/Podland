@@ -6,14 +6,14 @@ import (
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
 )
 
-// SecretSource is the source machine's secret store width: the value
+// SecretSource is the source host's secret store width: the value
 // reveal. A missing secret answers a podman not-found error the kit
 // classifies through the podmanerr adapter.
 type SecretSource interface {
 	Reveal(name string) (string, error)
 }
 
-// SecretTarget is the target machine's secret store width: the same-name
+// SecretTarget is the target host's secret store width: the same-name
 // membership check (the skip) and the create. A membership predicate, not
 // a name list — the kit asks per reference, so the adapter answers from
 // whatever read its store serves cheapest and no name set crosses the
@@ -68,7 +68,7 @@ func (e *SecretError) Unwrap() error {
 }
 
 // TransferSecrets carries each referenced secret's value from the source
-// machine's store into the target's (§19): one outcome per reference, in
+// host's store into the target's (§19): one outcome per reference, in
 // the order the caller listed them, deduplicated by name (first
 // reference wins — the caller deduplicates or not by the list it hands
 // over).

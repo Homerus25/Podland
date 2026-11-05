@@ -24,7 +24,7 @@ func TestContainerService_Create_UnparseableMemoryAnswersValidationFailed(t *tes
 	engine := &fakeContainerEngine{}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	_, err := service.Create(t.Context(), "user", "machine", ContainerCreateRequest{Image: "nginx:latest", Memory: "not-a-size"})
+	_, err := service.Create(t.Context(), "user", "host", ContainerCreateRequest{Image: "nginx:latest", Memory: "not-a-size"})
 
 	var appErr *appErrors.AppError
 	require.ErrorAs(t, err, &appErr, "an unparseable memory value must answer an AppError")
@@ -43,7 +43,7 @@ func TestContainerService_Create_UnparseableMemorySkipsEngineLease(t *testing.T)
 	provider := fakeEngineProvider{engine: engine, opRecorder: func(op string) { crossed = true }}
 	service := NewContainerService(provider)
 
-	_, err := service.Create(t.Context(), "user", "machine", ContainerCreateRequest{Image: "nginx:latest", Memory: "not-a-size"})
+	_, err := service.Create(t.Context(), "user", "host", ContainerCreateRequest{Image: "nginx:latest", Memory: "not-a-size"})
 
 	require.Error(t, err, "an unparseable memory value must answer the builder's error")
 	assert.False(t, crossed, "a request-local validation failure must not acquire the engine lease")

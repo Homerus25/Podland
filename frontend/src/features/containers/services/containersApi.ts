@@ -1,8 +1,8 @@
 import { createLogSource, type LogSource } from "@shared/streaming/logSource";
-import { api, machineApiPath, machineApiUrl } from "@shared/utils/api";
+import { api, hostApiPath, hostApiUrl } from "@shared/utils/api";
 import { keyValueRowsToRecord } from "@shared/utils/keyValueRows";
 
-// Container as returned by GET /api/machines/{id}/containers
+// Container as returned by GET /api/hosts/{id}/containers
 // (backend/internal/domain/containers/dto.go ContainerListResponse).
 export interface ContainerSummary {
 	id: string;
@@ -83,7 +83,7 @@ export interface ContainerHealthcheck {
 	disabled: boolean;
 }
 
-// Container as returned by GET /api/machines/{id}/containers/{containerId}
+// Container as returned by GET /api/hosts/{id}/containers/{containerId}
 // (backend/internal/domain/containers/dto.go ContainerGetResponse, extended
 // with entrypoint/secrets/volumes/exposedPorts by spec 301 ticket #302).
 export interface ContainerDetail {
@@ -116,7 +116,7 @@ export interface ContainerDetail {
 	healthcheck?: ContainerHealthcheck;
 }
 
-// Envelope of GET /api/machines/{id}/containers
+// Envelope of GET /api/hosts/{id}/containers
 // (backend/internal/domain/containers/dto.go ContainerListResult).
 interface ContainerListResult {
 	containers: ContainerSummary[];
@@ -125,11 +125,11 @@ interface ContainerListResult {
 }
 
 export async function listContainers(
-	machineId: string,
+	hostId: string,
 ): Promise<ContainerSummary[]> {
 	// all=true includes stopped containers; podman lists only running ones by default.
 	const response = await api.get<ContainerListResult>(
-		machineApiPath(machineId, "containers"),
+		hostApiPath(hostId, "containers"),
 		{
 			params: { all: true },
 		},
@@ -137,20 +137,20 @@ export async function listContainers(
 	return response.data.containers;
 }
 
-// GET /api/machines/{id}/containers/{containerId} -> 200
+// GET /api/hosts/{id}/containers/{containerId} -> 200
 // (backend/internal/domain/containers/dto.go ContainerGetResponse; the
 // extended DTO behind the container detail page, spec 301 ticket #306).
 export async function getContainer(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 ): Promise<ContainerDetail> {
 	const response = await api.get<ContainerDetail>(
-		machineApiPath(machineId, "containers", containerId),
+		hostApiPath(hostId, "containers", containerId),
 	);
 	return response.data;
 }
 
-// Restart policy of POST /api/machines/{id}/containers
+// Restart policy of POST /api/hosts/{id}/containers
 // (backend/internal/domain/containers/dto.go ContainerCreateRequest
 // restartPolicy oneof): the policy podman applies to the container.
 export type ContainerRestartPolicy =
@@ -169,7 +169,7 @@ export type MountMode = "ro" | "rw";
 // protocol): the transport the published port speaks.
 export type PortProtocol = "tcp" | "udp";
 
-// Body of POST /api/machines/{id}/containers
+// Body of POST /api/hosts/{id}/containers
 // (backend/internal/domain/containers/dto.go ContainerCreateRequest; only the
 // fields the create form exposes — everything else is optional server-side).
 export interface CreateContainerInput {
@@ -395,7 +395,7 @@ function capAddToInput(rows: CapAddRow[]): string[] | undefined {
 	return capabilities.length > 0 ? capabilities : undefined;
 }
 
-// Builds the POST /api/machines/{id}/containers body from the
+// Builds the POST /api/hosts/{id}/containers body from the
 // create-container dialog's form values (spec 313): the single owner of
 // the form-to-payload mapping — trims, the command whitespace split,
 // empty-key env skipping, integer-parseable port pairs, complete
@@ -487,7 +487,7 @@ export function buildCreateContainerInput(
 	};
 }
 
-// Response of POST /api/machines/{id}/containers -> 201
+// Response of POST /api/hosts/{id}/containers -> 201
 // (backend/internal/domain/containers/dto.go ContainerCreateResponse).
 export interface ContainerCreated {
 	id: string;
@@ -499,59 +499,57 @@ export interface ContainerCreated {
 }
 
 export async function createContainer(
-	machineId: string,
+	hostId: string,
 	input: CreateContainerInput,
 ): Promise<ContainerCreated> {
 	const response = await api.post<ContainerCreated>(
-		machineApiPath(machineId, "containers"),
+		hostApiPath(hostId, "containers"),
 		input,
 	);
 	return response.data;
 }
 
-// POST /api/machines/{id}/containers/{containerId}/start
+// POST /api/hosts/{id}/containers/{containerId}/start
 // (backend/internal/domain/containers/handler.go ContainerHandler.Start).
 export async function startContainer(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 ): Promise<void> {
-	await api.post(machineApiPath(machineId, "containers", containerId, "start"));
+	await api.post(hostApiPath(hostId, "containers", containerId, "start"));
 }
 
-// POST /api/machines/{id}/containers/{containerId}/stop
+// POST /api/hosts/{id}/containers/{containerId}/stop
 // (backend/internal/domain/containers/handler.go ContainerHandler.Stop).
 export async function stopContainer(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 ): Promise<void> {
-	await api.post(machineApiPath(machineId, "containers", containerId, "stop"));
+	await api.post(hostApiPath(hostId, "containers", containerId, "stop"));
 }
 
-// POST /api/machines/{id}/containers/{containerId}/restart
+// POST /api/hosts/{id}/containers/{containerId}/restart
 // (backend/internal/domain/containers/handler.go ContainerHandler.Restart).
 // The endpoint takes no timeout or force parameters — podman's default
 // timeout applies.
 export async function restartContainer(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 ): Promise<void> {
-	await api.post(
-		machineApiPath(machineId, "containers", containerId, "restart"),
-	);
+	await api.post(hostApiPath(hostId, "containers", containerId, "restart"));
 }
 
-// POST /api/machines/{id}/containers/{containerId}/rename -> 200
+// POST /api/hosts/{id}/containers/{containerId}/rename -> 200
 // (backend/internal/domain/containers/handler.go ContainerHandler.Rename).
 // The response is the updated container detail DTO, the same shape the
 // detail GET answers. The name's shape is the server's to validate: the
 // client guards only the empty and unchanged cases.
 export async function renameContainer(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 	name: string,
 ): Promise<ContainerDetail> {
 	const response = await api.post<ContainerDetail>(
-		machineApiPath(machineId, "containers", containerId, "rename"),
+		hostApiPath(hostId, "containers", containerId, "rename"),
 		{ name },
 	);
 	return response.data;
@@ -570,7 +568,7 @@ export interface ContainerHealthcheckUpdate {
 	disabled?: boolean;
 }
 
-// The body of POST /api/machines/{id}/containers/{containerId}/update
+// The body of POST /api/hosts/{id}/containers/{containerId}/update
 // (backend dto.go ContainerUpdateRequest): patch semantics — absent
 // fields mean "unchanged", and only present fields are forwarded to
 // podman's container update.
@@ -580,17 +578,17 @@ export interface UpdateContainerInput {
 	healthcheck?: ContainerHealthcheckUpdate;
 }
 
-// POST /api/machines/{id}/containers/{containerId}/update -> 200
+// POST /api/hosts/{id}/containers/{containerId}/update -> 200
 // (backend/internal/domain/containers/handler.go ContainerHandler.Update).
 // The response is the updated container detail DTO, the same shape the
 // detail GET answers, carrying the new limits and healthcheck.
 export async function updateContainer(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 	input: UpdateContainerInput,
 ): Promise<ContainerDetail> {
 	const response = await api.post<ContainerDetail>(
-		machineApiPath(machineId, "containers", containerId, "update"),
+		hostApiPath(hostId, "containers", containerId, "update"),
 		input,
 	);
 	return response.data;
@@ -685,17 +683,17 @@ export function buildUpdateContainerInput(
 	return input;
 }
 
-// DELETE /api/machines/{id}/containers/{containerId} -> 204
+// DELETE /api/hosts/{id}/containers/{containerId} -> 204
 // (backend/internal/domain/containers/handler.go ContainerHandler.Delete).
 // The force query param exists on the endpoint but is out of scope for now.
 export async function deleteContainer(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 ): Promise<void> {
-	await api.delete(machineApiPath(machineId, "containers", containerId));
+	await api.delete(hostApiPath(hostId, "containers", containerId));
 }
 
-// One entry of POST /api/machines/{id}/containers/prune -> 200 (backend
+// One entry of POST /api/hosts/{id}/containers/prune -> 200 (backend
 // containers dto.go ContainerPruneResponse): a removed container's ID and
 // reclaimed size, plus podman's per-container error when removal failed.
 // Podman's container prune report carries no name, so the entry is
@@ -706,26 +704,26 @@ export interface ContainerPruneReport {
 	error?: string;
 }
 
-// Prunes every stopped container on the machine. Running containers are
+// Prunes every stopped container on the host. Running containers are
 // never touched.
 export async function pruneContainers(
-	machineId: string,
+	hostId: string,
 ): Promise<ContainerPruneReport[]> {
 	const response = await api.post<ContainerPruneReport[]>(
-		machineApiPath(machineId, "containers", "prune"),
+		hostApiPath(hostId, "containers", "prune"),
 	);
 	return response.data;
 }
 
-// GET /api/machines/{id}/containers/{containerId}/inspect -> 200 with the
+// GET /api/hosts/{id}/containers/{containerId}/inspect -> 200 with the
 // raw podman inspect report as the top-level body. The report is deliberately
 // untyped on the client: no DTO is invented for it.
 export async function inspectContainer(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 ): Promise<Record<string, unknown>> {
 	const response = await api.get<Record<string, unknown>>(
-		machineApiPath(machineId, "containers", containerId, "inspect"),
+		hostApiPath(hostId, "containers", containerId, "inspect"),
 	);
 	return response.data;
 }
@@ -749,7 +747,7 @@ export interface ContainerStats {
 	pids: number;
 }
 
-// Envelope of GET /api/machines/{id}/containers/stats
+// Envelope of GET /api/hosts/{id}/containers/stats
 // (backend/internal/domain/containers/dto.go ContainerStatsResult).
 // Nothing running is a legal 200 with an empty containers array.
 export interface ContainerStatsListResult {
@@ -758,42 +756,39 @@ export interface ContainerStatsListResult {
 	timestamp: string;
 }
 
-// GET /api/machines/{id}/containers/stats -> 200
+// GET /api/hosts/{id}/containers/stats -> 200
 // (backend/internal/domain/containers/handler.go ContainerHandler.Stats):
-// one snapshot of every running container on the machine. Stopped and
+// one snapshot of every running container on the host. Stopped and
 // created containers do not appear.
 export async function listContainerStats(
-	machineId: string,
+	hostId: string,
 ): Promise<ContainerStats[]> {
 	const response = await api.get<ContainerStatsListResult>(
-		machineApiPath(machineId, "containers", "stats"),
+		hostApiPath(hostId, "containers", "stats"),
 	);
 	return response.data.containers;
 }
 
-// GET /api/machines/{id}/containers/{containerId}/stats -> 200
+// GET /api/hosts/{id}/containers/{containerId}/stats -> 200
 // (backend/internal/domain/containers/handler.go ContainerHandler.ContainerStats):
 // one container's snapshot. The container must be running — a stopped one
 // answers 404 with podman's own message riding in the error envelope.
 export async function getContainerStats(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 ): Promise<ContainerStats> {
 	const response = await api.get<ContainerStats>(
-		machineApiPath(machineId, "containers", containerId, "stats"),
+		hostApiPath(hostId, "containers", containerId, "stats"),
 	);
 	return response.data;
 }
 
-// Log source for GET /api/machines/{machineId}/containers/{containerId}/logs:
+// Log source for GET /api/hosts/{hostId}/containers/{containerId}/logs:
 // the kit owns the buffered tail fetch and the follow stream
 // (backend/internal/domain/containers handler pair).
-export function containerLogs(
-	machineId: string,
-	containerId: string,
-): LogSource {
+export function containerLogs(hostId: string, containerId: string): LogSource {
 	return createLogSource(
-		machineApiPath(machineId, "containers", containerId, "logs"),
-		machineApiUrl(machineId, "containers", containerId, "logs"),
+		hostApiPath(hostId, "containers", containerId, "logs"),
+		hostApiUrl(hostId, "containers", containerId, "logs"),
 	);
 }

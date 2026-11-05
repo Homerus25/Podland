@@ -324,7 +324,7 @@ func TestQuadletService_StopAndRemove_TerminalMatrix(t *testing.T) {
 			}
 			service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
 
-			err := service.stopAndRemove(context.Background(), "user", "machine", "web.container", tt.force, tt.stop, "quadlets.Delete", tt.terminals)
+			err := service.stopAndRemove(context.Background(), "user", "host", "web.container", tt.force, tt.stop, "quadlets.Delete", tt.terminals)
 
 			if tt.wantErr != nil {
 				tt.wantErr(t, err)
@@ -347,7 +347,7 @@ func TestQuadletService_StopAndRemove_ListFailureWraps(t *testing.T) {
 	}
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), nil)
 
-	err := service.stopAndRemove(context.Background(), "user", "machine", "web.container", false, true, "quadlets.Delete", deleteRemoveTerminals())
+	err := service.stopAndRemove(context.Background(), "user", "host", "web.container", false, true, "quadlets.Delete", deleteRemoveTerminals())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to list quadlets")

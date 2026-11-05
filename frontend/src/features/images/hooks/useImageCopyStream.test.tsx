@@ -14,7 +14,7 @@ import { ndjsonResponse } from "@/test/stream";
 
 // The image copy stream's domain assertions: the request shape (the
 // surface's URL builder and copy body) and the single-value progress fold.
-// The ritual — the both-machines invalidation, the terminal handling, the
+// The ritual — the both-hosts invalidation, the terminal handling, the
 // malformed-event skip — is pinned once in the transfer-hooks module's
 // suite (shared/transfers/transferHooks.test.tsx).
 
@@ -35,7 +35,7 @@ function streamResponse(events: ImageCopyStreamEvent[]) {
 	);
 }
 
-const copyUrl = `*/api/machines/m-1/images/${encodeURIComponent(imageId)}/copy`;
+const copyUrl = `*/api/hosts/m-1/images/${encodeURIComponent(imageId)}/copy`;
 
 let requests: Request[] = [];
 
@@ -49,7 +49,7 @@ function mockCopyStream(handler: CopyHandler) {
 	);
 }
 
-const copyInput = { targetMachineId: "m-2" };
+const copyInput = { targetHostId: "m-2" };
 
 function renderCopyStreamHook() {
 	return renderHookWithQuery(() => useImageCopyStream("m-1"));
@@ -69,7 +69,7 @@ describe("useImageCopyStream", () => {
 		expect(requests).toHaveLength(1);
 		expect(requests[0].method).toBe("POST");
 		expect(new URL(requests[0].url).pathname).toBe(
-			`/api/machines/m-1/images/${encodeURIComponent(imageId)}/copy`,
+			`/api/hosts/m-1/images/${encodeURIComponent(imageId)}/copy`,
 		);
 		expect(requests[0].headers.get("Content-Type")).toBe("application/json");
 		await waitFor(() => expect(result.current.isRunning).toBe(false));

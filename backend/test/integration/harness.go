@@ -29,23 +29,23 @@ type Suite struct {
 	// (e.g. "http://127.0.0.1:1234"). Tests append API paths to this.
 	ServerURL string
 
-	// MachineID is the UUID of the machine registered once during
+	// HostID is the UUID of the host registered once during
 	// TestMain. It is shared across all tests in the run. Do not delete
 	// it from a test — that would break every other test in the suite.
-	MachineID string
+	HostID string
 
-	// MachineName is the registered `podman system connection` name
+	// HostName is the registered `podman system connection` name
 	// (resolved from PODLAND_TEST_CONNECTION_NAME, default "podland-it")
 	// that TestMain adds for the test host and that the registered
-	// machine points at. Downstream slices use it for the
+	// host points at. Downstream slices use it for the
 	// isolation/cleanup CLI scaffolding (tag, rmi, sweep) so they hit
 	// the same host the backend does — instead of re-reading the env
 	// var (and risking drift if the var name changes).
 	//
 	// The readiness probe in TestMain guarantees `podman --connection
-	// <MachineName>` is reachable before any test runs, so CLI helpers
+	// <HostName>` is reachable before any test runs, so CLI helpers
 	// can rely on it without their own probe.
-	MachineName string
+	HostName string
 
 	// Token is the JWT bearer token captured from POST /api/auth/login
 	// during TestMain. AuthenticatedClient injects it as
@@ -60,8 +60,8 @@ type Suite struct {
 	OwnerUserID string
 
 	// OtherUserID is the DB-level ID of a second user seeded during
-	// TestMain. It exists to satisfy the machine_access(user_id) FK so
-	// the machines CRUD/access slice (080-04) can exercise
+	// TestMain. It exists to satisfy the host_access(user_id) FK so
+	// the hosts CRUD/access slice (080-04) can exercise
 	// grant/revoke/list against a real grantee without minting a token
 	// for them. The second user is never logged in.
 	OtherUserID string
@@ -73,22 +73,22 @@ type Suite struct {
 	DBPath string
 
 	// RunID is the run-scoped identifier (a short UUID) embedded in
-	// RunTag. Anything the suite creates on the shared machine is tagged
+	// RunTag. Anything the suite creates on the shared host is tagged
 	// with RunTag so per-run isolation is possible and the suite sweep
 	// can find its own garbage.
 	RunID string
 
-	// goodMachineRegistration holds the coordinates + identity the
-	// shared good machine was registered with (the discovered podman
-	// target). It is NOT used directly by tests; RegisterReachableMachine
-	// consumes it to register additional throwaway machines against the
+	// goodHostRegistration holds the coordinates + identity the
+	// shared good host was registered with (the discovered podman
+	// target). It is NOT used directly by tests; RegisterReachableHost
+	// consumes it to register additional throwaway hosts against the
 	// same reachable target. This exists because 080-05 made
-	// MachineService.Create probe the target at registration, so a
+	// HostService.Create probe the target at registration, so a
 	// throwaway pointing at an unreachable host (the original 080-04
 	// pattern) can no longer be registered — slices that need a
 	// mutable throwaway (PUT/access/DELETE) must now point at a host
 	// that actually answers.
-	goodMachineRegistration reachableTarget
+	goodHostRegistration reachableTarget
 
 	// application is the in-process backend built by TestMain. It is
 	// held so suite methods can expose narrow seams (e.g. SeedUserWithRole)
@@ -103,9 +103,9 @@ type Suite struct {
 	tempRoot string
 
 	// skipReason is the reason TestMain decided the suite cannot run
-	// (e.g. podman binary missing, machine unavailable). When non-empty,
+	// (e.g. podman binary missing, host unavailable). When non-empty,
 	// SkipIfUnavailable triggers t.Skip so a clean `go test` run on a
-	// machine without podman still exits 0.
+	// host without podman still exits 0.
 	skipReason string
 
 	// cleanup stack — LIFO, mirrors t.Cleanup semantics. Run during
@@ -121,7 +121,7 @@ type cleanupStep struct {
 }
 
 // SkipIfUnavailable makes a test skip cleanly when TestMain could not
-// build the full fixture (no podman binary, no machine, etc.). Call it
+// build the full fixture (no podman binary, no host, etc.). Call it
 // as the first line of every test in the suite:
 //
 //	func Test_Integration_Foo(t *testing.T) {
@@ -129,7 +129,7 @@ type cleanupStep struct {
 //	    …
 //	}
 //
-// This keeps `go test -tags=integration` green on machines that lack a
+// This keeps `go test -tags=integration` green on hosts that lack a
 // podman installation, satisfying the "skips cleanly" AC.
 func (s *Suite) SkipIfUnavailable(t *testing.T) {
 	t.Helper()
@@ -206,8 +206,8 @@ func (s *Suite) SeedUserWithRole(username, password, role string) (string, error
 }
 
 // RunTag returns the run-scoped tag (e.g. "podland-test-run=a1b2c3d4")
-// used to label anything this suite creates on the shared machine. Tests
-// that list resources filter by this tag so a pre-dirty machine doesn't
+// used to label anything this suite creates on the shared host. Tests
+// that list resources filter by this tag so a pre-dirty host doesn't
 // cause false failures; the suite sweep uses it to find leftover garbage.
 //
 // The tag is stable for the lifetime of one `go test` process; the RunID
@@ -223,7 +223,7 @@ func (s *Suite) RunTag() string {
 // RegisterCleanup registers a function to run during suite teardown.
 // Functions run in LIFO order (last registered runs first), mirroring
 // t.Cleanup semantics. Use this for suite-scoped resources created in
-// TestMain (e.g. the registered machine) or for sweep functions that
+// TestMain (e.g. the registered host) or for sweep functions that
 // clean up run-tagged resources across domains.
 //
 // Errors from a cleanup step are logged but do not halt the sweep —
@@ -267,13 +267,13 @@ func newRunID() string {
 
 // reachableTarget is the SSH/podman coordinate set for a host the suite
 // has already proven reachable (the container test host or an
-// SSH-override external host). The suite stores the good machine's
-// target here so RegisterReachableMachine can register additional
-// throwaway machines against the same host — needed because 080-05
+// SSH-override external host). The suite stores the good host's
+// target here so RegisterReachableHost can register additional
+// throwaway hosts against the same host — needed because 080-05
 // made registration probe the target, so a throwaway must point at a
 // host that answers.
 //
-// Defined here (not as machineRegistration, which lives in a _test.go
+// Defined here (not as hostRegistration, which lives in a _test.go
 // file) so the non-test harness.go can reference it without breaking
 // `go build -tags=integration`.
 type reachableTarget struct {

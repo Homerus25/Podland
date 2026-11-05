@@ -25,7 +25,7 @@ func TestPodService_Create_UnparseableMemoryAnswersValidationFailed(t *testing.T
 	engine := &fakePodEngine{}
 	service := NewPodService(fakeEngineProvider{engine: engine})
 
-	_, err := service.Create(t.Context(), "user", "machine", PodCreateRequest{Name: "web-pod", Memory: "not-a-size"})
+	_, err := service.Create(t.Context(), "user", "host", PodCreateRequest{Name: "web-pod", Memory: "not-a-size"})
 
 	var appErr *appErrors.AppError
 	require.ErrorAs(t, err, &appErr, "an unparseable memory value must answer an AppError")
@@ -43,7 +43,7 @@ func TestPodService_Create_UnparseableMemorySkipsEngineLease(t *testing.T) {
 	provider := fakeEngineProvider{engine: engine, opRecorder: func(op string) { crossed = true }}
 	service := NewPodService(provider)
 
-	_, err := service.Create(t.Context(), "user", "machine", PodCreateRequest{Name: "web-pod", Memory: "not-a-size"})
+	_, err := service.Create(t.Context(), "user", "host", PodCreateRequest{Name: "web-pod", Memory: "not-a-size"})
 
 	require.Error(t, err, "an unparseable memory value must answer the builder's error")
 	assert.False(t, crossed, "a request-local validation failure must not acquire the engine lease")
@@ -61,7 +61,7 @@ func TestPodService_Create_PodmanClientRejectionAnswersInvalidRequest(t *testing
 	}
 	service := NewPodService(fakeEngineProvider{engine: engine})
 
-	_, err := service.Create(t.Context(), "user", "machine", PodCreateRequest{Name: "web-pod"})
+	_, err := service.Create(t.Context(), "user", "host", PodCreateRequest{Name: "web-pod"})
 
 	require.Error(t, err)
 	var appErr *appErrors.AppError

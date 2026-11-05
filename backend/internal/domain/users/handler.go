@@ -36,7 +36,7 @@ func (h *UserHandler) WithFailureBudget(budget *failurebudget.Surface) *UserHand
 // List handles GET /api/users: any authenticated caller may list users,
 // and the response shape depends on the caller's role — admins receive
 // the full UserResponse, every other authenticated caller the minimal
-// UserSummaryResponse (enough to pick a person when sharing a machine);
+// UserSummaryResponse (enough to pick a person when sharing a host);
 // the service resolves the caller's role. Registration behind
 // JWTMiddleware happens in internal/app; the handler crosses the
 // envelope.

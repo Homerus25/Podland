@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The cross-machine volume copy/move slice (issue 238): the shared
+// The cross-host volume copy/move slice (issue 238): the shared
 // transfer kit behind the volumes domain's composition. A copy creates
 // the target volume and streams the source's data into it; a move does
 // the same and then removes the source VOLUME (unlike a quadlet move,
@@ -27,10 +27,10 @@ import (
 // time (409, never an overwrite), an in-use source refuses a move unless
 // force is set, and the preview reports the dialog's facts.
 //
-// Everything here is API-driven on both machines: volumes are created
+// Everything here is API-driven on both hosts: volumes are created
 // (POST /volumes), seeded (multipart /populate) and verified (untarred
 // /export) through the in-process server, so the slice runs wherever the
-// two-machine harness runs. No user-systemd probe: the volume surface
+// two-host harness runs. No user-systemd probe: the volume surface
 // never dials systemd — only the referencing-quadlet preview fact needs a
 // quadlet file, and that one subtest gates itself.
 
@@ -39,17 +39,17 @@ import (
 type volumeMoveEvent struct {
 	OperationID string `json:"operationId"`
 	Type        string `json:"type"`
-	MachineID   string `json:"machineId"`
+	HostID      string `json:"hostId"`
 	Volume      string `json:"volume,omitempty"`
 	Phase       string `json:"phase,omitempty"`
 	Bytes       int64  `json:"bytes,omitempty"`
 	Result      *struct {
-		Name            string `json:"name"`
-		Status          string `json:"status"`
-		SourceMachineID string `json:"sourceMachineId"`
-		TargetMachineID string `json:"targetMachineId"`
-		Bytes           int64  `json:"bytes"`
-		Error           string `json:"error,omitempty"`
+		Name         string `json:"name"`
+		Status       string `json:"status"`
+		SourceHostID string `json:"sourceHostId"`
+		TargetHostID string `json:"targetHostId"`
+		Bytes        int64  `json:"bytes"`
+		Error        string `json:"error,omitempty"`
 	} `json:"result,omitempty"`
 	Error *struct {
 		Code    string `json:"code"`
@@ -88,9 +88,9 @@ func parseVolumeMoveEvents(t *testing.T, body string) []volumeMoveEvent {
 
 // volumeMoveBody builds a volume transfer request body with arbitrary
 // extra flags.
-func volumeMoveBody(t *testing.T, targetMachineID, mode string, extra map[string]any) string {
+func volumeMoveBody(t *testing.T, targetHostID, mode string, extra map[string]any) string {
 	t.Helper()
-	payload := map[string]any{"targetMachineId": targetMachineID, "mode": mode}
+	payload := map[string]any{"targetHostId": targetHostID, "mode": mode}
 	for name, value := range extra {
 		payload[name] = value
 	}
@@ -102,10 +102,10 @@ func volumeMoveBody(t *testing.T, targetMachineID, mode string, extra map[string
 // postVolumeMove posts a transfer body to the volume move endpoint and
 // returns the response's status and body (the stream answers 200 with any
 // failure riding the terminal event).
-func postVolumeMove(t *testing.T, machineID, volumeName, body string) (int, []byte) {
+func postVolumeMove(t *testing.T, hostID, volumeName, body string) (int, []byte) {
 	t.Helper()
 	resp, err := suite.AuthenticatedClient().Post(
-		suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/move",
+		suite.ServerURL+"/api/hosts/"+hostID+"/volumes/"+volumeName+"/move",
 		"application/json", bytes.NewReader([]byte(body)))
 	require.NoError(t, err, "POST /volumes/{id}/move must connect to the in-process server")
 	defer resp.Body.Close()
@@ -115,9 +115,9 @@ func postVolumeMove(t *testing.T, machineID, volumeName, body string) (int, []by
 
 // postVolumeMoveEvents posts a transfer body and returns the parsed event
 // stream, requiring the stream itself to answer 200.
-func postVolumeMoveEvents(t *testing.T, machineID, volumeName, body string) []volumeMoveEvent {
+func postVolumeMoveEvents(t *testing.T, hostID, volumeName, body string) []volumeMoveEvent {
 	t.Helper()
-	status, raw := postVolumeMove(t, machineID, volumeName, body)
+	status, raw := postVolumeMove(t, hostID, volumeName, body)
 	require.Equalf(t, http.StatusOK, status,
 		"the volume transfer's stream itself must succeed. body: %s", string(raw))
 	return parseVolumeMoveEvents(t, string(raw))
@@ -126,10 +126,10 @@ func postVolumeMoveEvents(t *testing.T, machineID, volumeName, body string) []vo
 // postVolumeMoveEventsVia posts a transfer body through the given
 // authenticated client and base URL — the bounded second instance's
 // variant of postVolumeMoveEvents — and returns the parsed event stream.
-func postVolumeMoveEventsVia(t *testing.T, client *http.Client, baseURL, machineID, volumeName, body string) []volumeMoveEvent {
+func postVolumeMoveEventsVia(t *testing.T, client *http.Client, baseURL, hostID, volumeName, body string) []volumeMoveEvent {
 	t.Helper()
 	resp, err := client.Post(
-		baseURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"/move",
+		baseURL+"/api/hosts/"+hostID+"/volumes/"+volumeName+"/move",
 		"application/json", bytes.NewReader([]byte(body)))
 	require.NoError(t, err, "POST /volumes/{id}/move must connect to the in-process server")
 	defer resp.Body.Close()
@@ -141,11 +141,11 @@ func postVolumeMoveEventsVia(t *testing.T, client *http.Client, baseURL, machine
 
 // getVolumeMovePreview GETs the move preview and returns the decoded
 // response.
-func getVolumeMovePreview(t *testing.T, machineID, volumeName, targetMachineID string) volumeMovePreviewResponse {
+func getVolumeMovePreview(t *testing.T, hostID, volumeName, targetHostID string) volumeMovePreviewResponse {
 	t.Helper()
 	resp, err := suite.AuthenticatedClient().Get(
-		suite.ServerURL + "/api/machines/" + machineID + "/volumes/" + volumeName +
-			"/move-preview?targetMachineId=" + targetMachineID)
+		suite.ServerURL + "/api/hosts/" + hostID + "/volumes/" + volumeName +
+			"/move-preview?targetHostId=" + targetHostID)
 	require.NoError(t, err, "GET move-preview must connect to the in-process server")
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
@@ -160,20 +160,20 @@ func getVolumeMovePreview(t *testing.T, machineID, volumeName, targetMachineID s
 // cleanupVolume registers a best-effort API deletion of a volume — the
 // fixture discipline for volumes this slice creates outside
 // createVolumeViaAPI (the transfer's own target-side creations).
-func cleanupVolume(t *testing.T, machineID, volumeName string) {
+func cleanupVolume(t *testing.T, hostID, volumeName string) {
 	t.Helper()
 	t.Cleanup(func() {
 		resp, err := suite.AuthenticatedClient().Do(standardRequest(t, http.MethodDelete,
-			suite.ServerURL+"/api/machines/"+machineID+"/volumes/"+volumeName+"?force=true"))
+			suite.ServerURL+"/api/hosts/"+hostID+"/volumes/"+volumeName+"?force=true"))
 		if err != nil {
-			t.Logf("cleanup volume %s on %s: %v", volumeName, machineID, err)
+			t.Logf("cleanup volume %s on %s: %v", volumeName, hostID, err)
 			return
 		}
 		resp.Body.Close()
 	})
 }
 
-// Test_Integration_Volumes_Move pins the cross-machine volume copy/move
+// Test_Integration_Volumes_Move pins the cross-host volume copy/move
 // contract end to end: a copy carries the data and leaves the source, a
 // move carries the data and removes the source VOLUME, a same-named
 // target volume refuses with 409 (target content untouched), an in-use
@@ -185,12 +185,12 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 	registerContainersSweep()
 	registerQuadletsSweep()
 
-	b := suite.RegisterSecondMachine(t)
+	b := suite.RegisterSecondHost(t)
 	if !b.Independent {
-		t.Skip("machine B shares machine A's host (PODLAND_TEST_SSH_* fallback) — volume transfers need independent podman state")
+		t.Skip("host B shares host A's host (PODLAND_TEST_SSH_* fallback) — volume transfers need independent podman state")
 	}
 
-	machineA := suite.MachineID
+	hostA := suite.HostID
 	base := "it-" + suite.RunID + "-vmv"
 
 	// --- AC: a copy carries the data, the source stays ------------------
@@ -201,12 +201,12 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 			"pg/note.txt":   []byte("carry me"),
 		}
 
-		createVolumeViaAPI(t, machineA, volume)
-		seedVolumeViaAPI(t, machineA, volume, sourceFiles)
-		cleanupVolume(t, b.MachineID, volume)
+		createVolumeViaAPI(t, hostA, volume)
+		seedVolumeViaAPI(t, hostA, volume, sourceFiles)
+		cleanupVolume(t, b.HostID, volume)
 
-		events := postVolumeMoveEvents(t, machineA, volume,
-			volumeMoveBody(t, b.MachineID, "copy", nil))
+		events := postVolumeMoveEvents(t, hostA, volume,
+			volumeMoveBody(t, b.HostID, "copy", nil))
 
 		// The event stream: volume start, volume done, one terminal
 		// complete carrying the copied envelope.
@@ -214,7 +214,7 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 		assert.Equal(t, "volume", events[0].Type)
 		assert.Equal(t, "start", events[0].Phase)
 		assert.Equal(t, volume, events[0].Volume)
-		assert.Equal(t, machineA, events[0].MachineID)
+		assert.Equal(t, hostA, events[0].HostID)
 		assert.NotEmpty(t, events[0].OperationID, "the transport stamps its operation ID")
 
 		done := events[len(events)-2]
@@ -226,17 +226,17 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 		require.NotNil(t, complete.Result)
 		assert.Equal(t, "copied", complete.Result.Status)
 		assert.Equal(t, volume, complete.Result.Name)
-		assert.Equal(t, machineA, complete.Result.SourceMachineID)
-		assert.Equal(t, b.MachineID, complete.Result.TargetMachineID)
+		assert.Equal(t, hostA, complete.Result.SourceHostID)
+		assert.Equal(t, b.HostID, complete.Result.TargetHostID)
 		assert.Greater(t, complete.Result.Bytes, int64(0))
 
-		// The data itself crossed machines byte-for-byte, and the
+		// The data itself crossed hosts byte-for-byte, and the
 		// source volume keeps its copy — a copy never touches the
 		// source.
-		onB := exportVolumeViaAPI(t, b.MachineID, volume)
+		onB := exportVolumeViaAPI(t, b.HostID, volume)
 		assert.Equal(t, []byte("17"), onB["pg/PG_VERSION"])
 		assert.Equal(t, []byte("carry me"), onB["pg/note.txt"])
-		onA := exportVolumeViaAPI(t, machineA, volume)
+		onA := exportVolumeViaAPI(t, hostA, volume)
 		assert.Equal(t, []byte("carry me"), onA["pg/note.txt"])
 	})
 
@@ -245,12 +245,12 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 		volume := base + "-mv"
 		sourceFiles := map[string][]byte{"keep/data.bin": []byte{0x01, 0x02, 0x03}}
 
-		createVolumeViaAPI(t, machineA, volume)
-		seedVolumeViaAPI(t, machineA, volume, sourceFiles)
-		cleanupVolume(t, b.MachineID, volume)
+		createVolumeViaAPI(t, hostA, volume)
+		seedVolumeViaAPI(t, hostA, volume, sourceFiles)
+		cleanupVolume(t, b.HostID, volume)
 
-		events := postVolumeMoveEvents(t, machineA, volume,
-			volumeMoveBody(t, b.MachineID, "move", nil))
+		events := postVolumeMoveEvents(t, hostA, volume,
+			volumeMoveBody(t, b.HostID, "move", nil))
 
 		complete := events[len(events)-1]
 		assert.Equal(t, "complete", complete.Type)
@@ -260,10 +260,10 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 
 		// The data is on B and the source VOLUME is gone — a volume
 		// move removes the volume itself, unlike a quadlet move.
-		onB := exportVolumeViaAPI(t, b.MachineID, volume)
+		onB := exportVolumeViaAPI(t, b.HostID, volume)
 		assert.Equal(t, []byte{0x01, 0x02, 0x03}, onB["keep/data.bin"])
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
-			suite.ServerURL+"/api/machines/"+machineA+"/volumes/"+volume,
+			suite.ServerURL+"/api/hosts/"+hostA+"/volumes/"+volume,
 			"", http.StatusNotFound, "VOLUME_NOT_FOUND")
 	})
 
@@ -273,13 +273,13 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 		sourceFiles := map[string][]byte{"src.txt": []byte("from A")}
 		targetFiles := map[string][]byte{"tgt.txt": []byte("already here")}
 
-		createVolumeViaAPI(t, machineA, volume)
-		seedVolumeViaAPI(t, machineA, volume, sourceFiles)
-		createVolumeViaAPI(t, b.MachineID, volume)
-		seedVolumeViaAPI(t, b.MachineID, volume, targetFiles)
+		createVolumeViaAPI(t, hostA, volume)
+		seedVolumeViaAPI(t, hostA, volume, sourceFiles)
+		createVolumeViaAPI(t, b.HostID, volume)
+		seedVolumeViaAPI(t, b.HostID, volume, targetFiles)
 
-		events := postVolumeMoveEvents(t, machineA, volume,
-			volumeMoveBody(t, b.MachineID, "copy", nil))
+		events := postVolumeMoveEvents(t, hostA, volume,
+			volumeMoveBody(t, b.HostID, "copy", nil))
 
 		require.Len(t, events, 1, "the refusal fires before any progress event")
 		assert.Equal(t, "error", events[0].Type)
@@ -288,7 +288,7 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 		assert.Contains(t, events[0].Error.Message, volume)
 
 		// The target volume keeps its own content untouched.
-		onB := exportVolumeViaAPI(t, b.MachineID, volume)
+		onB := exportVolumeViaAPI(t, b.HostID, volume)
 		assert.Equal(t, []byte("already here"), onB["tgt.txt"])
 		assert.NotContains(t, onB, "src.txt")
 	})
@@ -298,9 +298,9 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 		volume := base + "-inuse"
 		containerName := base + "-inuse-c"
 
-		createVolumeViaAPI(t, machineA, volume)
-		seedVolumeViaAPI(t, machineA, volume, map[string][]byte{"data.txt": []byte("live")})
-		cleanupVolume(t, b.MachineID, volume)
+		createVolumeViaAPI(t, hostA, volume)
+		seedVolumeViaAPI(t, hostA, volume, map[string][]byte{"data.txt": []byte("live")})
+		cleanupVolume(t, b.HostID, volume)
 		t.Cleanup(func() {
 			_, _ = podmanConnRun("rm", "-f", containerName)
 		})
@@ -315,29 +315,29 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 
 		// Without force: the move refuses with the in-use code, before
 		// anything is created on the target.
-		events := postVolumeMoveEvents(t, machineA, volume,
-			volumeMoveBody(t, b.MachineID, "move", nil))
+		events := postVolumeMoveEvents(t, hostA, volume,
+			volumeMoveBody(t, b.HostID, "move", nil))
 		require.Len(t, events, 1, "the refusal fires before any progress event")
 		assert.Equal(t, "error", events[0].Type)
 		require.NotNil(t, events[0].Error)
 		assert.Equal(t, "VOLUME_IN_USE", events[0].Error.Code)
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
-			suite.ServerURL+"/api/machines/"+b.MachineID+"/volumes/"+volume,
+			suite.ServerURL+"/api/hosts/"+b.HostID+"/volumes/"+volume,
 			"", http.StatusNotFound, "VOLUME_NOT_FOUND")
 
 		// With force: the transfer proceeds; podman stops the dependent
 		// container and removes the source volume.
-		events = postVolumeMoveEvents(t, machineA, volume,
-			volumeMoveBody(t, b.MachineID, "move", map[string]any{"force": true}))
+		events = postVolumeMoveEvents(t, hostA, volume,
+			volumeMoveBody(t, b.HostID, "move", map[string]any{"force": true}))
 		complete := events[len(events)-1]
 		assert.Equal(t, "complete", complete.Type)
 		require.NotNil(t, complete.Result)
 		assert.Equal(t, "moved", complete.Result.Status)
 
-		onB := exportVolumeViaAPI(t, b.MachineID, volume)
+		onB := exportVolumeViaAPI(t, b.HostID, volume)
 		assert.Equal(t, []byte("live"), onB["data.txt"])
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
-			suite.ServerURL+"/api/machines/"+machineA+"/volumes/"+volume,
+			suite.ServerURL+"/api/hosts/"+hostA+"/volumes/"+volume,
 			"", http.StatusNotFound, "VOLUME_NOT_FOUND")
 		assert.NotEqual(t, "running", containerStateByName(t, containerName),
 			"podman must have stopped the dependent container")
@@ -349,29 +349,29 @@ func Test_Integration_Volumes_Move(t *testing.T) {
 		quadlet := base + "-pvq"
 
 		// The referencing-quadlet fact needs a quadlet file on the
-		// source machine — the quadlet surface's systemd probe, gated
+		// source host — the quadlet surface's systemd probe, gated
 		// to this subtest alone.
 		requireUserSystemd(t)
 
-		createVolumeViaAPI(t, machineA, volume)
-		seedVolumeViaAPI(t, machineA, volume, map[string][]byte{"seed.txt": []byte("facts")})
-		t.Cleanup(func() { forceDeleteQuadlet(t, machineA, quadlet+".container") })
-		createQuadlet(t, machineA, quadletCreateBody{
+		createVolumeViaAPI(t, hostA, volume)
+		seedVolumeViaAPI(t, hostA, volume, map[string][]byte{"seed.txt": []byte("facts")})
+		t.Cleanup(func() { forceDeleteQuadlet(t, hostA, quadlet+".container") })
+		createQuadlet(t, hostA, quadletCreateBody{
 			Name:     quadlet,
 			Resource: "container",
 			Content:  "[Container]\nImage=busybox\nVolume=" + volume + ":/data\n",
 		})
 
-		got := getVolumeMovePreview(t, machineA, volume, b.MachineID)
-		assert.False(t, got.Collision, "machine B holds nothing of this run")
+		got := getVolumeMovePreview(t, hostA, volume, b.HostID)
+		assert.False(t, got.Collision, "host B holds nothing of this run")
 		assert.False(t, got.InUse, "no container mounts the volume")
 		require.Len(t, got.ReferencingQuadlets, 1)
 		assert.Equal(t, quadlet+".container", got.ReferencingQuadlets[0].Name)
 
 		// A same-named volume appearing on the target flips the
 		// collision flag — the fact the dialog's confirm gate reads.
-		createVolumeViaAPI(t, b.MachineID, volume)
-		got = getVolumeMovePreview(t, machineA, volume, b.MachineID)
+		createVolumeViaAPI(t, b.HostID, volume)
+		got = getVolumeMovePreview(t, hostA, volume, b.HostID)
 		assert.True(t, got.Collision, "a same-named target volume is a collision")
 	})
 }
@@ -405,7 +405,7 @@ func bootVolumeBoundedApp(t *testing.T, maxUploadBytes int64) (*app.App, string)
 // volume is removed again — a partial volume must not survive to block a
 // retry with a false collision. The bound trip is the one rollback
 // trigger reachable through the real podman surface (an import failure
-// cannot be simulated without breaking the machine, so that trigger
+// cannot be simulated without breaking the host, so that trigger
 // stays pinned at the service seam); crossing the shared suite server's
 // 2 GiB bound would need 2 GiB of data, so the transfer runs against a
 // second app instance whose bound is tiny, with both test hosts
@@ -416,9 +416,9 @@ func Test_Integration_Volumes_Move_BoundTripsAndRollsBack(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerVolumesSweep()
 
-	b := suite.RegisterSecondMachine(t)
+	b := suite.RegisterSecondHost(t)
 	if !b.Independent {
-		t.Skip("machine B shares machine A's host (PODLAND_TEST_SSH_* fallback) — volume transfers need independent podman state")
+		t.Skip("host B shares host A's host (PODLAND_TEST_SSH_* fallback) — volume transfers need independent podman state")
 	}
 
 	// The bounded instance: a 1 KiB transfer bound, so a 64 KiB volume
@@ -426,8 +426,8 @@ func Test_Integration_Volumes_Move_BoundTripsAndRollsBack(t *testing.T) {
 	const bound = 1 << 10
 	application, serverURL := bootVolumeBoundedApp(t, bound)
 
-	// Its own caller and both machines, registered through its public API
-	// like any production machine (encryption-at-rest, owner-access
+	// Its own caller and both hosts, registered through its public API
+	// like any production host (encryption-at-rest, owner-access
 	// grant, connection probe).
 	username := "it-" + suite.RunID + "-vmvb"
 	password := "it-" + suite.RunID + "-vmvb-pw-" + uuid.New().String()[:8]
@@ -439,16 +439,16 @@ func Test_Integration_Volumes_Move_BoundTripsAndRollsBack(t *testing.T) {
 		Timeout:   30 * time.Second,
 		Transport: &bearerTransport{token: token, base: http.DefaultTransport},
 	}
-	boundedA, err := registerMachine(serverURL, token, machineRegistration{
+	boundedA, err := registerHost(serverURL, token, hostRegistration{
 		Name:    "it-" + suite.RunID + "-vmvb-a",
-		Host:    suite.goodMachineRegistration.Host,
-		Port:    suite.goodMachineRegistration.Port,
-		SSHUser: suite.goodMachineRegistration.SSHUser,
-		Socket:  suite.goodMachineRegistration.Socket,
-		SSHKey:  suite.goodMachineRegistration.SSHKey,
+		Host:    suite.goodHostRegistration.Host,
+		Port:    suite.goodHostRegistration.Port,
+		SSHUser: suite.goodHostRegistration.SSHUser,
+		Socket:  suite.goodHostRegistration.Socket,
+		SSHKey:  suite.goodHostRegistration.SSHKey,
 	})
-	require.NoError(t, err, "register machine A in the bounded instance")
-	boundedB, err := registerMachine(serverURL, token, machineRegistration{
+	require.NoError(t, err, "register host A in the bounded instance")
+	boundedB, err := registerHost(serverURL, token, hostRegistration{
 		Name:    "it-" + suite.RunID + "-vmvb-b",
 		Host:    b.Target.Host,
 		Port:    b.Target.Port,
@@ -456,16 +456,16 @@ func Test_Integration_Volumes_Move_BoundTripsAndRollsBack(t *testing.T) {
 		Socket:  b.Target.Socket,
 		SSHKey:  b.Target.SSHKey,
 	})
-	require.NoError(t, err, "register machine B in the bounded instance")
+	require.NoError(t, err, "register host B in the bounded instance")
 
 	// The source volume: created and seeded through the shared suite
 	// server (whose populate cap is the 2 GiB default), far larger than
 	// the bounded instance's transfer bound.
 	volume := "it-" + suite.RunID + "-vmv-rb"
 	payload := bytes.Repeat([]byte("x"), 64<<10)
-	createVolumeViaAPI(t, suite.MachineID, volume)
-	seedVolumeViaAPI(t, suite.MachineID, volume, map[string][]byte{"bulk/payload.bin": payload})
-	cleanupVolume(t, b.MachineID, volume)
+	createVolumeViaAPI(t, suite.HostID, volume)
+	seedVolumeViaAPI(t, suite.HostID, volume, map[string][]byte{"bulk/payload.bin": payload})
+	cleanupVolume(t, b.HostID, volume)
 
 	// The transfer through the bounded instance: the bound trips
 	// mid-stream, after the target volume's creation.
@@ -488,19 +488,19 @@ func Test_Integration_Volumes_Move_BoundTripsAndRollsBack(t *testing.T) {
 	assert.Contains(t, terminal.Error.Message, "partially transferred target volume was removed")
 
 	// The rollback itself, against real podman: the target volume is gone
-	// on machine B — no partial volume survives to block a retry with a
+	// on host B — no partial volume survives to block a retry with a
 	// false collision.
 	expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
-		suite.ServerURL+"/api/machines/"+b.MachineID+"/volumes/"+volume,
+		suite.ServerURL+"/api/hosts/"+b.HostID+"/volumes/"+volume,
 		"", http.StatusNotFound, "VOLUME_NOT_FOUND")
 
 	// The source volume keeps its data — a copy never touches the source.
-	onA := exportVolumeViaAPI(t, suite.MachineID, volume)
+	onA := exportVolumeViaAPI(t, suite.HostID, volume)
 	assert.Equal(t, payload, onA["bulk/payload.bin"])
 }
 
 // Test_Integration_Volumes_Move_TargetAccessDenied pins the AC the route
-// middleware cannot express: a caller who may WRITE the source machine
+// middleware cannot express: a caller who may WRITE the source host
 // (so the route's write gate passes) but holds only READ on the target.
 // The move's target write gate refuses through the stream's terminal
 // error event (the gate fires inside the operation, after the NDJSON
@@ -511,10 +511,10 @@ func Test_Integration_Volumes_Move_TargetAccessDenied(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerVolumesSweep()
 
-	b := suite.RegisterSecondMachine(t)
+	b := suite.RegisterSecondHost(t)
 
-	// A second, fully authenticated user holding write on machine A (the
-	// route gate passes) and read on machine B (below the write the
+	// A second, fully authenticated user holding write on host A (the
+	// route gate passes) and read on host B (below the write the
 	// transfer needs) — the quadlet access slice's fixture discipline.
 	username := "it-" + suite.RunID + "-vmvw"
 	password := "it-" + suite.RunID + "-vmvw-pw-" + uuid.New().String()[:8]
@@ -527,14 +527,14 @@ func Test_Integration_Volumes_Move_TargetAccessDenied(t *testing.T) {
 		Transport: &bearerTransport{token: token, base: http.DefaultTransport},
 	}
 
-	// The suite user owns both machines; grant the writer write on A and
+	// The suite user owns both hosts; grant the writer write on A and
 	// read on B.
 	for _, grant := range []struct {
-		machineID  string
+		hostID     string
 		permission string
 	}{
-		{machineID: suite.MachineID, permission: models.PermissionWrite},
-		{machineID: b.MachineID, permission: models.PermissionRead},
+		{hostID: suite.HostID, permission: models.PermissionWrite},
+		{hostID: b.HostID, permission: models.PermissionRead},
 	} {
 		grantBody, err := json.Marshal(map[string]string{
 			"userId":     userID,
@@ -542,17 +542,17 @@ func Test_Integration_Volumes_Move_TargetAccessDenied(t *testing.T) {
 		})
 		require.NoError(t, err)
 		resp, err := suite.AuthenticatedClient().Post(
-			suite.ServerURL+"/api/machines/"+grant.machineID+"/access",
+			suite.ServerURL+"/api/hosts/"+grant.hostID+"/access",
 			"application/json", bytes.NewReader(grantBody))
 		require.NoError(t, err)
 		raw, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		require.Equalf(t, http.StatusCreated, resp.StatusCode,
 			"grant %s on %s: expected 201, got %d. body: %s",
-			grant.permission, grant.machineID, resp.StatusCode, string(raw))
+			grant.permission, grant.hostID, resp.StatusCode, string(raw))
 		t.Cleanup(func() {
 			req, err := http.NewRequest(http.MethodDelete,
-				suite.ServerURL+"/api/machines/"+grant.machineID+"/access/"+userID, nil)
+				suite.ServerURL+"/api/hosts/"+grant.hostID+"/access/"+userID, nil)
 			if err != nil {
 				return
 			}
@@ -562,21 +562,21 @@ func Test_Integration_Volumes_Move_TargetAccessDenied(t *testing.T) {
 		})
 	}
 
-	// Positive control: the same caller reads machine A itself (no podman
+	// Positive control: the same caller reads host A itself (no podman
 	// involved), so the refusal below is the target gate, not route-level
 	// source access.
-	writerGet, err := writer.Get(suite.ServerURL + "/api/machines/" + suite.MachineID + "/")
+	writerGet, err := writer.Get(suite.ServerURL + "/api/hosts/" + suite.HostID + "/")
 	require.NoError(t, err)
 	writerGet.Body.Close()
 	require.Equal(t, http.StatusOK, writerGet.StatusCode,
-		"the writer must pass machine A's subtree gate for the refusal below to mean target access")
+		"the writer must pass host A's subtree gate for the refusal below to mean target access")
 
-	// The move across to machine B is refused with the standard access
+	// The move across to host B is refused with the standard access
 	// error riding the stream's terminal event — nothing transferred, no
 	// error shape from the podman layer.
 	moveResp, err := writer.Post(
-		suite.ServerURL+"/api/machines/"+suite.MachineID+"/volumes/whatever/move",
-		"application/json", bytes.NewReader([]byte(volumeMoveBody(t, b.MachineID, "copy", nil))))
+		suite.ServerURL+"/api/hosts/"+suite.HostID+"/volumes/whatever/move",
+		"application/json", bytes.NewReader([]byte(volumeMoveBody(t, b.HostID, "copy", nil))))
 	require.NoError(t, err)
 	defer moveResp.Body.Close()
 	raw, _ := io.ReadAll(moveResp.Body)
@@ -591,10 +591,10 @@ func Test_Integration_Volumes_Move_TargetAccessDenied(t *testing.T) {
 	// The same caller's preview passes: read on the target suffices
 	// there, and the source volume exists (the suite user's fixture).
 	volume := "it-" + suite.RunID + "-vmv-acs"
-	createVolumeViaAPI(t, suite.MachineID, volume)
+	createVolumeViaAPI(t, suite.HostID, volume)
 	previewResp, err := writer.Get(
-		suite.ServerURL + "/api/machines/" + suite.MachineID + "/volumes/" + volume +
-			"/move-preview?targetMachineId=" + b.MachineID)
+		suite.ServerURL + "/api/hosts/" + suite.HostID + "/volumes/" + volume +
+			"/move-preview?targetHostId=" + b.HostID)
 	require.NoError(t, err)
 	defer previewResp.Body.Close()
 	raw, _ = io.ReadAll(previewResp.Body)

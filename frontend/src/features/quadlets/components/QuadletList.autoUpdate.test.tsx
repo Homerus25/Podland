@@ -3,7 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { describe, expect, it } from "vitest";
-import { machineFixture, quadletFixture } from "@/test/factories";
+import { hostFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import { liveStream, streamResponse } from "@/test/stream";
@@ -14,9 +14,9 @@ type Permission = "admin" | "write" | "read";
 
 function renderQuadletList(permission: Permission = "admin") {
 	server.use(
-		http.get("*/api/machines/m-1/quadlets", () => HttpResponse.json([web])),
+		http.get("*/api/hosts/m-1/quadlets", () => HttpResponse.json([web])),
 	);
-	renderWithQuery(<QuadletList machine={machineFixture({ permission })} />, {
+	renderWithQuery(<QuadletList host={hostFixture({ permission })} />, {
 		router: true,
 	});
 }
@@ -33,7 +33,7 @@ function logEvent(line: string): AutoUpdateEvent {
 		type: "log",
 		stream: "stdout",
 		line,
-		machineId: "m-1",
+		hostId: "m-1",
 	};
 }
 
@@ -44,7 +44,7 @@ function completeEvent(
 	return {
 		operationId: "op-1",
 		type: "complete",
-		machineId: "m-1",
+		hostId: "m-1",
 		report: { containers, overall, exitCode: 0 },
 	};
 }
@@ -53,20 +53,20 @@ function errorEvent(code: string, message: string): AutoUpdateEvent {
 	return {
 		operationId: "op-1",
 		type: "error",
-		machineId: "m-1",
+		hostId: "m-1",
 		error: { code, message },
 	};
 }
 
 function planEvent(entries: Record<string, unknown>[]): AutoUpdateEvent {
-	return { operationId: "op-1", type: "plan", machineId: "m-1", plan: entries };
+	return { operationId: "op-1", type: "plan", hostId: "m-1", plan: entries };
 }
 
 function pullingEvent(unit: string, image?: string): AutoUpdateEvent {
 	return {
 		operationId: "op-1",
 		type: "pulling",
-		machineId: "m-1",
+		hostId: "m-1",
 		unit,
 		...(image !== undefined ? { image } : {}),
 	};
@@ -95,7 +95,7 @@ function mockAutoUpdate(events: AutoUpdateEvent[] = [], holdOpen = false) {
 	pendingEvents = events;
 	releaseStream = undefined;
 	server.use(
-		http.post("*/api/machines/m-1/quadlets/auto-update", ({ request }) => {
+		http.post("*/api/hosts/m-1/quadlets/auto-update", ({ request }) => {
 			autoUpdateRequests.push(request);
 			if (!holdOpen) {
 				return new HttpResponse(frameEvents(pendingEvents), {
@@ -139,28 +139,25 @@ function mockTwoRunAutoUpdate(
 	let releaseRealRun: (() => void) | undefined;
 	let runCount = 0;
 	server.use(
-		http.post(
-			"*/api/machines/m-1/quadlets/auto-update",
-			async ({ request }) => {
-				autoUpdateRequests.push(request);
-				runCount += 1;
-				if (runCount === 1) {
-					return new HttpResponse(frameEvents(dryRunEvents), {
-						status: 200,
-						headers: { "Content-Type": "application/json" },
-					});
-				}
-				await new Promise<void>((resolve) => {
-					releaseRealRun = resolve;
+		http.post("*/api/hosts/m-1/quadlets/auto-update", async ({ request }) => {
+			autoUpdateRequests.push(request);
+			runCount += 1;
+			if (runCount === 1) {
+				return new HttpResponse(frameEvents(dryRunEvents), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
 				});
-				return streamResponse(
-					liveStream(
-						realRunEvents.map((event) => frameEvents([event])),
-						250,
-					),
-				);
-			},
-		),
+			}
+			await new Promise<void>((resolve) => {
+				releaseRealRun = resolve;
+			});
+			return streamResponse(
+				liveStream(
+					realRunEvents.map((event) => frameEvents([event])),
+					250,
+				),
+			);
+		}),
 	);
 	return () => releaseRealRun?.();
 }
@@ -189,7 +186,7 @@ describe("QuadletList auto-update", () => {
 		const hint = await screen.findByTestId("quadlets-permission-hint");
 		expect(hint).toHaveAttribute("data-requirement", "write");
 		expect(hint).toHaveTextContent(
-			"You have read-only access to this machine. Ask an owner or admin for write access to manage its quadlets.",
+			"You have read-only access to this host. Ask an owner or admin for write access to manage its quadlets.",
 		);
 		expect(
 			screen.queryByTestId("create-quadlet-button"),
@@ -506,12 +503,12 @@ describe("QuadletList auto-update", () => {
 	});
 
 	it("surfaces a terminal error event as a connection error, not per-container failures", async () => {
-		mockAutoUpdate([errorEvent("SSH_FAILED", "Machine unreachable")]);
+		mockAutoUpdate([errorEvent("SSH_FAILED", "Host unreachable")]);
 		await clickCheckForUpdates();
 
 		const alert = await screen.findByRole("alert");
 		expect(alert).toHaveTextContent("SSH_FAILED");
-		expect(alert).toHaveTextContent("Machine unreachable");
+		expect(alert).toHaveTextContent("Host unreachable");
 		expect(
 			screen.queryByText(/failed/i, {
 				selector: '[data-testid^="auto-update-item"]',
@@ -539,7 +536,7 @@ describe("QuadletList auto-update", () => {
 	});
 
 	it("keeps the footer Update button disabled on a connection error", async () => {
-		mockAutoUpdate([errorEvent("SSH_FAILED", "Machine unreachable")]);
+		mockAutoUpdate([errorEvent("SSH_FAILED", "Host unreachable")]);
 		await clickCheckForUpdates();
 
 		expect(await screen.findByRole("alert")).toBeInTheDocument();
@@ -553,9 +550,7 @@ describe("QuadletList auto-update", () => {
 		await clickCheckForUpdates();
 
 		expect(
-			await screen.findByText(
-				"No auto-update containers found on this machine.",
-			),
+			await screen.findByText("No auto-update containers found on this host."),
 		).toBeInTheDocument();
 		const updateButton = screen.getByTestId("auto-update-button");
 		expect(updateButton).toBeDisabled();
@@ -779,7 +774,7 @@ describe("QuadletList auto-update", () => {
 		autoUpdateRequests = [];
 		let runCount = 0;
 		server.use(
-			http.post("*/api/machines/m-1/quadlets/auto-update", ({ request }) => {
+			http.post("*/api/hosts/m-1/quadlets/auto-update", ({ request }) => {
 				autoUpdateRequests.push(request);
 				runCount += 1;
 				const events: AutoUpdateEvent[] =
@@ -789,7 +784,7 @@ describe("QuadletList auto-update", () => {
 								{
 									operationId: "op-1",
 									type: "complete",
-									machineId: "m-1",
+									hostId: "m-1",
 									report: {
 										containers: null,
 										overall: "unparsable-report",
@@ -803,7 +798,7 @@ describe("QuadletList auto-update", () => {
 				});
 			}),
 		);
-		renderWithQuery(<QuadletList machine={machineFixture()} />, {
+		renderWithQuery(<QuadletList host={hostFixture()} />, {
 			router: true,
 		});
 		const user = userEvent.setup();
@@ -816,9 +811,7 @@ describe("QuadletList auto-update", () => {
 
 		await waitFor(() => expect(runCount).toBe(2));
 		expect(
-			await screen.findByText(
-				"No auto-update containers found on this machine.",
-			),
+			await screen.findByText("No auto-update containers found on this host."),
 		).toBeInTheDocument();
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 		const updateButton = screen.getByTestId("auto-update-button");
@@ -886,14 +879,14 @@ describe("QuadletList auto-update", () => {
 	it("refetches the quadlet list when the filtered run completes", async () => {
 		let listRequests = 0;
 		server.use(
-			http.get("*/api/machines/m-1/quadlets", () => {
+			http.get("*/api/hosts/m-1/quadlets", () => {
 				listRequests += 1;
 				return HttpResponse.json([web]);
 			}),
 		);
 		let runCount = 0;
 		server.use(
-			http.post("*/api/machines/m-1/quadlets/auto-update", () => {
+			http.post("*/api/hosts/m-1/quadlets/auto-update", () => {
 				runCount += 1;
 				const events =
 					runCount === 1
@@ -915,7 +908,7 @@ describe("QuadletList auto-update", () => {
 				});
 			}),
 		);
-		renderWithQuery(<QuadletList machine={machineFixture()} />, {
+		renderWithQuery(<QuadletList host={hostFixture()} />, {
 			router: true,
 		});
 		const user = userEvent.setup();

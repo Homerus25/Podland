@@ -17,14 +17,14 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities/reports"
 )
 
-// pruneRequest serves POST /api/machines/{id}/containers/prune through
+// pruneRequest serves POST /api/hosts/{id}/containers/prune through
 // the handler with an authenticated test identity.
 func pruneRequest(prune http.HandlerFunc) *httptest.ResponseRecorder {
 	return testutils.Perform(prune, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/test-machine/containers/prune",
+		Path:      "/api/hosts/test-host/containers/prune",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 }
 
@@ -84,26 +84,26 @@ func TestFromPodmanContainerPruneReports_NilEntries(t *testing.T) {
 // --- Route wiring: the containers subtree gates prune at write level ---
 //
 // These tests mount the containers routes on a ServeMux exactly the way
-// internal/app/app.go does (RequireMachineAccess wrapping the sub-mux,
-// RequireMachinePermission(write) on the literal POST /prune, the
+// internal/app/app.go does (RequireHostAccess wrapping the sub-mux,
+// RequireHostPermission(write) on the literal POST /prune, the
 // literal winning over the /{containerId} wildcard by ServeMux
 // precedence) so the 403 semantics and the literal-route win the ACs
 // promise are exercised through the real middleware.
 
-func pruneAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, handler *ContainerHandler) http.Handler {
-	machineAccess := appmiddleware.RequireMachineAccess(machineRepo, accessRepo)
-	requireWrite := appmiddleware.RequireMachinePermission(machineRepo, accessRepo, models.PermissionWrite)
+func pruneAccessRouter(hostRepo *testutils.MockHostRepository, accessRepo *testutils.MockHostAccessRepository, handler *ContainerHandler) http.Handler {
+	hostAccess := appmiddleware.RequireHostAccess(hostRepo, accessRepo)
+	requireWrite := appmiddleware.RequireHostPermission(hostRepo, accessRepo, models.PermissionWrite)
 	r := http.NewServeMux()
-	r.Handle("GET /api/machines/{id}/containers", machineAccess(http.HandlerFunc(handler.List)))
+	r.Handle("GET /api/hosts/{id}/containers", hostAccess(http.HandlerFunc(handler.List)))
 	// The literal /prune route must beat the /{containerId} wildcard
 	// or prune calls get swallowed as a container named "prune".
-	r.Handle("POST /api/machines/{id}/containers/prune", machineAccess(requireWrite(http.HandlerFunc(handler.Prune))))
-	r.Handle("GET /api/machines/{id}/containers/{containerId}", machineAccess(http.HandlerFunc(handler.Get)))
+	r.Handle("POST /api/hosts/{id}/containers/prune", hostAccess(requireWrite(http.HandlerFunc(handler.Prune))))
+	r.Handle("GET /api/hosts/{id}/containers/{containerId}", hostAccess(http.HandlerFunc(handler.Get)))
 	return r
 }
 
 func pruneRequestAsUser(router http.Handler, userID string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/api/machines/machine-1/containers/prune", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/hosts/host-1/containers/prune", nil)
 	req = req.WithContext(contextutils.SetUserID(req.Context(), userID))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -126,10 +126,10 @@ func TestContainerHandler_Prune_WriteGate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			machineRepo := testutils.NewMockMachineRepository()
-			machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-			accessRepo := testutils.NewMockMachineAccessRepository()
-			accessRepo.AddAccess("machine-1", "grantee-1", tt.level, time.Now())
+			hostRepo := testutils.NewMockHostRepository()
+			hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+			accessRepo := testutils.NewMockHostAccessRepository()
+			accessRepo.AddAccess("host-1", "grantee-1", tt.level, time.Now())
 			called := false
 			engine := &fakeContainerEngine{
 				pruneFn: func() ([]*reports.PruneReport, error) {
@@ -137,7 +137,7 @@ func TestContainerHandler_Prune_WriteGate(t *testing.T) {
 					return []*reports.PruneReport{{Id: "stopped-a", Size: 4096}}, nil
 				},
 			}
-			router := pruneAccessRouter(machineRepo, accessRepo, newTestHandler(engine))
+			router := pruneAccessRouter(hostRepo, accessRepo, newTestHandler(engine))
 
 			w := pruneRequestAsUser(router, "grantee-1")
 
@@ -155,16 +155,16 @@ func TestContainerHandler_Prune_WriteGate(t *testing.T) {
 // way app.go mounts them, POST /containers/prune reaches the prune
 // handler (a swallowed route would answer 404/405, not a prune report).
 func TestContainerHandler_Prune_LiteralRouteWins(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	accessRepo := testutils.NewMockMachineAccessRepository()
-	accessRepo.AddAccess("machine-1", "grantee-1", models.PermissionWrite, time.Now())
+	hostRepo := testutils.NewMockHostRepository()
+	hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+	accessRepo := testutils.NewMockHostAccessRepository()
+	accessRepo.AddAccess("host-1", "grantee-1", models.PermissionWrite, time.Now())
 	engine := &fakeContainerEngine{
 		pruneFn: func() ([]*reports.PruneReport, error) {
 			return []*reports.PruneReport{{Id: "stopped-a", Size: 4096}}, nil
 		},
 	}
-	router := pruneAccessRouter(machineRepo, accessRepo, newTestHandler(engine))
+	router := pruneAccessRouter(hostRepo, accessRepo, newTestHandler(engine))
 
 	w := pruneRequestAsUser(router, "grantee-1")
 

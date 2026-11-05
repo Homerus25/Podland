@@ -13,25 +13,25 @@ import (
 )
 
 func TestPerform_WiresContextIdentityAndURLParams(t *testing.T) {
-	var gotUserID, gotRequestID, gotMachineID, gotVolumeName string
+	var gotUserID, gotRequestID, gotHostID, gotVolumeName string
 
 	w := Perform(func(w http.ResponseWriter, r *http.Request) {
 		gotUserID = contextutils.GetUserIDFromContext(r.Context())
 		gotRequestID = contextutils.GetRequestID(r.Context())
-		gotMachineID = r.PathValue("id")
+		gotHostID = r.PathValue("id")
 		gotVolumeName = r.PathValue("volumeName")
 		w.WriteHeader(http.StatusNoContent)
 	}, Request{
 		Method:    http.MethodDelete,
-		Path:      "/api/machines/test-machine/volumes/my-volume",
+		Path:      "/api/hosts/test-host/volumes/my-volume",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "volumeName": "my-volume"},
+		URLParams: map[string]string{"id": "test-host", "volumeName": "my-volume"},
 	})
 
 	assert.Equal(t, http.StatusNoContent, w.Code)
 	assert.Equal(t, "test-user", gotUserID)
 	assert.Equal(t, "test-request-id", gotRequestID, "requestID defaults when unset")
-	assert.Equal(t, "test-machine", gotMachineID)
+	assert.Equal(t, "test-host", gotHostID)
 	assert.Equal(t, "my-volume", gotVolumeName)
 }
 
@@ -46,7 +46,7 @@ func TestPerform_BodyDefaultsToJSONContentType(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}, Request{
 		Method: http.MethodPost,
-		Path:   "/api/machines/test-machine/volumes",
+		Path:   "/api/hosts/test-host/volumes",
 		UserID: "test-user",
 		Body:   strings.NewReader(`{"name":"v"}`),
 	})
@@ -68,7 +68,7 @@ func TestPerform_LayersIdentityOntoInjectedContext(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}, Request{
 		Method:  http.MethodGet,
-		Path:    "/api/machines/test-machine/volumes",
+		Path:    "/api/hosts/test-host/volumes",
 		UserID:  "test-user",
 		Context: ctx,
 	})
@@ -83,7 +83,7 @@ func TestPerform_AllowsAnonymousContext(t *testing.T) {
 	Perform(func(w http.ResponseWriter, r *http.Request) {
 		gotUserID = contextutils.GetUserIDFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
-	}, Request{Method: http.MethodGet, Path: "/api/machines/m/volumes"})
+	}, Request{Method: http.MethodGet, Path: "/api/hosts/m/volumes"})
 
 	assert.Empty(t, gotUserID, "empty UserID must produce an identity-less context")
 }

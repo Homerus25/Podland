@@ -9,7 +9,7 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
 
-// NetworkCreateRequest is the POST /api/machines/{id}/networks body.
+// NetworkCreateRequest is the POST /api/hosts/{id}/networks body.
 // Name is required; containers optionally lists container IDs to attach
 // to the new network in the same call.
 type NetworkCreateRequest struct {
@@ -20,7 +20,7 @@ type NetworkCreateRequest struct {
 }
 
 // NetworkConnectRequest is the
-// POST /api/machines/{id}/networks/{networkName}/connect body.
+// POST /api/hosts/{id}/networks/{networkName}/connect body.
 type NetworkConnectRequest struct {
 	// Container ID to attach to the network
 	Container string `json:"container" validate:"required"`
@@ -75,7 +75,7 @@ type NetworkContainerRef struct {
 }
 
 // NetworkDetailResponse is the GET
-// /api/machines/{id}/networks/{networkName} detail DTO: the fields
+// /api/hosts/{id}/networks/{networkName} detail DTO: the fields
 // the network detail page renders, mapped from the inspect report.
 type NetworkDetailResponse struct {
 	// Network name

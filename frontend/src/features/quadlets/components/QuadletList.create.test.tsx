@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
-import { machineFixture, quadletFixture } from "@/test/factories";
+import { hostFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -23,7 +23,7 @@ function resetCounters() {
 }
 
 function quadletsHandler(quadlets: () => QuadletSummary[]) {
-	return http.get("*/api/machines/m-1/quadlets", () =>
+	return http.get("*/api/hosts/m-1/quadlets", () =>
 		HttpResponse.json(quadlets()),
 	);
 }
@@ -33,7 +33,7 @@ function createHandler(
 	body?: JsonBodyType,
 	onCreated?: () => void,
 ) {
-	return http.post("*/api/machines/m-1/quadlets", async ({ request }) => {
+	return http.post("*/api/hosts/m-1/quadlets", async ({ request }) => {
 		createRequests.count++;
 		createRequests.body = await request.json();
 		if (status !== 201) return HttpResponse.json(body, { status });
@@ -52,7 +52,7 @@ function createHandler(
 }
 
 function renderQuadletList() {
-	renderWithQuery(<QuadletList machine={machineFixture()} />, {
+	renderWithQuery(<QuadletList host={hostFixture()} />, {
 		router: true,
 	});
 }
@@ -211,7 +211,7 @@ describe("QuadletList create", () => {
 		expect(screen.getByDisplayValue("existing")).toBeInTheDocument();
 	});
 
-	it("offers the create action on an empty machine and creates the first quadlet", async () => {
+	it("offers the create action on an empty host and creates the first quadlet", async () => {
 		let quadlets: QuadletSummary[] = [];
 		server.use(
 			quadletsHandler(() => quadlets),

@@ -29,33 +29,33 @@ import (
 var realDialMu sync.Mutex
 
 // newProbeManager returns a manager with live podman connection contexts
-// pre-seeded per machine, standing in for SSH-established tunnels so the
+// pre-seeded per host, standing in for SSH-established tunnels so the
 // probe exercises the "cached connection" path without a real host. The
-// cache is warmed by acquiring each pre-seeded machine once (its dial
+// cache is warmed by acquiring each pre-seeded host once (its dial
 // returns the pre-seeded context); the dial is then swapped for one that
 // fails loudly, so a probe that ever tries to dial fails the test.
-func newProbeManager(t *testing.T, connCtxByMachine map[string]context.Context, testTimeout time.Duration) *ConnectionManager {
+func newProbeManager(t *testing.T, connCtxByHost map[string]context.Context, testTimeout time.Duration) *ConnectionManager {
 	t.Helper()
 	mgr := newManager(managerOptions{
 		maxSize:         10,
 		testTimeout:     testTimeout,
 		idleTimeout:     15 * time.Minute,
 		cleanupInterval: 0, // no cleanup goroutine: entries must survive the test
-		dial: func(_ context.Context, machineID string) (context.Context, bindings.CloseFunc, error) {
-			connCtx, ok := connCtxByMachine[machineID]
+		dial: func(_ context.Context, hostID string) (context.Context, bindings.CloseFunc, error) {
+			connCtx, ok := connCtxByHost[hostID]
 			if !ok {
 				return nil, nil, errors.New("probe tests must not dial: connections are pre-seeded")
 			}
 			return connCtx, func() {}, nil
 		},
 	})
-	for machineID, connCtx := range connCtxByMachine {
+	for hostID, connCtx := range connCtxByHost {
 		if _, err := bindings.GetClient(connCtx); err != nil {
-			t.Fatalf("pre-seeded context for %s: %v", machineID, err)
+			t.Fatalf("pre-seeded context for %s: %v", hostID, err)
 		}
-		_, release, err := mgr.cache.Acquire(context.Background(), machineID)
+		_, release, err := mgr.cache.Acquire(context.Background(), hostID)
 		if err != nil {
-			t.Fatalf("seed cache for %s: %v", machineID, err)
+			t.Fatalf("seed cache for %s: %v", hostID, err)
 		}
 		release()
 	}
@@ -88,12 +88,12 @@ func tunnelCtx(t *testing.T, uri string) context.Context {
 	return connCtx
 }
 
-func TestConnectionManager_ProbeMachine(t *testing.T) {
+func TestConnectionManager_ProbeHost(t *testing.T) {
 	t.Run("ping succeeds over cached connection", func(t *testing.T) {
 		connCtx := tunnelCtx(t, pingServer(t, http.StatusOK))
-		mgr := newProbeManager(t, map[string]context.Context{"machine-1": connCtx}, 10*time.Second)
+		mgr := newProbeManager(t, map[string]context.Context{"host-1": connCtx}, 10*time.Second)
 
-		err := mgr.ProbeMachine("machine-1", "user-1")
+		err := mgr.ProbeHost("host-1", "user-1")
 
 		assert.NoError(t, err, "SSH reachable + ping OK must mean online (nil)")
 	})
@@ -111,9 +111,9 @@ func TestConnectionManager_ProbeMachine(t *testing.T) {
 		t.Cleanup(server.Close)
 		connCtx := tunnelCtx(t, "tcp://"+server.Listener.Addr().String())
 		status.Store(http.StatusInternalServerError)
-		mgr := newProbeManager(t, map[string]context.Context{"machine-1": connCtx}, 10*time.Second)
+		mgr := newProbeManager(t, map[string]context.Context{"host-1": connCtx}, 10*time.Second)
 
-		err := mgr.ProbeMachine("machine-1", "user-1")
+		err := mgr.ProbeHost("host-1", "user-1")
 
 		assert.Error(t, err, "non-200 ping must mean offline (error)")
 	})
@@ -125,9 +125,9 @@ func TestConnectionManager_ProbeMachine(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 		connCtx := tunnelCtx(t, "tcp://"+server.Listener.Addr().String())
-		mgr := newProbeManager(t, map[string]context.Context{"machine-1": connCtx}, 20*time.Millisecond)
+		mgr := newProbeManager(t, map[string]context.Context{"host-1": connCtx}, 20*time.Millisecond)
 
-		err := mgr.ProbeMachine("machine-1", "user-1")
+		err := mgr.ProbeHost("host-1", "user-1")
 
 		assert.ErrorIs(t, err, context.DeadlineExceeded,
 			"probe exceeding testTimeout must return the standard deadline error (→ offline)")

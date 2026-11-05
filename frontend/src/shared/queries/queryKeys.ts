@@ -1,12 +1,12 @@
-// Single owner of the machine-resource query key vocabulary. Every key in the
+// Single owner of the host-resource query key vocabulary. Every key in the
 // app is built here and every list invalidation targets these keys, so a
 // rename cannot strand a string literal in another feature. All keys are
 // plain `as const` tuples: invalidation is prefix-based, so the union carries
 // all the rename-safety that matters.
 
-// Exactly the invalidatable set; mirrors the machine detail page's resource
+// Exactly the invalidatable set; mirrors the host detail page's resource
 // tabs.
-export type MachineResource =
+export type HostResource =
 	| "containers"
 	| "pods"
 	| "volumes"
@@ -15,55 +15,55 @@ export type MachineResource =
 	| "quadlets"
 	| "secrets";
 
-export const machinesQueryKey = ["machines"] as const;
+export const hostsQueryKey = ["hosts"] as const;
 
-// App-wide resources are bare constants too (no machine id to embed).
+// App-wide resources are bare constants too (no host id to embed).
 export const usersQueryKey = ["users"] as const;
 
-export function containersQueryKey(machineId: string) {
-	return ["machines", machineId, "containers"] as const;
+export function containersQueryKey(hostId: string) {
+	return ["hosts", hostId, "containers"] as const;
 }
 
-export function podsQueryKey(machineId: string) {
-	return ["machines", machineId, "pods"] as const;
+export function podsQueryKey(hostId: string) {
+	return ["hosts", hostId, "pods"] as const;
 }
 
-export function volumesQueryKey(machineId: string) {
-	return ["machines", machineId, "volumes"] as const;
+export function volumesQueryKey(hostId: string) {
+	return ["hosts", hostId, "volumes"] as const;
 }
 
-export function imagesQueryKey(machineId: string) {
-	return ["machines", machineId, "images"] as const;
+export function imagesQueryKey(hostId: string) {
+	return ["hosts", hostId, "images"] as const;
 }
 
-export function networksQueryKey(machineId: string) {
-	return ["machines", machineId, "networks"] as const;
+export function networksQueryKey(hostId: string) {
+	return ["hosts", hostId, "networks"] as const;
 }
 
-export function quadletsQueryKey(machineId: string) {
-	return ["machines", machineId, "quadlets"] as const;
+export function quadletsQueryKey(hostId: string) {
+	return ["hosts", hostId, "quadlets"] as const;
 }
 
-export function secretsQueryKey(machineId: string) {
-	return ["machines", machineId, "secrets"] as const;
+export function secretsQueryKey(hostId: string) {
+	return ["hosts", hostId, "secrets"] as const;
 }
 
-export function quadletQueryKey(machineId: string, quadletId: string) {
-	return [...quadletsQueryKey(machineId), quadletId] as const;
+export function quadletQueryKey(hostId: string, quadletId: string) {
+	return [...quadletsQueryKey(hostId), quadletId] as const;
 }
 
 // The move/copy preview is a quadlet sub-resource keyed by the chosen target,
 // so changing the target refetches. Never an invalidation target of its own:
 // quadlets-prefix invalidation (a transfer's success) covers it.
 export function quadletMovePreviewQueryKey(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
-	targetMachineId: string,
+	targetHostId: string,
 ) {
 	return [
-		...quadletQueryKey(machineId, quadletId),
+		...quadletQueryKey(hostId, quadletId),
 		"move-preview",
-		targetMachineId,
+		targetHostId,
 	] as const;
 }
 
@@ -71,150 +71,147 @@ export function quadletMovePreviewQueryKey(
 // target, so changing the target refetches. Never an invalidation target of
 // its own: volumes-prefix invalidation (a transfer's success) covers it.
 export function volumeMovePreviewQueryKey(
-	machineId: string,
+	hostId: string,
 	volumeName: string,
-	targetMachineId: string,
+	targetHostId: string,
 ) {
 	return [
-		...volumeQueryKey(machineId, volumeName),
+		...volumeQueryKey(hostId, volumeName),
 		"move-preview",
-		targetMachineId,
+		targetHostId,
 	] as const;
 }
 
-export function secretQueryKey(machineId: string, secretId: string) {
-	return [...secretsQueryKey(machineId), secretId] as const;
+export function secretQueryKey(hostId: string, secretId: string) {
+	return [...secretsQueryKey(hostId), secretId] as const;
 }
 
 // The secret copy/move preview is a secret sub-resource keyed by the chosen
 // target, so changing the target refetches. Never an invalidation target of
 // its own: secrets-prefix invalidation (a transfer's success) covers it.
 export function secretMovePreviewQueryKey(
-	machineId: string,
+	hostId: string,
 	secretId: string,
-	targetMachineId: string,
+	targetHostId: string,
 ) {
 	return [
-		...secretQueryKey(machineId, secretId),
+		...secretQueryKey(hostId, secretId),
 		"move-preview",
-		targetMachineId,
+		targetHostId,
 	] as const;
 }
 
-export function volumeQueryKey(machineId: string, volumeName: string) {
-	return [...volumesQueryKey(machineId), volumeName] as const;
+export function volumeQueryKey(hostId: string, volumeName: string) {
+	return [...volumesQueryKey(hostId), volumeName] as const;
 }
 
-export function machineDetailKey(id: string) {
-	return ["machines", id] as const;
+export function hostDetailKey(id: string) {
+	return ["hosts", id] as const;
 }
 
 // Sub-resources reuse the key shape but are never invalidation targets, so
-// they are deliberately not MachineResource members.
-export function machineStatusQueryKey(id: string) {
-	return ["machines", id, "status"] as const;
+// they are deliberately not HostResource members.
+export function hostStatusQueryKey(id: string) {
+	return ["hosts", id, "status"] as const;
 }
 
-export function machineVersionQueryKey(id: string) {
-	return ["machines", id, "version"] as const;
+export function hostVersionQueryKey(id: string) {
+	return ["hosts", id, "version"] as const;
 }
 
-export function machineAccessQueryKey(id: string) {
-	return ["machines", id, "access"] as const;
+export function hostAccessQueryKey(id: string) {
+	return ["hosts", id, "access"] as const;
 }
 
 // The detail view is a container sub-resource keyed by the container, so
 // every page visit resolves to its own entry. Never an invalidation target
 // of its own: containers-prefix invalidation covers it.
-export function containerQueryKey(machineId: string, containerId: string) {
-	return [...containersQueryKey(machineId), containerId] as const;
+export function containerQueryKey(hostId: string, containerId: string) {
+	return [...containersQueryKey(hostId), containerId] as const;
 }
 
 // The detail view is a pod sub-resource keyed by the pod, so every page
 // visit resolves to its own entry. Never an invalidation target of its
 // own: pods-prefix invalidation covers it.
-export function podQueryKey(machineId: string, podId: string) {
-	return [...podsQueryKey(machineId), podId] as const;
+export function podQueryKey(hostId: string, podId: string) {
+	return [...podsQueryKey(hostId), podId] as const;
 }
 
 // The raw inspect report is a pod sub-resource keyed by the pod, so every
 // reveal resolves to its own entry. Never an invalidation target of its
 // own: pods-prefix invalidation covers it.
-export function podInspectQueryKey(machineId: string, podId: string) {
-	return [...podsQueryKey(machineId), podId, "inspect"] as const;
+export function podInspectQueryKey(hostId: string, podId: string) {
+	return [...podsQueryKey(hostId), podId, "inspect"] as const;
 }
 
 // The raw inspect report is a container sub-resource keyed by the container,
 // so every dialog open resolves to its own entry. Never an invalidation
 // target of its own: containers-prefix invalidation covers it.
-export function containerInspectQueryKey(
-	machineId: string,
-	containerId: string,
-) {
-	return [...containersQueryKey(machineId), containerId, "inspect"] as const;
+export function containerInspectQueryKey(hostId: string, containerId: string) {
+	return [...containersQueryKey(hostId), containerId, "inspect"] as const;
 }
 
-// The all-stats snapshot is a machine's containers sub-resource, so every
+// The all-stats snapshot is a host's containers sub-resource, so every
 // dialog open resolves to its own entry. Never an invalidation target of
 // its own: containers-prefix invalidation covers it.
-export function containersStatsQueryKey(machineId: string) {
-	return [...containersQueryKey(machineId), "stats"] as const;
+export function containersStatsQueryKey(hostId: string) {
+	return [...containersQueryKey(hostId), "stats"] as const;
 }
 
 // The one-container stats snapshot is a container sub-resource keyed by
 // the container, a sibling of the inspect key, so every dialog open
 // resolves to its own entry. Never an invalidation target of its own:
 // containers-prefix invalidation covers it.
-export function containerStatsQueryKey(machineId: string, containerId: string) {
-	return [...containersQueryKey(machineId), containerId, "stats"] as const;
+export function containerStatsQueryKey(hostId: string, containerId: string) {
+	return [...containersQueryKey(hostId), containerId, "stats"] as const;
 }
 
 // The detail view is a network sub-resource keyed by the network, so every
 // page visit resolves to its own entry. Never an invalidation target of its
 // own: networks-prefix invalidation covers it.
-export function networkQueryKey(machineId: string, networkName: string) {
-	return [...networksQueryKey(machineId), networkName] as const;
+export function networkQueryKey(hostId: string, networkName: string) {
+	return [...networksQueryKey(hostId), networkName] as const;
 }
 
 // The raw inspect report is a network sub-resource keyed by the network,
 // so every dialog open resolves to its own entry. Never an invalidation
 // target of its own: networks-prefix invalidation covers it.
-export function networkInspectQueryKey(machineId: string, networkName: string) {
-	return [...networksQueryKey(machineId), networkName, "inspect"] as const;
+export function networkInspectQueryKey(hostId: string, networkName: string) {
+	return [...networksQueryKey(hostId), networkName, "inspect"] as const;
 }
 
 // The detail view is an image sub-resource keyed by the image, so every
 // page visit resolves to its own entry. Never an invalidation target of its
 // own: images-prefix invalidation covers it.
-export function imageQueryKey(machineId: string, imageId: string) {
-	return [...imagesQueryKey(machineId), imageId] as const;
+export function imageQueryKey(hostId: string, imageId: string) {
+	return [...imagesQueryKey(hostId), imageId] as const;
 }
 
 // The raw inspect report is an image sub-resource keyed by the image, so
 // every dialog open resolves to its own entry. Never an invalidation
 // target of its own: images-prefix invalidation covers it.
-export function imageInspectQueryKey(machineId: string, imageId: string) {
-	return [...imagesQueryKey(machineId), imageId, "inspect"] as const;
+export function imageInspectQueryKey(hostId: string, imageId: string) {
+	return [...imagesQueryKey(hostId), imageId, "inspect"] as const;
 }
 
 // The image copy preview is an image sub-resource keyed by the chosen
 // target, so changing the target refetches. Never an invalidation target
 // of its own: images-prefix invalidation (a copy's success) covers it.
 export function imageCopyPreviewQueryKey(
-	machineId: string,
+	hostId: string,
 	imageId: string,
-	targetMachineId: string,
+	targetHostId: string,
 ) {
 	return [
-		...imageQueryKey(machineId, imageId),
+		...imageQueryKey(hostId, imageId),
 		"copy-preview",
-		targetMachineId,
+		targetHostId,
 	] as const;
 }
 
 // The raw inspect report is a secret sub-resource keyed by the secret, so
 // every dialog open resolves to its own entry. Never an invalidation target
 // of its own: secrets-prefix invalidation covers it.
-export function secretInspectQueryKey(machineId: string, secretId: string) {
-	return [...secretsQueryKey(machineId), secretId, "inspect"] as const;
+export function secretInspectQueryKey(hostId: string, secretId: string) {
+	return [...secretsQueryKey(hostId), secretId, "inspect"] as const;
 }

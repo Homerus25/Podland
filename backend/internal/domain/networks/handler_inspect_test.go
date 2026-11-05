@@ -20,14 +20,14 @@ import (
 )
 
 // inspectRequest serves GET
-// /api/machines/{id}/networks/{networkName}/inspect through the handler
+// /api/hosts/{id}/networks/{networkName}/inspect through the handler
 // with an authenticated test identity.
 func inspectRequest(inspect http.HandlerFunc, networkName string) *httptest.ResponseRecorder {
 	return testutils.Perform(inspect, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/networks/" + networkName + "/inspect",
+		Path:      "/api/hosts/test-host/networks/" + networkName + "/inspect",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "networkName": networkName},
+		URLParams: map[string]string{"id": "test-host", "networkName": networkName},
 	})
 }
 
@@ -51,7 +51,7 @@ func networkInspectFixture(name string) entities.NetworkInspectReport {
 
 // TestNetworkHandler_Inspect_Success pins the inspect contract: 200
 // with the raw network inspect report as the top-level JSON body — no
-// DTO mapping — and the URL-param network reaching the machine.
+// DTO mapping — and the URL-param network reaching the host.
 func TestNetworkHandler_Inspect_Success(t *testing.T) {
 	report := networkInspectFixture("frontend")
 	var inspectedName string
@@ -65,7 +65,7 @@ func TestNetworkHandler_Inspect_Success(t *testing.T) {
 	w := inspectRequest(newTestHandler(engine).Inspect, "frontend")
 
 	require.Equal(t, http.StatusOK, w.Code, "inspect should return 200")
-	assert.Equal(t, "frontend", inspectedName, "the URL-param network must reach the machine")
+	assert.Equal(t, "frontend", inspectedName, "the URL-param network must reach the host")
 
 	var body entities.NetworkInspectReport
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), "the top-level body must be the raw inspect report")
@@ -107,9 +107,9 @@ func TestNetworkHandler_Inspect_MissingNetworkName(t *testing.T) {
 
 	w := testutils.Perform(newTestHandler(engine).Inspect, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/networks//inspect",
+		Path:      "/api/hosts/test-host/networks//inspect",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -117,12 +117,12 @@ func TestNetworkHandler_Inspect_MissingNetworkName(t *testing.T) {
 }
 
 // networksAccessRouter mirrors app.go's mounting of the networks
-// inspect route: GET /api/machines/{id}/networks/{networkName}/inspect
-// rides the RequireMachineAccess subtree at read level (no requireWrite).
-func networksAccessRouter(machineRepo *testutils.MockMachineRepository, accessRepo *testutils.MockMachineAccessRepository, service *NetworkService) http.Handler {
+// inspect route: GET /api/hosts/{id}/networks/{networkName}/inspect
+// rides the RequireHostAccess subtree at read level (no requireWrite).
+func networksAccessRouter(hostRepo *testutils.MockHostRepository, accessRepo *testutils.MockHostAccessRepository, service *NetworkService) http.Handler {
 	r := http.NewServeMux()
-	r.Handle("GET /api/machines/{id}/networks/{networkName}/inspect",
-		appmiddleware.RequireMachineAccess(machineRepo, accessRepo)(http.HandlerFunc(NewNetworkHandler(service).Inspect)))
+	r.Handle("GET /api/hosts/{id}/networks/{networkName}/inspect",
+		appmiddleware.RequireHostAccess(hostRepo, accessRepo)(http.HandlerFunc(NewNetworkHandler(service).Inspect)))
 	return r
 }
 
@@ -134,23 +134,23 @@ func requestAsUser(method, target, userID string) *http.Request {
 }
 
 // TestNetworkHandler_Inspect_ReadLevelGranteeReachesRoute pins the
-// route mounting: GET /api/machines/{id}/networks/{networkName}/inspect
-// rides the RequireMachineAccess subtree at read level (no requireWrite),
+// route mounting: GET /api/hosts/{id}/networks/{networkName}/inspect
+// rides the RequireHostAccess subtree at read level (no requireWrite),
 // so a read-level grantee reaches the handler.
 func TestNetworkHandler_Inspect_ReadLevelGranteeReachesRoute(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	accessRepo := testutils.NewMockMachineAccessRepository()
-	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
+	hostRepo := testutils.NewMockHostRepository()
+	hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+	accessRepo := testutils.NewMockHostAccessRepository()
+	accessRepo.AddAccess("host-1", "reader-1", models.PermissionRead, time.Now())
 	engine := &fakeNetworkEngine{
 		inspectFn: func(name string) ([]entities.NetworkInspectReport, []error, error) {
 			return []entities.NetworkInspectReport{networkInspectFixture("frontend")}, nil, nil
 		},
 	}
-	router := networksAccessRouter(machineRepo, accessRepo, NewNetworkService(fakeEngineProvider{engine: engine}))
+	router := networksAccessRouter(hostRepo, accessRepo, NewNetworkService(fakeEngineProvider{engine: engine}))
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/networks/frontend/inspect", "reader-1"))
+	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/hosts/host-1/networks/frontend/inspect", "reader-1"))
 
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "a read-level grantee must reach the raw inspect endpoint")
 }

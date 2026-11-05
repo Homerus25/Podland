@@ -21,7 +21,7 @@ import (
 // The handler is constructed over both quadlet modules (architecture
 // review 2026-10-19, candidate C2): the lean service owns CRUD, lifecycle,
 // logs, generate, import, and auto-update; the transfer service owns the
-// cross-machine move/copy.
+// cross-host move/copy.
 type QuadletHandler struct {
 	service  *QuadletService
 	transfer *QuadletTransferService
@@ -38,41 +38,41 @@ func NewQuadletHandler(service *QuadletService, transfer *QuadletTransferService
 
 // List handles listing quadlets
 func (h *QuadletHandler) List(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]QuadletListResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]QuadletListResponse, error) {
 		filters := ListFilters{
 			Resource: r.URL.Query().Get("resource"),
 			Name:     r.URL.Query().Get("name"),
 		}
-		return h.service.List(ctx, userID, machineID, filters)
+		return h.service.List(ctx, userID, hostID, filters)
 	})
 }
 
 // Create handles creating a quadlet
 func (h *QuadletHandler) Create(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*QuadletCreateResponse, error) {
+	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, hostID string) (*QuadletCreateResponse, error) {
 		var request QuadletCreateRequest
 		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 
-		return h.service.Create(ctx, userID, machineID, request)
+		return h.service.Create(ctx, userID, hostID, request)
 	})
 }
 
 // Get handles getting a quadlet by ID
 func (h *QuadletHandler) Get(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletGetResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*QuadletGetResponse, error) {
 		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
 		if guard != nil {
 			return nil, guard
 		}
-		return h.service.Get(ctx, userID, machineID, quadletID)
+		return h.service.Get(ctx, userID, hostID, quadletID)
 	})
 }
 
 // Update handles updating a quadlet
 func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletGetResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*QuadletGetResponse, error) {
 		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
 		if guard != nil {
 			return nil, guard
@@ -83,7 +83,7 @@ func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return nil, appErr
 		}
 
-		return h.service.Update(ctx, userID, machineID, quadletID, request)
+		return h.service.Update(ctx, userID, hostID, quadletID, request)
 	})
 }
 
@@ -93,7 +93,7 @@ func (h *QuadletHandler) Update(w http.ResponseWriter, r *http.Request) {
 // through the lifecycle seam before remove unless force is set; with
 // stop=false a running resource is refused (400).
 func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, hostID string) (struct{}, error) {
 		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
 		if guard != nil {
 			return struct{}{}, guard
@@ -102,7 +102,7 @@ func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		force := web.QueryBool(r, "force", false)
 		stop := web.QueryBool(r, "stop", true)
 
-		return struct{}{}, h.service.Delete(ctx, userID, machineID, quadletID, force, stop)
+		return struct{}{}, h.service.Delete(ctx, userID, hostID, quadletID, force, stop)
 	})
 }
 
@@ -111,12 +111,12 @@ func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
 // Returns 200 with {id, state, unit}, or QUADLET_ALREADY_RUNNING (400) /
 // QUADLET_NOT_FOUND (404) / CONNECTION_FAILED (502) on error.
 func (h *QuadletHandler) Start(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletLifecycleResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*QuadletLifecycleResponse, error) {
 		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
 		if guard != nil {
 			return nil, guard
 		}
-		return h.service.Start(ctx, userID, machineID, quadletID)
+		return h.service.Start(ctx, userID, hostID, quadletID)
 	})
 }
 
@@ -125,12 +125,12 @@ func (h *QuadletHandler) Start(w http.ResponseWriter, r *http.Request) {
 // query param (doku/description_quadlets_api.md). No force param —
 // see LifecycleOptions (issue 205).
 func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletLifecycleResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*QuadletLifecycleResponse, error) {
 		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
 		if guard != nil {
 			return nil, guard
 		}
-		return h.service.Stop(ctx, userID, machineID, quadletID, parseLifecycleOptions(r))
+		return h.service.Stop(ctx, userID, hostID, quadletID, parseLifecycleOptions(r))
 	})
 }
 
@@ -139,12 +139,12 @@ func (h *QuadletHandler) Stop(w http.ResponseWriter, r *http.Request) {
 // query param (doku/description_quadlets_api.md). No force param —
 // see LifecycleOptions (issue 205).
 func (h *QuadletHandler) Restart(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletLifecycleResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*QuadletLifecycleResponse, error) {
 		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
 		if guard != nil {
 			return nil, guard
 		}
-		return h.service.Restart(ctx, userID, machineID, quadletID, parseLifecycleOptions(r))
+		return h.service.Restart(ctx, userID, hostID, quadletID, parseLifecycleOptions(r))
 	})
 }
 
@@ -176,27 +176,27 @@ func (h *QuadletHandler) GetLogs(w http.ResponseWriter, r *http.Request) {
 // MovePreview handles the move/copy preview for a quadlet: the referenced
 // volumes, the target collision flag, and the source's running state
 // (doku/description_quadlets_api.md). Read-level on the source suffices
-// (the route sits at the subtree's read gate); the target machine's access
+// (the route sits at the subtree's read gate); the target host's access
 // is enforced inside the service against the access store.
 func (h *QuadletHandler) MovePreview(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletMovePreviewResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*QuadletMovePreviewResponse, error) {
 		quadletID, guard := web.URLParam(r, "quadletId", "MISSING_QUADLET_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		targetMachineID, guard := web.QueryString(r, "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+		targetHostID, guard := web.QueryString(r, "targetHostId", "MISSING_TARGET_HOST_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		return h.transfer.MovePreview(ctx, userID, machineID, quadletID, targetMachineID)
+		return h.transfer.MovePreview(ctx, userID, hostID, quadletID, targetHostID)
 	})
 }
 
-// Move handles the move/copy transfer of a quadlet to another machine
+// Move handles the move/copy transfer of a quadlet to another host
 // (doku/description_quadlets_api.md). The route sits at the subtree's
-// write gate for the SOURCE machine; the target machine's write-level
+// write gate for the SOURCE host; the target host's write-level
 // access is enforced inside the service against the access store. Copy
 // mode (issue 210) answers the transfer envelope with status "copied";
 // move mode (issue 211) removes the source after the install and answers
@@ -226,59 +226,59 @@ func (h *QuadletHandler) Move(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !request.MigrateVolumeData {
-		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletMoveResponse, error) {
-			return h.transfer.Move(ctx, userID, machineID, quadletID, request)
+		web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*QuadletMoveResponse, error) {
+			return h.transfer.Move(ctx, userID, hostID, quadletID, request)
 		})
 		return
 	}
 
 	streaming.HandleProgress(w, r, "Move quadlet with volume data migration", []slog.Attr{slog.String("quadletID", quadletID)}, streaming.ProgressConfig[QuadletMoveEvent, *QuadletMoveResponse]{
 		Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(QuadletMoveEvent)) (*QuadletMoveResponse, error) {
-			return h.transfer.MoveWithProgress(ctx, op.UserID, op.MachineID, quadletID, request, func(event QuadletMoveEvent) {
+			return h.transfer.MoveWithProgress(ctx, op.UserID, op.HostID, quadletID, request, func(event QuadletMoveEvent) {
 				event.OperationID = op.OperationID
-				event.MachineID = op.MachineID
+				event.HostID = op.HostID
 				onProgress(event)
 			})
 		},
 		CompleteEvent: func(op streaming.OperationContext, response *QuadletMoveResponse) any {
-			return NewQuadletMoveCompleteEvent(op.OperationID, op.MachineID, *response)
+			return NewQuadletMoveCompleteEvent(op.OperationID, op.HostID, *response)
 		},
 		ErrorDefault: errors.ErrConnectionFailed,
 		ErrorEvent: func(op streaming.OperationContext, code, message string, _ bool) any {
-			return NewQuadletMoveErrorEvent(op.OperationID, op.MachineID, code, message)
+			return NewQuadletMoveErrorEvent(op.OperationID, op.HostID, code, message)
 		},
 	})
 }
 
 // Generate handles generating a quadlet from an existing container or pod
 func (h *QuadletHandler) Generate(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*QuadletGenerateResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*QuadletGenerateResponse, error) {
 		var request QuadletGenerateRequest
 		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 
-		return h.service.Generate(ctx, userID, machineID, request)
+		return h.service.Generate(ctx, userID, hostID, request)
 	})
 }
 
 // Import handles importing quadlets from uploaded content
 func (h *QuadletHandler) Import(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*QuadletImportResponse, error) {
+	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, hostID string) (*QuadletImportResponse, error) {
 		var request QuadletImportRequest
 		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
 		}
 
-		return h.service.Import(ctx, userID, machineID, request)
+		return h.service.Import(ctx, userID, hostID, request)
 	})
 }
 
 // ConvertCompose handles converting compose file content into quadlet
 // entries (spec #336). The endpoint is the first quadlets route OUTSIDE
-// the machine subtree: it crosses the user-scoped envelope (web.HandleUser)
-// — any authenticated user may call it, with no machine access check —
-// because conversion touches no machine data. The response carries the
+// the host subtree: it crosses the user-scoped envelope (web.HandleUser)
+// — any authenticated user may call it, with no host access check —
+// because conversion touches no host data. The response carries the
 // import endpoint's entry shape so the frontend can forward it unchanged.
 func (h *QuadletHandler) ConvertCompose(w http.ResponseWriter, r *http.Request) {
 	web.HandleUser(w, r, http.StatusOK, func(ctx context.Context, userID string) (*QuadletConvertComposeResponse, error) {
@@ -297,11 +297,11 @@ func (h *QuadletHandler) ConvertCompose(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// AutoUpdate handles running `podman auto-update` on the machine with live
+// AutoUpdate handles running `podman auto-update` on the host with live
 // NDJSON streaming of remote output, terminating in a parsed report event.
 // The stream opens with the service's plan event naming every participating
 // unit and reports each matching pull as a pulling event (issue 448); the
-// handler stamps the operation and machine identities on each service event,
+// handler stamps the operation and host identities on each service event,
 // the move stream's arrangement. The streaming kit's progress seam
 // (HandleProgress) owns the handler-side ritual, including the 10-minute
 // write-deadline extension: registry pulls make runs routinely exceed the
@@ -312,18 +312,18 @@ func (h *QuadletHandler) AutoUpdate(w http.ResponseWriter, r *http.Request) {
 
 	streaming.HandleProgress(w, r, "AutoUpdate quadlets", []slog.Attr{slog.Bool("dryRun", dryRun), slog.String("filter", filter)}, streaming.ProgressConfig[AutoUpdateEvent, AutoUpdateReport]{
 		Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(AutoUpdateEvent)) (AutoUpdateReport, error) {
-			return h.service.AutoUpdate(ctx, op.UserID, op.MachineID, dryRun, filter, func(event AutoUpdateEvent) {
+			return h.service.AutoUpdate(ctx, op.UserID, op.HostID, dryRun, filter, func(event AutoUpdateEvent) {
 				event.OperationID = op.OperationID
-				event.MachineID = op.MachineID
+				event.HostID = op.HostID
 				onProgress(event)
 			})
 		},
 		CompleteEvent: func(op streaming.OperationContext, report AutoUpdateReport) any {
-			return NewAutoUpdateCompleteEvent(op.OperationID, op.MachineID, report)
+			return NewAutoUpdateCompleteEvent(op.OperationID, op.HostID, report)
 		},
 		ErrorDefault: errors.ErrConnectionFailed,
 		ErrorEvent: func(op streaming.OperationContext, code, message string, _ bool) any {
-			return NewAutoUpdateErrorEvent(op.OperationID, op.MachineID, code, message)
+			return NewAutoUpdateErrorEvent(op.OperationID, op.HostID, code, message)
 		},
 	})
 }

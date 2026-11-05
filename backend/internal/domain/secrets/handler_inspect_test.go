@@ -13,17 +13,17 @@ import (
 	errorhandling "go.podman.io/podman/v6/pkg/errorhandling"
 )
 
-// --- Inspect (GET /api/machines/{id}/secrets/{secretId}/inspect) ---
+// --- Inspect (GET /api/hosts/{id}/secrets/{secretId}/inspect) ---
 
 // inspectRequest serves GET
-// /api/machines/{id}/secrets/{secretId}/inspect through the handler with
+// /api/hosts/{id}/secrets/{secretId}/inspect through the handler with
 // an authenticated test identity, the way the router would.
 func inspectRequest(handler http.HandlerFunc, secretID string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/secrets/" + secretID + "/inspect",
+		Path:      "/api/hosts/test-host/secrets/" + secretID + "/inspect",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine", "secretId": secretID},
+		URLParams: map[string]string{"id": "test-host", "secretId": secretID},
 	})
 }
 
@@ -89,9 +89,9 @@ func TestSecretHandler_Inspect_MissingSecretID(t *testing.T) {
 
 	w := testutils.Perform(newTestHandler(engine).Inspect, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/secrets//inspect",
+		Path:      "/api/hosts/test-host/secrets//inspect",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -99,25 +99,25 @@ func TestSecretHandler_Inspect_MissingSecretID(t *testing.T) {
 }
 
 // TestSecretHandler_Inspect_ReadLevelGranteeReachesRoute pins the route
-// mounting: GET /api/machines/{id}/secrets/{secretId}/inspect rides the
-// RequireMachineAccess subtree at read level (no requireWrite), so a
+// mounting: GET /api/hosts/{id}/secrets/{secretId}/inspect rides the
+// RequireHostAccess subtree at read level (no requireWrite), so a
 // read-level grantee reaches the handler — metadata is visible at read —
 // and the answer carries no value.
 func TestSecretHandler_Inspect_ReadLevelGranteeReachesRoute(t *testing.T) {
-	machineRepo := testutils.NewMockMachineRepository()
-	machineRepo.AddMachine(&models.Machine{ID: "machine-1", Name: "machine-one", OwnerID: "owner-1"})
-	accessRepo := testutils.NewMockMachineAccessRepository()
-	accessRepo.AddAccess("machine-1", "reader-1", models.PermissionRead, time.Now())
+	hostRepo := testutils.NewMockHostRepository()
+	hostRepo.AddHost(&models.Host{ID: "host-1", Name: "host-one", OwnerID: "owner-1"})
+	accessRepo := testutils.NewMockHostAccessRepository()
+	accessRepo.AddAccess("host-1", "reader-1", models.PermissionRead, time.Now())
 	engine := &fakeSecretEngine{
 		inspectFn: func(name string, reveal bool) (*entities.SecretInfoReport, error) {
 			assert.False(t, reveal, "the raw inspect must never ask the engine for the value")
 			return secretFixture("3f2e1d0c", "db-password", time.Time{}, ""), nil
 		},
 	}
-	router := secretsAccessRouter(machineRepo, accessRepo, newTestHandler(engine).service)
+	router := secretsAccessRouter(hostRepo, accessRepo, newTestHandler(engine).service)
 
 	w := httptest.NewRecorder()
-	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/machines/machine-1/secrets/db-password/inspect", "reader-1"))
+	router.ServeHTTP(w, requestAsUser(http.MethodGet, "/api/hosts/host-1/secrets/db-password/inspect", "reader-1"))
 
 	assert.Equal(t, http.StatusOK, w.Result().StatusCode, "a read-level grantee must reach the raw inspect endpoint")
 	assert.NotContains(t, w.Body.String(), "SecretData",

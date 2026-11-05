@@ -7,15 +7,15 @@ import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 // The transfer mutation's domain assertion: the request shape. The
-// both-machines invalidation (a partial result is success-shaped) is the
+// both-hosts invalidation (a partial result is success-shaped) is the
 // shared transfer-hooks module's rule, pinned once in its suite; the list
 // suite pins the refetch through MSW.
 describe("useMoveSecret", () => {
-	it("POSTs to the source machine's move endpoint with the transfer body", async () => {
+	it("POSTs to the source host's move endpoint with the transfer body", async () => {
 		let body: unknown;
 		server.use(
 			http.post(
-				"*/api/machines/m-1/secrets/db-password/move",
+				"*/api/hosts/m-1/secrets/db-password/move",
 				async ({ request }) => {
 					body = await request.json();
 					return HttpResponse.json(secretMoveResultFixture());
@@ -27,12 +27,12 @@ describe("useMoveSecret", () => {
 		act(() => {
 			result.current.mutate({
 				secretId: "db-password",
-				targetMachineId: "m-2",
+				targetHostId: "m-2",
 				mode: "move",
 			});
 		});
 
 		await waitFor(() => expect(result.current.isSuccess).toBe(true));
-		expect(body).toEqual({ targetMachineId: "m-2", mode: "move" });
+		expect(body).toEqual({ targetHostId: "m-2", mode: "move" });
 	});
 });

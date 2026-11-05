@@ -10,7 +10,7 @@ const imageId =
 describe("imageExportUrl", () => {
 	it("builds the full export URL with the image ID encoded", () => {
 		expect(imageExportUrl("m-1", imageId)).toBe(
-			`/api/machines/m-1/images/${encodeURIComponent(imageId)}/export`,
+			`/api/hosts/m-1/images/${encodeURIComponent(imageId)}/export`,
 		);
 	});
 });

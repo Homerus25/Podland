@@ -1,6 +1,6 @@
 # Podland Frontend
 
-Vite + React 18 + TypeScript (strict) app for managing Podman on remote machines.
+Vite + React 18 + TypeScript (strict) app for managing Podman on remote hosts.
 
 ## Scripts
 
@@ -19,7 +19,7 @@ Feature-sliced structure with path aliases (`@` → `src`, `@features` → `src/
 
 ```
 src/
-├── features/   # Feature modules (auth, machines, ...) — filled in by later slices
+├── features/   # Feature modules (auth, hosts, ...) — filled in by later slices
 ├── pages/      # Route-level pages
 ├── shared/     # Cross-feature code (API client, types, hooks, components)
 └── test/       # Test harness: MSW server, handlers, global setup

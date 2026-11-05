@@ -48,7 +48,7 @@ const maxSecretValueBytes = 1048576
 // value), validator errors name the failing field, not its content, and
 // the response echoes only the created ID.
 func (h *SecretHandler) Create(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (*SecretCreateResponse, error) {
+	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, hostID string) (*SecretCreateResponse, error) {
 		var request SecretCreateRequest
 		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return nil, appErr
@@ -67,29 +67,29 @@ func (h *SecretHandler) Create(w http.ResponseWriter, r *http.Request) {
 				http.StatusBadRequest)
 		}
 
-		return h.service.Create(ctx, userID, machineID, request)
+		return h.service.Create(ctx, userID, hostID, request)
 	})
 }
 
 // Delete handles removing a secret by name or ID. Route-level
-// RequireMachinePermission(write) (app.go) gates it at write; on success
+// RequireHostPermission(write) (app.go) gates it at write; on success
 // podman answers 204 and this handler echoes that with an empty body —
 // the frontend series (170) invalidates the list on the 204.
 func (h *SecretHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, hostID string) (struct{}, error) {
 		secretID, guard := web.URLParam(r, "secretId", "MISSING_SECRET_ID")
 		if guard != nil {
 			return struct{}{}, guard
 		}
 
-		return struct{}{}, h.service.Delete(ctx, userID, machineID, secretID)
+		return struct{}{}, h.service.Delete(ctx, userID, hostID, secretID)
 	})
 }
 
 // List handles listing secret metadata
 func (h *SecretHandler) List(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]SecretListResponse, error) {
-		return h.service.List(ctx, userID, machineID)
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]SecretListResponse, error) {
+		return h.service.List(ctx, userID, hostID)
 	})
 }
 
@@ -99,14 +99,14 @@ func (h *SecretHandler) List(w http.ResponseWriter, r *http.Request) {
 // answers 403 ACCESS_DENIED for callers below admin. The response body is
 // never logged: a reveal's JSON carries the value.
 func (h *SecretHandler) Get(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*SecretInspectResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*SecretInspectResponse, error) {
 		secretID, guard := web.URLParam(r, "secretId", "MISSING_SECRET_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
 		reveal := r.URL.Query().Get("reveal") == "true"
-		return h.service.Get(ctx, userID, machineID, secretID, reveal)
+		return h.service.Get(ctx, userID, hostID, secretID, reveal)
 	})
 }
 
@@ -115,49 +115,49 @@ func (h *SecretHandler) Get(w http.ResponseWriter, r *http.Request) {
 // only. The service never passes reveal, so the response cannot carry the
 // value; the route is read-level (no reveal/admin gate, unlike Get).
 func (h *SecretHandler) Inspect(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*entities.SecretInfoReport, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*entities.SecretInfoReport, error) {
 		secretID, guard := web.URLParam(r, "secretId", "MISSING_SECRET_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		return h.service.Inspect(ctx, userID, machineID, secretID)
+		return h.service.Inspect(ctx, userID, hostID, secretID)
 	})
 }
 
 // MovePreview answers the copy/move dialog's facts (issue 239,
 // doku/description_secrets_api.md): collision, referencing quadlets.
-// Route-level RequireMachineAccess (app.go) gates the subtree at read;
-// the target machine's read access is enforced inside the service
+// Route-level RequireHostAccess (app.go) gates the subtree at read;
+// the target host's read access is enforced inside the service
 // against the access store.
 func (h *SecretHandler) MovePreview(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*SecretMovePreviewResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*SecretMovePreviewResponse, error) {
 		secretID, guard := web.URLParam(r, "secretId", "MISSING_SECRET_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		targetMachineID, guard := web.QueryString(r, "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+		targetHostID, guard := web.QueryString(r, "targetHostId", "MISSING_TARGET_HOST_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		return h.service.MovePreview(ctx, userID, machineID, secretID, targetMachineID)
+		return h.service.MovePreview(ctx, userID, hostID, secretID, targetHostID)
 	})
 }
 
-// Move handles the cross-machine copy/move transfer of a secret (issue
+// Move handles the cross-host copy/move transfer of a secret (issue
 // 239, doku/description_secrets_api.md). The route sits at the subtree's
-// write gate for the SOURCE machine; the value leaving it is a reveal,
+// write gate for the SOURCE host; the value leaving it is a reveal,
 // so the service additionally gates the source at admin and the target
-// machine's write-level access in-service against the access store.
+// host's write-level access in-service against the access store.
 //
 // Transport: the plain JSON envelope — secret values are small, the
 // NDJSON transport stays a volume concern. Neither the request DTO nor
 // the response ever reaches a log statement on this path (the value
 // travels in the create the transfer issues, never in a response body).
 func (h *SecretHandler) Move(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*SecretMoveResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*SecretMoveResponse, error) {
 		secretID, guard := web.URLParam(r, "secretId", "MISSING_SECRET_ID")
 		if guard != nil {
 			return nil, guard
@@ -168,6 +168,6 @@ func (h *SecretHandler) Move(w http.ResponseWriter, r *http.Request) {
 			return nil, appErr
 		}
 
-		return h.service.Move(ctx, userID, machineID, secretID, request)
+		return h.service.Move(ctx, userID, hostID, secretID, request)
 	})
 }

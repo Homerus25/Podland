@@ -375,10 +375,10 @@ func TestApp_Handler_ProtectedRoutesStayGatedDuringSetup(t *testing.T) {
 	_, status := getStatus(t, baseURL)
 	require.True(t, status.NeedsSetup, "precondition: the instance is in setup state")
 
-	machinesResp, err := http.Get(baseURL + "/api/machines")
+	hostsResp, err := http.Get(baseURL + "/api/hosts")
 	require.NoError(t, err)
-	defer machinesResp.Body.Close()
-	assert.Equal(t, http.StatusUnauthorized, machinesResp.StatusCode)
+	defer hostsResp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, hostsResp.StatusCode)
 
 	usersResp, _ := postJSON(t, baseURL, "/api/users",
 		`{"username":"someone","password":"whatever-123"}`)

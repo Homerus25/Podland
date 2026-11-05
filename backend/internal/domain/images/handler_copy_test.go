@@ -26,7 +26,7 @@ type copyErrorEnvelope struct {
 }
 
 // newCopyTestHandler builds the handler over the real service with
-// per-machine fake engines and a write-allowing access store — the wiring
+// per-host fake engines and a write-allowing access store — the wiring
 // the copy endpoints exercise.
 func newCopyTestHandler(source, target *fakeImageEngine) *ImageHandler {
 	service := newCopyTestService(source, target, &fakeAccessRepo{getPermissionFn: allowTargetWrite})
@@ -36,9 +36,9 @@ func newCopyTestHandler(source, target *fakeImageEngine) *ImageHandler {
 func TestImageHandler_CopyPreview_ReturnsPreview(t *testing.T) {
 	w := testutils.Perform(newCopyTestHandler(copySourceFixture(), copyTargetFixture()).CopyPreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/images/" + copyImageID + "/copy-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/images/" + copyImageID + "/copy-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "imageId": copyImageID},
+		URLParams: map[string]string{"id": "host-a", "imageId": copyImageID},
 	})
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -56,9 +56,9 @@ func TestImageHandler_CopyPreview_PresentTargetAnswersTrue(t *testing.T) {
 
 	w := testutils.Perform(newCopyTestHandler(copySourceFixture(), target).CopyPreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/images/" + copyImageID + "/copy-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/images/" + copyImageID + "/copy-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "imageId": copyImageID},
+		URLParams: map[string]string{"id": "host-a", "imageId": copyImageID},
 	})
 
 	require.Equal(t, http.StatusOK, w.Code)
@@ -71,27 +71,27 @@ func TestImageHandler_CopyPreview_PresentTargetAnswersTrue(t *testing.T) {
 func TestImageHandler_CopyPreview_MissingImageIDIs400(t *testing.T) {
 	w := testutils.Perform(newCopyTestHandler(&fakeImageEngine{}, &fakeImageEngine{}).CopyPreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/images//copy-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/images//copy-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "imageId": ""},
+		URLParams: map[string]string{"id": "host-a", "imageId": ""},
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestImageHandler_CopyPreview_MissingTargetMachineIDIs400(t *testing.T) {
+func TestImageHandler_CopyPreview_MissingTargetHostIDIs400(t *testing.T) {
 	w := testutils.Perform(newCopyTestHandler(&fakeImageEngine{}, &fakeImageEngine{}).CopyPreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/images/" + copyImageID + "/copy-preview",
+		Path:      "/api/hosts/host-a/images/" + copyImageID + "/copy-preview",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "imageId": copyImageID},
+		URLParams: map[string]string{"id": "host-a", "imageId": copyImageID},
 	})
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 
 	var errResp copyErrorEnvelope
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &errResp))
-	assert.Equal(t, "MISSING_TARGET_MACHINE_ID", errResp.Error.Code)
+	assert.Equal(t, "MISSING_TARGET_HOST_ID", errResp.Error.Code)
 }
 
 func TestImageHandler_CopyPreview_TargetAccessDeniedIs403(t *testing.T) {
@@ -111,9 +111,9 @@ func TestImageHandler_CopyPreview_TargetAccessDeniedIs403(t *testing.T) {
 
 	w := testutils.Perform(handler.CopyPreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/images/" + copyImageID + "/copy-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/images/" + copyImageID + "/copy-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "imageId": copyImageID},
+		URLParams: map[string]string{"id": "host-a", "imageId": copyImageID},
 	})
 
 	require.Equal(t, http.StatusForbidden, w.Code)
@@ -132,9 +132,9 @@ func TestImageHandler_CopyPreview_MissingSourceImageIs404(t *testing.T) {
 
 	w := testutils.Perform(newCopyTestHandler(source, copyTargetFixture()).CopyPreview, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/machine-a/images/sha256:gone/copy-preview?targetMachineId=machine-b",
+		Path:      "/api/hosts/host-a/images/sha256:gone/copy-preview?targetHostId=host-b",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "imageId": "sha256:gone"},
+		URLParams: map[string]string{"id": "host-a", "imageId": "sha256:gone"},
 	})
 
 	require.Equal(t, http.StatusNotFound, w.Code)
@@ -165,13 +165,13 @@ func parseCopyNDJSON(t *testing.T, body string) []ImageCopyEvent {
 }
 
 // copyRequest performs a POST copy through the handler with the given
-// JSON body and the standard machine and image params.
+// JSON body and the standard host and image params.
 func copyRequest(handler *ImageHandler, body string) *httptest.ResponseRecorder {
 	return testutils.Perform(handler.Copy, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/machine-a/images/" + copyImageID + "/copy",
+		Path:      "/api/hosts/host-a/images/" + copyImageID + "/copy",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "imageId": copyImageID},
+		URLParams: map[string]string{"id": "host-a", "imageId": copyImageID},
 		Body:      strings.NewReader(body),
 	})
 }
@@ -189,7 +189,7 @@ func TestImageHandler_Copy_StreamsNDJSON(t *testing.T) {
 	}
 	handler := newCopyTestHandler(copySourceFixture(), target)
 
-	w := copyRequest(handler, `{"targetMachineId":"machine-b"}`)
+	w := copyRequest(handler, `{"targetHostId":"host-b"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -199,7 +199,7 @@ func TestImageHandler_Copy_StreamsNDJSON(t *testing.T) {
 	assert.Equal(t, ImageCopyEventTypeImage, events[0].Type)
 	assert.Equal(t, ImageCopyPhaseStart, events[0].Phase)
 	assert.Equal(t, copyImageID, events[0].Image)
-	assert.Equal(t, "machine-a", events[0].MachineID)
+	assert.Equal(t, "host-a", events[0].HostID)
 	assert.NotEmpty(t, events[0].OperationID, "the transport stamps its operation ID")
 	assert.NotEmpty(t, events[0].Timestamp)
 
@@ -212,15 +212,15 @@ func TestImageHandler_Copy_StreamsNDJSON(t *testing.T) {
 	require.NotNil(t, complete.Result)
 	assert.Equal(t, ImageCopyStatusCopied, complete.Result.Status)
 	assert.Equal(t, copyImageID, complete.Result.ID)
-	assert.Equal(t, "machine-a", complete.Result.SourceMachineID)
-	assert.Equal(t, "machine-b", complete.Result.TargetMachineID)
+	assert.Equal(t, "host-a", complete.Result.SourceHostID)
+	assert.Equal(t, "host-b", complete.Result.TargetHostID)
 	assert.Greater(t, complete.Result.Bytes, int64(0))
 	assert.Equal(t, []string{"registry.example/app:latest"}, complete.Result.Names)
 	assert.Equal(t, int64(len(copyArchive)), loaded, "the archive crossed the splice")
 
 	for _, event := range events {
 		assert.Equal(t, events[0].OperationID, event.OperationID)
-		assert.Equal(t, "machine-a", event.MachineID)
+		assert.Equal(t, "host-a", event.HostID)
 	}
 }
 
@@ -229,10 +229,10 @@ func TestImageHandler_Copy_MissingImageIDIs400(t *testing.T) {
 
 	w := testutils.Perform(handler.Copy, testutils.Request{
 		Method:    http.MethodPost,
-		Path:      "/api/machines/machine-a/images//copy",
+		Path:      "/api/hosts/host-a/images//copy",
 		UserID:    "user123",
-		URLParams: map[string]string{"id": "machine-a", "imageId": ""},
-		Body:      strings.NewReader(`{"targetMachineId":"machine-b"}`),
+		URLParams: map[string]string{"id": "host-a", "imageId": ""},
+		Body:      strings.NewReader(`{"targetHostId":"host-b"}`),
 	})
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
@@ -245,7 +245,7 @@ func TestImageHandler_Copy_BodyValidationIs400(t *testing.T) {
 		want string
 	}{
 		{name: "malformed JSON", body: `{`, want: "INVALID_REQUEST"},
-		{name: "missing targetMachineId", body: `{}`, want: "VALIDATION_FAILED"},
+		{name: "missing targetHostId", body: `{}`, want: "VALIDATION_FAILED"},
 	}
 
 	for _, tt := range tests {
@@ -278,7 +278,7 @@ func TestImageHandler_Copy_TargetAccessDeniedIsTerminalErrorEvent(t *testing.T) 
 	service := newCopyTestService(source, copyTargetFixture(), &fakeAccessRepo{getPermissionFn: allowTargetRead})
 	handler := NewImageHandler(service)
 
-	w := copyRequest(handler, `{"targetMachineId":"machine-b"}`)
+	w := copyRequest(handler, `{"targetHostId":"host-b"}`)
 
 	require.Equal(t, http.StatusOK, w.Code, "the stream itself succeeds; the refusal rides the terminal event")
 
@@ -297,7 +297,7 @@ func TestImageHandler_Copy_MissingSourceImageIsTerminalErrorEvent(t *testing.T) 
 	}
 	handler := newCopyTestHandler(source, copyTargetFixture())
 
-	w := copyRequest(handler, `{"targetMachineId":"machine-b"}`)
+	w := copyRequest(handler, `{"targetHostId":"host-b"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -317,7 +317,7 @@ func TestImageHandler_Copy_BoundTripsIsTerminalErrorEvent(t *testing.T) {
 		WithMaxImageTransferBytes(1 << 20)
 	handler := NewImageHandler(service)
 
-	w := copyRequest(handler, `{"targetMachineId":"machine-b"}`)
+	w := copyRequest(handler, `{"targetHostId":"host-b"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 
@@ -339,7 +339,7 @@ func TestImageHandler_Copy_LoadFailureIsTerminalErrorEvent(t *testing.T) {
 	}
 	handler := newCopyTestHandler(copySourceFixture(), target)
 
-	w := copyRequest(handler, `{"targetMachineId":"machine-b"}`)
+	w := copyRequest(handler, `{"targetHostId":"host-b"}`)
 
 	require.Equal(t, http.StatusOK, w.Code)
 

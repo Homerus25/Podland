@@ -5,13 +5,13 @@ import { useOneShotQuery } from "@shared/queries/useFreshQuery";
 // The volume's inspect response is also its detail data, so the detail
 // page's "Show inspect JSON" reveal rides this hook with enabled: revealed.
 export function useVolume(
-	machineId: string,
+	hostId: string,
 	volumeName: string,
 	options?: { enabled?: boolean },
 ) {
 	return useOneShotQuery(
-		volumeQueryKey(machineId, volumeName),
-		() => inspectVolume(machineId, volumeName),
+		volumeQueryKey(hostId, volumeName),
+		() => inspectVolume(hostId, volumeName),
 		options,
 	);
 }

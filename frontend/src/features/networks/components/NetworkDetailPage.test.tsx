@@ -12,7 +12,7 @@ import { server } from "@/test/server";
 
 function mockNetworkDetail(detail: NetworkDetail) {
 	server.use(
-		http.get("*/api/machines/m-1/networks/app-net", () =>
+		http.get("*/api/hosts/m-1/networks/app-net", () =>
 			HttpResponse.json(detail),
 		),
 	);
@@ -21,13 +21,13 @@ function mockNetworkDetail(detail: NetworkDetail) {
 // The cross-link target: a stub standing in for the container detail page,
 // rendering the route params so the test pins the exact URL navigated to.
 function ContainerDetailStub() {
-	const { machineId, containerId } = useParams<{
-		machineId: string;
+	const { hostId, containerId } = useParams<{
+		hostId: string;
 		containerId: string;
 	}>();
 	return (
 		<div data-testid="container-detail-page">
-			{machineId}/{containerId}
+			{hostId}/{containerId}
 		</div>
 	);
 }
@@ -36,15 +36,15 @@ function renderNetworkDetailPage() {
 	return renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId/networks/:networkName"
+				path="/hosts/:hostId/networks/:networkName"
 				element={<NetworkDetailPage />}
 			/>
 			<Route
-				path="/machines/:machineId/containers/:containerId"
+				path="/hosts/:hostId/containers/:containerId"
 				element={<ContainerDetailStub />}
 			/>
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/networks/app-net"] } },
+		{ router: { initialEntries: ["/hosts/m-1/networks/app-net"] } },
 	);
 }
 
@@ -55,7 +55,7 @@ afterEach(() => {
 describe("NetworkDetailPage", () => {
 	it("shows the loading state while the network detail is pending", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/networks/app-net", async () => {
+			http.get("*/api/hosts/m-1/networks/app-net", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
 				return HttpResponse.json(networkDetailFixture());
 			}),
@@ -98,10 +98,10 @@ describe("NetworkDetailPage", () => {
 
 		const first = await screen.findByTestId("network-container-link-c-1");
 		expect(first).toHaveTextContent("my-container");
-		expect(first).toHaveAttribute("href", "/machines/m-1/containers/c-1");
+		expect(first).toHaveAttribute("href", "/hosts/m-1/containers/c-1");
 		const second = screen.getByTestId("network-container-link-c-2");
 		expect(second).toHaveTextContent("sidecar");
-		expect(second).toHaveAttribute("href", "/machines/m-1/containers/c-2");
+		expect(second).toHaveAttribute("href", "/hosts/m-1/containers/c-2");
 	});
 
 	it("navigates to the container's detail page when its link is clicked", async () => {
@@ -133,7 +133,7 @@ describe("NetworkDetailPage", () => {
 		await screen.findByTestId("detail-page-overview");
 		expect(screen.getByTestId("detail-back-button")).toHaveAttribute(
 			"href",
-			"/machines/m-1?tab=networks",
+			"/hosts/m-1?tab=networks",
 		);
 	});
 
@@ -141,7 +141,7 @@ describe("NetworkDetailPage", () => {
 		let inspectRequests = 0;
 		mockNetworkDetail(networkDetailFixture());
 		server.use(
-			http.get("*/api/machines/m-1/networks/app-net/inspect", () => {
+			http.get("*/api/hosts/m-1/networks/app-net/inspect", () => {
 				inspectRequests++;
 				return HttpResponse.json(rawInspectFixture());
 			}),
@@ -167,7 +167,7 @@ describe("NetworkDetailPage", () => {
 
 	it("renders the error state when the detail endpoint fails", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/networks/app-net", () =>
+			http.get("*/api/hosts/m-1/networks/app-net", () =>
 				errorResponse(403, "ACCESS_DENIED", "Access denied", "req-1"),
 			),
 		);
@@ -183,7 +183,7 @@ describe("NetworkDetailPage", () => {
 
 	it("renders the not-found state when the network no longer exists (404)", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/networks/app-net", () =>
+			http.get("*/api/hosts/m-1/networks/app-net", () =>
 				errorResponse(404, "NETWORK_NOT_FOUND", "Network not found", "req-1"),
 			),
 		);
@@ -191,7 +191,7 @@ describe("NetworkDetailPage", () => {
 
 		expect(
 			await screen.findByTestId("detail-page-not-found"),
-		).toHaveTextContent("This item no longer exists on the machine.");
+		).toHaveTextContent("This item no longer exists on the host.");
 		expect(screen.queryByTestId("detail-page-error")).not.toBeInTheDocument();
 		expect(
 			screen.queryByTestId("detail-page-overview"),

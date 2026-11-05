@@ -4,14 +4,14 @@ import type {
 	VolumeMoveResult,
 	VolumeSummary,
 } from "@features/volumes/services/volumesApi";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
 import {
-	machineFixture,
+	hostFixture,
 	volumeFixture,
 	volumeMovePreviewFixture,
 	volumeMoveResultFixture,
@@ -22,10 +22,10 @@ import { liveNdjsonResponse, ndjsonResponse } from "@/test/stream";
 
 const volume = volumeFixture();
 
-const source = machineFixture();
-const staging = machineFixture({ id: "m-2", name: "staging-01" });
-const backup = machineFixture({ id: "m-4", name: "backup-01" });
-const readOnly = machineFixture({
+const source = hostFixture();
+const staging = hostFixture({ id: "m-2", name: "staging-01" });
+const backup = hostFixture({ id: "m-4", name: "backup-01" });
+const readOnly = hostFixture({
 	id: "m-3",
 	name: "laptop-01",
 	permission: "read",
@@ -46,22 +46,22 @@ function resetCounters() {
 }
 
 function volumesHandler(volumes: () => VolumeSummary[]) {
-	return http.get("*/api/machines/m-1/volumes", () => {
+	return http.get("*/api/hosts/m-1/volumes", () => {
 		volumeFetches++;
 		return HttpResponse.json(volumes());
 	});
 }
 
-function machinesHandler(machines: Machine[]) {
-	return http.get("*/api/machines", () => HttpResponse.json(machines));
+function hostsHandler(hosts: Host[]) {
+	return http.get("*/api/hosts", () => HttpResponse.json(hosts));
 }
 
 function previewHandler(overrides: Partial<VolumeMovePreview> = {}) {
 	return http.get(
-		"*/api/machines/m-1/volumes/app-data/move-preview",
+		"*/api/hosts/m-1/volumes/app-data/move-preview",
 		({ request }) => {
 			previewTargets.push(
-				new URL(request.url).searchParams.get("targetMachineId") ?? "",
+				new URL(request.url).searchParams.get("targetHostId") ?? "",
 			);
 			return HttpResponse.json(volumeMovePreviewFixture(overrides));
 		},
@@ -74,7 +74,7 @@ function previewHandler(overrides: Partial<VolumeMovePreview> = {}) {
 function moveStreamHandler(events: Record<string, unknown>[], live = false) {
 	const chunks = events.map((event) => `${JSON.stringify(event)}\n`);
 	return http.post(
-		"*/api/machines/m-1/volumes/app-data/move",
+		"*/api/hosts/m-1/volumes/app-data/move",
 		async ({ request }) => {
 			moveRequests.count++;
 			moveRequests.body = (await request.json()) as Record<string, unknown>;
@@ -87,7 +87,7 @@ function completeEvent(result: VolumeMoveResult) {
 	return {
 		operationId: "op-1",
 		type: "complete",
-		machineId: "m-1",
+		hostId: "m-1",
 		result,
 	};
 }
@@ -96,7 +96,7 @@ function errorEvent(code: string, message: string) {
 	return {
 		operationId: "op-1",
 		type: "error",
-		machineId: "m-1",
+		hostId: "m-1",
 		error: { code, message },
 	};
 }
@@ -106,11 +106,11 @@ async function openMoveDialog(
 ) {
 	server.use(
 		volumesHandler(() => [volume]),
-		machinesHandler([source, staging, readOnly, backup]),
+		hostsHandler([source, staging, readOnly, backup]),
 		previewHandler(previewOverrides),
 		moveStreamHandler([completeEvent(volumeMoveResultFixture())]),
 	);
-	renderWithQuery(<VolumeList machine={source} />, {
+	renderWithQuery(<VolumeList host={source} />, {
 		chakra: true,
 		router: true,
 	});
@@ -140,9 +140,7 @@ describe("VolumeList move/copy", () => {
 	it("hides the Move/Copy action below the manage-volumes capability", async () => {
 		server.use(volumesHandler(() => [volume]));
 		renderWithQuery(
-			<VolumeList
-				machine={machineFixture({ permission: "read", isOwner: false })}
-			/>,
+			<VolumeList host={hostFixture({ permission: "read", isOwner: false })} />,
 			{ chakra: true, router: true },
 		);
 
@@ -152,7 +150,7 @@ describe("VolumeList move/copy", () => {
 		).not.toBeInTheDocument();
 	});
 
-	it("offers one dialog listing only manageable machines, source excluded", async () => {
+	it("offers one dialog listing only manageable hosts, source excluded", async () => {
 		await openMoveDialog();
 
 		const select = screen.getByTestId("move-target-select");
@@ -178,7 +176,7 @@ describe("VolumeList move/copy", () => {
 		await user.click(screen.getByTestId("confirm-move-button"));
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			force: false,
 		});
@@ -193,7 +191,7 @@ describe("VolumeList move/copy", () => {
 		);
 		expect(await screen.findByTestId("modal")).toBeInTheDocument();
 		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's volume)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's volume)" }),
 		);
 		await waitFor(() =>
 			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
@@ -201,7 +199,7 @@ describe("VolumeList move/copy", () => {
 		await user.click(screen.getByTestId("confirm-move-button"));
 		await waitFor(() => expect(moveRequests.count).toBe(2));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "copy",
 		});
 	});
@@ -219,13 +217,13 @@ describe("VolumeList move/copy", () => {
 	it("keeps confirm disabled while the preview is pending", async () => {
 		server.use(
 			volumesHandler(() => [volume]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			http.get(
-				"*/api/machines/m-1/volumes/app-data/move-preview",
+				"*/api/hosts/m-1/volumes/app-data/move-preview",
 				() => new Promise<Response>(() => {}),
 			),
 		);
-		renderWithQuery(<VolumeList machine={source} />, {
+		renderWithQuery(<VolumeList host={source} />, {
 			chakra: true,
 			router: true,
 		});
@@ -243,15 +241,15 @@ describe("VolumeList move/copy", () => {
 	it("shows a failed preview and keeps confirm disabled", async () => {
 		server.use(
 			volumesHandler(() => [volume]),
-			machinesHandler([source, staging, readOnly, backup]),
-			http.get("*/api/machines/m-1/volumes/app-data/move-preview", () =>
+			hostsHandler([source, staging, readOnly, backup]),
+			http.get("*/api/hosts/m-1/volumes/app-data/move-preview", () =>
 				HttpResponse.json(
 					errorJson("ACCESS_DENIED", "Access denied", "req-71"),
 					{ status: 403 },
 				),
 			),
 		);
-		renderWithQuery(<VolumeList machine={source} />, {
+		renderWithQuery(<VolumeList host={source} />, {
 			chakra: true,
 			router: true,
 		});
@@ -268,13 +266,13 @@ describe("VolumeList move/copy", () => {
 		const user = await openMoveDialogReadyToConfirm({ inUse: true });
 
 		const warning = screen.getByTestId("move-inuse-warning");
-		expect(warning).toHaveTextContent("container on this machine");
+		expect(warning).toHaveTextContent("container on this host");
 		const forceOption = screen.getByTestId("move-force-option");
 		expect(forceOption).not.toBeChecked();
 
 		// Copy mode: no removal, so no in-use warning and no force.
 		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's volume)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's volume)" }),
 		);
 		expect(screen.queryByTestId("move-inuse-warning")).not.toBeInTheDocument();
 		expect(screen.queryByTestId("move-force-option")).not.toBeInTheDocument();
@@ -288,7 +286,7 @@ describe("VolumeList move/copy", () => {
 
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			force: true,
 		});
@@ -309,7 +307,7 @@ describe("VolumeList move/copy", () => {
 		expect(warning).toHaveTextContent("references dangle");
 
 		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's volume)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's volume)" }),
 		);
 		expect(
 			screen.getByTestId("move-referencing-warning"),
@@ -319,21 +317,21 @@ describe("VolumeList move/copy", () => {
 	it("runs the transfer over the NDJSON transport, narrates in place, and refetches the source list", async () => {
 		server.use(
 			volumesHandler(() => [volume]),
-			machinesHandler([source, staging, readOnly, backup]),
+			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(),
 			moveStreamHandler(
 				[
 					{
 						operationId: "op-1",
 						type: "volume",
-						machineId: "m-1",
+						hostId: "m-1",
 						volume: "app-data",
 						phase: "start",
 					},
 					{
 						operationId: "op-1",
 						type: "volume",
-						machineId: "m-1",
+						hostId: "m-1",
 						volume: "app-data",
 						phase: "done",
 						bytes: 2097152,
@@ -343,7 +341,7 @@ describe("VolumeList move/copy", () => {
 				true,
 			),
 		);
-		renderWithQuery(<VolumeList machine={source} />, {
+		renderWithQuery(<VolumeList host={source} />, {
 			chakra: true,
 			router: true,
 		});
@@ -360,7 +358,7 @@ describe("VolumeList move/copy", () => {
 
 		await waitFor(() => expect(moveRequests.count).toBe(1));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			force: false,
 		});
@@ -383,7 +381,7 @@ describe("VolumeList move/copy", () => {
 		);
 	});
 
-	it("keeps the dialog open on a partial result, naming the both-machines state", async () => {
+	it("keeps the dialog open on a partial result, naming the both-hosts state", async () => {
 		const user = await openMoveDialogReadyToConfirm();
 		server.use(
 			moveStreamHandler([
@@ -399,7 +397,7 @@ describe("VolumeList move/copy", () => {
 		await user.click(screen.getByTestId("confirm-move-button"));
 
 		const message = await screen.findByTestId("move-partial-message");
-		expect(message).toHaveTextContent("both machines");
+		expect(message).toHaveTextContent("both hosts");
 		expect(message).toHaveTextContent("failed to remove volume");
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
@@ -437,7 +435,7 @@ describe("VolumeList move/copy", () => {
 		await user.click(screen.getByTestId("confirm-move-button"));
 		await waitFor(() => expect(moveRequests.count).toBe(2));
 		expect(moveRequests.body).toEqual({
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 			force: true,
 		});
@@ -449,7 +447,7 @@ describe("VolumeList move/copy", () => {
 			moveStreamHandler([
 				errorEvent(
 					"VOLUME_ALREADY_EXISTS",
-					"Volume app-data already exists on the target machine",
+					"Volume app-data already exists on the target host",
 				),
 			]),
 		);

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { imageFixture, machineFixture } from "@/test/factories";
+import { hostFixture, imageFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -15,8 +15,8 @@ const imagesFixture = [
 ];
 
 function renderImageList() {
-	return renderWithQuery(<ImageList machine={machineFixture()} />, {
-		router: { initialEntries: ["/machines/m-1"] },
+	return renderWithQuery(<ImageList host={hostFixture()} />, {
+		router: { initialEntries: ["/hosts/m-1"] },
 	});
 }
 
@@ -31,16 +31,16 @@ function renderImageListWithLocationProbe() {
 	renderWithQuery(
 		<>
 			<LocationProbe />
-			<ImageList machine={machineFixture()} />
+			<ImageList host={hostFixture()} />
 		</>,
-		{ router: { initialEntries: ["/machines/m-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1"] } },
 	);
 }
 
 describe("ImageList", () => {
 	it("renders one row per image with repo tag, human size, and relative date", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/images", () =>
+			http.get("*/api/hosts/m-1/images", () =>
 				HttpResponse.json(imagesFixture),
 			),
 		);
@@ -57,7 +57,7 @@ describe("ImageList", () => {
 
 	it("shows all repo tags and falls back to <none> with the short id for a dangling image", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/images", () =>
+			http.get("*/api/hosts/m-1/images", () =>
 				HttpResponse.json([
 					imageFixture({
 						id: "sha256:abc123def4567890abc123def4567890abc123def4567890abc123def4567890",
@@ -94,7 +94,7 @@ describe("ImageList", () => {
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		vi.setSystemTime(new Date("2026-08-21T12:00:00Z"));
 		server.use(
-			http.get("*/api/machines/m-1/images", () =>
+			http.get("*/api/hosts/m-1/images", () =>
 				HttpResponse.json(imagesFixture),
 			),
 		);
@@ -105,7 +105,7 @@ describe("ImageList", () => {
 
 	it("shows a loading state before images arrive, with the toolbar still above it", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/images", async () => {
+			http.get("*/api/hosts/m-1/images", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
 				return HttpResponse.json(imagesFixture);
 			}),
@@ -117,10 +117,8 @@ describe("ImageList", () => {
 		expect(screen.getByTestId("prune-images-button")).toBeInTheDocument();
 	});
 
-	it("shows an explanatory empty state when the machine has no images", async () => {
-		server.use(
-			http.get("*/api/machines/m-1/images", () => HttpResponse.json([])),
-		);
+	it("shows an explanatory empty state when the host has no images", async () => {
+		server.use(http.get("*/api/hosts/m-1/images", () => HttpResponse.json([])));
 		renderImageList();
 
 		const empty = await screen.findByTestId("images-empty");
@@ -132,7 +130,7 @@ describe("ImageList", () => {
 
 	it("sorts rows when a column header is clicked", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/images", () =>
+			http.get("*/api/hosts/m-1/images", () =>
 				HttpResponse.json([
 					imageFixture({ repoTags: ["zebra:latest"] }),
 					imageFixture({
@@ -153,7 +151,7 @@ describe("ImageList", () => {
 
 	it("navigates to the image's detail page when a row is clicked", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/images", () =>
+			http.get("*/api/hosts/m-1/images", () =>
 				HttpResponse.json(imagesFixture),
 			),
 		);
@@ -163,14 +161,14 @@ describe("ImageList", () => {
 		await user.click(await screen.findByTestId("image-row"));
 
 		expect(screen.getByTestId("location").textContent).toBe(
-			`/machines/m-1/images/${encodeURIComponent(imagesFixture[0].id)}`,
+			`/hosts/m-1/images/${encodeURIComponent(imagesFixture[0].id)}`,
 		);
 		expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
 	});
 
 	it("does not navigate when the row's delete button is clicked", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/images", () =>
+			http.get("*/api/hosts/m-1/images", () =>
 				HttpResponse.json(imagesFixture),
 			),
 		);
@@ -188,7 +186,7 @@ describe("ImageList", () => {
 		expect(
 			await screen.findByTestId("confirm-delete-button"),
 		).toBeInTheDocument();
-		expect(screen.getByTestId("location").textContent).toBe("/machines/m-1");
+		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
 	});
 });
 

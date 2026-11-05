@@ -19,7 +19,7 @@ import userEvent from "@testing-library/user-event";
 import { type ComponentProps, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
-	machineFixture,
+	hostFixture,
 	quadletMoveCompanionVolumeFixture,
 	quadletMoveDataVolumeFixture,
 	quadletMovePreviewFixture,
@@ -198,9 +198,7 @@ describe("isSecretTransferOffered", () => {
 	const transferable = quadletMovePreviewSecretFixture();
 
 	it("is offered to an admin caller when a transferable secret exists", () => {
-		expect(isSecretTransferOffered(machineFixture(), [transferable])).toBe(
-			true,
-		);
+		expect(isSecretTransferOffered(hostFixture(), [transferable])).toBe(true);
 	});
 
 	it("is not offered when no secret is transferable", () => {
@@ -213,11 +211,11 @@ describe("isSecretTransferOffered", () => {
 				existsOnTarget: false,
 			}),
 		];
-		expect(isSecretTransferOffered(machineFixture(), secrets)).toBe(false);
+		expect(isSecretTransferOffered(hostFixture(), secrets)).toBe(false);
 	});
 
 	it("is not offered to a caller without the reveal-secrets capability", () => {
-		const grantee = machineFixture({ permission: "write", isOwner: false });
+		const grantee = hostFixture({ permission: "write", isOwner: false });
 		expect(isSecretTransferOffered(grantee, [transferable])).toBe(false);
 	});
 });
@@ -262,7 +260,7 @@ describe("MoveQuadletWarnings rendering", () => {
 		).not.toBeInTheDocument();
 	});
 
-	it("lists volumes with their kind labels, naming the source machine", () => {
+	it("lists volumes with their kind labels, naming the source host", () => {
 		renderWarnings();
 
 		const warning = screen.getByTestId("move-volume-warning");
@@ -434,7 +432,7 @@ describe("MoveQuadletWarnings rendering", () => {
 		);
 		// Dangling: renders honestly as missing here.
 		expect(within(rows[2]).getByTestId("move-secret-source")).toHaveTextContent(
-			"missing on this machine",
+			"missing on this host",
 		);
 		// A host path claims nothing: podman reads it off the filesystem.
 		expect(

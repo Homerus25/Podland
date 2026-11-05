@@ -13,7 +13,7 @@ describe("inspectVolume", () => {
 	it("fetches a single volume through the API", async () => {
 		const volume = volumeFixture();
 		server.use(
-			http.get("*/api/machines/m-1/volumes/app-data", () =>
+			http.get("*/api/hosts/m-1/volumes/app-data", () =>
 				HttpResponse.json(volume),
 			),
 		);
@@ -26,7 +26,7 @@ describe("useVolume", () => {
 	it("returns the volume's full inspect data", async () => {
 		const volume = volumeFixture();
 		server.use(
-			http.get("*/api/machines/m-1/volumes/app-data", () =>
+			http.get("*/api/hosts/m-1/volumes/app-data", () =>
 				HttpResponse.json(volume),
 			),
 		);
@@ -52,7 +52,7 @@ describe("useVolume", () => {
 
 	it("exposes 404 without retrying when the volume is gone", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/volumes/gone", () =>
+			http.get("*/api/hosts/m-1/volumes/gone", () =>
 				errorResponse(404, "VOLUME_NOT_FOUND", "Volume not found", "r-1"),
 			),
 		);

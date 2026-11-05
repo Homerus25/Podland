@@ -19,29 +19,29 @@ import (
 
 // The quadlet move/copy secret slice (issue 215). Every `Secret=` line of
 // the quadlet content counts: the preview always reports the references
-// with their existence in each machine's podman secret store, and the
+// with their existence in each host's podman secret store, and the
 // transfer carries VALUES only when the request opts into
 // transferSecrets — admin on the source, a same-name secret on the target
 // is skipped not overwritten, dangling and host-path references are
 // skipped and reported, and a move never removes the source secrets.
 //
-// Everything here is API-driven on both machines: secrets are created
+// Everything here is API-driven on both hosts: secrets are created
 // (POST /secrets), verified (list) and compared (admin reveal) through the
-// in-process server, so the slice runs wherever the two-machine harness
+// in-process server, so the slice runs wherever the two-host harness
 // runs. The user-systemd probe gates the quadlet surface, as in every
 // quadlet slice.
 
 // revealSecretViaAPI GETs ?reveal=true as the owner and returns the
 // value — the byte-identical comparison's source of truth.
-func revealSecretViaAPI(t *testing.T, machineID, secretName string) string {
+func revealSecretViaAPI(t *testing.T, hostID, secretName string) string {
 	t.Helper()
-	revealURL := suite.ServerURL + "/api/machines/" + machineID + "/secrets/" + url.PathEscape(secretName) + "?reveal=true"
+	revealURL := suite.ServerURL + "/api/hosts/" + hostID + "/secrets/" + url.PathEscape(secretName) + "?reveal=true"
 	resp, err := suite.AuthenticatedClient().Get(revealURL)
 	require.NoError(t, err, "admin reveal must connect to the in-process server")
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	require.Equalf(t, http.StatusOK, resp.StatusCode,
-		"reveal %s on %s: expected 200, got %d. body: %s", secretName, machineID, resp.StatusCode, string(body))
+		"reveal %s on %s: expected 200, got %d. body: %s", secretName, hostID, resp.StatusCode, string(body))
 	var got secretInspectResponse
 	require.NoErrorf(t, json.Unmarshal(body, &got), "reveal: response must decode. body: %s", string(body))
 	require.NotNil(t, got.SecretData, "an admin reveal must include the secretData field")
@@ -51,9 +51,9 @@ func revealSecretViaAPI(t *testing.T, machineID, secretName string) string {
 // postMoveAs posts a transfer body as the given client (the below-admin
 // slice drives the endpoint with a write-level grantee) and returns the
 // response's status and body.
-func postMoveAs(t *testing.T, client *http.Client, sourceMachineID, quadletName, body string) (int, []byte) {
+func postMoveAs(t *testing.T, client *http.Client, sourceHostID, quadletName, body string) (int, []byte) {
 	t.Helper()
-	resp, err := client.Post(moveURL(sourceMachineID, quadletName),
+	resp, err := client.Post(moveURL(sourceHostID, quadletName),
 		"application/json", bytes.NewReader([]byte(body)))
 	require.NoError(t, err, "POST /quadlets/{id}/move must connect to the in-process server")
 	defer resp.Body.Close()
@@ -61,10 +61,10 @@ func postMoveAs(t *testing.T, client *http.Client, sourceMachineID, quadletName,
 	return resp.StatusCode, raw
 }
 
-// belowAdminOnBothClient seeds a user holding WRITE on both machines —
+// belowAdminOnBothClient seeds a user holding WRITE on both hosts —
 // enough for a plain transfer on every gate, one level short of moving a
 // secret value off the source.
-func belowAdminOnBothClient(t *testing.T, machineB string) *http.Client {
+func belowAdminOnBothClient(t *testing.T, hostB string) *http.Client {
 	t.Helper()
 	username := "it-" + suite.RunID + "-mvsec-w"
 	password := "it-" + suite.RunID + "-mvsec-w-pw-" + uuid.New().String()[:8]
@@ -72,14 +72,14 @@ func belowAdminOnBothClient(t *testing.T, machineB string) *http.Client {
 	require.NoErrorf(t, err, "seed write user: %v", err)
 	token, err := realLogin(suite.ServerURL, username, password)
 	require.NoErrorf(t, err, "login as write user: %v", err)
-	for _, machineID := range []string{suite.MachineID, machineB} {
-		grantURL := suite.ServerURL + "/api/machines/" + machineID + "/access"
+	for _, hostID := range []string{suite.HostID, hostB} {
+		grantURL := suite.ServerURL + "/api/hosts/" + hostID + "/access"
 		grantBody := fmt.Sprintf(`{"userId":%q,"permission":%q}`, userID, models.PermissionWrite)
 		resp, err := suite.AuthenticatedClient().Post(grantURL, "application/json", bytes.NewReader([]byte(grantBody)))
-		require.NoErrorf(t, err, "grant write on %s: %v", machineID, err)
+		require.NoErrorf(t, err, "grant write on %s: %v", hostID, err)
 		_ = resp.Body.Close()
 		require.Containsf(t, []int{http.StatusCreated, http.StatusOK}, resp.StatusCode,
-			"grant write on %s: unexpected status %d", machineID, resp.StatusCode)
+			"grant write on %s: unexpected status %d", hostID, resp.StatusCode)
 	}
 	return bearerClient(token)
 }
@@ -112,25 +112,25 @@ func Test_Integration_Quadlets_MoveSecrets(t *testing.T) {
 
 	requireUserSystemd(t)
 
-	b := suite.RegisterSecondMachine(t)
+	b := suite.RegisterSecondHost(t)
 	if !b.Independent {
-		t.Skip("machine B shares machine A's host (PODLAND_TEST_SSH_* fallback) — secret transfers need independent podman state")
+		t.Skip("host B shares host A's host (PODLAND_TEST_SSH_* fallback) — secret transfers need independent podman state")
 	}
 	if !userSystemdAvailableOn(b.Target) {
-		t.Skip("machine B user systemd unusable (is-system-running did not answer running/degraded)")
+		t.Skip("host B user systemd unusable (is-system-running did not answer running/degraded)")
 	}
 
-	machineA := suite.MachineID
-	machineB := b.MachineID
+	hostA := suite.HostID
+	hostB := b.HostID
 	base := "it-" + suite.RunID + "-mvsec"
 
 	// secretLine builds one quadlet Secret= line for a run-scoped name.
 	secretLine := func(suffix string) string { return base + "-" + suffix }
 
-	// cleanupSecret best-effort removes the secret from both machines.
+	// cleanupSecret best-effort removes the secret from both hosts.
 	cleanupSecret := func(name string) {
-		t.Cleanup(func() { deleteSecretBestEffort(t, machineA, name) })
-		t.Cleanup(func() { deleteSecretBestEffort(t, machineB, name) })
+		t.Cleanup(func() { deleteSecretBestEffort(t, hostA, name) })
+		t.Cleanup(func() { deleteSecretBestEffort(t, hostB, name) })
 	}
 
 	// --- AC: the preview reports per-store existence; hostPath and
@@ -140,13 +140,13 @@ func Test_Integration_Quadlets_MoveSecrets(t *testing.T) {
 		transferable := secretLine("tok")
 		dangling := secretLine("gone")
 
-		for _, machine := range []string{machineA, machineB} {
+		for _, host := range []string{hostA, hostB} {
 			name := quadlet + ".container"
-			t.Cleanup(func() { forceDeleteQuadlet(t, machine, name) })
+			t.Cleanup(func() { forceDeleteQuadlet(t, host, name) })
 		}
 		cleanupSecret(transferable)
-		createSecret(t, machineA, secretCreateBody{Name: transferable, Value: "preview-value"})
-		createQuadlet(t, machineA, quadletCreateBody{
+		createSecret(t, hostA, secretCreateBody{Name: transferable, Value: "preview-value"})
+		createQuadlet(t, hostA, quadletCreateBody{
 			Name:     quadlet,
 			Resource: "container",
 			Content: `[Container]
@@ -158,12 +158,12 @@ Secret=` + dangling + `
 `,
 		})
 
-		got := getMovePreview(t, machineA, quadlet+".container", machineB)
+		got := getMovePreview(t, hostA, quadlet+".container", hostB)
 		require.Len(t, got.Secrets, 3)
 		assert.Equal(t, transferable, got.Secrets[0].Name)
 		assert.Equal(t, "secret", got.Secrets[0].Kind)
 		assert.True(t, got.Secrets[0].ExistsOnSource)
-		assert.False(t, got.Secrets[0].ExistsOnTarget, "machine B holds no such secret yet")
+		assert.False(t, got.Secrets[0].ExistsOnTarget, "host B holds no such secret yet")
 		assert.Equal(t, "/etc/certs/store.pem", got.Secrets[1].Name)
 		assert.Equal(t, "hostPath", got.Secrets[1].Kind)
 		assert.False(t, got.Secrets[1].ExistsOnSource, "a hostPath entry carries no existence claims")
@@ -172,9 +172,9 @@ Secret=` + dangling + `
 		assert.False(t, got.Secrets[2].ExistsOnSource, "a dangling reference is an honest entry, not an error")
 		assert.False(t, got.Secrets[2].ExistsOnTarget)
 
-		// Machine B gains the same-name secret: both flags flip true.
-		createSecret(t, machineB, secretCreateBody{Name: transferable, Value: "on-b"})
-		got = getMovePreview(t, machineA, quadlet+".container", machineB)
+		// Host B gains the same-name secret: both flags flip true.
+		createSecret(t, hostB, secretCreateBody{Name: transferable, Value: "on-b"})
+		got = getMovePreview(t, hostA, quadlet+".container", hostB)
 		assert.True(t, got.Secrets[0].ExistsOnSource)
 		assert.True(t, got.Secrets[0].ExistsOnTarget)
 	})
@@ -185,13 +185,13 @@ Secret=` + dangling + `
 		quadlet := base + "-c"
 		secretName := secretLine("carry")
 
-		for _, machine := range []string{machineA, machineB} {
+		for _, host := range []string{hostA, hostB} {
 			name := quadlet + ".container"
-			t.Cleanup(func() { forceDeleteQuadlet(t, machine, name) })
+			t.Cleanup(func() { forceDeleteQuadlet(t, host, name) })
 		}
 		cleanupSecret(secretName)
-		createSecret(t, machineA, secretCreateBody{Name: secretName, Value: "carry-me-value\n"})
-		createQuadlet(t, machineA, quadletCreateBody{
+		createSecret(t, hostA, secretCreateBody{Name: secretName, Value: "carry-me-value\n"})
+		createQuadlet(t, hostA, quadletCreateBody{
 			Name:     quadlet,
 			Resource: "container",
 			Content: `[Container]
@@ -201,8 +201,8 @@ Secret=` + secretName + `
 `,
 		})
 
-		status, raw := postMove(t, machineA, quadlet+".container",
-			moveCompanionBody(t, machineB, "copy", map[string]any{"transferSecrets": true}))
+		status, raw := postMove(t, hostA, quadlet+".container",
+			moveCompanionBody(t, hostB, "copy", map[string]any{"transferSecrets": true}))
 		require.Equalf(t, http.StatusOK, status, "the copy must succeed. body: %s", string(raw))
 		var got secretTransferEnvelope
 		require.NoError(t, json.Unmarshal(raw, &got))
@@ -212,12 +212,12 @@ Secret=` + secretName + `
 		assert.Equal(t, secretName, got.SecretTransfer.Secrets[0].Name)
 		assert.Equal(t, "transferred", got.SecretTransfer.Secrets[0].Outcome)
 
-		// The value crossed machines byte-identical (newline included).
-		assert.Equal(t, "carry-me-value\n", revealSecretViaAPI(t, machineB, secretName))
+		// The value crossed hosts byte-identical (newline included).
+		assert.Equal(t, "carry-me-value\n", revealSecretViaAPI(t, hostB, secretName))
 		// The source secret is untouched.
-		requireSecretListed(t, machineA, secretName, "the source secret survives a copy")
+		requireSecretListed(t, hostA, secretName, "the source secret survives a copy")
 		// And the quadlet landed on B.
-		getQuadlet(t, machineB, quadlet+".container")
+		getQuadlet(t, hostB, quadlet+".container")
 	})
 
 	// --- AC: a same-name secret on the target is skipped, never
@@ -226,14 +226,14 @@ Secret=` + secretName + `
 		quadlet := base + "-s"
 		secretName := secretLine("clash")
 
-		for _, machine := range []string{machineA, machineB} {
+		for _, host := range []string{hostA, hostB} {
 			name := quadlet + ".container"
-			t.Cleanup(func() { forceDeleteQuadlet(t, machine, name) })
+			t.Cleanup(func() { forceDeleteQuadlet(t, host, name) })
 		}
 		cleanupSecret(secretName)
-		createSecret(t, machineA, secretCreateBody{Name: secretName, Value: "from-a"})
-		createSecret(t, machineB, secretCreateBody{Name: secretName, Value: "from-b"})
-		createQuadlet(t, machineA, quadletCreateBody{
+		createSecret(t, hostA, secretCreateBody{Name: secretName, Value: "from-a"})
+		createSecret(t, hostB, secretCreateBody{Name: secretName, Value: "from-b"})
+		createQuadlet(t, hostA, quadletCreateBody{
 			Name:     quadlet,
 			Resource: "container",
 			Content: `[Container]
@@ -243,8 +243,8 @@ Secret=` + secretName + `
 `,
 		})
 
-		status, raw := postMove(t, machineA, quadlet+".container",
-			moveCompanionBody(t, machineB, "copy", map[string]any{"transferSecrets": true}))
+		status, raw := postMove(t, hostA, quadlet+".container",
+			moveCompanionBody(t, hostB, "copy", map[string]any{"transferSecrets": true}))
 		require.Equalf(t, http.StatusOK, status, "a same-name skip must not fail the transfer. body: %s", string(raw))
 		var got secretTransferEnvelope
 		require.NoError(t, json.Unmarshal(raw, &got))
@@ -252,8 +252,8 @@ Secret=` + secretName + `
 		assert.Equal(t, "skipped", got.SecretTransfer.Secrets[0].Outcome)
 		assert.NotEmpty(t, got.SecretTransfer.Secrets[0].Reason)
 
-		// Machine B's secret keeps its own value.
-		assert.Equal(t, "from-b", revealSecretViaAPI(t, machineB, secretName))
+		// Host B's secret keeps its own value.
+		assert.Equal(t, "from-b", revealSecretViaAPI(t, hostB, secretName))
 	})
 
 	// --- AC: a dangling reference skips and reports, not errors ---------
@@ -261,11 +261,11 @@ Secret=` + secretName + `
 		quadlet := base + "-d"
 		dangling := secretLine("missing")
 
-		for _, machine := range []string{machineA, machineB} {
+		for _, host := range []string{hostA, hostB} {
 			name := quadlet + ".container"
-			t.Cleanup(func() { forceDeleteQuadlet(t, machine, name) })
+			t.Cleanup(func() { forceDeleteQuadlet(t, host, name) })
 		}
-		createQuadlet(t, machineA, quadletCreateBody{
+		createQuadlet(t, hostA, quadletCreateBody{
 			Name:     quadlet,
 			Resource: "container",
 			Content: `[Container]
@@ -275,8 +275,8 @@ Secret=` + dangling + `
 `,
 		})
 
-		status, raw := postMove(t, machineA, quadlet+".container",
-			moveCompanionBody(t, machineB, "copy", map[string]any{"transferSecrets": true}))
+		status, raw := postMove(t, hostA, quadlet+".container",
+			moveCompanionBody(t, hostB, "copy", map[string]any{"transferSecrets": true}))
 		require.Equalf(t, http.StatusOK, status, "a dangling reference must not fail the transfer. body: %s", string(raw))
 		var got secretTransferEnvelope
 		require.NoError(t, json.Unmarshal(raw, &got))
@@ -285,7 +285,7 @@ Secret=` + dangling + `
 		assert.Equal(t, "skipped", got.SecretTransfer.Secrets[0].Outcome)
 		assert.Contains(t, got.SecretTransfer.Secrets[0].Reason, "does not exist")
 
-		getQuadlet(t, machineB, quadlet+".container")
+		getQuadlet(t, hostB, quadlet+".container")
 	})
 
 	// --- AC: transferSecrets below admin on the source is 403 in the
@@ -294,13 +294,13 @@ Secret=` + dangling + `
 		quadlet := base + "-w"
 		secretName := secretLine("guarded")
 
-		for _, machine := range []string{machineA, machineB} {
+		for _, host := range []string{hostA, hostB} {
 			name := quadlet + ".container"
-			t.Cleanup(func() { forceDeleteQuadlet(t, machine, name) })
+			t.Cleanup(func() { forceDeleteQuadlet(t, host, name) })
 		}
 		cleanupSecret(secretName)
-		createSecret(t, machineA, secretCreateBody{Name: secretName, Value: "must-not-move"})
-		createQuadlet(t, machineA, quadletCreateBody{
+		createSecret(t, hostA, secretCreateBody{Name: secretName, Value: "must-not-move"})
+		createQuadlet(t, hostA, quadletCreateBody{
 			Name:     quadlet,
 			Resource: "container",
 			Content: `[Container]
@@ -309,10 +309,10 @@ Exec=sh -c "sleep 3600"
 Secret=` + secretName + `
 `,
 		})
-		client := belowAdminOnBothClient(t, machineB)
+		client := belowAdminOnBothClient(t, hostB)
 
-		status, raw := postMoveAs(t, client, machineA, quadlet+".container",
-			moveCompanionBody(t, machineB, "copy", map[string]any{"transferSecrets": true}))
+		status, raw := postMoveAs(t, client, hostA, quadlet+".container",
+			moveCompanionBody(t, hostB, "copy", map[string]any{"transferSecrets": true}))
 		require.Equalf(t, http.StatusForbidden, status,
 			"a write-level caller must be refused. body: %s", string(raw))
 		var errResp apiErrorResponse
@@ -320,9 +320,9 @@ Secret=` + secretName + `
 		assert.Equal(t, "ACCESS_DENIED", errResp.Error.Code)
 
 		// Nothing moved in either direction.
-		getQuadletExpectNotFound(t, machineB, quadlet+".container")
-		quadletListsEntry(t, machineA, quadlet+".container")
-		requireSecretNotListed(t, machineB, secretName, "no value moved off the source")
+		getQuadletExpectNotFound(t, hostB, quadlet+".container")
+		quadletListsEntry(t, hostA, quadlet+".container")
+		requireSecretNotListed(t, hostB, secretName, "no value moved off the source")
 	})
 
 	// --- AC: a move removes only the quadlet; source secrets survive -----
@@ -330,13 +330,13 @@ Secret=` + secretName + `
 		quadlet := base + "-mv"
 		secretName := secretLine("stay")
 
-		for _, machine := range []string{machineA, machineB} {
+		for _, host := range []string{hostA, hostB} {
 			name := quadlet + ".container"
-			t.Cleanup(func() { forceDeleteQuadlet(t, machine, name) })
+			t.Cleanup(func() { forceDeleteQuadlet(t, host, name) })
 		}
 		cleanupSecret(secretName)
-		createSecret(t, machineA, secretCreateBody{Name: secretName, Value: "i-stay"})
-		createQuadlet(t, machineA, quadletCreateBody{
+		createSecret(t, hostA, secretCreateBody{Name: secretName, Value: "i-stay"})
+		createQuadlet(t, hostA, quadletCreateBody{
 			Name:     quadlet,
 			Resource: "container",
 			Content: `[Container]
@@ -346,18 +346,18 @@ Secret=` + secretName + `
 `,
 		})
 
-		status, raw := postMove(t, machineA, quadlet+".container",
-			moveCompanionBody(t, machineB, "move", map[string]any{"transferSecrets": true}))
+		status, raw := postMove(t, hostA, quadlet+".container",
+			moveCompanionBody(t, hostB, "move", map[string]any{"transferSecrets": true}))
 		require.Equalf(t, http.StatusOK, status, "the move must succeed. body: %s", string(raw))
 		var got secretTransferEnvelope
 		require.NoError(t, json.Unmarshal(raw, &got))
 		assert.Equal(t, "moved", got.Status)
 
-		getQuadletExpectNotFound(t, machineA, quadlet+".container")
-		getQuadlet(t, machineB, quadlet+".container")
+		getQuadletExpectNotFound(t, hostA, quadlet+".container")
+		getQuadlet(t, hostB, quadlet+".container")
 		// The secret never leaves the source, any mode.
-		requireSecretListed(t, machineA, secretName, "a move removes ONLY the quadlet — source secrets survive")
-		assert.Equal(t, "i-stay", revealSecretViaAPI(t, machineA, secretName))
+		requireSecretListed(t, hostA, secretName, "a move removes ONLY the quadlet — source secrets survive")
+		assert.Equal(t, "i-stay", revealSecretViaAPI(t, hostA, secretName))
 	})
 
 	// --- AC: with migrateVolumeData also set, the NDJSON terminal
@@ -367,15 +367,15 @@ Secret=` + secretName + `
 		volume := base + "-vol"
 		secretName := secretLine("stream")
 
-		for _, machine := range []string{machineA, machineB} {
+		for _, host := range []string{hostA, hostB} {
 			name := quadlet + ".container"
-			t.Cleanup(func() { forceDeleteQuadlet(t, machine, name) })
+			t.Cleanup(func() { forceDeleteQuadlet(t, host, name) })
 		}
 		cleanupSecret(secretName)
-		createSecret(t, machineA, secretCreateBody{Name: secretName, Value: "rides-along"})
-		createVolumeViaAPI(t, machineA, volume)
-		seedVolumeViaAPI(t, machineA, volume, map[string][]byte{"note.txt": []byte("with secrets")})
-		createQuadlet(t, machineA, quadletCreateBody{
+		createSecret(t, hostA, secretCreateBody{Name: secretName, Value: "rides-along"})
+		createVolumeViaAPI(t, hostA, volume)
+		seedVolumeViaAPI(t, hostA, volume, map[string][]byte{"note.txt": []byte("with secrets")})
+		createQuadlet(t, hostA, quadletCreateBody{
 			Name:     quadlet,
 			Resource: "container",
 			Content: `[Container]
@@ -386,8 +386,8 @@ Secret=` + secretName + `
 `,
 		})
 
-		events := postMoveMigrate(t, machineA, quadlet+".container",
-			migratingMoveBody(t, machineB, "copy", map[string]any{"transferSecrets": true}))
+		events := postMoveMigrate(t, hostA, quadlet+".container",
+			migratingMoveBody(t, hostB, "copy", map[string]any{"transferSecrets": true}))
 
 		complete := events[len(events)-1]
 		assert.Equal(t, "complete", complete.Type)
@@ -401,6 +401,6 @@ Secret=` + secretName + `
 		assert.Equal(t, secretName, complete.Result.SecretTransfer.Secrets[0].Name)
 		assert.Equal(t, "transferred", complete.Result.SecretTransfer.Secrets[0].Outcome)
 
-		assert.Equal(t, "rides-along", revealSecretViaAPI(t, machineB, secretName))
+		assert.Equal(t, "rides-along", revealSecretViaAPI(t, hostB, secretName))
 	})
 }

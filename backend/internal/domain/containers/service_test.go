@@ -29,7 +29,7 @@ func TestContainerService_List_ReturnsEngineContainers(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.List(context.Background(), "user", "machine", entities.ContainerListOptions{All: true})
+	got, err := service.List(context.Background(), "user", "host", entities.ContainerListOptions{All: true})
 
 	require.NoError(t, err)
 	assert.Equal(t, containers, got)
@@ -43,7 +43,7 @@ func TestContainerService_List_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.List(context.Background(), "user", "machine", entities.ContainerListOptions{})
+	got, err := service.List(context.Background(), "user", "host", entities.ContainerListOptions{})
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -63,7 +63,7 @@ func TestContainerService_Create_ReturnsEngineReport(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine", ContainerCreateRequest{
+	got, err := service.Create(context.Background(), "user", "host", ContainerCreateRequest{
 		Name:  "test-container",
 		Image: "nginx:latest",
 	})
@@ -84,7 +84,7 @@ func TestContainerService_Create_MissingPodIsPodNotFound(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine", ContainerCreateRequest{
+	got, err := service.Create(context.Background(), "user", "host", ContainerCreateRequest{
 		Image: "nginx:latest",
 		Pod:   "missing-pod",
 	})
@@ -110,7 +110,7 @@ func TestContainerService_Create_MissingImageWithoutPodStaysImageNotFound(t *tes
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine", ContainerCreateRequest{
+	got, err := service.Create(context.Background(), "user", "host", ContainerCreateRequest{
 		Image: "missing:latest",
 	})
 
@@ -129,7 +129,7 @@ func TestContainerService_Create_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Create(context.Background(), "user", "machine",
+	got, err := service.Create(context.Background(), "user", "host",
 		ContainerCreateRequest{Name: "c", Image: "nginx:latest"})
 
 	require.Error(t, err)
@@ -144,7 +144,7 @@ func TestContainerService_Create_WrapsEngineFailure(t *testing.T) {
 func TestContainerService_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewContainerService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	got, err := service.List(context.Background(), "user", "machine", entities.ContainerListOptions{})
+	got, err := service.List(context.Background(), "user", "host", entities.ContainerListOptions{})
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Nil(t, got)

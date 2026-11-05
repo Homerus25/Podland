@@ -14,14 +14,14 @@ import (
 	"go.podman.io/common/libnetwork/types"
 )
 
-// listRequest performs a GET /api/machines/{id}/networks through the
+// listRequest performs a GET /api/hosts/{id}/networks through the
 // handler with an authenticated test identity.
 func listRequest(list http.HandlerFunc) *httptest.ResponseRecorder {
 	return testutils.Perform(list, testutils.Request{
 		Method:    http.MethodGet,
-		Path:      "/api/machines/test-machine/networks",
+		Path:      "/api/hosts/test-host/networks",
 		UserID:    "test-user",
-		URLParams: map[string]string{"id": "test-machine"},
+		URLParams: map[string]string{"id": "test-host"},
 	})
 }
 

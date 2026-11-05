@@ -76,7 +76,7 @@ test:
 
 # Coverage — unit tests only; the integration suite is deliberately left
 # out (it boots the containerized podman test host and skips cleanly
-# where podman is missing, which would make the number machine-dependent).
+# where podman is missing, which would make the number host-dependent).
 # Writes coverage.out, prints the per-function summary, and renders
 # coverage.html for browsing. Both artifacts are gitignored.
 coverage:
@@ -93,20 +93,20 @@ coverage:
 #
 # Runs are serialized per host: the test hosts use fixed container
 # names and fixed published ports (127.0.0.1:24422 for the primary,
-# 127.0.0.1:24423 for the lazily-booted second host used by cross-machine
+# 127.0.0.1:24423 for the lazily-booted second host used by cross-host
 # tests), so a second concurrent run fails fast instead of racing over
 # shared volumes.
 #
 # Override the registered `podman system connection` name with
 # PODLAND_TEST_CONNECTION_NAME (default "podland-it"). To target an
 # externally managed host instead of the container (e.g. a manually
-# started podman machine on macOS), set ALL of
+# started podman host on macOS), set ALL of
 # PODLAND_TEST_SSH_{HOST,PORT,USER,SOCKET,KEY_PATH} — the container
 # lifecycle is skipped entirely.
 test-integration:
 	$(GOCMD) test -v -tags=integration ./test/integration/...
 
-# Container test host image — a podman machine stand-in built from
+# Container test host image — a podman host stand-in built from
 # test/integration/testhost/Dockerfile (pinned Fedora + podman,
 # fuse-overlayfs, openssh-server; boots WITHOUT systemd via
 # entrypoint.sh: foreground sshd + `podman system service` serving the

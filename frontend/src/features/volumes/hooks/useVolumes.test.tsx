@@ -10,10 +10,10 @@ import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 describe("listVolumes", () => {
-	it("fetches the machine volumes through the API", async () => {
+	it("fetches the host volumes through the API", async () => {
 		const volumes = [volumeFixture()];
 		server.use(
-			http.get("*/api/machines/m-1/volumes", () => HttpResponse.json(volumes)),
+			http.get("*/api/hosts/m-1/volumes", () => HttpResponse.json(volumes)),
 		);
 
 		await expect(listVolumes("m-1")).resolves.toEqual(volumes);
@@ -21,13 +21,13 @@ describe("listVolumes", () => {
 });
 
 describe("useVolumes", () => {
-	it("returns and caches the volume list per machine", async () => {
+	it("returns and caches the volume list per host", async () => {
 		const volumes = [
 			volumeFixture(),
 			volumeFixture({ name: "tmp", anonymous: true, size: 4096 }),
 		];
 		server.use(
-			http.get("*/api/machines/m-1/volumes", () => HttpResponse.json(volumes)),
+			http.get("*/api/hosts/m-1/volumes", () => HttpResponse.json(volumes)),
 		);
 
 		const { result, queryClient } = renderHookWithQuery(() =>
@@ -41,7 +41,7 @@ describe("useVolumes", () => {
 
 	it("surfaces request errors without retrying", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/volumes", () =>
+			http.get("*/api/hosts/m-1/volumes", () =>
 				errorResponse(500, "INTERNAL_ERROR", "ssh failed", "r-1"),
 			),
 		);

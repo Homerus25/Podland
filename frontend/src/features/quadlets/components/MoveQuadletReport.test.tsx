@@ -114,7 +114,7 @@ describe("selectMoveQuadletReport", () => {
 });
 
 describe("MoveQuadletReport", () => {
-	it("narrates a partial result, naming both machines and the error", () => {
+	it("narrates a partial result, naming both hosts and the error", () => {
 		renderReport({
 			kind: "partial",
 			result: quadletMoveResultFixture({
@@ -127,7 +127,7 @@ describe("MoveQuadletReport", () => {
 
 		const message = screen.getByTestId("move-partial-message");
 		expect(message).toHaveTextContent(
-			"The quadlet was installed on “staging-01” but could not be removed from “prod-web-01”. It currently exists on both machines and must be cleaned up manually.",
+			"The quadlet was installed on “staging-01” but could not be removed from “prod-web-01”. It currently exists on both hosts and must be cleaned up manually.",
 		);
 		expect(message).toHaveTextContent(
 			"failed to remove quadlet: resource running",
@@ -147,7 +147,7 @@ describe("MoveQuadletReport", () => {
 		});
 
 		const message = screen.getByTestId("move-partial-message");
-		expect(message).toHaveTextContent("both machines");
+		expect(message).toHaveTextContent("both hosts");
 		expect(
 			within(message).queryByText("failed to remove quadlet: resource running"),
 		).not.toBeInTheDocument();

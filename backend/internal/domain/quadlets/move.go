@@ -21,15 +21,15 @@ import (
 // terminals. It is consumer-declared here, in the transfer module, and
 // satisfied implicitly by *QuadletService.
 type lifecycleSeam interface {
-	applyUnitAction(ctx context.Context, userID, machineID string, action lifecycleAction, unit string, opts LifecycleOptions) error
-	reloadUserSystemd(ctx context.Context, machineID, userID string) error
-	stopAndRemove(ctx context.Context, userID, machineID, name string, force, stop bool, op string, terminals removeTerminals) error
+	applyUnitAction(ctx context.Context, userID, hostID string, action lifecycleAction, unit string, opts LifecycleOptions) error
+	reloadUserSystemd(ctx context.Context, hostID, userID string) error
+	stopAndRemove(ctx context.Context, userID, hostID, name string, force, stop bool, op string, terminals removeTerminals) error
 }
 
 // Compile-time pin: the lean service satisfies the transfer's seam.
 var _ lifecycleSeam = (*QuadletService)(nil)
 
-// QuadletTransferService owns the cross-machine move/copy transfer (issues
+// QuadletTransferService owns the cross-host move/copy transfer (issues
 // 209-215): the preview, the move (plain and progress), the volume-data
 // phase, and the secret-transfer phase. It is the transfer half of the
 // quadlets domain split (architecture review 2026-10-19, candidate C2) —
@@ -37,7 +37,7 @@ var _ lifecycleSeam = (*QuadletService)(nil)
 // and auto-update, and this service crosses into that half through the
 // lifecycleSeam.
 type QuadletTransferService struct {
-	// engines is the connection seam both machines' leases cross.
+	// engines is the connection seam both hosts' leases cross.
 	engines QuadletEngineProvider
 	// secretEngines resolves the podman secret stores the move/copy's
 	// secret surface crosses (issue 215): the existence reads for the
@@ -45,8 +45,8 @@ type QuadletTransferService struct {
 	// target for the transfer.
 	secretEngines moveSecretEngineProvider
 	// accessRepo resolves the caller's permission level for the
-	// cross-machine operations: route middleware only sees the route's
-	// machine, so the target machine's access is checked here, against
+	// cross-host operations: route middleware only sees the route's
+	// host, so the target host's access is checked here, against
 	// the store, before any podman call.
 	accessRepo permission.PermissionGetter
 	// maxVolumeUploadBytes bounds the volume data migration's stream
@@ -108,32 +108,32 @@ func checkDeletePreconditions(target *entities.ListQuadlet, force, stop bool) er
 
 // MovePreview answers everything the move/copy transfer dialog must show
 // before confirming (issue 209): the volumes the quadlet references, whether
-// the target machine already has a quadlet of the same name and resource,
+// the target host already has a quadlet of the same name and resource,
 // and whether the source quadlet's managed resource is running. Volume
 // entries whose source names a companion .volume quadlet on the source
-// machine additionally carry that file and its state on the target (issue
+// host additionally carry that file and its state on the target (issue
 // 217). Every volume-kind entry also carries its resolved podman volume and
-// the migration facts both machines hold about it — sizes when the engines
+// the migration facts both hosts hold about it — sizes when the engines
 // report any, target existence, migratability — regardless of what the
 // transfer request later opts into (issue 214). Every `Secret=` reference
-// carries its resolved name and kind plus its existence in each machine's
+// carries its resolved name and kind plus its existence in each host's
 // podman secret store, always computed and flag-independent (issue 215). See
 // doku/description_quadlets_api.md.
 //
 // Access: the route's subtree middleware already proved the caller holds an
-// access row on the source machine — read level suffices, this endpoint
-// mutates nothing. The target machine is a service-side gate (route
-// middleware only sees the route's machine): the caller's stored level must
+// access row on the source host — read level suffices, this endpoint
+// mutates nothing. The target host is a service-side gate (route
+// middleware only sees the route's host): the caller's stored level must
 // be at least read, checked against the access store BEFORE any podman call,
 // so a caller without target access gets the standard 403 ACCESS_DENIED and
 // never a false preview. The target's quadlet list itself is read through
-// the connection seam on the target's machine ID.
-func (s *QuadletTransferService) MovePreview(ctx context.Context, userID, machineID, quadletID, targetMachineID string) (*QuadletMovePreviewResponse, error) {
+// the connection seam on the target's host ID.
+func (s *QuadletTransferService) MovePreview(ctx context.Context, userID, hostID, quadletID, targetHostID string) (*QuadletMovePreviewResponse, error) {
 	// The target gate fires before the connection lease (the same shape as
 	// the secrets reveal gate): a lookup failure is 500, a level below read
 	// — an absent row included — is 403, per permission.RequireLevel's
 	// single-owner contract.
-	if err := permission.RequireLevel(s.accessRepo, targetMachineID, userID, models.PermissionRead); err != nil {
+	if err := permission.RequireLevel(s.accessRepo, targetHostID, userID, models.PermissionRead); err != nil {
 		return nil, err
 	}
 
@@ -150,7 +150,7 @@ func (s *QuadletTransferService) MovePreview(ctx context.Context, userID, machin
 	var source *entities.ListQuadlet
 	var companions []companionVolumeQuadlet
 	var resolution volumeResolution
-	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.MovePreview", func(e QuadletEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "quadlets.MovePreview", func(e QuadletEngine) error {
 		c, list, listed, err := fetchQuadletWithList(e, quadletID)
 		if err != nil {
 			return err
@@ -184,7 +184,7 @@ func (s *QuadletTransferService) MovePreview(ctx context.Context, userID, machin
 	// podman volume; a nil inspect is an absent volume (ExistsOnTarget
 	// false — a fresh target, the honest answer).
 	targetVolumes := map[string]*QuadletVolumeInspect{}
-	err = s.engines.WithEngine(ctx, userID, targetMachineID, "quadlets.MovePreviewTarget", func(e QuadletEngine) error {
+	err = s.engines.WithEngine(ctx, userID, targetHostID, "quadlets.MovePreviewTarget", func(e QuadletEngine) error {
 		list, err := e.List(entities.QuadletListOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to list target quadlets: %w", err)
@@ -231,11 +231,11 @@ func (s *QuadletTransferService) MovePreview(ctx context.Context, userID, machin
 
 	// Secret references (issue 215): every `Secret=` line, always
 	// computed, flag-independent — the volume facts' discipline. Existence
-	// means "in the machine's podman secret store" and is only claimed for
+	// means "in the host's podman secret store" and is only claimed for
 	// kind secret entries; a hostPath source is read off the host
 	// filesystem at run time and never consults a store, so it carries no
 	// claims. The two name lists ride their own connection leases on the
-	// machines the quadlet leases above dialed — the source list read on
+	// hosts the quadlet leases above dialed — the source list read on
 	// the source (read level suffices, the preview mutates nothing), the
 	// target list through the connection seam like the collision read.
 	// The leases open only when a kind secret entry needs them.
@@ -250,7 +250,7 @@ func (s *QuadletTransferService) MovePreview(ctx context.Context, userID, machin
 		}
 	}
 	if needsSecretStores {
-		err = s.secretEngines.WithEngine(ctx, userID, machineID, "quadlets.MovePreviewSecretsSource", func(e moveSecretEngine) error {
+		err = s.secretEngines.WithEngine(ctx, userID, hostID, "quadlets.MovePreviewSecretsSource", func(e moveSecretEngine) error {
 			names, err := e.Names()
 			if err != nil {
 				return fmt.Errorf("failed to list source secrets: %w", err)
@@ -263,7 +263,7 @@ func (s *QuadletTransferService) MovePreview(ctx context.Context, userID, machin
 		if err != nil {
 			return nil, err
 		}
-		err = s.secretEngines.WithEngine(ctx, userID, targetMachineID, "quadlets.MovePreviewSecretsTarget", func(e moveSecretEngine) error {
+		err = s.secretEngines.WithEngine(ctx, userID, targetHostID, "quadlets.MovePreviewSecretsTarget", func(e moveSecretEngine) error {
 			names, err := e.Names()
 			if err != nil {
 				return fmt.Errorf("failed to list target secrets: %w", err)
@@ -293,7 +293,7 @@ func (s *QuadletTransferService) MovePreview(ctx context.Context, userID, machin
 	}, nil
 }
 
-// fetchQuadletWithList is the source-lease ritual both machine reads share
+// fetchQuadletWithList is the source-lease ritual both host reads share
 // (MovePreview and MoveWithProgress's source lease): the quadlet's printed
 // content (for the volume/secret parse) plus its list entry (for name,
 // resource, and live state), fetched under one engine lease. A missing
@@ -321,7 +321,7 @@ func fetchQuadletWithList(e QuadletEngine, quadletID string) (content string, li
 	return content, list, source, nil
 }
 
-// Move transfers a quadlet to another machine (issues 210 and 211).
+// Move transfers a quadlet to another host (issues 210 and 211).
 //
 // Copy mode installs the source quadlet's file — same name, resource, and
 // content — on the target without overwriting and never touches the source:
@@ -340,12 +340,12 @@ func fetchQuadletWithList(e QuadletEngine, quadletID string) (content string, li
 // install or reload failure therefore answers a plain error with the source
 // untouched. A removal failure after a successful install answers the
 // transfer envelope with status "partial" plus the failure's detail in
-// Error: the quadlet then exists on BOTH machines and the source side must
+// Error: the quadlet then exists on BOTH hosts and the source side must
 // be cleaned up manually. A source quadlet that vanished between install
 // and removal needs no removal — the answer is "moved".
 //
 // Companion .volume quadlets (issue 217): when the quadlet references
-// volume sources a same-named .volume quadlet file on the source machine
+// volume sources a same-named .volume quadlet file on the source host
 // defines, the transfer carries those definitions along unless the request
 // opts out with transferVolumeQuadlets=false. The companion set is
 // re-derived from the source content at execution time — the client never
@@ -366,7 +366,7 @@ func fetchQuadletWithList(e QuadletEngine, quadletID string) (content string, li
 // run before anything is installed — preflight (target emptiness, 409
 // VOLUME_MIGRATION_TARGET_NOT_EMPTY; size bound, 413), then the secret
 // phase when opted into, then a move's stop, then the data itself — so a
-// refusal or a data failure answers an error with both machines' quadlet
+// refusal or a data failure answers an error with both hosts' quadlet
 // sets untouched. A migrating move stops the source's running resource
 // BEFORE the data phase (exporting under a live writer would capture torn
 // state); the non-migration path keeps the delete flow's stop inside the
@@ -398,41 +398,41 @@ func fetchQuadletWithList(e QuadletEngine, quadletID string) (content string, li
 // block; no progress events and no NDJSON transport ride on secrets alone.
 //
 // Access: the route's write-level middleware proved the caller may mutate
-// the SOURCE machine; the TARGET machine is a service-side gate (route
-// middleware only sees the route's machine): the caller's stored level must
+// the SOURCE host; the TARGET host is a service-side gate (route
+// middleware only sees the route's host): the caller's stored level must
 // be at least write, checked against the access store BEFORE any podman
 // call, so a read-level grantee is refused with the standard 403
 // ACCESS_DENIED before anything is installed. The transfer itself then
-// crosses the connection seam once per machine: the source lease reads
+// crosses the connection seam once per host: the source lease reads
 // content and list entry (and, in move mode, the removal lease), the target
 // lease re-checks the collision and installs.
 //
 // Move answers through the plain JSON envelope; MoveWithProgress is the
 // full orchestration and reports data-phase progress. The two share every
 // semantic — Move just discards the progress callback.
-func (s *QuadletTransferService) Move(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest) (*QuadletMoveResponse, error) {
-	return s.MoveWithProgress(ctx, userID, machineID, quadletID, req, nil)
+func (s *QuadletTransferService) Move(ctx context.Context, userID, hostID, quadletID string, req QuadletMoveRequest) (*QuadletMoveResponse, error) {
+	return s.MoveWithProgress(ctx, userID, hostID, quadletID, req, nil)
 }
 
 // MoveWithProgress performs the transfer and reports volume data-phase
 // progress through onProgress (the NDJSON transport's feed; nil progress
 // simply emits nothing). See Move for the transfer semantics.
-func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest, onProgress func(QuadletMoveEvent)) (*QuadletMoveResponse, error) {
+func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, hostID, quadletID string, req QuadletMoveRequest, onProgress func(QuadletMoveEvent)) (*QuadletMoveResponse, error) {
 	// The target gate fires before any connection lease (the same shape as
 	// the secrets reveal gate, one level up from MovePreview's read gate):
 	// a lookup failure is 500, a level below write — an absent row included
 	// — is 403, per permission.RequireLevel's single-owner contract.
-	if err := permission.RequireLevel(s.accessRepo, req.TargetMachineID, userID, models.PermissionWrite); err != nil {
+	if err := permission.RequireLevel(s.accessRepo, req.TargetHostID, userID, models.PermissionWrite); err != nil {
 		return nil, err
 	}
 
 	// The secret transfer's admin gate on the SOURCE (issue 215): a
-	// transferSecrets request moves VALUES off this machine, so the reveal
+	// transferSecrets request moves VALUES off this host, so the reveal
 	// gate's admin level stays the single owner of value exposure — a
-	// write-level caller must never be able to move values off a machine.
+	// write-level caller must never be able to move values off a host.
 	// Fires in the preflight, before any byte moves.
 	if req.TransferSecrets {
-		if err := permission.RequireLevel(s.accessRepo, machineID, userID, models.PermissionAdmin); err != nil {
+		if err := permission.RequireLevel(s.accessRepo, hostID, userID, models.PermissionAdmin); err != nil {
 			return nil, err
 		}
 	}
@@ -440,7 +440,7 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 	// Source lease: content plus the list entry (for name, resource, and
 	// live state). A missing quadlet is a 404. The lease only reads — the
 	// move mode's removal runs in its own lease after the install, so a
-	// transfer onto the source's own machine finds its own collision below
+	// transfer onto the source's own host finds its own collision below
 	// and installs (and therefore removes) nothing. The companion set is
 	// derived here when the request carries companions along (issue 217):
 	// re-derived from the source content at execution time, the same
@@ -449,7 +449,7 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 	var source *entities.ListQuadlet
 	var companions []companionVolumeQuadlet
 	var plan []volumeMigrationPlanEntry
-	err := s.engines.WithEngine(ctx, userID, machineID, "quadlets.MoveSource", func(e QuadletEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "quadlets.MoveSource", func(e QuadletEngine) error {
 		c, list, listed, err := fetchQuadletWithList(e, quadletID)
 		if err != nil {
 			return err
@@ -513,7 +513,7 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 	resource := deriveResourceFromPath(source.Path)
 
 	// Volume data migration phases (issue 214, §18) — all BEFORE anything
-	// is installed, so a refusal or a data failure leaves both machines'
+	// is installed, so a refusal or a data failure leaves both hosts'
 	// quadlet sets untouched. Phase order: the target preflight first,
 	// then the secret phase (issue 215) — its cheap failures must abort
 	// before any state is mutated, and secrets never need the source
@@ -524,7 +524,7 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 		// failures name their volume. The collision re-check below still
 		// runs in the install lease; this earlier target lease exists so a
 		// volume refusal lands before a stop or any data moves.
-		if err := s.preflightVolumeMigration(ctx, userID, req.TargetMachineID, plan, req.OverwriteVolumes); err != nil {
+		if err := s.preflightVolumeMigration(ctx, userID, req.TargetHostID, plan, req.OverwriteVolumes); err != nil {
 			return nil, err
 		}
 	}
@@ -536,7 +536,7 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 	// are skipped on re-run.
 	var secretOutcomes []QuadletMoveSecretOutcome
 	if req.TransferSecrets {
-		outcomes, err := s.transferSecrets(ctx, userID, machineID, req.TargetMachineID, content)
+		outcomes, err := s.transferSecrets(ctx, userID, hostID, req.TargetHostID, content)
 		if err != nil {
 			return nil, err
 		}
@@ -554,12 +554,12 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 	var stopApplied bool
 	if req.MigrateVolumeData {
 		if req.Mode == MoveModeMove && parseStateFromStatus(source.Status) == "running" && req.Stop && !req.Force {
-			if err := s.lifecycle.applyUnitAction(ctx, userID, machineID, actionStop, resolveUnitName(source, quadletID), LifecycleOptions{}); err != nil {
+			if err := s.lifecycle.applyUnitAction(ctx, userID, hostID, actionStop, resolveUnitName(source, quadletID), LifecycleOptions{}); err != nil {
 				return nil, fmt.Errorf("failed to stop quadlet before volume migration: %w", err)
 			}
 			stopApplied = true
 		}
-		outcomes, err := s.migrateVolumeData(ctx, userID, machineID, req.TargetMachineID, plan, onProgress)
+		outcomes, err := s.migrateVolumeData(ctx, userID, hostID, req.TargetHostID, plan, onProgress)
 		if err != nil {
 			return nil, noteStopped(err, stopApplied)
 		}
@@ -572,7 +572,7 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 	// source's name carries its extension, so it names the target file
 	// too).
 	var response *QuadletMoveResponse
-	err = s.engines.WithEngine(ctx, userID, req.TargetMachineID, "quadlets.MoveTarget", func(e QuadletEngine) error {
+	err = s.engines.WithEngine(ctx, userID, req.TargetHostID, "quadlets.MoveTarget", func(e QuadletEngine) error {
 		list, err := e.List(entities.QuadletListOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to list target quadlets: %w", err)
@@ -604,12 +604,12 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 		}
 
 		response = &QuadletMoveResponse{
-			ID:              source.Name,
-			Name:            source.Name,
-			Resource:        resource,
-			Status:          MoveStatusCopied,
-			SourceMachineID: machineID,
-			TargetMachineID: req.TargetMachineID,
+			ID:           source.Name,
+			Name:         source.Name,
+			Resource:     resource,
+			Status:       MoveStatusCopied,
+			SourceHostID: hostID,
+			TargetHostID: req.TargetHostID,
 		}
 		if req.Mode == MoveModeMove {
 			response.Status = MoveStatusMoved
@@ -638,22 +638,22 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 		response.SecretTransfer = &QuadletMoveSecretTransfer{Secrets: secretOutcomes}
 	}
 
-	// The same manager-visibility guarantee Create gives a single machine:
+	// The same manager-visibility guarantee Create gives a single host:
 	// podman's internal reload reaches the manager the podman service sees,
 	// not necessarily the one the lifecycle's scoped systemctl calls address,
 	// so the TARGET's manager is reloaded explicitly. A reload failure fails
 	// the transfer with ErrConnectionFailed even though the file is
 	// installed — and, in move mode, before the source is touched at all.
-	if err := s.lifecycle.reloadUserSystemd(ctx, req.TargetMachineID, userID); err != nil {
+	if err := s.lifecycle.reloadUserSystemd(ctx, req.TargetHostID, userID); err != nil {
 		return nil, noteStopped(err, stopApplied)
 	}
 
 	// Move mode's source half, only now that the install fully succeeded.
 	// A removal failure does not fail the request: the quadlet exists on
-	// both machines, and the envelope says so with status "partial" plus
+	// both hosts, and the envelope says so with status "partial" plus
 	// the failure's detail.
 	if req.Mode == MoveModeMove {
-		if err := s.removeSourceAfterInstall(ctx, userID, machineID, quadletID, req); err != nil {
+		if err := s.removeSourceAfterInstall(ctx, userID, hostID, quadletID, req); err != nil {
 			response.Status = MoveStatusPartial
 			response.Error = err.Error()
 		}
@@ -666,7 +666,7 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 // (stopAndRemove, remove.go — issue 231) with the transfer's terminals,
 // crossed through the lifecycle seam into the lean service. A
 // vanished source quadlet answers nil — the transfer's goal is met and a
-// "partial" would falsely claim the quadlet exists on both machines — and a
+// "partial" would falsely claim the quadlet exists on both hosts — and a
 // running-resource refusal answers the wrapped sentinel that becomes the
 // partial detail (a dropping closure: the cause is dropped today). Its
 // error is the "partial" detail, never a request failure — the install it
@@ -679,8 +679,8 @@ func (s *QuadletTransferService) MoveWithProgress(ctx context.Context, userID, m
 // issue 231's accepted tightening: same partial status, byte-identical
 // detail, where the old path asked podman to refuse at the remove instead.
 // No existing test pinned the old path.
-func (s *QuadletTransferService) removeSourceAfterInstall(ctx context.Context, userID, machineID, quadletID string, req QuadletMoveRequest) error {
-	return s.lifecycle.stopAndRemove(ctx, userID, machineID, quadletID, req.Force, req.Stop, "quadlets.MoveSourceRemove", removeTerminals{
+func (s *QuadletTransferService) removeSourceAfterInstall(ctx context.Context, userID, hostID, quadletID string, req QuadletMoveRequest) error {
+	return s.lifecycle.stopAndRemove(ctx, userID, hostID, quadletID, req.Force, req.Stop, "quadlets.MoveSourceRemove", removeTerminals{
 		missing: nil,
 		// The running refusal's cause (podman's text) is dropped today:
 		// the wire answers the wrapped sentinel that becomes the partial
@@ -693,7 +693,7 @@ func (s *QuadletTransferService) removeSourceAfterInstall(ctx context.Context, u
 
 // stopNote is what any failure after the migrating move's stop admits
 // (issue 207 review): the transfer answers a plain error and leaves both
-// machines' quadlet sets untouched, but the source's unit was already
+// hosts' quadlet sets untouched, but the source's unit was already
 // stopped and stays stopped — the error says so instead of going silent.
 const stopNote = "the source quadlet was stopped before this failure and remains stopped"
 
@@ -733,17 +733,17 @@ func quadletNameAndResourceTaken(list []*entities.ListQuadlet, name, resource st
 // companionVolumeQuadlet is one companion .volume quadlet file the
 // transferred quadlet references by filename (issue 217): File is the
 // file's name (extension included) and Content its verbatim bytes, both
-// read on the SOURCE machine.
+// read on the SOURCE host.
 type companionVolumeQuadlet struct {
 	File    string
 	Content string
 }
 
 // companionVolumeQuadlets derives the companion set from the quadlet's
-// parsed volume refs against the source machine's own list (issue 217):
+// parsed volume refs against the source host's own list (issue 217):
 // every parsed volume source that names a candidate (suffix .volume, no
 // path separator — the shared transfer kit's companion discovery rule,
-// §19 issue 242) AND has a same-named quadlet file on the source machine
+// §19 issue 242) AND has a same-named quadlet file on the source host
 // — exact filename match — yields that file with its printed content. A
 // candidate with no matching source file is dangling and yields nothing
 // (the reference stays an ordinary volume entry); bare names and host

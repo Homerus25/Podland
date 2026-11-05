@@ -11,7 +11,7 @@ import (
 	"go.podman.io/podman/v6/pkg/domain/infra/tunnel"
 )
 
-// VolumeEngine is the volumes domain's view of one machine's podman: the
+// VolumeEngine is the volumes domain's view of one host's podman: the
 // exact set of volume operations the service performs, in domain vocabulary
 // (single names, plain flags) and without a context parameter — the
 // connection context lives only inside the production adapter below.
@@ -35,7 +35,7 @@ type VolumeEngine interface {
 	Import(name string, r io.Reader) error
 }
 
-// VolumeUsageEngine is the volumes domain's view of one machine's
+// VolumeUsageEngine is the volumes domain's view of one host's
 // in-use surface (issue 238): the exact reads the move/copy preview and
 // transfer need to decide whether a volume is in use and which quadlets
 // reference it. Podman reports no in-use flag on volume inspect and no
@@ -51,7 +51,7 @@ type VolumeUsageEngine interface {
 	// ContainerMounts lists every container (all states) with its
 	// user-declared volume mounts, each as written (`name:/dest:opts`).
 	ContainerMounts() ([]ContainerMounts, error)
-	// ListQuadletNames lists the machine's quadlet file names.
+	// ListQuadletNames lists the host's quadlet file names.
 	ListQuadletNames() ([]string, error)
 	// PrintQuadlet returns one quadlet file's verbatim content.
 	PrintQuadlet(name string) (string, error)
@@ -67,9 +67,9 @@ type ContainerMounts struct {
 
 // VolumeUsageEngineProvider is the volumes domain's slice of the
 // connection seam for the usage surface (issue 238): it hands a closure
-// one machine's VolumeUsageEngine, delegating to connections.Manager.
+// one host's VolumeUsageEngine, delegating to connections.Manager.
 type VolumeUsageEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e VolumeUsageEngine) error) error
+	WithEngine(ctx context.Context, userID, hostID, op string, fn func(e VolumeUsageEngine) error) error
 }
 
 // NewVolumeUsageEngineProvider returns the production usage provider: it
@@ -84,8 +84,8 @@ type connectionUsageEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionUsageEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e VolumeUsageEngine) error) error {
-	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+func (p connectionUsageEngines) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e VolumeUsageEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, hostID, op, func(connCtx context.Context) error {
 		return fn(&podmanVolumeUsageEngine{ctx: connCtx})
 	})
 }
@@ -132,11 +132,11 @@ func (e *podmanVolumeUsageEngine) PrintQuadlet(name string) (string, error) {
 	return e.tunnelEngine().QuadletPrint(e.ctx, name)
 }
 
-// seam: it hands a closure one machine's VolumeEngine. It delegates to
+// seam: it hands a closure one host's VolumeEngine. It delegates to
 // connections.Manager.WithConnection, which owns acquisition, the
 // warn-and-502-sentinel failure contract, and the op tag.
 type VolumeEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e VolumeEngine) error) error
+	WithEngine(ctx context.Context, userID, hostID, op string, fn func(e VolumeEngine) error) error
 }
 
 // NewVolumeEngineProvider returns the production provider: it wraps the
@@ -152,8 +152,8 @@ type connectionEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e VolumeEngine) error) error {
-	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+func (p connectionEngines) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e VolumeEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, hostID, op, func(connCtx context.Context) error {
 		return fn(&podmanVolumeEngine{ctx: connCtx})
 	})
 }

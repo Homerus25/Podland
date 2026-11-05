@@ -179,7 +179,7 @@ export function CreateQuadletDialog({
 }
 
 interface EditQuadletDialogProps {
-	machineId: string;
+	hostId: string;
 	quadlet: QuadletSummary;
 	mutation: MutationSlice<{ quadletId: string } & UpdateQuadletInput>;
 	onClose: () => void;
@@ -194,12 +194,12 @@ interface EditQuadletDialogProps {
 // so reopening after a save never serves the pre-edit file; keepDirtyValues
 // keeps user edits if a refetch lands mid-edit.
 export function EditQuadletDialog({
-	machineId,
+	hostId,
 	quadlet,
 	mutation,
 	onClose,
 }: EditQuadletDialogProps) {
-	const { data, isPending, error } = useQuadlet(machineId, quadlet.id);
+	const { data, isPending, error } = useQuadlet(hostId, quadlet.id);
 	const { register, handleSubmit, reset, formState } =
 		useForm<QuadletFormValues>({
 			defaultValues: { name: "", resource: "", content: "" },

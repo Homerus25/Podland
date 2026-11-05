@@ -34,7 +34,7 @@ describe("convertCompose", () => {
 		const compose = "services:\n  web:\n    image: nginx:1.27\n";
 		const result = await convertCompose(compose);
 
-		// Global endpoint: the literal path, not a machine-scoped one.
+		// Global endpoint: the literal path, not a host-scoped one.
 		expect(captured.path).toBe("/api/quadlets/convert-compose");
 		// The request is always a JSON body, never multipart.
 		expect(captured.contentType).toContain("application/json");
@@ -63,13 +63,13 @@ describe("convertCompose", () => {
 });
 
 describe("importQuadlets", () => {
-	it("POSTs the entries to the machine-scoped import endpoint and returns the report", async () => {
+	it("POSTs the entries to the host-scoped import endpoint and returns the report", async () => {
 		const captured: { path: string; body: unknown } = {
 			path: "",
 			body: null,
 		};
 		server.use(
-			http.post("*/api/machines/m-1/quadlets/import", async ({ request }) => {
+			http.post("*/api/hosts/m-1/quadlets/import", async ({ request }) => {
 				captured.path = new URL(request.url).pathname;
 				captured.body = await request.json();
 				return HttpResponse.json(quadletImportResponseFixture(), {
@@ -88,7 +88,7 @@ describe("importQuadlets", () => {
 		];
 		const result = await importQuadlets("m-1", { quadlets: entries });
 
-		expect(captured.path).toBe("/api/machines/m-1/quadlets/import");
+		expect(captured.path).toBe("/api/hosts/m-1/quadlets/import");
 		expect(captured.body).toEqual({ quadlets: entries });
 		expect(result).toEqual(quadletImportResponseFixture());
 	});
@@ -106,7 +106,7 @@ describe("importQuadlets", () => {
 			failed: [{ name: "dbdata", error: "permission denied" }],
 		});
 		server.use(
-			http.post("*/api/machines/m-1/quadlets/import", () =>
+			http.post("*/api/hosts/m-1/quadlets/import", () =>
 				HttpResponse.json(report, { status: 201 }),
 			),
 		);

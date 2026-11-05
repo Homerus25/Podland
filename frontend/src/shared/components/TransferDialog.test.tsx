@@ -11,25 +11,25 @@ import userEvent from "@testing-library/user-event";
 import { act } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { axiosError } from "@/test/errors";
-import { machineFixture } from "@/test/factories";
+import { hostFixture } from "@/test/factories";
 import { renderHookWithQuery } from "@/test/render";
 
-const source = machineFixture();
-const staging = machineFixture({ id: "m-2", name: "staging-01" });
-const backup = machineFixture({ id: "m-4", name: "backup-01" });
-const readOnly = machineFixture({
+const source = hostFixture();
+const staging = hostFixture({ id: "m-2", name: "staging-01" });
+const backup = hostFixture({ id: "m-4", name: "backup-01" });
+const readOnly = hostFixture({
 	id: "m-3",
 	name: "laptop-01",
 	permission: "read",
 	isOwner: false,
 });
 
-// The skeleton's machine facts arrive through the feature hook the preset
+// The skeleton's host facts arrive through the feature hook the preset
 // composes; the stub stands in for the query so this suite pins the dialog,
 // not the transport. The fixtures are read inside the stubbed hook body, so
 // the mock's hoist still sees them initialized.
-vi.mock("@features/machines/hooks/useMachines", () => ({
-	useMachines: () => ({ data: [source, staging, readOnly, backup] }),
+vi.mock("@features/hosts/hooks/useHosts", () => ({
+	useHosts: () => ({ data: [source, staging, readOnly, backup] }),
 }));
 
 function stubPreview(
@@ -57,12 +57,12 @@ function stubTransfer(overrides: Partial<TransferState> = {}): TransferState {
 }
 
 // The preset as an adapter rides it: the real state hook over the stubbed
-// machines, so target and mode interactions run through real state.
+// hosts, so target and mode interactions run through real state.
 function TransferHarness(
-	props: Omit<Parameters<typeof TransferDialog>[0], "machine" | "transfer">,
+	props: Omit<Parameters<typeof TransferDialog>[0], "host" | "transfer">,
 ) {
 	const transfer = useTransferState(source, "manage-volumes");
-	return <TransferDialog machine={source} transfer={transfer} {...props} />;
+	return <TransferDialog host={source} transfer={transfer} {...props} />;
 }
 
 function renderHarness(
@@ -84,7 +84,7 @@ function renderHarness(
 }
 
 describe("useTransferState", () => {
-	it("filters machines by capability, source excluded, defaulting to the first target", () => {
+	it("filters hosts by capability, source excluded, defaulting to the first target", () => {
 		const { result } = renderHookWithQuery(() =>
 			useTransferState(source, "manage-volumes"),
 		);
@@ -128,10 +128,10 @@ describe("TransferDialog skeleton", () => {
 		expect(names).toEqual(["staging-01", "backup-01"]);
 
 		expect(
-			screen.getByRole("radio", { name: "Move (remove from this machine)" }),
+			screen.getByRole("radio", { name: "Move (remove from this host)" }),
 		).toBeChecked();
 		expect(
-			screen.getByRole("radio", { name: "Copy (keep this machine's gadget)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's gadget)" }),
 		).not.toBeChecked();
 		expect(screen.getByTestId("confirm-move-button")).toHaveTextContent(
 			"Move gadget",
@@ -139,7 +139,7 @@ describe("TransferDialog skeleton", () => {
 
 		// The mode switch retells the confirm in copy vocabulary.
 		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's gadget)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's gadget)" }),
 		);
 		expect(screen.getByTestId("confirm-move-button")).toHaveTextContent(
 			"Copy gadget",
@@ -255,7 +255,7 @@ describe("TransferDialog skeleton", () => {
 		expect(warning).toHaveTextContent("references dangle");
 
 		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this machine's gadget)" }),
+			screen.getByRole("radio", { name: "Copy (keep this host's gadget)" }),
 		);
 		expect(
 			screen.getByTestId("move-referencing-warning"),
@@ -265,7 +265,7 @@ describe("TransferDialog skeleton", () => {
 	it("renders the warnings slot above the referencing warning and children below", () => {
 		render(
 			<TransferDialog
-				machine={source}
+				host={source}
 				transfer={stubTransfer()}
 				preview={stubPreview()}
 				noun="gadget"
@@ -302,7 +302,7 @@ describe("TransferDialog skeleton", () => {
 			targetName: "",
 		});
 		const props = {
-			machine: source,
+			host: source,
 			transfer: empty,
 			preview: stubPreview(),
 			noun: "gadget",
@@ -315,7 +315,7 @@ describe("TransferDialog skeleton", () => {
 		};
 		const first = render(<TransferDialog {...props} />);
 		expect(screen.getByTestId("move-no-targets")).toHaveTextContent(
-			"No other machine you can manage gadgets on.",
+			"No other host you can manage gadgets on.",
 		);
 		// No writable target means nothing to confirm against.
 		expect(screen.getByTestId("confirm-move-button")).toBeDisabled();
@@ -324,11 +324,11 @@ describe("TransferDialog skeleton", () => {
 		render(
 			<TransferDialog
 				{...props}
-				noTargetsMessage="No other machine you can write to."
+				noTargetsMessage="No other host you can write to."
 			/>,
 		);
 		expect(screen.getByTestId("move-no-targets")).toHaveTextContent(
-			"No other machine you can write to.",
+			"No other host you can write to.",
 		);
 	});
 
@@ -336,7 +336,7 @@ describe("TransferDialog skeleton", () => {
 		const reset = vi.fn();
 		const view = render(
 			<TransferDialog
-				machine={source}
+				host={source}
 				transfer={stubTransfer()}
 				preview={stubPreview()}
 				noun="gadget"

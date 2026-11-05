@@ -19,7 +19,7 @@ import type { ReactNode } from "react";
 // itself renders through the shared transfer-presentation module's skeleton
 // (candidate C8): the narrations are the children slot and the partial
 // cause sentence is the quadlet domain's, while the header shape and the
-// both-machines tail are the skeleton's. It takes data props only — no
+// both-hosts tail are the skeleton's. It takes data props only — no
 // queries, no hooks; the adapter keeps the move-stream hook.
 
 // Live data-phase progress (issue 214): one line per volume, updated in
@@ -144,7 +144,7 @@ export function SecretNarration({ result }: { result: QuadletMoveResult }) {
 
 // The report precedence: which result narrates in place, if any — a partial
 // result over a completed migration over a plain transfer's secret
-// outcomes. A partial result names the both-machines state and keeps the
+// outcomes. A partial result names the both-hosts state and keeps the
 // dialog open on either transport; a migrating transfer's completed
 // narration and a plain transfer whose answer carries a secretTransfer
 // block (issue 222) likewise stay open — the outcomes are the answer's
@@ -157,7 +157,7 @@ export type MoveQuadletReportSelection =
 
 // The kind names why the dialog stays open, not what the carried result
 // is: a plain partial beside a completed stream migration selects kind
-// "partial" (the both-machines state keeps the dialog open) while
+// "partial" (the both-hosts state keeps the dialog open) while
 // carrying the stream's completed result — its migration outcomes are
 // what narrates. Read the kind for the close decision and the result for
 // the narration; the two deliberately need not agree.
@@ -187,7 +187,7 @@ export function selectMoveQuadletReport(
 // outcomes, or a plain transfer's secret outcomes — each narrates in
 // place through the shared skeleton (candidate C8); anything else stays
 // the form. The narrations are the children slot; the partial cause
-// sentence is the quadlet domain's; the header shape, the both-machines
+// sentence is the quadlet domain's; the header shape, the both-hosts
 // tail, and the error line are the skeleton's.
 export function MoveQuadletReport({
 	selection,

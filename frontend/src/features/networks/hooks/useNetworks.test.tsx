@@ -23,7 +23,7 @@ describe("getNetwork", () => {
 	it("fetches a single network's detail through the API", async () => {
 		const detail = networkDetailFixture();
 		server.use(
-			http.get("*/api/machines/m-1/networks/app-net", () =>
+			http.get("*/api/hosts/m-1/networks/app-net", () =>
 				HttpResponse.json(detail),
 			),
 		);
@@ -36,7 +36,7 @@ describe("useNetwork", () => {
 	it("returns the network's detail cached under the detail query key", async () => {
 		const detail = networkDetailFixture();
 		server.use(
-			http.get("*/api/machines/m-1/networks/app-net", () =>
+			http.get("*/api/hosts/m-1/networks/app-net", () =>
 				HttpResponse.json(detail),
 			),
 		);
@@ -53,7 +53,7 @@ describe("useNetwork", () => {
 
 	it("exposes 404 without retrying when the network is gone", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/networks/gone", () =>
+			http.get("*/api/hosts/m-1/networks/gone", () =>
 				errorResponse(404, "NETWORK_NOT_FOUND", "Network not found", "r-1"),
 			),
 		);
@@ -81,11 +81,11 @@ function resetConnectCounters() {
 
 function mockConnectLists() {
 	return [
-		http.get("*/api/machines/m-1/networks", () => {
+		http.get("*/api/hosts/m-1/networks", () => {
 			networksGets++;
 			return HttpResponse.json([networkFixture()]);
 		}),
-		http.get("*/api/machines/m-1/containers", () => {
+		http.get("*/api/hosts/m-1/containers", () => {
 			containersGets++;
 			return HttpResponse.json({
 				containers: [containerFixture()],
@@ -102,7 +102,7 @@ function connectHandler(
 	failures: Record<string, HttpResponse<JsonBodyType>> = {},
 ) {
 	return http.post(
-		"*/api/machines/m-1/networks/:networkName/connect",
+		"*/api/hosts/m-1/networks/:networkName/connect",
 		async ({ request, params }) => {
 			const body = (await request.json()) as { container: string };
 			connectRequests.push({ url: request.url, body });
@@ -139,7 +139,7 @@ describe("useConnectContainers", () => {
 		);
 		for (const request of connectRequests) {
 			expect(
-				request.url.endsWith("/api/machines/m-1/networks/app-net/connect"),
+				request.url.endsWith("/api/hosts/m-1/networks/app-net/connect"),
 			).toBe(true);
 		}
 		// One invalidation round after settle — not one per request.

@@ -98,7 +98,7 @@ describe("streamNdjson", () => {
 
 	it("rejects non-ok responses with the envelope, collapsing internal codes to the generic sentinel", async () => {
 		mockStream("post", () =>
-			errorResponse(404, "MACHINE_NOT_FOUND", "Machine not found"),
+			errorResponse(404, "HOST_NOT_FOUND", "Host not found"),
 		);
 		await expect(
 			streamNdjson(
@@ -107,8 +107,8 @@ describe("streamNdjson", () => {
 				() => undefined,
 			),
 		).rejects.toEqual({
-			code: "MACHINE_NOT_FOUND",
-			message: "Machine not found",
+			code: "HOST_NOT_FOUND",
+			message: "Host not found",
 		});
 
 		mockStream("post", () =>
@@ -452,7 +452,7 @@ describe("useNdjsonOperation", () => {
 
 	it("finishes on an error event with its code and message, generic when absent", async () => {
 		mockStream("get", () =>
-			ndjsonResponse([errorEvent("SSH_FAILED", "Machine unreachable")]),
+			ndjsonResponse([errorEvent("SSH_FAILED", "Host unreachable")]),
 		);
 		const { result } = renderOperation();
 		const events: unknown[] = [];
@@ -468,7 +468,7 @@ describe("useNdjsonOperation", () => {
 		expect(events).toHaveLength(1);
 		expect(result.current.error).toEqual({
 			code: "SSH_FAILED",
-			message: "Machine unreachable",
+			message: "Host unreachable",
 		});
 
 		mockStream("get", () =>
@@ -599,7 +599,7 @@ describe("useNdjsonOperation", () => {
 
 	it("surfaces transport failures as the error state and clears it on the next start", async () => {
 		mockStream("post", () =>
-			errorResponse(404, "MACHINE_NOT_FOUND", "Machine not found"),
+			errorResponse(404, "HOST_NOT_FOUND", "Host not found"),
 		);
 		const { result } = renderOperation();
 
@@ -612,8 +612,8 @@ describe("useNdjsonOperation", () => {
 		});
 		await waitFor(() => expect(result.current.isRunning).toBe(false));
 		expect(result.current.error).toEqual({
-			code: "MACHINE_NOT_FOUND",
-			message: "Machine not found",
+			code: "HOST_NOT_FOUND",
+			message: "Host not found",
 		});
 
 		let release: (() => void) | undefined;

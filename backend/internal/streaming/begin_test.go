@@ -15,17 +15,17 @@ import (
 
 // serveBegin runs a begin endpoint the way the router does: request-scoped
 // context values plus chi URL params (mirrors the web envelope test setup).
-func serveBegin(t *testing.T, w http.ResponseWriter, userID, machineID string, endpoint http.HandlerFunc) {
+func serveBegin(t *testing.T, w http.ResponseWriter, userID, hostID string, endpoint http.HandlerFunc) {
 	t.Helper()
 
 	ctx := contextutils.SetRequestID(context.Background(), "test-request-id")
 	if userID != "" {
 		ctx = contextutils.SetUserID(ctx, userID)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/machines/"+machineID+"/containers/x/logs", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/api/hosts/"+hostID+"/containers/x/logs", nil).WithContext(ctx)
 
-	if machineID != "" {
-		req.SetPathValue("id", machineID)
+	if hostID != "" {
+		req.SetPathValue("id", hostID)
 	}
 
 	endpoint(w, req)
@@ -42,11 +42,11 @@ func TestBegin_SetsHeadersAndReturnsIdentities(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	var gotStream *streamHandle
-	serveBegin(t, rec, "test-user", "test-machine", captureBegin(&gotStream))
+	serveBegin(t, rec, "test-user", "test-host", captureBegin(&gotStream))
 
 	require.NotNil(t, gotStream, "begin must return a stream handle")
 	assert.Equal(t, "test-user", gotStream.UserID)
-	assert.Equal(t, "test-machine", gotStream.MachineID)
+	assert.Equal(t, "test-host", gotStream.HostID)
 	assert.Equal(t, "application/json", rec.Header().Get("Content-Type"))
 	assert.Equal(t, "no-cache", rec.Header().Get("Cache-Control"))
 }
@@ -55,7 +55,7 @@ func TestBegin_WriterEmitsNDJSON(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	var gotStream *streamHandle
-	serveBegin(t, rec, "test-user", "test-machine", captureBegin(&gotStream))
+	serveBegin(t, rec, "test-user", "test-host", captureBegin(&gotStream))
 	require.NotNil(t, gotStream)
 
 	require.NoError(t, gotStream.Writer.Write(map[string]string{"hello": "world"}))
@@ -66,7 +66,7 @@ func TestBegin_MissingUserIDIsAnInvariantViolation(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	var gotStream *streamHandle
-	serveBegin(t, rec, "", "test-machine", captureBegin(&gotStream))
+	serveBegin(t, rec, "", "test-host", captureBegin(&gotStream))
 
 	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	assert.Nil(t, gotStream, "begin must return nil after writing the error response")
@@ -79,7 +79,7 @@ func TestBegin_MissingUserIDIsAnInvariantViolation(t *testing.T) {
 	assert.Equal(t, "INTERNAL_ERROR", body.Error.Code)
 }
 
-func TestBegin_MissingMachineIDIsAnInvariantViolation(t *testing.T) {
+func TestBegin_MissingHostIDIsAnInvariantViolation(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	var gotStream *streamHandle
@@ -112,7 +112,7 @@ func TestBegin_UnsupportedFlushingWrites500(t *testing.T) {
 	w := &noFlushWriter{header: http.Header{}}
 	var gotStream *streamHandle
 
-	serveBegin(t, w, "test-user", "test-machine", captureBegin(&gotStream))
+	serveBegin(t, w, "test-user", "test-host", captureBegin(&gotStream))
 
 	assert.Equal(t, http.StatusInternalServerError, w.code)
 	assert.Contains(t, w.body.String(), "STREAMING_NOT_SUPPORTED")

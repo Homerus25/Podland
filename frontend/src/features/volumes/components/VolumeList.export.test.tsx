@@ -4,7 +4,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { machineFixture, volumeFixture } from "@/test/factories";
+import { hostFixture, volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -32,10 +32,10 @@ function installHandlers(
 	}),
 ) {
 	server.use(
-		http.get("*/api/machines/m-1/volumes", () =>
+		http.get("*/api/hosts/m-1/volumes", () =>
 			HttpResponse.json([volumeFixture({ name: "shared-data", size: 1024 })]),
 		),
-		http.get("*/api/machines/m-1/volumes/shared-data/export", ({ request }) => {
+		http.get("*/api/hosts/m-1/volumes/shared-data/export", ({ request }) => {
 			exportRequests.count += 1;
 			exportRequests.pathname = new URL(request.url).pathname;
 			const response = exportResponse();
@@ -50,7 +50,7 @@ function installHandlers(
 }
 
 function renderVolumeList(permission: "read" | "write" | "admin" = "read") {
-	renderWithQuery(<VolumeList machine={machineFixture({ permission })} />, {
+	renderWithQuery(<VolumeList host={hostFixture({ permission })} />, {
 		chakra: true,
 		router: true,
 	});
@@ -88,7 +88,7 @@ describe("VolumeList export", () => {
 		await clickExport("read");
 
 		expect(mockedDownload).toHaveBeenCalledWith(
-			"/api/machines/m-1/volumes/shared-data/export",
+			"/api/hosts/m-1/volumes/shared-data/export",
 			"shared-data.tar",
 		);
 	});

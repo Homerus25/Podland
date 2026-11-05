@@ -49,7 +49,7 @@ func TestPodService_List_ReturnsPodmanReports(t *testing.T) {
 	provider := fakeEngineProvider{engine: engine, opRecorder: func(op string) { gotOp = op }}
 	service := NewPodService(provider)
 
-	got, err := service.List(t.Context(), "user", "machine", entities.PodPSOptions{})
+	got, err := service.List(t.Context(), "user", "host", entities.PodPSOptions{})
 
 	require.NoError(t, err)
 	assert.Equal(t, reports, got, "the engine's reports must pass through untouched")
@@ -68,7 +68,7 @@ func TestPodService_List_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	}
 	service := NewPodService(fakeEngineProvider{engine: engine, err: appErrors.ErrConnectionFailed})
 
-	got, err := service.List(t.Context(), "user", "machine", entities.PodPSOptions{})
+	got, err := service.List(t.Context(), "user", "host", entities.PodPSOptions{})
 
 	require.Error(t, err)
 	assert.Nil(t, got)

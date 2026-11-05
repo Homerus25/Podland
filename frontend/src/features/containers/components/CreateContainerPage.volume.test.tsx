@@ -11,13 +11,13 @@ import { server } from "@/test/server";
 // Inline volume create on the create-container page (spec 341, ticket
 // #347): the "Create volume" button next to the named-volume rows opens
 // the existing create-volume dialog; success refreshes the volumes query
-// (the create mutation invalidates the machine's volume list) and lands
+// (the create mutation invalidates the host's volume list) and lands
 // the new volume's name in a volume row's dropdown. The seam is the
 // rendered page: the button, the dialog, and the row dropdowns.
 
 // The harness's option-list handler serves a fixed volume list; these
 // overrides give the volumes endpoint a mutable list so the post-create
-// refetch serves the new volume, the way the real machine does.
+// refetch serves the new volume, the way the real host does.
 let volumeListRequests = 0;
 let volumeCreateRequests = 0;
 let volumes = [volumeFixture(), volumeFixture({ name: "pgdata" })];
@@ -30,11 +30,11 @@ function resetVolumeState() {
 
 function volumeHandlers() {
 	return [
-		http.get("*/api/machines/m-1/volumes", () => {
+		http.get("*/api/hosts/m-1/volumes", () => {
 			volumeListRequests += 1;
 			return HttpResponse.json(volumes);
 		}),
-		http.post("*/api/machines/m-1/volumes", async ({ request }) => {
+		http.post("*/api/hosts/m-1/volumes", async ({ request }) => {
 			volumeCreateRequests += 1;
 			const body = (await request.json()) as { name?: string };
 			const created = volumeFixture({
@@ -97,7 +97,7 @@ describe("CreateContainerPage inline volume create", () => {
 			);
 			await user.click(screen.getByTestId("volume-form-submit"));
 
-			// The create mutation invalidates the machine's volume list, so
+			// The create mutation invalidates the host's volume list, so
 			// the page's volumes query refetches through MSW.
 			await waitFor(() => expect(volumeCreateRequests).toBe(1));
 			await waitFor(() =>

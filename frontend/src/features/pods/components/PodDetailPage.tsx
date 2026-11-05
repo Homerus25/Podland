@@ -1,5 +1,5 @@
 import { Box, Button, HStack, Table, Tbody, Text } from "@chakra-ui/react";
-import { useCapabilityGate } from "@features/machines/hooks/useCapabilityGate";
+import { useCapabilityGate } from "@features/hosts/hooks/useCapabilityGate";
 import { GenerateQuadletModal } from "@features/pods/components/GenerateQuadletModal";
 import {
 	usePod,
@@ -24,18 +24,18 @@ import { Link, useParams } from "react-router-dom";
 // query, so a success refetches the pod's current state; a failure
 // surfaces the API's error envelope above the button.
 function PodLifecycleSection({
-	machineId,
+	hostId,
 	podId,
 	name,
 	state,
 }: {
-	machineId: string;
+	hostId: string;
 	podId: string;
 	name: string;
 	state: string;
 }) {
-	const start = usePodAction(machineId, "start");
-	const stop = usePodAction(machineId, "stop");
+	const start = usePodAction(hostId, "start");
+	const stop = usePodAction(hostId, "stop");
 	// Podman's pod status is capitalized ("Running"); compare
 	// case-insensitively, like the list's toggle.
 	const isRunning = state.toLowerCase() === "running";
@@ -86,27 +86,27 @@ function PodLifecycleSection({
 // report fetches lazily on the first
 // "Show inspect JSON" click and never on page mount.
 export function PodDetailPage() {
-	const { machineId, podId } = useParams<{
-		machineId: string;
+	const { hostId, podId } = useParams<{
+		hostId: string;
 		podId: string;
 	}>();
 	const [revealed, setRevealed] = useState(false);
 	// The generate-quadlet modal (spec #402 ticket #406): rendered
 	// conditionally, so mount is open and unmount is close.
 	const [generateOpen, setGenerateOpen] = useState(false);
-	const pod = usePod(machineId!, podId!);
-	const inspectQuery = usePodInspect(machineId!, podId!, {
+	const pod = usePod(hostId!, podId!);
+	const inspectQuery = usePodInspect(hostId!, podId!, {
 		enabled: revealed,
 	});
-	// The capability gates (the machines feature's hook) own the
+	// The capability gates (the hosts feature's hook) own the
 	// per-caller classification end to end: the lifecycle section renders
 	// from the manage-pods tri-state — allowed renders the buttons, denied
 	// renders the shared write hint (for a read-only caller and a failed
-	// machine query alike, never a silent gap), pending renders neither —
+	// host query alike, never a silent gap), pending renders neither —
 	// and the generate-quadlet modal's save flag derives from the
 	// manage-quadlets answer (allowed → savable).
-	const lifecycleGate = useCapabilityGate(machineId!, "manage-pods");
-	const quadletGate = useCapabilityGate(machineId!, "manage-quadlets");
+	const lifecycleGate = useCapabilityGate(hostId!, "manage-pods");
+	const quadletGate = useCapabilityGate(hostId!, "manage-quadlets");
 
 	return (
 		<>
@@ -124,7 +124,7 @@ export function PodDetailPage() {
 					<>
 						{lifecycleGate === "allowed" ? (
 							<PodLifecycleSection
-								machineId={machineId!}
+								hostId={hostId!}
 								podId={podId!}
 								name={pod.data.name}
 								state={pod.data.state}
@@ -133,7 +133,7 @@ export function PodDetailPage() {
 						{lifecycleGate === "denied" ? (
 							// The write hint in place of the lifecycle
 							// buttons: a read-only caller — and a caller
-							// whose machine query failed — learns why the
+							// whose host query failed — learns why the
 							// controls are gone instead of a bare gap.
 							<Box mb={4}>
 								<PermissionHint
@@ -218,7 +218,7 @@ export function PodDetailPage() {
 											// the pod's containers are first-class resources.
 											<Link
 												key={container.id}
-												to={detailPath(machineId!, "containers", container.id)}
+												to={detailPath(hostId!, "containers", container.id)}
 												color="blue.500"
 												data-testid="pod-detail-container-link"
 											>
@@ -237,7 +237,7 @@ export function PodDetailPage() {
 			</DetailPage>
 			{generateOpen ? (
 				<GenerateQuadletModal
-					machineId={machineId!}
+					hostId={hostId!}
 					podId={podId!}
 					podName={pod.data?.name ?? podId!}
 					// Save posts to the write-gated quadlet create endpoint,

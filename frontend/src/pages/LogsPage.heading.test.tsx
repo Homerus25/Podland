@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { LogsPage } from "@/pages/LogsPage";
 import { renderWithQuery } from "@/test/render";
 
-// The viewer's machinery is pinned in its own suite; here it is a stub so
+// The viewer's plumbing is pinned in its own suite; here it is a stub so
 // the page suite needs no streaming endpoints.
 vi.mock("@shared/components/LogViewer", () => ({
 	LogViewer: () => <div data-testid="log-viewer-stub" />,

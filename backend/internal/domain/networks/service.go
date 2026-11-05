@@ -12,9 +12,9 @@ import (
 )
 
 // NetworkService provides business logic for networks. Networks live
-// only in the remote machine's podman; this service proxies podman
+// only in the remote host's podman; this service proxies podman
 // directly and persists nothing locally, matching VolumeService/
-// SecretService. Every machine-scoped podman call crosses the
+// SecretService. Every host-scoped podman call crosses the
 // NetworkEngineProvider (the connection seam); the service itself owns
 // only domain mapping.
 type NetworkService struct {
@@ -28,11 +28,11 @@ func NewNetworkService(engines NetworkEngineProvider) *NetworkService {
 	}
 }
 
-// List returns every network on the specified machine — everything
+// List returns every network on the specified host — everything
 // podman reports, including the default bridge network; no filtering.
-func (s *NetworkService) List(ctx context.Context, userID, machineID string) ([]types.Network, error) {
+func (s *NetworkService) List(ctx context.Context, userID, hostID string) ([]types.Network, error) {
 	var networks []types.Network
-	err := s.engines.WithEngine(ctx, userID, machineID, "networks.List", func(e NetworkEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "networks.List", func(e NetworkEngine) error {
 		n, err := e.List()
 		if err != nil {
 			return fmt.Errorf("failed to list networks: %w", err)
@@ -43,15 +43,15 @@ func (s *NetworkService) List(ctx context.Context, userID, machineID string) ([]
 	return networks, err
 }
 
-// Create makes a network by name on the specified machine and returns
+// Create makes a network by name on the specified host and returns
 // the created network; podman's defaults fill driver and subnet. When
 // the request lists containers, each is attached after the create — an
 // attach failure fails the call naming the failing container, and the
 // network stays created (no rollback). A duplicate name surfaces as 409
 // NETWORK_ALREADY_EXISTS.
-func (s *NetworkService) Create(ctx context.Context, userID, machineID string, req NetworkCreateRequest) (*types.Network, error) {
+func (s *NetworkService) Create(ctx context.Context, userID, hostID string, req NetworkCreateRequest) (*types.Network, error) {
 	var created *types.Network
-	err := s.engines.WithEngine(ctx, userID, machineID, "networks.Create", func(e NetworkEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "networks.Create", func(e NetworkEngine) error {
 		network, err := e.Create(req.Name)
 		if err != nil {
 			if appErr := mapCreateError(err); appErr != nil {
@@ -71,10 +71,10 @@ func (s *NetworkService) Create(ctx context.Context, userID, machineID string, r
 }
 
 // Connect attaches a container (by ID) to a network by name on the
-// specified machine. An unknown network surfaces as 404
+// specified host. An unknown network surfaces as 404
 // NETWORK_NOT_FOUND; an unknown container as 404 CONTAINER_NOT_FOUND.
-func (s *NetworkService) Connect(ctx context.Context, userID, machineID, networkName, containerID string) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "networks.Connect", func(e NetworkEngine) error {
+func (s *NetworkService) Connect(ctx context.Context, userID, hostID, networkName, containerID string) error {
+	return s.engines.WithEngine(ctx, userID, hostID, "networks.Connect", func(e NetworkEngine) error {
 		// Resolve the network first: podman answers an unknown network
 		// and an unknown container with the same 404 shape, and the
 		// contract gives each its own code.
@@ -102,12 +102,12 @@ func (s *NetworkService) Connect(ctx context.Context, userID, machineID, network
 	})
 }
 
-// Get returns one network's detail DTO on the specified machine,
+// Get returns one network's detail DTO on the specified host,
 // mapped from podman's inspect report. A missing network surfaces as
 // 404 NETWORK_NOT_FOUND.
-func (s *NetworkService) Get(ctx context.Context, userID, machineID, networkName string) (NetworkDetailResponse, error) {
+func (s *NetworkService) Get(ctx context.Context, userID, hostID, networkName string) (NetworkDetailResponse, error) {
 	var detail NetworkDetailResponse
-	err := s.engines.WithEngine(ctx, userID, machineID, "networks.Get", func(e NetworkEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "networks.Get", func(e NetworkEngine) error {
 		report, err := inspectNetwork(e, networkName)
 		if err != nil {
 			return err
@@ -120,11 +120,11 @@ func (s *NetworkService) Get(ctx context.Context, userID, machineID, networkName
 }
 
 // Inspect returns the raw podman inspect report for one network on the
-// specified machine, unmapped — the endpoint answers podman's raw
+// specified host, unmapped — the endpoint answers podman's raw
 // inspect JSON. A missing network surfaces as 404 NETWORK_NOT_FOUND.
-func (s *NetworkService) Inspect(ctx context.Context, userID, machineID, networkName string) (entities.NetworkInspectReport, error) {
+func (s *NetworkService) Inspect(ctx context.Context, userID, hostID, networkName string) (entities.NetworkInspectReport, error) {
 	var report entities.NetworkInspectReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "networks.Inspect", func(e NetworkEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "networks.Inspect", func(e NetworkEngine) error {
 		inspectReport, err := inspectNetwork(e, networkName)
 		if err != nil {
 			return err
@@ -136,13 +136,13 @@ func (s *NetworkService) Inspect(ctx context.Context, userID, machineID, network
 	return report, err
 }
 
-// Prune removes every unused network on the machine in one call
+// Prune removes every unused network on the host in one call
 // (podman's own selection) and returns podman's per-network reports.
 // Networks in use by a container are untouched — podman's own
 // semantics, which is the blast-radius mitigation for this endpoint.
-func (s *NetworkService) Prune(ctx context.Context, userID, machineID string) ([]*entities.NetworkPruneReport, error) {
+func (s *NetworkService) Prune(ctx context.Context, userID, hostID string) ([]*entities.NetworkPruneReport, error) {
 	var prunes []*entities.NetworkPruneReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "networks.Prune", func(e NetworkEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "networks.Prune", func(e NetworkEngine) error {
 		p, err := e.Prune()
 		if err != nil {
 			return fmt.Errorf("failed to prune networks: %w", err)

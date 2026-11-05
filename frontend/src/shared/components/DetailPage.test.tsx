@@ -42,19 +42,19 @@ function defaultProps(
 	};
 }
 
-// The layout reads machineId from the route (the deep-link branch's back
-// button targets /machines/:machineId?tab=<resource>), so every render goes
+// The layout reads hostId from the route (the deep-link branch's back
+// button targets /hosts/:hostId?tab=<resource>), so every render goes
 // through a matching route inside the harness's MemoryRouter. The initial
 // entries seed the history stack: one entry is a deep link (the session's
 // initial entry), two entries simulate in-app navigation to the detail page.
 function renderDetailPage(
 	ui: ReactElement,
-	initialEntries: string[] = ["/machines/m-1/containers/c-1"],
+	initialEntries: string[] = ["/hosts/m-1/containers/c-1"],
 ) {
 	return renderWithQuery(
 		<Routes>
-			<Route path="/machines/:machineId/containers/:containerId" element={ui} />
-			<Route path="/machines/:machineId/images/:imageId" element={ui} />
+			<Route path="/hosts/:hostId/containers/:containerId" element={ui} />
+			<Route path="/hosts/:hostId/images/:imageId" element={ui} />
 			<Route path="*" element={<LocationProbe />} />
 		</Routes>,
 		{ router: { initialEntries } },
@@ -121,26 +121,26 @@ function LazyInspectDouble({ onFetch }: { onFetch: () => void }) {
 }
 
 describe("DetailPage", () => {
-	it("links to the machine's resource tab when the detail page is the session's initial entry (deep link)", () => {
+	it("links to the host's resource tab when the detail page is the session's initial entry (deep link)", () => {
 		renderDetailPage(<DetailPage {...defaultProps()} />);
 
 		expect(screen.getByTestId("detail-page-title")).toHaveTextContent("web");
 		expect(screen.getByTestId("detail-back-button")).toHaveAttribute(
 			"href",
-			"/machines/m-1?tab=containers",
+			"/hosts/m-1?tab=containers",
 		);
 	});
 
 	it("returns to the referring page via history back when the detail page was reached by in-app navigation", async () => {
 		// The detail page was reached by in-app navigation (here: from the
-		// machine page; the cross-link detail→detail case is pinned in
+		// host page; the cross-link detail→detail case is pinned in
 		// DetailCrossLinks.test.tsx), so Back rides the history stack and
 		// the referring page returns, exactly like the browser's back
 		// button.
 		const user = userEvent.setup();
 		renderDetailPage(<DetailPage {...defaultProps({ backTo: "images" })} />, [
-			"/machines/m-1",
-			"/machines/m-1/images/i-1",
+			"/hosts/m-1",
+			"/hosts/m-1/images/i-1",
 		]);
 
 		const back = screen.getByTestId("detail-back-button");
@@ -151,7 +151,7 @@ describe("DetailPage", () => {
 		await user.click(back);
 
 		expect(await screen.findByTestId("location-probe")).toHaveTextContent(
-			"/machines/m-1",
+			"/hosts/m-1",
 		);
 	});
 
@@ -175,7 +175,7 @@ describe("DetailPage", () => {
 					error: axiosError(
 						403,
 						"ACCESS_DENIED",
-						"You do not have access to this machine",
+						"You do not have access to this host",
 					),
 				})}
 			/>,
@@ -183,7 +183,7 @@ describe("DetailPage", () => {
 
 		const alert = screen.getByTestId("detail-page-error");
 		expect(alert).toHaveTextContent("ACCESS_DENIED");
-		expect(alert).toHaveTextContent("You do not have access to this machine");
+		expect(alert).toHaveTextContent("You do not have access to this host");
 		expect(screen.queryByTestId("overview-name-row")).not.toBeInTheDocument();
 	});
 
@@ -198,7 +198,7 @@ describe("DetailPage", () => {
 		);
 
 		expect(screen.getByTestId("detail-page-not-found")).toHaveTextContent(
-			"This item no longer exists on the machine.",
+			"This item no longer exists on the host.",
 		);
 		expect(screen.queryByTestId("detail-page-error")).not.toBeInTheDocument();
 		expect(screen.queryByTestId("overview-name-row")).not.toBeInTheDocument();

@@ -23,7 +23,7 @@ func TestImageService_Get_ReturnsMappedDetail(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "sha256:abc123")
+	got, err := service.Get(context.Background(), "user", "host", "sha256:abc123")
 
 	require.NoError(t, err)
 	assert.Equal(t, "sha256:abc123", got.ID)
@@ -40,7 +40,7 @@ func TestImageService_Get_MissingImageIsAnError(t *testing.T) {
 	}
 	service := NewImageService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "image-123")
+	got, err := service.Get(context.Background(), "user", "host", "image-123")
 
 	require.Error(t, err)
 	assert.Equal(t, ImageDetailResponse{}, got)
@@ -54,7 +54,7 @@ func TestImageService_Get_MissingImageIsAnError(t *testing.T) {
 func TestImageService_Get_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	service := NewImageService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
 
-	got, err := service.Get(context.Background(), "user", "machine", "image-123")
+	got, err := service.Get(context.Background(), "user", "host", "image-123")
 
 	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
 	assert.Equal(t, ImageDetailResponse{}, got)

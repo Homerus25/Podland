@@ -1,7 +1,7 @@
 import { createLogSource, type LogSource } from "@shared/streaming/logSource";
-import { api, machineApiPath, machineApiUrl } from "@shared/utils/api";
+import { api, hostApiPath, hostApiUrl } from "@shared/utils/api";
 
-// Quadlet as returned by GET /api/machines/{id}/quadlets
+// Quadlet as returned by GET /api/hosts/{id}/quadlets
 // (backend/internal/domain/quadlets/dto.go QuadletListResponse; raw is omitted
 // in list responses).
 export interface QuadletSummary {
@@ -16,11 +16,9 @@ export interface QuadletSummary {
 	raw?: string;
 }
 
-export async function listQuadlets(
-	machineId: string,
-): Promise<QuadletSummary[]> {
+export async function listQuadlets(hostId: string): Promise<QuadletSummary[]> {
 	const response = await api.get<QuadletSummary[]>(
-		machineApiPath(machineId, "quadlets"),
+		hostApiPath(hostId, "quadlets"),
 	);
 	return response.data;
 }
@@ -39,7 +37,7 @@ export const QUADLET_RESOURCES = [
 
 export type QuadletResource = (typeof QUADLET_RESOURCES)[number];
 
-// Body of POST /api/machines/{id}/quadlets
+// Body of POST /api/hosts/{id}/quadlets
 // (backend/internal/domain/quadlets/dto.go QuadletCreateRequest).
 export interface CreateQuadletInput {
 	name: string;
@@ -47,7 +45,7 @@ export interface CreateQuadletInput {
 	content: string;
 }
 
-// Response of POST /api/machines/{id}/quadlets -> 201
+// Response of POST /api/hosts/{id}/quadlets -> 201
 // (backend/internal/domain/quadlets/dto.go QuadletCreateResponse).
 export interface QuadletCreated {
 	id: string;
@@ -60,11 +58,11 @@ export interface QuadletCreated {
 }
 
 export async function createQuadlet(
-	machineId: string,
+	hostId: string,
 	input: CreateQuadletInput,
 ): Promise<QuadletCreated> {
 	const response = await api.post<QuadletCreated>(
-		machineApiPath(machineId, "quadlets"),
+		hostApiPath(hostId, "quadlets"),
 		input,
 	);
 	return response.data;
@@ -72,7 +70,7 @@ export async function createQuadlet(
 
 // --- Generate quadlet from an existing resource (spec #402 ticket #406) ---
 
-// Body of POST /api/machines/{id}/quadlets/{quadletId}/generate
+// Body of POST /api/hosts/{id}/quadlets/{quadletId}/generate
 // (backend/internal/domain/quadlets/dto.go QuadletGenerateRequest). The
 // path's {quadletId} segment is ignored by the handler — the real target
 // rides the body — so the resourceId fills the segment.
@@ -84,7 +82,7 @@ export interface GenerateQuadletInput {
 // Response of POST .../quadlets/{quadletId}/generate -> 200 (backend
 // QuadletGenerateResponse): the generated quadlet file, not installed —
 // state is always "unknown", path and unit empty. Saving it to the
-// machine is a separate create request.
+// host is a separate create request.
 export interface GeneratedQuadlet {
 	id: string;
 	name: string;
@@ -94,17 +92,17 @@ export interface GeneratedQuadlet {
 }
 
 export async function generateQuadlet(
-	machineId: string,
+	hostId: string,
 	input: GenerateQuadletInput,
 ): Promise<GeneratedQuadlet> {
 	const response = await api.post<GeneratedQuadlet>(
-		machineApiPath(machineId, "quadlets", input.resourceId, "generate"),
+		hostApiPath(hostId, "quadlets", input.resourceId, "generate"),
 		input,
 	);
 	return response.data;
 }
 
-// Response of GET /api/machines/{id}/quadlets/{quadletId} and of a successful
+// Response of GET /api/hosts/{id}/quadlets/{quadletId} and of a successful
 // update (backend/internal/domain/quadlets/dto.go QuadletGetResponse).
 export interface QuadletDetail {
 	id: string;
@@ -117,16 +115,16 @@ export interface QuadletDetail {
 }
 
 export async function getQuadlet(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
 ): Promise<QuadletDetail> {
 	const response = await api.get<QuadletDetail>(
-		machineApiPath(machineId, "quadlets", quadletId),
+		hostApiPath(hostId, "quadlets", quadletId),
 	);
 	return response.data;
 }
 
-// Body of PUT /api/machines/{id}/quadlets/{quadletId}
+// Body of PUT /api/hosts/{id}/quadlets/{quadletId}
 // (backend/internal/domain/quadlets/dto.go QuadletUpdateRequest). Content
 // only: the name comes from the URL path and the resource type is derived
 // from the existing quadlet file path, so neither is sent.
@@ -135,18 +133,18 @@ export interface UpdateQuadletInput {
 }
 
 export async function updateQuadlet(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
 	input: UpdateQuadletInput,
 ): Promise<QuadletDetail> {
 	const response = await api.put<QuadletDetail>(
-		machineApiPath(machineId, "quadlets", quadletId),
+		hostApiPath(hostId, "quadlets", quadletId),
 		input,
 	);
 	return response.data;
 }
 
-// DELETE /api/machines/{id}/quadlets/{quadletId} -> 204
+// DELETE /api/hosts/{id}/quadlets/{quadletId} -> 204
 // (backend/internal/domain/quadlets/handler.go QuadletHandler.Delete).
 // stop stops the unit before the quadlet file is removed and defaults to
 // true in the backend; force enables aggressive teardown and defaults to
@@ -157,23 +155,23 @@ export interface DeleteQuadletOptions {
 }
 
 export async function deleteQuadlet(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
 	options: DeleteQuadletOptions,
 ): Promise<void> {
-	await api.delete(machineApiPath(machineId, "quadlets", quadletId), {
+	await api.delete(hostApiPath(hostId, "quadlets", quadletId), {
 		params: { stop: options.stop, force: options.force },
 	});
 }
 
-// POST /api/machines/{id}/quadlets/{quadletId}/start -> 200
+// POST /api/hosts/{id}/quadlets/{quadletId}/start -> 200
 // (backend/internal/domain/quadlets/handler.go QuadletHandler.Start).
 // Start takes no options per the backend contract.
 export async function startQuadlet(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
 ): Promise<void> {
-	await api.post(machineApiPath(machineId, "quadlets", quadletId, "start"));
+	await api.post(hostApiPath(hostId, "quadlets", quadletId, "start"));
 }
 
 // Query parameters for the stop and restart endpoints
@@ -185,37 +183,37 @@ export interface QuadletLifecycleOptions {
 	timeout?: number;
 }
 
-// POST /api/machines/{id}/quadlets/{quadletId}/stop -> 200
+// POST /api/hosts/{id}/quadlets/{quadletId}/stop -> 200
 // (backend/internal/domain/quadlets/handler.go QuadletHandler.Stop).
 export async function stopQuadlet(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
 	options: QuadletLifecycleOptions,
 ): Promise<void> {
-	return postLifecycle(machineId, quadletId, "stop", options);
+	return postLifecycle(hostId, quadletId, "stop", options);
 }
 
-// POST /api/machines/{id}/quadlets/{quadletId}/restart -> 200
+// POST /api/hosts/{id}/quadlets/{quadletId}/restart -> 200
 // (backend/internal/domain/quadlets/handler.go QuadletHandler.Restart);
 // same option set as stop.
 export async function restartQuadlet(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
 	options: QuadletLifecycleOptions,
 ): Promise<void> {
-	return postLifecycle(machineId, quadletId, "restart", options);
+	return postLifecycle(hostId, quadletId, "restart", options);
 }
 
 // Shared stop/restart body: the endpoints differ only in the path segment,
 // and both take the same query parameters via lifecycleParams.
 async function postLifecycle(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
 	action: string,
 	options: QuadletLifecycleOptions,
 ): Promise<void> {
 	await api.post(
-		machineApiPath(machineId, "quadlets", quadletId, action),
+		hostApiPath(hostId, "quadlets", quadletId, action),
 		undefined,
 		{
 			params: lifecycleParams(options),
@@ -227,13 +225,13 @@ function lifecycleParams(options: QuadletLifecycleOptions) {
 	return options.timeout === undefined ? {} : { timeout: options.timeout };
 }
 
-// Log source for GET /api/machines/{machineId}/quadlets/{quadletId}/logs:
+// Log source for GET /api/hosts/{hostId}/quadlets/{quadletId}/logs:
 // the kit owns the buffered tail fetch and the follow stream
 // (backend/internal/domain/quadlets handler pair).
-export function quadletLogs(machineId: string, quadletId: string): LogSource {
+export function quadletLogs(hostId: string, quadletId: string): LogSource {
 	return createLogSource(
-		machineApiPath(machineId, "quadlets", quadletId, "logs"),
-		machineApiUrl(machineId, "quadlets", quadletId, "logs"),
+		hostApiPath(hostId, "quadlets", quadletId, "logs"),
+		hostApiUrl(hostId, "quadlets", quadletId, "logs"),
 	);
 }
 
@@ -241,14 +239,14 @@ export function quadletLogs(machineId: string, quadletId: string): LogSource {
 // builder's, not the caller's: ?dryRun=true on a dry run, ?filter=<unit> on
 // a filtered run, both when they compose, and no query when neither applies.
 export function autoUpdateStreamUrl(
-	machineId: string,
+	hostId: string,
 	options: { dryRun: boolean; filter?: string },
 ): string {
 	const query = new URLSearchParams();
 	if (options.dryRun) query.set("dryRun", "true");
 	if (options.filter) query.set("filter", options.filter);
 	const queryString = query.toString();
-	return `${machineApiUrl(machineId, "quadlets", "auto-update")}${
+	return `${hostApiUrl(hostId, "quadlets", "auto-update")}${
 		queryString ? `?${queryString}` : ""
 	}`;
 }
@@ -259,7 +257,7 @@ export function autoUpdateStreamUrl(
 // path. The parse is backend-owned; the frontend only labels.
 export type QuadletMoveVolumeKind = "volume" | "hostPath";
 
-// How a companion .volume quadlet file sits on the TARGET machine
+// How a companion .volume quadlet file sits on the TARGET host
 // (backend/internal/domain/quadlets/dto.go MovePreviewCompanion*): absent,
 // byte-identical, or with different content. An identical companion is
 // skipped by the transfer; a differing one fails it with 409.
@@ -271,13 +269,13 @@ export interface QuadletMovePreviewVolume {
 	source: string;
 	kind: QuadletMoveVolumeKind;
 	// Companion .volume quadlet fields (issue 217): present exactly when the
-	// reference names a same-named quadlet file on the source machine;
+	// reference names a same-named quadlet file on the source host;
 	// quadletFile is that file's name and targetState labels how it sits on
 	// the target. A dangling reference carries neither field.
 	quadletFile?: string;
 	targetState?: QuadletMoveCompanionState;
 	// Volume-data fields (issue 214): podmanVolume is the podman volume the
-	// reference resolves to on BOTH machines — volume-kind entries only,
+	// reference resolves to on BOTH hosts — volume-kind entries only,
 	// host paths never resolve. sizeBytes/targetSizeBytes are the source
 	// and target volumes' content sizes when the engine can report one
 	// (podman's service API reports none today). existsOnTarget is always
@@ -301,7 +299,7 @@ export interface QuadletMovePreviewVolume {
 export type QuadletMoveSecretKind = "secret" | "hostPath";
 
 // One `Secret=` reference in the move/copy preview (issue 215).
-// existsOnSource/existsOnTarget answer whether the respective machine's
+// existsOnSource/existsOnTarget answer whether the respective host's
 // podman secret store holds the name — meaningful on secret-kind entries
 // only; a hostPath entry renders both false (no existence claims), the
 // same way host-path volume entries do. A secret-kind reference with
@@ -313,7 +311,7 @@ export interface QuadletMovePreviewSecret {
 	existsOnTarget: boolean;
 }
 
-// Response of GET /api/machines/{id}/quadlets/{quadletId}/move-preview
+// Response of GET /api/hosts/{id}/quadlets/{quadletId}/move-preview
 // (backend/internal/domain/quadlets/dto.go QuadletMovePreviewResponse): the
 // referenced volumes and secrets in file order, whether the target already
 // holds a quadlet of the same name and resource, and the source's live
@@ -329,18 +327,18 @@ export interface QuadletMovePreview {
 }
 
 export async function quadletMovePreview(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
-	targetMachineId: string,
+	targetHostId: string,
 ): Promise<QuadletMovePreview> {
 	const response = await api.get<QuadletMovePreview>(
-		machineApiPath(machineId, "quadlets", quadletId, "move-preview"),
-		{ params: { targetMachineId } },
+		hostApiPath(hostId, "quadlets", quadletId, "move-preview"),
+		{ params: { targetHostId } },
 	);
 	return response.data;
 }
 
-// Mode of POST /api/machines/{id}/quadlets/{quadletId}/move
+// Mode of POST /api/hosts/{id}/quadlets/{quadletId}/move
 // (backend/internal/domain/quadlets/dto.go MoveMode*): "copy" installs on
 // the target only; "move" additionally removes the source after the install
 // succeeded.
@@ -351,7 +349,7 @@ export type QuadletMoveMode = "copy" | "move";
 // are move-mode vocabulary (the delete flow's flags): copy never stops
 // anything and ignores them, so copy requests omit them entirely.
 export interface QuadletMoveInput {
-	targetMachineId: string;
+	targetHostId: string;
 	mode: QuadletMoveMode;
 	stop?: boolean;
 	force?: boolean;
@@ -387,7 +385,7 @@ export interface QuadletMoveInput {
 // content, and whether the caller (admin on the source) is offered the
 // secret transfer at all.
 export interface QuadletMoveFacts {
-	targetMachineId: string;
+	targetHostId: string;
 	companions: boolean;
 	migratable: boolean;
 	anyExistsOnTarget: boolean;
@@ -424,7 +422,7 @@ export function buildMoveInput(
 ): { input: QuadletMoveInput; stream: boolean } {
 	const migrateChecked = choices.migrate && facts.migratable;
 	const input: QuadletMoveInput = {
-		targetMachineId: facts.targetMachineId,
+		targetHostId: facts.targetHostId,
 		mode,
 		...(mode === "move" ? { stop: choices.stop, force: choices.force } : {}),
 		...(facts.companions
@@ -447,7 +445,7 @@ export function buildMoveInput(
 // (backend/internal/domain/quadlets/dto.go MoveStatus*): "copied" for a
 // completed copy, "moved" for a completed move, "partial" when a move's
 // target install succeeded but the source removal failed — the quadlet then
-// exists on both machines.
+// exists on both hosts.
 export type QuadletMoveStatus = "copied" | "moved" | "partial";
 
 // Outcome label of one data-phase volume result
@@ -503,15 +501,15 @@ export interface QuadletMoveSecretTransfer {
 	secrets: QuadletMoveSecretOutcome[];
 }
 
-// Response of POST /api/machines/{id}/quadlets/{quadletId}/move
+// Response of POST /api/hosts/{id}/quadlets/{quadletId}/move
 // (backend/internal/domain/quadlets/dto.go QuadletMoveResponse).
 export interface QuadletMoveResult {
 	id: string;
 	name: string;
 	resource: string;
 	status: QuadletMoveStatus;
-	sourceMachineId: string;
-	targetMachineId: string;
+	sourceHostId: string;
+	targetHostId: string;
 	path?: string;
 	// Removal-failure detail, populated only when status is "partial".
 	error?: string;
@@ -526,12 +524,12 @@ export interface QuadletMoveResult {
 }
 
 export async function moveQuadlet(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
 	input: QuadletMoveInput,
 ): Promise<QuadletMoveResult> {
 	const response = await api.post<QuadletMoveResult>(
-		machineApiPath(machineId, "quadlets", quadletId, "move"),
+		hostApiPath(hostId, "quadlets", quadletId, "move"),
 		input,
 	);
 	return response.data;
@@ -542,10 +540,10 @@ export async function moveQuadlet(
 // progress events with one terminal event instead of the plain envelope.
 // The transfer body travels in the request, so no query is appended.
 export function moveQuadletStreamUrl(
-	machineId: string,
+	hostId: string,
 	quadletId: string,
 ): string {
-	return machineApiUrl(machineId, "quadlets", quadletId, "move");
+	return hostApiUrl(hostId, "quadlets", quadletId, "move");
 }
 
 // --- Import compose file (spec #336) ---
@@ -561,7 +559,7 @@ export interface QuadletImportEntry {
 	content: string;
 }
 
-// Body of POST /api/machines/{id}/quadlets/import
+// Body of POST /api/hosts/{id}/quadlets/import
 // (backend/internal/domain/quadlets/dto.go QuadletImportRequest).
 export interface QuadletImportRequest {
 	quadlets: QuadletImportEntry[];
@@ -583,7 +581,7 @@ export interface QuadletImportError {
 	error: string;
 }
 
-// Response of POST /api/machines/{id}/quadlets/import -> 201
+// Response of POST /api/hosts/{id}/quadlets/import -> 201
 // (backend/internal/domain/quadlets/dto.go QuadletImportResponse): the
 // imported/failed report per file.
 export interface QuadletImportResponse {
@@ -591,14 +589,14 @@ export interface QuadletImportResponse {
 	failed: QuadletImportError[];
 }
 
-// Installs quadlet files on the machine from their content. This is the
+// Installs quadlet files on the host from their content. This is the
 // first frontend caller of the import endpoint (spec #336).
 export async function importQuadlets(
-	machineId: string,
+	hostId: string,
 	request: QuadletImportRequest,
 ): Promise<QuadletImportResponse> {
 	const response = await api.post<QuadletImportResponse>(
-		machineApiPath(machineId, "quadlets", "import"),
+		hostApiPath(hostId, "quadlets", "import"),
 		request,
 	);
 	return response.data;
@@ -620,7 +618,7 @@ export interface QuadletConvertComposeResponse {
 }
 
 // Converts compose file content into quadlet entries. The endpoint is
-// global — not machine-scoped — so the call rides the shared instance's
+// global — not host-scoped — so the call rides the shared instance's
 // literal path, like usersApi's listUsers (spec #336).
 export async function convertCompose(
 	content: string,

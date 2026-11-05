@@ -21,7 +21,7 @@ describe("getSecretMovePreview", () => {
 		};
 		server.use(
 			http.get(
-				"*/api/machines/m-1/secrets/db-password/move-preview",
+				"*/api/hosts/m-1/secrets/db-password/move-preview",
 				({ request }) => {
 					const url = new URL(request.url);
 					captured.path = url.pathname;
@@ -34,9 +34,9 @@ describe("getSecretMovePreview", () => {
 		const preview = await getSecretMovePreview("m-1", "db-password", "m-2");
 
 		expect(captured.path).toBe(
-			"/api/machines/m-1/secrets/db-password/move-preview",
+			"/api/hosts/m-1/secrets/db-password/move-preview",
 		);
-		expect(captured.query?.get("targetMachineId")).toBe("m-2");
+		expect(captured.query?.get("targetHostId")).toBe("m-2");
 		expect(preview).toEqual(secretMovePreviewFixture());
 	});
 
@@ -49,7 +49,7 @@ describe("getSecretMovePreview", () => {
 			],
 		});
 		server.use(
-			http.get("*/api/machines/m-1/secrets/db-password/move-preview", () =>
+			http.get("*/api/hosts/m-1/secrets/db-password/move-preview", () =>
 				HttpResponse.json(facts),
 			),
 		);
@@ -65,7 +65,7 @@ describe("moveSecret", () => {
 		let body: unknown;
 		server.use(
 			http.post(
-				"*/api/machines/m-1/secrets/db-password/move",
+				"*/api/hosts/m-1/secrets/db-password/move",
 				async ({ request }) => {
 					body = await request.json();
 					return HttpResponse.json(secretMoveResultFixture());
@@ -74,11 +74,11 @@ describe("moveSecret", () => {
 		);
 
 		const result = await moveSecret("m-1", "db-password", {
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 		});
 
-		expect(body).toEqual({ targetMachineId: "m-2", mode: "move" });
+		expect(body).toEqual({ targetHostId: "m-2", mode: "move" });
 		expect(result).toEqual(secretMoveResultFixture());
 	});
 
@@ -88,13 +88,13 @@ describe("moveSecret", () => {
 			error: "failed to delete secret: secret is in use",
 		});
 		server.use(
-			http.post("*/api/machines/m-1/secrets/db-password/move", () =>
+			http.post("*/api/hosts/m-1/secrets/db-password/move", () =>
 				HttpResponse.json(envelope),
 			),
 		);
 
 		const result = await moveSecret("m-1", "db-password", {
-			targetMachineId: "m-2",
+			targetHostId: "m-2",
 			mode: "move",
 		});
 

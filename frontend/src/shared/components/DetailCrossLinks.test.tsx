@@ -8,13 +8,13 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { MachineDetailPage } from "@/pages/MachineDetailPage";
+import { HostDetailPage } from "@/pages/HostDetailPage";
 import {
 	containerDetailFixture,
 	containerFixture,
+	hostFixture,
 	imageDetailFixture,
 	imageFixture,
-	machineFixture,
 	rawInspectFixture,
 	secretFixture,
 	volumeFixture,
@@ -33,41 +33,39 @@ const containerDetail = containerDetailFixture();
 const image = imageDetailFixture({ id: containerDetail.imageId });
 const secret = secretFixture();
 
-// Every endpoint the chain touches: the machine, the containers list, the
+// Every endpoint the chain touches: the host, the containers list, the
 // container/image/secret detail endpoints, and the lazy inspect endpoints
 // (registered though the chain never reveals the JSON).
 function mockChainEndpoints() {
 	server.use(
-		http.get("*/api/machines/m-1", () => HttpResponse.json(machineFixture())),
-		http.get("*/api/machines/m-1/containers", () =>
+		http.get("*/api/hosts/m-1", () => HttpResponse.json(hostFixture())),
+		http.get("*/api/hosts/m-1/containers", () =>
 			HttpResponse.json({
 				containers: [container],
 				total: 1,
 				timestamp: "2026-08-26T00:00:00Z",
 			}),
 		),
-		http.get("*/api/machines/m-1/containers/c-1", () =>
+		http.get("*/api/hosts/m-1/containers/c-1", () =>
 			HttpResponse.json(containerDetail),
 		),
-		http.get("*/api/machines/m-1/containers/c-1/inspect", () =>
+		http.get("*/api/hosts/m-1/containers/c-1/inspect", () =>
 			HttpResponse.json(rawInspectFixture()),
 		),
-		http.get("*/api/machines/m-1/images", () =>
+		http.get("*/api/hosts/m-1/images", () =>
 			HttpResponse.json([imageFixture({ id: containerDetail.imageId })]),
 		),
-		http.get("*/api/machines/m-1/images/:imageId", () =>
-			HttpResponse.json(image),
-		),
-		http.get("*/api/machines/m-1/images/:imageId/inspect", () =>
+		http.get("*/api/hosts/m-1/images/:imageId", () => HttpResponse.json(image)),
+		http.get("*/api/hosts/m-1/images/:imageId/inspect", () =>
 			HttpResponse.json(rawInspectFixture()),
 		),
-		http.get("*/api/machines/m-1/secrets/db-password", () =>
+		http.get("*/api/hosts/m-1/secrets/db-password", () =>
 			HttpResponse.json(secret),
 		),
-		http.get("*/api/machines/m-1/secrets/db-password/inspect", () =>
+		http.get("*/api/hosts/m-1/secrets/db-password/inspect", () =>
 			HttpResponse.json(rawInspectFixture()),
 		),
-		http.get("*/api/machines/m-1/volumes/app-data", () =>
+		http.get("*/api/hosts/m-1/volumes/app-data", () =>
 			HttpResponse.json(volumeFixture()),
 		),
 	);
@@ -86,36 +84,36 @@ function LocationProbe() {
 }
 
 // The real route table from App.tsx (minus the protected layout): the
-// machine detail page plus the five resource detail routes.
+// host detail page plus the five resource detail routes.
 function renderAppRoutes() {
 	return renderWithQuery(
 		<>
 			<LocationProbe />
 			<Routes>
-				<Route path="/machines/:machineId" element={<MachineDetailPage />} />
+				<Route path="/hosts/:hostId" element={<HostDetailPage />} />
 				<Route
-					path="/machines/:machineId/containers/:containerId"
+					path="/hosts/:hostId/containers/:containerId"
 					element={<ContainerDetailPage />}
 				/>
 				<Route
-					path="/machines/:machineId/volumes/:volumeName"
+					path="/hosts/:hostId/volumes/:volumeName"
 					element={<VolumeDetailPage />}
 				/>
 				<Route
-					path="/machines/:machineId/images/:imageId"
+					path="/hosts/:hostId/images/:imageId"
 					element={<ImageDetailPage />}
 				/>
 				<Route
-					path="/machines/:machineId/networks/:networkName"
+					path="/hosts/:hostId/networks/:networkName"
 					element={<NetworkDetailPage />}
 				/>
 				<Route
-					path="/machines/:machineId/secrets/:secretId"
+					path="/hosts/:hostId/secrets/:secretId"
 					element={<SecretDetailPage />}
 				/>
 			</Routes>
 		</>,
-		{ router: { initialEntries: ["/machines/m-1?tab=containers"] } },
+		{ router: { initialEntries: ["/hosts/m-1?tab=containers"] } },
 	);
 }
 
@@ -128,7 +126,7 @@ describe("detail page cross-links", () => {
 		// Land on the Containers tab: the list renders the container's row.
 		expect(await screen.findByTestId("container-row")).toBeInTheDocument();
 		expect(screen.getByTestId("location")).toHaveTextContent(
-			"/machines/m-1?tab=containers",
+			"/hosts/m-1?tab=containers",
 		);
 
 		// The row opens the container's detail page.
@@ -137,7 +135,7 @@ describe("detail page cross-links", () => {
 			await screen.findByTestId("container-detail-name"),
 		).toHaveTextContent("web");
 		expect(screen.getByTestId("location")).toHaveTextContent(
-			"/machines/m-1/containers/c-1",
+			"/hosts/m-1/containers/c-1",
 		);
 
 		// The image name links to the image's detail page, addressed by the
@@ -150,7 +148,7 @@ describe("detail page cross-links", () => {
 		// The image id is "sha256:…", so the navigated path carries the
 		// percent-encoded segment (the route kit's C11 discipline).
 		expect(screen.getByTestId("location")).toHaveTextContent(
-			`/machines/m-1/images/${encodeURIComponent(containerDetail.imageId!)}`,
+			`/hosts/m-1/images/${encodeURIComponent(containerDetail.imageId!)}`,
 		);
 
 		// The back button is history-aware: the image detail page was
@@ -161,7 +159,7 @@ describe("detail page cross-links", () => {
 			await screen.findByTestId("container-detail-name"),
 		).toHaveTextContent("web");
 		expect(screen.getByTestId("location")).toHaveTextContent(
-			"/machines/m-1/containers/c-1",
+			"/hosts/m-1/containers/c-1",
 		);
 
 		// The secret name links to the secret's detail page, addressed by
@@ -174,7 +172,7 @@ describe("detail page cross-links", () => {
 			"db-password",
 		);
 		expect(screen.getByTestId("location")).toHaveTextContent(
-			"/machines/m-1/secrets/db-password",
+			"/hosts/m-1/secrets/db-password",
 		);
 
 		// Back to the container detail page once more, then the volume
@@ -192,7 +190,7 @@ describe("detail page cross-links", () => {
 			"app-data",
 		);
 		expect(screen.getByTestId("location")).toHaveTextContent(
-			"/machines/m-1/volumes/app-data",
+			"/hosts/m-1/volumes/app-data",
 		);
 	});
 });

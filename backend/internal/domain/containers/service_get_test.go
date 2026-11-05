@@ -23,7 +23,7 @@ func TestContainerService_Get_ReturnsInspectReport(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "container-123")
+	got, err := service.Get(context.Background(), "user", "host", "container-123")
 
 	require.NoError(t, err)
 	assert.Same(t, report, got)
@@ -40,7 +40,7 @@ func TestContainerService_Get_MissingContainerIsAnError(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Get(context.Background(), "user", "machine", "container-123")
+		got, err := service.Get(context.Background(), "user", "host", "container-123")
 
 		require.Error(t, err)
 		assert.Nil(t, got)
@@ -55,7 +55,7 @@ func TestContainerService_Get_MissingContainerIsAnError(t *testing.T) {
 		}
 		service := NewContainerService(fakeEngineProvider{engine: engine})
 
-		got, err := service.Get(context.Background(), "user", "machine", "container-123")
+		got, err := service.Get(context.Background(), "user", "host", "container-123")
 
 		require.Error(t, err)
 		assert.Nil(t, got)
@@ -71,7 +71,7 @@ func TestContainerService_Get_WrapsEngineFailure(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "container-123")
+	got, err := service.Get(context.Background(), "user", "host", "container-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -86,7 +86,7 @@ func TestContainerService_Get_ZeroReportsWithPerItemErrorWrapsCause(t *testing.T
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "container-123")
+	got, err := service.Get(context.Background(), "user", "host", "container-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)
@@ -103,7 +103,7 @@ func TestContainerService_Get_ZeroReportsWithoutErrorsIsAnomaly(t *testing.T) {
 	}
 	service := NewContainerService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Get(context.Background(), "user", "machine", "container-123")
+	got, err := service.Get(context.Background(), "user", "host", "container-123")
 
 	require.Error(t, err)
 	assert.Nil(t, got)

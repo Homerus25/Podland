@@ -7,7 +7,7 @@
 //
 // The handler reproduces the Caddy container's `try_files {path}
 // /index.html` contract: any path that is not a real file in the bundle
-// — route-shaped (/machines/xyz) and file-shaped (/foo.png) misses alike
+// — route-shaped (/hosts/xyz) and file-shaped (/foo.png) misses alike
 // — answers index.html with HTTP 200, so client-side routing keeps
 // working on deep links and refreshes. Cache headers follow the bundle's
 // layout: index.html is revalidated on every load (no-cache), while

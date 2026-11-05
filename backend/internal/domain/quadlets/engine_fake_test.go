@@ -114,21 +114,21 @@ func (f *fakeQuadletEngine) VolumeImport(name string, r io.Reader) error {
 type fakeEngineProvider struct {
 	engine QuadletEngine
 	err    error
-	// engines serves per-machine engines keyed by machine ID — the shape
-	// the cross-machine operations (move-preview) exercise. When non-nil
+	// engines serves per-host engines keyed by host ID — the shape
+	// the cross-host operations (move-preview) exercise. When non-nil
 	// it takes precedence over engine; a lookup miss panics, so a closure
-	// crossing an unexpected machine fails the test loudly.
+	// crossing an unexpected host fails the test loudly.
 	engines map[string]QuadletEngine
 }
 
-func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e QuadletEngine) error) error {
+func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e QuadletEngine) error) error {
 	if p.err != nil {
 		return p.err
 	}
 	if p.engines != nil {
-		e, ok := p.engines[machineID]
+		e, ok := p.engines[hostID]
 		if !ok {
-			panic("unexpected WithEngine machine: " + machineID)
+			panic("unexpected WithEngine host: " + hostID)
 		}
 		return fn(e)
 	}
@@ -175,40 +175,40 @@ func (f *fakeMoveSecretEngine) Create(name, value string) error {
 	return f.createFn(name, value)
 }
 
-// fakeSecretEngineProvider arms the secret provider seam per machine ID
+// fakeSecretEngineProvider arms the secret provider seam per host ID
 // (the two-lease shape the secret surface exercises); a lookup miss
-// panics, so a closure crossing an unexpected machine fails the test
+// panics, so a closure crossing an unexpected host fails the test
 // loudly.
 type fakeSecretEngineProvider struct {
 	engines map[string]moveSecretEngine
 }
 
-func (p fakeSecretEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e moveSecretEngine) error) error {
-	e, ok := p.engines[machineID]
+func (p fakeSecretEngineProvider) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e moveSecretEngine) error) error {
+	e, ok := p.engines[hostID]
 	if !ok {
-		panic("unexpected secret WithEngine machine: " + machineID)
+		panic("unexpected secret WithEngine host: " + hostID)
 	}
 	return fn(e)
 }
 
-// fakeMachineLookup is the function-field fake for the machineLookup seam
-// behind systemctl scoping: machine is the row GetByID answers (nil
-// simulates a machine deleted concurrently with the request), err a store
+// fakeHostLookup is the function-field fake for the hostLookup seam
+// behind systemctl scoping: host is the row GetByID answers (nil
+// simulates a host deleted concurrently with the request), err a store
 // failure. lastID records what the service asked for so tests can pin that
-// scoping resolves per machine.
-type fakeMachineLookup struct {
-	machine *models.Machine
-	err     error
-	lastID  string
+// scoping resolves per host.
+type fakeHostLookup struct {
+	host   *models.Host
+	err    error
+	lastID string
 }
 
-func (f *fakeMachineLookup) GetByID(id string) (*models.Machine, error) {
+func (f *fakeHostLookup) GetByID(id string) (*models.Host, error) {
 	f.lastID = id
-	return f.machine, f.err
+	return f.host, f.err
 }
 
-// lookupForUser arms a fakeMachineLookup whose machine row registers the
+// lookupForUser arms a fakeHostLookup whose host row registers the
 // given SSH user — the input that decides the `--user` scope.
-func lookupForUser(sshUser string) *fakeMachineLookup {
-	return &fakeMachineLookup{machine: &models.Machine{ID: "machine", SSHUsername: sshUser}}
+func lookupForUser(sshUser string) *fakeHostLookup {
+	return &fakeHostLookup{host: &models.Host{ID: "host", SSHUsername: sshUser}}
 }

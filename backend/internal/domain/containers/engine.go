@@ -11,7 +11,7 @@ import (
 	"go.podman.io/podman/v6/pkg/specgen"
 )
 
-// ContainerEngine is the containers domain's view of one machine's podman:
+// ContainerEngine is the containers domain's view of one host's podman:
 // the exact set of container operations the service performs, in domain
 // vocabulary (single names, plain flags) and without a context parameter —
 // the connection context lives only inside the production adapter below.
@@ -49,7 +49,7 @@ type ContainerEngine interface {
 	// no filters) and answers podman's per-container prune reports.
 	Prune() ([]*reports.PruneReport, error)
 	// Stats answers a one-shot stats snapshot for the target containers
-	// (every running container on the machine when all is set) and one
+	// (every running container on the host when all is set) and one
 	// error. The adapter reads podman's single stats report inside the
 	// connection lease and folds its error into the returned error —
 	// the report channel never crosses the seam.
@@ -57,11 +57,11 @@ type ContainerEngine interface {
 }
 
 // ContainerEngineProvider is the containers domain's slice of the
-// connection seam: it hands a closure one machine's ContainerEngine. It
+// connection seam: it hands a closure one host's ContainerEngine. It
 // delegates to connections.Manager.WithConnection, which owns acquisition,
 // the warn-and-502-sentinel failure contract, and the op tag.
 type ContainerEngineProvider interface {
-	WithEngine(ctx context.Context, userID, machineID, op string, fn func(e ContainerEngine) error) error
+	WithEngine(ctx context.Context, userID, hostID, op string, fn func(e ContainerEngine) error) error
 }
 
 // NewContainerEngineProvider returns the production provider: it wraps the
@@ -77,8 +77,8 @@ type connectionEngines struct {
 	conn connections.Manager
 }
 
-func (p connectionEngines) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e ContainerEngine) error) error {
-	return p.conn.WithConnection(ctx, userID, machineID, op, func(connCtx context.Context) error {
+func (p connectionEngines) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e ContainerEngine) error) error {
+	return p.conn.WithConnection(ctx, userID, hostID, op, func(connCtx context.Context) error {
 		return fn(&podmanContainerEngine{ctx: connCtx})
 	})
 }

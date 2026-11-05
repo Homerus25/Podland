@@ -17,7 +17,7 @@ import (
 )
 
 // Volume data migration service tests (issue 214, architecture-decisions
-// §18): plan resolution, preflight refusals, the machine-to-machine data
+// §18): plan resolution, preflight refusals, the host-to-host data
 // phase, the bound's pre-check and counting backstop, and the migrating
 // move's stop-before-data ordering.
 
@@ -77,14 +77,14 @@ func volumeSourceFixture(content string, volumes map[string]*QuadletVolumeInspec
 }
 
 // newMoveVolumeTestService wires the transfer service over the two
-// per-machine fake engines the data phase dials, with the real lean
-// service (SSH exec and machine lookup wired for the seam crossings — the
+// per-host fake engines the data phase dials, with the real lean
+// service (SSH exec and host lookup wired for the seam crossings — the
 // post-install reload and move-mode stops run through it) as its
 // lifecycle seam, and the migration bound (0 keeps the kit default).
 func newMoveVolumeTestService(source, target *fakeQuadletEngine, limit int64) *QuadletTransferService {
 	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
-		"machine-a": source,
-		"machine-b": target,
+		"host-a": source,
+		"host-b": target,
 	}}
 	service := NewQuadletService(provider, testutils.NewMockSSHExec(), lookupForUser("core"))
 	return NewQuadletTransferService(provider, nil, &fakeAccessRepo{getPermissionFn: allowTargetWrite}, limit, service)
@@ -92,7 +92,7 @@ func newMoveVolumeTestService(source, target *fakeQuadletEngine, limit int64) *Q
 
 // migrateCopyRequest opts a copy transfer into volume data migration.
 func migrateCopyRequest() QuadletMoveRequest {
-	return QuadletMoveRequest{TargetMachineID: "machine-b", Mode: MoveModeCopy, MigrateVolumeData: true}
+	return QuadletMoveRequest{TargetHostID: "host-b", Mode: MoveModeCopy, MigrateVolumeData: true}
 }
 
 // TestQuadletService_MoveVolumeData_BareVolumeMigrates pins the happy
@@ -129,7 +129,7 @@ func TestQuadletService_MoveVolumeData_BareVolumeMigrates(t *testing.T) {
 	}
 
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -186,7 +186,7 @@ func TestQuadletService_MoveVolumeData_CompanionVolumeNameWins(t *testing.T) {
 	}
 
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.NoError(t, err)
 	assert.Equal(t, "custom-name", gotCreated)
@@ -197,7 +197,7 @@ func TestQuadletService_MoveVolumeData_CompanionVolumeNameWins(t *testing.T) {
 
 // TestQuadletService_MoveVolumeData_CompanionDefaultNameWithoutOverride
 // pins the fallback: a companion that sets no VolumeName= resolves to
-// podman's systemd-<name> default, on both machines.
+// podman's systemd-<name> default, on both hosts.
 func TestQuadletService_MoveVolumeData_CompanionDefaultNameWithoutOverride(t *testing.T) {
 	companionContent := "[Volume]\nDriver=local\n"
 	content := "[Container]\nImage=busybox\nVolume=app-data.volume:/var/lib/app\n"
@@ -235,7 +235,7 @@ func TestQuadletService_MoveVolumeData_CompanionDefaultNameWithoutOverride(t *te
 	}
 
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.NoError(t, err)
 	assert.Equal(t, "systemd-app-data", gotCreated)
@@ -258,7 +258,7 @@ func TestQuadletService_MoveVolumeData_DanglingReferenceIsSkipped(t *testing.T) 
 	}
 
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -294,7 +294,7 @@ func TestQuadletService_MoveVolumeData_NonEmptyTargetIs409(t *testing.T) {
 	}
 
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.Nil(t, got)
 	appErr, ok := errors.AsType[*appErrors.AppError](err)
@@ -329,7 +329,7 @@ func TestQuadletService_MoveVolumeData_DanglingSourceSkipsTheProbe(t *testing.T)
 	}
 
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.NoError(t, err)
 	assert.False(t, probed, "the emptiness probe never fires for a source-dangling reference")
@@ -375,7 +375,7 @@ func TestQuadletService_MoveVolumeData_OverwriteVolumesMerges(t *testing.T) {
 	service := newMoveVolumeTestService(source, target, 0)
 	req := migrateCopyRequest()
 	req.OverwriteVolumes = true
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", req)
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", req)
 
 	require.NoError(t, err)
 	assert.True(t, imported)
@@ -390,12 +390,12 @@ func TestQuadletService_MoveVolumeData_KnownOversizeIs413(t *testing.T) {
 	source := volumeSourceFixture(moveVolumeContent, map[string]*QuadletVolumeInspect{
 		"pgdata": {Name: "pgdata", Size: ptr[int64](2048)},
 	})
-	// The provider hands this engine out for machine-b: any crossing of
+	// The provider hands this engine out for host-b: any crossing of
 	// the target lease panics the test.
 	target := &fakeQuadletEngine{}
 
 	service := newMoveVolumeTestService(source, target, 1024)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.Nil(t, got)
 	appErr, ok := errors.AsType[*appErrors.AppError](err)
@@ -429,7 +429,7 @@ func TestQuadletService_MoveVolumeData_CountingReaderBackstopsTheBound(t *testin
 	}
 
 	service := newMoveVolumeTestService(source, target, 1024)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.Nil(t, got)
 	appErr, ok := errors.AsType[*appErrors.AppError](err)
@@ -457,7 +457,7 @@ func TestQuadletService_MoveVolumeData_ImportFailureInstallsNothing(t *testing.T
 	}
 
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.Nil(t, got)
 	appErr, ok := errors.AsType[*appErrors.AppError](err)
@@ -508,8 +508,8 @@ func TestQuadletService_MoveVolumeData_MoveStopsBeforeTheDataPhase(t *testing.T)
 	}
 
 	service := newMoveTransferTestService(source, target, &fakeAccessRepo{getPermissionFn: allowTargetWrite}, sshExec)
-	req := QuadletMoveRequest{TargetMachineID: "machine-b", Mode: MoveModeMove, Stop: true, MigrateVolumeData: true}
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", req)
+	req := QuadletMoveRequest{TargetHostID: "host-b", Mode: MoveModeMove, Stop: true, MigrateVolumeData: true}
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", req)
 
 	require.NoError(t, err)
 	assert.Equal(t, MoveStatusMoved, got.Status)
@@ -519,11 +519,11 @@ func TestQuadletService_MoveVolumeData_MoveStopsBeforeTheDataPhase(t *testing.T)
 	// already stopped, but the ritual re-lists and keeps its flag honored,
 	// byte-identical to the non-migration move).
 	require.Len(t, sshExec.Calls(), 3)
-	assert.Equal(t, "machine-a", sshExec.Calls()[0].MachineID)
+	assert.Equal(t, "host-a", sshExec.Calls()[0].HostID)
 	assert.Equal(t, []string{"--user", "stop", "web.service"}, sshExec.Calls()[0].Opts.Args)
-	assert.Equal(t, "machine-b", sshExec.Calls()[1].MachineID, "the reload completes the target install before the source removal")
+	assert.Equal(t, "host-b", sshExec.Calls()[1].HostID, "the reload completes the target install before the source removal")
 	assert.Equal(t, []string{"--user", "daemon-reload"}, sshExec.Calls()[1].Opts.Args)
-	assert.Equal(t, "machine-a", sshExec.Calls()[2].MachineID)
+	assert.Equal(t, "host-a", sshExec.Calls()[2].HostID)
 	assert.Equal(t, []string{"--user", "stop", "web.service"}, sshExec.Calls()[2].Opts.Args)
 	assert.Equal(t, 1, sshCallsAtExport, "the export must not stream before the source unit is stopped")
 
@@ -565,8 +565,8 @@ func TestQuadletService_MoveVolumeData_DataFailureAfterTheStopCarriesTheNote(t *
 		&fakeAccessRepo{getPermissionFn: allowTargetWrite},
 		sshExec,
 	)
-	req := QuadletMoveRequest{TargetMachineID: "machine-b", Mode: MoveModeMove, Stop: true, MigrateVolumeData: true}
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", req)
+	req := QuadletMoveRequest{TargetHostID: "host-b", Mode: MoveModeMove, Stop: true, MigrateVolumeData: true}
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", req)
 
 	require.Nil(t, got)
 	appErr, ok := errors.AsType[*appErrors.AppError](err)
@@ -606,7 +606,7 @@ func TestQuadletService_MoveVolumeData_EventsFlow(t *testing.T) {
 
 	events := []QuadletMoveEvent{}
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.MoveWithProgress(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest(),
+	got, err := service.MoveWithProgress(context.Background(), "user", "host-a", "web.container", migrateCopyRequest(),
 		func(event QuadletMoveEvent) { events = append(events, event) })
 
 	require.NoError(t, err)
@@ -618,7 +618,7 @@ func TestQuadletService_MoveVolumeData_EventsFlow(t *testing.T) {
 	assert.Equal(t, MoveVolumePhaseStart, start.Phase)
 	assert.Equal(t, "pgdata", start.Ref)
 	assert.Equal(t, "pgdata", start.PodmanVolume)
-	assert.Equal(t, "machine-a", start.MachineID)
+	assert.Equal(t, "host-a", start.HostID)
 	assert.Empty(t, start.OperationID, "the transport owns the operation ID")
 
 	done := events[1]
@@ -656,7 +656,7 @@ func TestQuadletService_MoveVolumeData_BytesEventsThrottle(t *testing.T) {
 
 	events := []QuadletMoveEvent{}
 	service := newMoveVolumeTestService(source, target, 0)
-	_, err := service.MoveWithProgress(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest(),
+	_, err := service.MoveWithProgress(context.Background(), "user", "host-a", "web.container", migrateCopyRequest(),
 		func(event QuadletMoveEvent) { events = append(events, event) })
 
 	require.NoError(t, err)
@@ -700,7 +700,7 @@ func TestQuadletService_MoveVolumeData_EmptyVolumeStillMigrates(t *testing.T) {
 	}
 
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.NoError(t, err)
 	assert.Equal(t, payload, gotImport)
@@ -752,7 +752,7 @@ func TestQuadletService_MoveVolumeData_TwoRefsOneVolumeMigratesOnce(t *testing.T
 	}
 
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.NoError(t, err)
 	require.NotNil(t, got.VolumeMigration)
@@ -787,13 +787,13 @@ func TestQuadletService_MovePreview_VolumeMigrationFacts(t *testing.T) {
 	}
 
 	provider := fakeEngineProvider{engines: map[string]QuadletEngine{
-		"machine-a": source,
-		"machine-b": target,
+		"host-a": source,
+		"host-b": target,
 	}}
 	lean := NewQuadletService(provider, nil, nil)
 	service := NewQuadletTransferService(provider, nil, &fakeAccessRepo{getPermissionFn: allowTargetRead}, 0, lean)
 
-	got, err := service.MovePreview(context.Background(), "user", "machine-a", "web.container", "machine-b")
+	got, err := service.MovePreview(context.Background(), "user", "host-a", "web.container", "host-b")
 
 	require.NoError(t, err)
 	require.Len(t, got.Volumes, 2)
@@ -949,7 +949,7 @@ func TestQuadletService_MoveVolumeData_ProbeEmptyTargetProceeds(t *testing.T) {
 	}
 
 	service := newMoveVolumeTestService(source, target, 0)
-	got, err := service.Move(context.Background(), "user", "machine-a", "web.container", migrateCopyRequest())
+	got, err := service.Move(context.Background(), "user", "host-a", "web.container", migrateCopyRequest())
 
 	require.NoError(t, err)
 	assert.True(t, strings.Contains(got.ID, "web.container"))

@@ -43,7 +43,7 @@ import {
 	RowListEditor,
 	RowSelect,
 } from "@shared/components/RowEditor";
-import { machineTabPath } from "@shared/routes/detailRoute";
+import { hostTabPath } from "@shared/routes/detailRoute";
 import { getApiError } from "@shared/utils/api";
 import { useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
@@ -54,24 +54,24 @@ import { useNavigate, useParams } from "react-router-dom";
 // (Basic, Environment, Ports, Storage, Network, Secrets, Devices) plus the
 // Security section (privileged + cap-add, spec 341 ticket #345) with
 // room to breathe instead of a 60vh scroll window. The page fetches the
-// machine's networks, volumes, and secrets to populate the dropdowns and
-// checkbox lists. Success and cancel both navigate back to the machine's
+// host's networks, volumes, and secrets to populate the dropdowns and
+// checkbox lists. Success and cancel both navigate back to the host's
 // containers tab (?tab=containers); navigating away discards the form
 // silently — there is no unsaved-changes guard. The form-to-payload
 // mapping lives in the services module (buildCreateContainerInput); the
 // page keeps form ownership only.
 export function CreateContainerPage() {
-	const { machineId } = useParams<{ machineId: string }>();
+	const { hostId } = useParams<{ hostId: string }>();
 	const navigate = useNavigate();
-	const createContainer = useCreateContainer(machineId!);
-	const startContainer = useStartContainer(machineId!);
+	const createContainer = useCreateContainer(hostId!);
+	const startContainer = useStartContainer(hostId!);
 	const toast = useToast();
-	const createVolume = useCreateVolume(machineId!);
-	const { data: networks } = useNetworks(machineId!);
-	const { data: volumes } = useVolumes(machineId!);
-	const { data: secrets } = useSecrets(machineId!);
+	const createVolume = useCreateVolume(hostId!);
+	const { data: networks } = useNetworks(hostId!);
+	const { data: volumes } = useVolumes(hostId!);
+	const { data: secrets } = useSecrets(hostId!);
 	// The pod selector's option list (spec 356).
-	const { data: pods } = usePods(machineId!);
+	const { data: pods } = usePods(hostId!);
 	const [isCreateVolumeOpen, setIsCreateVolumeOpen] = useState(false);
 
 	// Run-after-create (spec 341, ticket #346): checked by default, the
@@ -80,8 +80,7 @@ export function CreateContainerPage() {
 	// it never reaches the create payload.
 	const [runAfterCreate, setRunAfterCreate] = useState(true);
 
-	const backToContainers = () =>
-		navigate(machineTabPath(machineId!, "containers"));
+	const backToContainers = () => navigate(hostTabPath(hostId!, "containers"));
 
 	const {
 		register,
@@ -182,7 +181,7 @@ export function CreateContainerPage() {
 	// leaves its error inline. The hook owns the pull-then-retry-once
 	// ritual; the page hands it the create re-submission and keeps only
 	// the form and the displays below.
-	const pull = usePullThenRetry(machineId!, submit);
+	const pull = usePullThenRetry(hostId!, submit);
 
 	return (
 		<VStack align="stretch" spacing={4}>

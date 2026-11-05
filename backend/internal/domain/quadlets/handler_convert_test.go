@@ -18,8 +18,8 @@ import (
 )
 
 // convertComposeRequest builds the request the mounted user-scoped route
-// hands the handler: a user identity in the context and NO machine ID —
-// the route sits outside the machine subtree (spec #336), so the request
+// hands the handler: a user identity in the context and NO host ID —
+// the route sits outside the host subtree (spec #336), so the request
 // carries only a user identity.
 func convertComposeRequest(t *testing.T, body string) *http.Request {
 	t.Helper()
@@ -31,7 +31,7 @@ func convertComposeRequest(t *testing.T, body string) *http.Request {
 
 // newConvertTestHandler builds the handler around the real lean service
 // with the given converter wired, over the fake engine (the conversion
-// touches no machine, so the engine stays unarmed).
+// touches no host, so the engine stays unarmed).
 func newConvertTestHandler(converter ComposeConverter) *QuadletHandler {
 	provider := fakeEngineProvider{engine: &fakeQuadletEngine{}}
 	service := NewQuadletService(provider, nil, nil).WithComposeConverter(converter)
@@ -49,7 +49,7 @@ type errorEnvelope struct {
 
 // TestHandlerConvertCompose_Success pins the user-scoped contract through
 // the real service over the fake converter: a request carrying only a user
-// identity (no machine ID) answers 200 with the generated entries in the
+// identity (no host ID) answers 200 with the generated entries in the
 // import endpoint's shape, sorted by name.
 func TestHandlerConvertCompose_Success(t *testing.T) {
 	t.Parallel()

@@ -63,7 +63,7 @@ type fakeEngineProvider struct {
 	err    error
 }
 
-func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, machineID, op string, fn func(e NetworkEngine) error) error {
+func (p fakeEngineProvider) WithEngine(ctx context.Context, userID, hostID, op string, fn func(e NetworkEngine) error) error {
 	if p.err != nil {
 		return p.err
 	}

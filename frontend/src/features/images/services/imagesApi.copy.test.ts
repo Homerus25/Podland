@@ -21,7 +21,7 @@ describe("getImageCopyPreview", () => {
 		};
 		server.use(
 			http.get(
-				`*/api/machines/m-1/images/${encodeURIComponent(imageId)}/copy-preview`,
+				`*/api/hosts/m-1/images/${encodeURIComponent(imageId)}/copy-preview`,
 				({ request }) => {
 					const url = new URL(request.url);
 					captured.path = url.pathname;
@@ -34,9 +34,9 @@ describe("getImageCopyPreview", () => {
 		const preview = await getImageCopyPreview("m-1", imageId, "m-2");
 
 		expect(captured.path).toBe(
-			`/api/machines/m-1/images/${encodeURIComponent(imageId)}/copy-preview`,
+			`/api/hosts/m-1/images/${encodeURIComponent(imageId)}/copy-preview`,
 		);
-		expect(captured.query?.get("targetMachineId")).toBe("m-2");
+		expect(captured.query?.get("targetHostId")).toBe("m-2");
 		expect(preview).toEqual(imageCopyPreviewFixture());
 	});
 
@@ -44,7 +44,7 @@ describe("getImageCopyPreview", () => {
 		const facts = imageCopyPreviewFixture({ present: true });
 		server.use(
 			http.get(
-				`*/api/machines/m-1/images/${encodeURIComponent(imageId)}/copy-preview`,
+				`*/api/hosts/m-1/images/${encodeURIComponent(imageId)}/copy-preview`,
 				() => HttpResponse.json(facts),
 			),
 		);
@@ -58,7 +58,7 @@ describe("getImageCopyPreview", () => {
 describe("imageCopyStreamUrl", () => {
 	it("builds the full copy-stream URL for the fetch transport", () => {
 		expect(imageCopyStreamUrl("m-1", imageId)).toBe(
-			`/api/machines/m-1/images/${encodeURIComponent(imageId)}/copy`,
+			`/api/hosts/m-1/images/${encodeURIComponent(imageId)}/copy`,
 		);
 	});
 });

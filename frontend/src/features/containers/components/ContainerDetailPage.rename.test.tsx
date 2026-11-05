@@ -10,7 +10,7 @@ import { errorResponse } from "@/test/errors";
 import {
 	containerDetailFixture,
 	containerFixture,
-	machineFixture,
+	hostFixture,
 	podFixture,
 } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
@@ -30,9 +30,9 @@ interface Counters {
 // The sibling lists the detail page does not render itself: mounting them
 // alongside the page is how the invalidation is observed through MSW
 // (feature tests assert refetch, never invalidation spies).
-function SiblingLists({ machineId }: { machineId: string }) {
-	useContainers(machineId);
-	usePods(machineId);
+function SiblingLists({ hostId }: { hostId: string }) {
+	useContainers(hostId);
+	usePods(hostId);
 	return null;
 }
 
@@ -49,18 +49,18 @@ function setup(
 	let renamed = false;
 
 	server.use(
-		http.get("*/api/machines/m-1", () =>
+		http.get("*/api/hosts/m-1", () =>
 			HttpResponse.json(
-				machineFixture({ permission, isOwner: permission === "admin" }),
+				hostFixture({ permission, isOwner: permission === "admin" }),
 			),
 		),
-		http.get("*/api/machines/m-1/containers/c-1", () => {
+		http.get("*/api/hosts/m-1/containers/c-1", () => {
 			counters.detail++;
 			return HttpResponse.json(
 				containerDetailFixture(renamed ? { name: "renamed" } : {}),
 			);
 		}),
-		http.get("*/api/machines/m-1/containers", () => {
+		http.get("*/api/hosts/m-1/containers", () => {
 			counters.containers++;
 			return HttpResponse.json({
 				containers: [containerFixture()],
@@ -68,7 +68,7 @@ function setup(
 				timestamp: "2026-08-20T10:00:00Z",
 			});
 		}),
-		http.get("*/api/machines/m-1/pods", () => {
+		http.get("*/api/hosts/m-1/pods", () => {
 			counters.pods++;
 			return HttpResponse.json({
 				pods: [podFixture()],
@@ -76,7 +76,7 @@ function setup(
 				timestamp: "2026-08-20T10:00:00Z",
 			});
 		}),
-		http.post("*/api/machines/m-1/containers/c-1/rename", () => {
+		http.post("*/api/hosts/m-1/containers/c-1/rename", () => {
 			counters.rename++;
 			if (options.renameResponder) return options.renameResponder();
 			renamed = true;
@@ -91,16 +91,16 @@ function renderDetailPage() {
 	return renderWithQuery(
 		<Routes>
 			<Route
-				path="/machines/:machineId/containers/:containerId"
+				path="/hosts/:hostId/containers/:containerId"
 				element={
 					<>
 						<ContainerDetailPage />
-						<SiblingLists machineId="m-1" />
+						<SiblingLists hostId="m-1" />
 					</>
 				}
 			/>
 		</Routes>,
-		{ router: { initialEntries: ["/machines/m-1/containers/c-1"] } },
+		{ router: { initialEntries: ["/hosts/m-1/containers/c-1"] } },
 	);
 }
 
@@ -131,7 +131,7 @@ describe("ContainerDetailPage rename", () => {
 		const hint = screen.getByTestId("rename-permission-hint");
 		expect(hint).toHaveAttribute("data-requirement", "write");
 		expect(hint).toHaveTextContent(
-			"You have read-only access to this machine. Ask an owner or admin for write access to manage its containers.",
+			"You have read-only access to this host. Ask an owner or admin for write access to manage its containers.",
 		);
 		// The hint sits in the Name row, beside the name it guards.
 		const nameRow = screen.getByTestId("container-detail-name").closest("tr");
@@ -151,8 +151,8 @@ describe("ContainerDetailPage rename", () => {
 		expect(screen.getByTestId("rename-container-submit")).toBeDisabled();
 	});
 
-	it("renders neither the button nor the hint while the machine query is pending", async () => {
-		// The machine query is the gate's only input: while it is in flight
+	it("renders neither the button nor the hint while the host query is pending", async () => {
+		// The host query is the gate's only input: while it is in flight
 		// the caller's level is unknown, so the Name row must not flash the
 		// read-only hint at a write-capable caller.
 		setup();
@@ -161,9 +161,9 @@ describe("ContainerDetailPage rename", () => {
 			release = resolve;
 		});
 		server.use(
-			http.get("*/api/machines/m-1", async () => {
+			http.get("*/api/hosts/m-1", async () => {
 				await gate;
-				return HttpResponse.json(machineFixture({ permission: "write" }));
+				return HttpResponse.json(hostFixture({ permission: "write" }));
 			}),
 		);
 		renderDetailPage();

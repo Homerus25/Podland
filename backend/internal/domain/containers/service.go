@@ -16,7 +16,7 @@ import (
 )
 
 // ContainerService provides business logic for containers. Every
-// machine-scoped podman call crosses the ContainerEngineProvider (the
+// host-scoped podman call crosses the ContainerEngineProvider (the
 // connection seam); the service itself owns only domain mapping,
 // composition, and dispatch to the streaming kit's log rituals.
 type ContainerService struct {
@@ -30,10 +30,10 @@ func NewContainerService(engines ContainerEngineProvider) *ContainerService {
 	}
 }
 
-// List returns a list of containers on the specified machine
-func (s *ContainerService) List(ctx context.Context, userID, machineID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error) {
+// List returns a list of containers on the specified host
+func (s *ContainerService) List(ctx context.Context, userID, hostID string, opts entities.ContainerListOptions) ([]entities.ListContainer, error) {
 	var containers []entities.ListContainer
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.List", func(e ContainerEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "containers.List", func(e ContainerEngine) error {
 		list, err := e.List(opts)
 		if err != nil {
 			return fmt.Errorf("failed to list containers: %w", err)
@@ -44,7 +44,7 @@ func (s *ContainerService) List(ctx context.Context, userID, machineID string, o
 	return containers, err
 }
 
-// Create creates a new container on the specified machine. The
+// Create creates a new container on the specified host. The
 // request → specgen mapping lives in the pure builder (buildCreateSpec,
 // create_spec.go — the per-domain create builder settlement,
 // backend-conventions); the spec is built before the lease is acquired,
@@ -52,14 +52,14 @@ func (s *ContainerService) List(ctx context.Context, userID, machineID string, o
 // costs an engine lease, and this closure is a thin lease: the engine
 // call plus the not-found classification. The service returns podman's
 // create report; the handler maps the response DTO.
-func (s *ContainerService) Create(ctx context.Context, userID, machineID string, request ContainerCreateRequest) (*entities.ContainerCreateReport, error) {
+func (s *ContainerService) Create(ctx context.Context, userID, hostID string, request ContainerCreateRequest) (*entities.ContainerCreateReport, error) {
 	spec, err := buildCreateSpec(request)
 	if err != nil {
 		return nil, err
 	}
 
 	var report *entities.ContainerCreateReport
-	err = s.engines.WithEngine(ctx, userID, machineID, "containers.Create", func(e ContainerEngine) error {
+	err = s.engines.WithEngine(ctx, userID, hostID, "containers.Create", func(e ContainerEngine) error {
 		// Create the container using Podman API. A not-found answer is
 		// the missing-image terminal — unless the request asked for a
 		// pod, in which case the missing pod is the terminal: the doku
@@ -88,9 +88,9 @@ func (s *ContainerService) Create(ctx context.Context, userID, machineID string,
 }
 
 // Get returns detailed information about a specific container
-func (s *ContainerService) Get(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
+func (s *ContainerService) Get(ctx context.Context, userID, hostID, containerID string) (*entities.ContainerInspectReport, error) {
 	var report *entities.ContainerInspectReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Get", func(e ContainerEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Get", func(e ContainerEngine) error {
 		inspectReport, err := inspectContainer(e, containerID)
 		if err != nil {
 			return err
@@ -105,9 +105,9 @@ func (s *ContainerService) Get(ctx context.Context, userID, machineID, container
 // Inspect returns the container's raw podman inspect report. Unlike
 // Get, the report crosses the wire unmapped: this endpoint is the raw
 // inspect JSON window, so no DTO mapping happens here or in the handler.
-func (s *ContainerService) Inspect(ctx context.Context, userID, machineID, containerID string) (*entities.ContainerInspectReport, error) {
+func (s *ContainerService) Inspect(ctx context.Context, userID, hostID, containerID string) (*entities.ContainerInspectReport, error) {
 	var report *entities.ContainerInspectReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Inspect", func(e ContainerEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Inspect", func(e ContainerEngine) error {
 		inspectReport, err := inspectContainer(e, containerID)
 		if err != nil {
 			return err
@@ -119,7 +119,7 @@ func (s *ContainerService) Inspect(ctx context.Context, userID, machineID, conta
 	return report, err
 }
 
-// Start starts a container by ID on the specified machine. The service
+// Start starts a container by ID on the specified host. The service
 // inspects the container first — one inspect serves existence, state,
 // and name — and answers the documented wrong-state terminal before
 // any start call: podman's already-running refusal produces no error
@@ -129,9 +129,9 @@ func (s *ContainerService) Inspect(ctx context.Context, userID, machineID, conta
 // error; a missing container answers ErrContainerNotFound, anything
 // else is wrapped, never answered as a running success; the handler
 // maps the result to the response DTO.
-func (s *ContainerService) Start(ctx context.Context, userID, machineID, containerID string) (*ContainerStartResult, error) {
+func (s *ContainerService) Start(ctx context.Context, userID, hostID, containerID string) (*ContainerStartResult, error) {
 	var result *ContainerStartResult
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Start", func(e ContainerEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Start", func(e ContainerEngine) error {
 		report, err := inspectContainer(e, containerID)
 		if err != nil {
 			return err
@@ -157,7 +157,7 @@ func (s *ContainerService) Start(ctx context.Context, userID, machineID, contain
 	return result, err
 }
 
-// Stop stops a container by ID on the specified machine. The service
+// Stop stops a container by ID on the specified host. The service
 // inspects the container first — one inspect serves existence, state,
 // and name — and answers the documented wrong-state terminal before
 // any stop call: podman's not-running refusal produces no error shape
@@ -167,9 +167,9 @@ func (s *ContainerService) Start(ctx context.Context, userID, machineID, contain
 // container answers ErrContainerNotFound, anything else is wrapped,
 // never answered as a stopped success; the handler maps the result to
 // the response DTO.
-func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containerID string) (*ContainerStopResult, error) {
+func (s *ContainerService) Stop(ctx context.Context, userID, hostID, containerID string) (*ContainerStopResult, error) {
 	var result *ContainerStopResult
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Stop", func(e ContainerEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Stop", func(e ContainerEngine) error {
 		report, err := inspectContainer(e, containerID)
 		if err != nil {
 			return err
@@ -195,7 +195,7 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 	return result, err
 }
 
-// Restart restarts a running container by ID on the specified machine.
+// Restart restarts a running container by ID on the specified host.
 // Like Stop it inspects first — one inspect serves existence, state, and
 // name — and answers the documented wrong-state terminal before any
 // restart call: a stopped container is Start's caller, not this one, so
@@ -205,9 +205,9 @@ func (s *ContainerService) Stop(ctx context.Context, userID, machineID, containe
 // report slice into one error; a missing container answers
 // ErrContainerNotFound, anything else is wrapped, never answered as a
 // restarted success; the handler maps the result to the response DTO.
-func (s *ContainerService) Restart(ctx context.Context, userID, machineID, containerID string) (*ContainerRestartResult, error) {
+func (s *ContainerService) Restart(ctx context.Context, userID, hostID, containerID string) (*ContainerRestartResult, error) {
 	var result *ContainerRestartResult
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Restart", func(e ContainerEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Restart", func(e ContainerEngine) error {
 		report, err := inspectContainer(e, containerID)
 		if err != nil {
 			return err
@@ -242,7 +242,7 @@ func inspectContainer(e ContainerEngine, containerID string) (*entities.Containe
 	return inspect.Resolve(reports, inspectErrs, err, appErrors.ErrContainerNotFound, "container", containerID)
 }
 
-// Rename renames a container on the specified machine and answers the
+// Rename renames a container on the specified host and answers the
 // container's post-rename inspect report, so the handler maps the same
 // detail DTO the detail GET does. Podman renames running and stopped
 // containers alike — no state restriction, and no quadlet-owned
@@ -251,9 +251,9 @@ func inspectContainer(e ContainerEngine, containerID string) (*entities.Containe
 // shape is podman's to validate: an invalid name is a client error and
 // answers 400 INVALID_REQUEST carrying podman's message, while a name
 // already in use answers the domain's 409 collision sentinel.
-func (s *ContainerService) Rename(ctx context.Context, userID, machineID, containerID, newName string) (*entities.ContainerInspectReport, error) {
+func (s *ContainerService) Rename(ctx context.Context, userID, hostID, containerID, newName string) (*entities.ContainerInspectReport, error) {
 	var report *entities.ContainerInspectReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Rename", func(e ContainerEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Rename", func(e ContainerEngine) error {
 		if err := e.Rename(containerID, newName); err != nil {
 			if podmanerr.IsAlreadyExists(err) {
 				return appErrors.ErrContainerAlreadyExists
@@ -289,7 +289,7 @@ func (s *ContainerService) Rename(ctx context.Context, userID, machineID, contai
 }
 
 // Update changes a container's resource limits and healthcheck
-// configuration on the specified machine and answers the container's
+// configuration on the specified host and answers the container's
 // post-update inspect report, so the handler maps the same detail DTO
 // the detail GET does — one round trip carries the new state. The
 // request → podman update options mapping lives in the pure update
@@ -304,14 +304,14 @@ func (s *ContainerService) Rename(ctx context.Context, userID, machineID, contai
 // changes live to a running container and rewrites a stopped one's
 // config for the next start — and a missing container answers
 // ErrContainerNotFound, the same envelope as start/stop.
-func (s *ContainerService) Update(ctx context.Context, userID, machineID, containerID string, request ContainerUpdateRequest) (*entities.ContainerInspectReport, error) {
+func (s *ContainerService) Update(ctx context.Context, userID, hostID, containerID string, request ContainerUpdateRequest) (*entities.ContainerInspectReport, error) {
 	opts, err := buildUpdateOptions(request)
 	if err != nil {
 		return nil, err
 	}
 
 	var report *entities.ContainerInspectReport
-	err = s.engines.WithEngine(ctx, userID, machineID, "containers.Update", func(e ContainerEngine) error {
+	err = s.engines.WithEngine(ctx, userID, hostID, "containers.Update", func(e ContainerEngine) error {
 		if err := e.Update(containerID, opts); err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrContainerNotFound
@@ -346,12 +346,12 @@ func containerName(report *entities.ContainerInspectReport, containerID string) 
 	return containerID
 }
 
-// Delete removes a container by ID on the specified machine.
+// Delete removes a container by ID on the specified host.
 // The force option allows removing running containers. The engine
 // folds podman's report slice into one error; a missing container
 // answers ErrContainerNotFound, anything else is wrapped.
-func (s *ContainerService) Delete(ctx context.Context, userID, machineID, containerID string, force bool) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "containers.Delete", func(e ContainerEngine) error {
+func (s *ContainerService) Delete(ctx context.Context, userID, hostID, containerID string, force bool) error {
+	return s.engines.WithEngine(ctx, userID, hostID, "containers.Delete", func(e ContainerEngine) error {
 		if err := e.Remove(containerID, force); err != nil {
 			if podmanerr.IsNotFound(err) {
 				return appErrors.ErrContainerNotFound
@@ -363,13 +363,13 @@ func (s *ContainerService) Delete(ctx context.Context, userID, machineID, contai
 	})
 }
 
-// Prune removes every stopped container on the machine in one call and
+// Prune removes every stopped container on the host in one call and
 // returns podman's per-container reports. Running containers are
 // untouched — podman's own semantics, which is the blast-radius
 // mitigation for this endpoint.
-func (s *ContainerService) Prune(ctx context.Context, userID, machineID string) ([]*reports.PruneReport, error) {
+func (s *ContainerService) Prune(ctx context.Context, userID, hostID string) ([]*reports.PruneReport, error) {
 	var prunes []*reports.PruneReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Prune", func(e ContainerEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Prune", func(e ContainerEngine) error {
 		p, err := e.Prune()
 		if err != nil {
 			return fmt.Errorf("failed to prune containers: %w", err)
@@ -381,15 +381,15 @@ func (s *ContainerService) Prune(ctx context.Context, userID, machineID string) 
 }
 
 // Stats answers a one-shot stats snapshot: every running container on
-// the machine when no target IDs are given (all set), or the target
+// the host when no target IDs are given (all set), or the target
 // containers' snapshot otherwise. A not-found answer is the domain's
 // existing 404 sentinel with podman's own message riding along as the
 // disambiguator: podman's stats handler maps any first-report error to
 // 404, so an unknown container and a known-but-not-running one cannot
 // be honestly distinguished here.
-func (s *ContainerService) Stats(ctx context.Context, userID, machineID string, ids []string, all bool) ([]libpoddefine.ContainerStats, error) {
+func (s *ContainerService) Stats(ctx context.Context, userID, hostID string, ids []string, all bool) ([]libpoddefine.ContainerStats, error) {
 	var stats []libpoddefine.ContainerStats
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.Stats", func(e ContainerEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Stats", func(e ContainerEngine) error {
 		snapshot, err := e.Stats(ids, all)
 		if err != nil {
 			if podmanerr.IsNotFound(err) {
@@ -404,12 +404,12 @@ func (s *ContainerService) Stats(ctx context.Context, userID, machineID string, 
 }
 
 // GetLogs retrieves logs for a specific container on the specified
-// machine. The buffered ritual (options build, writer pair, combine,
+// host. The buffered ritual (options build, writer pair, combine,
 // not-found and cancellation mapping) belongs to the kit's FetchLogs;
 // the service keeps validation, engine acquisition, and dispatch.
-func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64) (*ContainerLogsResponse, error) {
+func (s *ContainerService) GetLogs(ctx context.Context, userID, hostID, containerID string, since time.Time, tail int64) (*ContainerLogsResponse, error) {
 	var response *ContainerLogsResponse
-	err := s.engines.WithEngine(ctx, userID, machineID, "containers.GetLogs", func(e ContainerEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "containers.GetLogs", func(e ContainerEngine) error {
 		logs, err := streaming.FetchLogs(ctx, streaming.FetchLogsOp{
 			Target:   containerID,
 			Since:    since,
@@ -434,8 +434,8 @@ func (s *ContainerService) GetLogs(ctx context.Context, userID, machineID, conta
 // streaming callback. The follow ritual (options build, writer pair,
 // not-found and cancellation mapping) belongs to the kit's FollowLogs;
 // the service keeps validation, engine acquisition, and target dispatch.
-func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, machineID, containerID string, since time.Time, tail int64, logCallback func(event streaming.LogEvent)) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "containers.GetLogsWithStream", func(e ContainerEngine) error {
+func (s *ContainerService) GetLogsWithStream(ctx context.Context, userID, hostID, containerID string, since time.Time, tail int64, logCallback func(event streaming.LogEvent)) error {
+	return s.engines.WithEngine(ctx, userID, hostID, "containers.GetLogsWithStream", func(e ContainerEngine) error {
 		return streaming.FollowLogs(ctx, streaming.FollowLogsOp{
 			Target:   containerID,
 			Since:    since,

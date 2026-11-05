@@ -24,10 +24,10 @@ func TestPodService_Pause_ReachesEngine(t *testing.T) {
 	var gotOp string
 	service := NewPodService(fakeEngineProvider{engine: engine, opRecorder: func(op string) { gotOp = op }})
 
-	err := service.Pause(t.Context(), "user", "machine", "web")
+	err := service.Pause(t.Context(), "user", "host", "web")
 
 	require.NoError(t, err)
-	assert.Equal(t, "web", gotName, "the URL-param pod must reach the machine")
+	assert.Equal(t, "web", gotName, "the URL-param pod must reach the host")
 	assert.Equal(t, "pods.Pause", gotOp, "the op tag must name the pods domain")
 }
 
@@ -44,10 +44,10 @@ func TestPodService_Start_ReachesEngine(t *testing.T) {
 	var gotOp string
 	service := NewPodService(fakeEngineProvider{engine: engine, opRecorder: func(op string) { gotOp = op }})
 
-	err := service.Start(t.Context(), "user", "machine", "web")
+	err := service.Start(t.Context(), "user", "host", "web")
 
 	require.NoError(t, err)
-	assert.Equal(t, "web", gotName, "the URL-param pod must reach the machine")
+	assert.Equal(t, "web", gotName, "the URL-param pod must reach the host")
 	assert.Equal(t, "pods.Start", gotOp, "the op tag must name the pods domain")
 }
 
@@ -64,10 +64,10 @@ func TestPodService_Stop_ReachesEngine(t *testing.T) {
 	var gotOp string
 	service := NewPodService(fakeEngineProvider{engine: engine, opRecorder: func(op string) { gotOp = op }})
 
-	err := service.Stop(t.Context(), "user", "machine", "web")
+	err := service.Stop(t.Context(), "user", "host", "web")
 
 	require.NoError(t, err)
-	assert.Equal(t, "web", gotName, "the URL-param pod must reach the machine")
+	assert.Equal(t, "web", gotName, "the URL-param pod must reach the host")
 	assert.Equal(t, "pods.Stop", gotOp, "the op tag must name the pods domain")
 }
 
@@ -84,37 +84,37 @@ func TestPodService_Lifecycle_MissingPodAnswers404(t *testing.T) {
 		{
 			name:  "pause",
 			armed: func(e *fakePodEngine) { e.pauseFn = func(string) error { return notFound } },
-			call:  func(s *PodService) error { return s.Pause(t.Context(), "user", "machine", "ghost") },
+			call:  func(s *PodService) error { return s.Pause(t.Context(), "user", "host", "ghost") },
 		},
 		{
 			name:  "unpause",
 			armed: func(e *fakePodEngine) { e.unpauseFn = func(string) error { return notFound } },
-			call:  func(s *PodService) error { return s.Unpause(t.Context(), "user", "machine", "ghost") },
+			call:  func(s *PodService) error { return s.Unpause(t.Context(), "user", "host", "ghost") },
 		},
 		{
 			name:  "kill",
 			armed: func(e *fakePodEngine) { e.killFn = func(string) error { return notFound } },
-			call:  func(s *PodService) error { return s.Kill(t.Context(), "user", "machine", "ghost") },
+			call:  func(s *PodService) error { return s.Kill(t.Context(), "user", "host", "ghost") },
 		},
 		{
 			name:  "restart",
 			armed: func(e *fakePodEngine) { e.restartFn = func(string) error { return notFound } },
-			call:  func(s *PodService) error { return s.Restart(t.Context(), "user", "machine", "ghost") },
+			call:  func(s *PodService) error { return s.Restart(t.Context(), "user", "host", "ghost") },
 		},
 		{
 			name:  "start",
 			armed: func(e *fakePodEngine) { e.startFn = func(string) error { return notFound } },
-			call:  func(s *PodService) error { return s.Start(t.Context(), "user", "machine", "ghost") },
+			call:  func(s *PodService) error { return s.Start(t.Context(), "user", "host", "ghost") },
 		},
 		{
 			name:  "stop",
 			armed: func(e *fakePodEngine) { e.stopFn = func(string) error { return notFound } },
-			call:  func(s *PodService) error { return s.Stop(t.Context(), "user", "machine", "ghost") },
+			call:  func(s *PodService) error { return s.Stop(t.Context(), "user", "host", "ghost") },
 		},
 		{
 			name:  "remove",
 			armed: func(e *fakePodEngine) { e.removeFn = func(string, bool) error { return notFound } },
-			call:  func(s *PodService) error { return s.Remove(t.Context(), "user", "machine", "ghost", false) },
+			call:  func(s *PodService) error { return s.Remove(t.Context(), "user", "host", "ghost", false) },
 		},
 	}
 
@@ -145,32 +145,32 @@ func TestPodService_Lifecycle_ConflictRefusalAnswersStateConflict(t *testing.T) 
 		{
 			name:  "pause",
 			armed: func(e *fakePodEngine) { e.pauseFn = func(string) error { return conflict } },
-			call:  func(s *PodService) error { return s.Pause(t.Context(), "user", "machine", "web") },
+			call:  func(s *PodService) error { return s.Pause(t.Context(), "user", "host", "web") },
 		},
 		{
 			name:  "unpause",
 			armed: func(e *fakePodEngine) { e.unpauseFn = func(string) error { return conflict } },
-			call:  func(s *PodService) error { return s.Unpause(t.Context(), "user", "machine", "web") },
+			call:  func(s *PodService) error { return s.Unpause(t.Context(), "user", "host", "web") },
 		},
 		{
 			name:  "kill",
 			armed: func(e *fakePodEngine) { e.killFn = func(string) error { return conflict } },
-			call:  func(s *PodService) error { return s.Kill(t.Context(), "user", "machine", "web") },
+			call:  func(s *PodService) error { return s.Kill(t.Context(), "user", "host", "web") },
 		},
 		{
 			name:  "restart",
 			armed: func(e *fakePodEngine) { e.restartFn = func(string) error { return conflict } },
-			call:  func(s *PodService) error { return s.Restart(t.Context(), "user", "machine", "web") },
+			call:  func(s *PodService) error { return s.Restart(t.Context(), "user", "host", "web") },
 		},
 		{
 			name:  "start",
 			armed: func(e *fakePodEngine) { e.startFn = func(string) error { return conflict } },
-			call:  func(s *PodService) error { return s.Start(t.Context(), "user", "machine", "web") },
+			call:  func(s *PodService) error { return s.Start(t.Context(), "user", "host", "web") },
 		},
 		{
 			name:  "stop",
 			armed: func(e *fakePodEngine) { e.stopFn = func(string) error { return conflict } },
-			call:  func(s *PodService) error { return s.Stop(t.Context(), "user", "machine", "web") },
+			call:  func(s *PodService) error { return s.Stop(t.Context(), "user", "host", "web") },
 		},
 	}
 
@@ -206,7 +206,7 @@ func TestPodService_Remove_RunningRefusalAnswersStateConflict(t *testing.T) {
 	}
 	service := NewPodService(fakeEngineProvider{engine: engine})
 
-	err := service.Remove(t.Context(), "user", "machine", "web", false)
+	err := service.Remove(t.Context(), "user", "host", "web", false)
 
 	var appErr *appErrors.AppError
 	require.ErrorAs(t, err, &appErr, "the running refusal must map to an AppError")
@@ -227,10 +227,10 @@ func TestPodService_Remove_ForceReachesEngine(t *testing.T) {
 	}
 	service := NewPodService(fakeEngineProvider{engine: engine})
 
-	err := service.Remove(t.Context(), "user", "machine", "web", true)
+	err := service.Remove(t.Context(), "user", "host", "web", true)
 
 	require.NoError(t, err)
-	assert.True(t, gotForce, "the force flag must reach the machine")
+	assert.True(t, gotForce, "the force flag must reach the host")
 }
 
 // TestPodService_Prune_ReturnsPodmanReports pins the prune service
@@ -247,7 +247,7 @@ func TestPodService_Prune_ReturnsPodmanReports(t *testing.T) {
 	}
 	service := NewPodService(fakeEngineProvider{engine: engine})
 
-	got, err := service.Prune(t.Context(), "user", "machine")
+	got, err := service.Prune(t.Context(), "user", "host")
 
 	require.NoError(t, err)
 	assert.Equal(t, reports, got, "the engine's reports must pass through untouched")

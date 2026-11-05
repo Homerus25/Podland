@@ -83,7 +83,7 @@ const (
 type PullProgressEvent struct {
 	OperationID string      `json:"operationId"`
 	Type        string      `json:"type"`
-	MachineID   string      `json:"machineId"`
+	HostID      string      `json:"hostId"`
 	State       *EventState `json:"state,omitempty"`
 	Error       *EventError `json:"error,omitempty"`
 	Timestamp   string      `json:"timestamp"`
@@ -105,10 +105,10 @@ type EventError struct {
 
 // NewProgressEvent creates a new progress event. The operation ID is
 // left zero here and stamped by the handler that owns the operation.
-func NewProgressEvent(machineID, status, message string, current, total int) PullProgressEvent {
+func NewProgressEvent(hostID, status, message string, current, total int) PullProgressEvent {
 	return PullProgressEvent{
-		Type:      EventTypeProgress,
-		MachineID: machineID,
+		Type:   EventTypeProgress,
+		HostID: hostID,
 		State: &EventState{
 			Current: current,
 			Total:   total,
@@ -120,11 +120,11 @@ func NewProgressEvent(machineID, status, message string, current, total int) Pul
 }
 
 // NewCompleteEvent creates a new complete event
-func NewCompleteEvent(operationID, machineID string) PullProgressEvent {
+func NewCompleteEvent(operationID, hostID string) PullProgressEvent {
 	return PullProgressEvent{
 		OperationID: operationID,
 		Type:        EventTypeComplete,
-		MachineID:   machineID,
+		HostID:      hostID,
 		State: &EventState{
 			Status: "completed",
 		},
@@ -133,11 +133,11 @@ func NewCompleteEvent(operationID, machineID string) PullProgressEvent {
 }
 
 // NewErrorEvent creates a new error event
-func NewErrorEvent(operationID, machineID string, code, message string) PullProgressEvent {
+func NewErrorEvent(operationID, hostID string, code, message string) PullProgressEvent {
 	return PullProgressEvent{
 		OperationID: operationID,
 		Type:        EventTypeError,
-		MachineID:   machineID,
+		HostID:      hostID,
 		Error: &EventError{
 			Code:    code,
 			Message: message,

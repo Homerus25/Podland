@@ -24,16 +24,16 @@ import (
 
 // Test_Integration_Images_PullListDelete is the images vertical slice for
 // the real-podman integration suite (PRD 080-02). It exercises the full
-// images pipeline end-to-end against the once-registered machine:
+// images pipeline end-to-end against the once-registered host:
 //
-//	POST   /api/machines/{id}/images/pull   → NDJSON progress stream
-//	GET    /api/machines/{id}/images        → list (run-scoped filter)
-//	DELETE /api/machines/{id}/images/{id}   → remove
+//	POST   /api/hosts/{id}/images/pull   → NDJSON progress stream
+//	GET    /api/hosts/{id}/images        → list (run-scoped filter)
+//	DELETE /api/hosts/{id}/images/{id}   → remove
 //
 // The pull proves the registry → SSH tunnel → podman socket path,
 // including consuming the NDJSON pull-progress stream. List and delete
 // then operate on exactly what the pull produced, scoped by a run-scoped
-// tag so a pre-dirty shared machine can't cause a false failure.
+// tag so a pre-dirty shared host can't cause a false failure.
 //
 // Isolation model (per the master PRD's "run-scoped tag + per-test
 // cleanup + suite sweep" ruling):
@@ -45,8 +45,8 @@ import (
 //     scaffolding for isolation, NOT part of the system under test (the
 //     API has no tag endpoint today).
 //   - t.Cleanup fully restores state: it removes the run-scoped tag and,
-//     if busybox:latest already lived on the machine before this run,
-//     re-pulls it so the shared machine is left as found.
+//     if busybox:latest already lived on the host before this run,
+//     re-pulls it so the shared host is left as found.
 //   - A suite-teardown sweep (registered once per process) removes any
 //     leftover run-scoped references if a test aborted before its
 //     t.Cleanup fired (e.g. SIGINT).
@@ -54,7 +54,7 @@ func Test_Integration_Images_PullListDelete(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerImagesSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 	runScopedRef := "localhost/it-" + suite.RunID + "-busybox:latest"
 	// runScopedNeedle is the substring used for client-side filtering of
 	// RepoTags. It intentionally omits the ":latest" suffix and the
@@ -62,24 +62,24 @@ func Test_Integration_Images_PullListDelete(t *testing.T) {
 	// how podman normalises the stored reference.
 	runScopedNeedle := "it-" + suite.RunID + "-busybox"
 
-	// Detect whether busybox already lived on the shared machine so
+	// Detect whether busybox already lived on the shared host so
 	// cleanup can restore it. The needle is the canonical fully-qualified
 	// repo that `podman pull busybox:latest` produces — NOT a bare
 	// "busybox" substring — so unrelated images (e.g. my-busybox-tool)
 	// can't false-positive into an unnecessary (and junk-leaving)
 	// restore re-pull.
-	busyboxPreexisted := imageRepoPresent(t, machineID, "docker.io/library/busybox")
-	t.Logf("pre-check: busybox pre-existing on machine = %v", busyboxPreexisted)
+	busyboxPreexisted := imageRepoPresent(t, hostID, "docker.io/library/busybox")
+	t.Logf("pre-check: busybox pre-existing on host = %v", busyboxPreexisted)
 
 	// Per-test cleanup. Registered before the pull so it runs even if a
-	// later phase fails. Restores the shared machine to its prior state.
+	// later phase fails. Restores the shared host to its prior state.
 	t.Cleanup(func() {
 		// Remove the run-scoped tag we created. Best-effort: errors are
 		// logged, not fatal (the sweep is the backstop).
 		if out, err := podmanConnRun("rmi", runScopedRef); err != nil {
 			t.Logf("cleanup: rmi %q best-effort failed: %v (%s)", runScopedRef, err, strings.TrimSpace(out))
 		}
-		// If busybox:latest was on the machine before we touched it, the
+		// If busybox:latest was on the host before we touched it, the
 		// force-delete-by-ID below removed it along with our tag. Pull it
 		// back so we leave no trace. This is the only path that mutates
 		// pre-existing state, and it restores it exactly.
@@ -92,7 +92,7 @@ func Test_Integration_Images_PullListDelete(t *testing.T) {
 
 	// --- AC #1: pull via API, consume NDJSON progress to completion ---
 	t.Run("PullBusybox", func(t *testing.T) {
-		ok := pullImageStreamToCompletion(t, machineID, "busybox:latest")
+		ok := pullImageStreamToCompletion(t, hostID, "busybox:latest")
 		require.True(t, ok,
 			"pull must terminate with a 'complete' event and no 'error' event")
 	})
@@ -112,7 +112,7 @@ func Test_Integration_Images_PullListDelete(t *testing.T) {
 	// --- AC #2: list returns the pulled image (run-scoped assertion) ---
 	var imageID string
 	t.Run("ListReturnsPulledImage", func(t *testing.T) {
-		imageID = findRunScopedImageID(t, machineID, runScopedNeedle)
+		imageID = findRunScopedImageID(t, hostID, runScopedNeedle)
 		require.NotEmpty(t, imageID, "run-scoped image must expose an ID for delete")
 		t.Logf("run-scoped image found: id=%s", imageID)
 	})
@@ -123,8 +123,8 @@ func Test_Integration_Images_PullListDelete(t *testing.T) {
 	// --- AC #3: delete removes it; subsequent list no longer has it ---
 	t.Run("DeleteRemovesImage", func(t *testing.T) {
 		require.NotEmpty(t, imageID, "delete requires the image ID captured in the list phase")
-		deleteImageByID(t, machineID, imageID)
-		requireNoRunScopedImage(t, machineID, runScopedNeedle)
+		deleteImageByID(t, hostID, imageID)
+		requireNoRunScopedImage(t, hostID, runScopedNeedle)
 	})
 }
 
@@ -146,7 +146,7 @@ const pullStreamTimeout = 3 * time.Minute
 // Timeout covers the entire request including body read — which would cut
 // a streaming pull mid-stream. The hang guard is the request-scoped
 // context (pullStreamTimeout) instead.
-func pullImageStreamToCompletion(t *testing.T, machineID, image string) bool {
+func pullImageStreamToCompletion(t *testing.T, hostID, image string) bool {
 	t.Helper()
 	body, err := json.Marshal(map[string]string{"image": image})
 	require.NoError(t, err)
@@ -154,13 +154,13 @@ func pullImageStreamToCompletion(t *testing.T, machineID, image string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), pullStreamTimeout)
 	defer cancel()
 
-	pullURL := suite.ServerURL + "/api/machines/" + machineID + "/images/pull"
+	pullURL := suite.ServerURL + "/api/hosts/" + hostID + "/images/pull"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pullURL, bytes.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	// Bearer header is set by hand (not via suite.AuthenticatedClient)
 	// because we need a no-timeout client for streaming. main_test.go's
-	// registerMachine follows the same hand-set-header pattern when it
+	// registerHost follows the same hand-set-header pattern when it
 	// also can't use the default Suite client.
 	req.Header.Set("Authorization", "Bearer "+suite.Token)
 
@@ -223,12 +223,12 @@ type imageDTO struct {
 	RepoTags []string `json:"repoTags"`
 }
 
-// listImages GETs /api/machines/{id}/images/ and decodes the JSON array.
+// listImages GETs /api/hosts/{id}/images/ and decodes the JSON array.
 // The list endpoint returns a bare JSON array ([]ImageListResponse), not
 // an envelope — unlike the containers list which wraps in an object.
-func listImages(t *testing.T, machineID string) []imageDTO {
+func listImages(t *testing.T, hostID string) []imageDTO {
 	t.Helper()
-	listURL := suite.ServerURL + "/api/machines/" + machineID + "/images/"
+	listURL := suite.ServerURL + "/api/hosts/" + hostID + "/images/"
 	resp, err := suite.AuthenticatedClient().Get(listURL)
 	require.NoError(t, err, "GET /images")
 	defer resp.Body.Close()
@@ -255,12 +255,12 @@ func tagsContainNeedle(tags []string, needle string) bool {
 	return false
 }
 
-// imageRepoPresent reports whether any image on the machine carries a
+// imageRepoPresent reports whether any image on the host carries a
 // repo tag containing needle. Client-side check over an unfiltered list
 // so the result is independent of podman's reference-filter quirks.
-func imageRepoPresent(t *testing.T, machineID, needle string) bool {
+func imageRepoPresent(t *testing.T, hostID, needle string) bool {
 	t.Helper()
-	for _, img := range listImages(t, machineID) {
+	for _, img := range listImages(t, hostID) {
 		if tagsContainNeedle(img.RepoTags, needle) {
 			return true
 		}
@@ -270,12 +270,12 @@ func imageRepoPresent(t *testing.T, machineID, needle string) bool {
 
 // findRunScopedImageID lists images and asserts that exactly one carries
 // a tag mentioning the run-scoped needle, returning its image ID. The
-// assertion is scoped to the run so other images on the shared machine
+// assertion is scoped to the run so other images on the shared host
 // cannot cause a false failure (PRD AC #2).
-func findRunScopedImageID(t *testing.T, machineID, needle string) string {
+func findRunScopedImageID(t *testing.T, hostID, needle string) string {
 	t.Helper()
 	var matched []imageDTO
-	for _, img := range listImages(t, machineID) {
+	for _, img := range listImages(t, hostID) {
 		if tagsContainNeedle(img.RepoTags, needle) {
 			matched = append(matched, img)
 		}
@@ -286,12 +286,12 @@ func findRunScopedImageID(t *testing.T, machineID, needle string) string {
 	return matched[0].ID
 }
 
-// requireNoRunScopedImage asserts that no image on the machine carries a
+// requireNoRunScopedImage asserts that no image on the host carries a
 // run-scoped tag anymore — i.e. the delete actually removed it.
-func requireNoRunScopedImage(t *testing.T, machineID, needle string) {
+func requireNoRunScopedImage(t *testing.T, hostID, needle string) {
 	t.Helper()
 	var leftover []imageDTO
-	for _, img := range listImages(t, machineID) {
+	for _, img := range listImages(t, hostID) {
 		if tagsContainNeedle(img.RepoTags, needle) {
 			leftover = append(leftover, img)
 		}
@@ -312,9 +312,9 @@ func requireNoRunScopedImage(t *testing.T, machineID, needle string) {
 // force=true removes the image and ALL its tags, so if busybox:latest
 // pre-existed it is also removed here — t.Cleanup re-pulls it to restore
 // the prior state.
-func deleteImageByID(t *testing.T, machineID, imageID string) {
+func deleteImageByID(t *testing.T, hostID, imageID string) {
 	t.Helper()
-	delURL := suite.ServerURL + "/api/machines/" + machineID + "/images/" + imageID + "?force=true"
+	delURL := suite.ServerURL + "/api/hosts/" + hostID + "/images/" + imageID + "?force=true"
 	req, err := http.NewRequest(http.MethodDelete, delURL, nil)
 	require.NoError(t, err)
 	resp, err := suite.AuthenticatedClient().Do(req)
@@ -334,19 +334,19 @@ func deleteImageByID(t *testing.T, machineID, imageID string) {
 // enough for the restore re-pull (registry fetch over the SSH tunnel).
 const podmanCLITimeout = 2 * time.Minute
 
-// podmanConnRun runs `podman --connection <MachineName> <args...>` with
+// podmanConnRun runs `podman --connection <HostName> <args...>` with
 // a bounded context and returns the combined output. Used for the
 // isolation/cleanup CLI ops the images API doesn't expose (tag) or that
 // must work after the backend has torn down (sweep).
 //
-// The connection name comes from Suite.MachineName, which TestMain
+// The connection name comes from Suite.HostName, which TestMain
 // resolves and whose reachability the readiness probe guarantees — so
 // this hits the same host the backend does, including the SSH-override
 // escape hatch (as long as a matching podman connection exists).
 func podmanConnRun(args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), podmanCLITimeout)
 	defer cancel()
-	full := append([]string{"--connection", suite.MachineName}, args...)
+	full := append([]string{"--connection", suite.HostName}, args...)
 	out, err := exec.CommandContext(ctx, "podman", full...).CombinedOutput()
 	if err != nil {
 		// Match main_test.go's convention of folding podman's stderr
@@ -385,13 +385,13 @@ func registerImagesSweep() {
 	})
 }
 
-// sweepRunScopedImages lists every image on the machine and removes any
+// sweepRunScopedImages lists every image on the host and removes any
 // whose repo tag mentions the runID. See registerImagesSweep for the
 // non-destructive (no-force) rationale.
 func sweepRunScopedImages(runID string) {
 	out, err := podmanConnRun("images", "--format", "{{.Repository}}:{{.Tag}}")
 	if err != nil {
-		// Best-effort: a failed list (e.g. machine already stopped) is
+		// Best-effort: a failed list (e.g. host already stopped) is
 		// not a fatal teardown problem.
 		return
 	}
@@ -407,20 +407,20 @@ func sweepRunScopedImages(runID string) {
 }
 
 // Test_Integration_Images_Export is the image export vertical slice
-// (issue 401) against GET /api/machines/{id}/images/{imageId}/export.
+// (issue 401) against GET /api/hosts/{id}/images/{imageId}/export.
 // It pulls the suite's fixture image when absent (restoring the shared
-// machine's prior state on cleanup), exports it through the API as a
+// host's prior state on cleanup), exports it through the API as a
 // read-level user, and untars the response body to verify the
 // docker-archive shape. Access control rides the same slice: no-access
 // users get 403, unknown image IDs get the 404 envelope before any byte
 // is written.
 //
-//	GET /api/machines/{id}/images/{imageId}/export → 200, x-tar
+//	GET /api/hosts/{id}/images/{imageId}/export → 200, x-tar
 func Test_Integration_Images_Export(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerImagesSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// Fixture: busybox, the suite's fixture image, ensured over the same
 	// podman connection the backend uses (scaffolding, not the SUT) —
@@ -438,7 +438,7 @@ func Test_Integration_Images_Export(t *testing.T) {
 	// the short image ID; the body is the image's docker-archive tar ---
 	t.Run("ReadLevelUserCanExport", func(t *testing.T) {
 		client := levelUserClient(t, models.PermissionRead)
-		resp, err := client.Get(suite.ServerURL + "/api/machines/" + machineID + "/images/" + imageID + "/export")
+		resp, err := client.Get(suite.ServerURL + "/api/hosts/" + hostID + "/images/" + imageID + "/export")
 		require.NoError(t, err, "read-level export must connect")
 		defer resp.Body.Close()
 		require.Equal(t, http.StatusOK, resp.StatusCode,
@@ -469,13 +469,13 @@ func Test_Integration_Images_Export(t *testing.T) {
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		expectAPIError(t, noAccessUserClient(t), http.MethodGet,
-			suite.ServerURL+"/api/machines/"+machineID+"/images/"+imageID+"/export",
+			suite.ServerURL+"/api/hosts/"+hostID+"/images/"+imageID+"/export",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
 	t.Run("UnknownImageGets404", func(t *testing.T) {
 		expectAPIError(t, suite.AuthenticatedClient(), http.MethodGet,
-			suite.ServerURL+"/api/machines/"+machineID+"/images/sha256:"+suite.RunID+"-no-such-image/export",
+			suite.ServerURL+"/api/hosts/"+hostID+"/images/sha256:"+suite.RunID+"-no-such-image/export",
 			"", http.StatusNotFound, "IMAGE_NOT_FOUND")
 	})
 }

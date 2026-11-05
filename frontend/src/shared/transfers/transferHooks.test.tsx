@@ -8,7 +8,7 @@ import {
 	useMovePreview,
 	useMoveStream,
 } from "@shared/transfers/transferHooks";
-import { api, machineApiPath } from "@shared/utils/api";
+import { api, hostApiPath } from "@shared/utils/api";
 import { QueryClient } from "@tanstack/react-query";
 import { act, waitFor } from "@testing-library/react";
 import { type DefaultBodyType, HttpResponse, http } from "msw";
@@ -22,8 +22,8 @@ afterEach(() => {
 });
 
 // The transfer-hooks module's suite (issue 273): the ritual every
-// cross-machine move/copy surface shares is pinned once here — the
-// null-target preview, the both-machines invalidation (a partial result is
+// cross-host move/copy surface shares is pinned once here — the
+// null-target preview, the both-hosts invalidation (a partial result is
 // success-shaped), the terminal handling, the malformed-event skip, and the
 // abort-never-an-error rule. The suite supplies its own minimal surface (a
 // key constructor, fetcher, URL builder, event vocabulary, shape guard, and
@@ -36,14 +36,14 @@ afterEach(() => {
 interface TestMoveResult {
 	name: string;
 	status: "moved" | "partial";
-	sourceMachineId: string;
-	targetMachineId: string;
+	sourceHostId: string;
+	targetHostId: string;
 }
 
 interface TestMoveEvent {
 	operationId: string;
 	type: "progress" | "complete" | "error";
-	machineId: string;
+	hostId: string;
 	phase?: string;
 	result?: TestMoveResult;
 	error?: { code: string; message: string };
@@ -68,7 +68,7 @@ function foldProgress(event: TestMoveEvent): string | null {
 
 const streamConfig: MoveStreamConfig<TestMoveEvent, string | null> = {
 	resource: "volumes",
-	url: (id) => `/api/machines/m-1/things/${id}/move`,
+	url: (id) => `/api/hosts/m-1/things/${id}/move`,
 	isEvent: isTestMoveEvent,
 	foldProgress,
 	initialProgress: null,
@@ -86,8 +86,8 @@ function testMoveResult(
 	return {
 		name: "app",
 		status: "moved",
-		sourceMachineId: "m-1",
-		targetMachineId: "m-2",
+		sourceHostId: "m-1",
+		targetHostId: "m-2",
 		...overrides,
 	};
 }
@@ -96,21 +96,21 @@ function progressEvent(overrides: Record<string, unknown> = {}) {
 	return {
 		operationId: "op-1",
 		type: "progress",
-		machineId: "m-1",
+		hostId: "m-1",
 		phase: "start",
 		...overrides,
 	};
 }
 
 function completeEvent(result: TestMoveResult) {
-	return { operationId: "op-1", type: "complete", machineId: "m-1", result };
+	return { operationId: "op-1", type: "complete", hostId: "m-1", result };
 }
 
 function errorEvent(code: string, message: string) {
 	return {
 		operationId: "op-1",
 		type: "error",
-		machineId: "m-1",
+		hostId: "m-1",
 		error: { code, message },
 	};
 }
@@ -127,7 +127,7 @@ function moveStreamResponse(events: Record<string, unknown>[]) {
 type MoveResponse = HttpResponse<DefaultBodyType>;
 type MoveHandler = (request: Request) => MoveResponse | Promise<MoveResponse>;
 
-const moveUrl = "*/api/machines/m-1/things/app/move";
+const moveUrl = "*/api/hosts/m-1/things/app/move";
 
 let requests: Request[] = [];
 
@@ -141,7 +141,7 @@ function mockMoveStream(handler: MoveHandler) {
 	);
 }
 
-const transferInput = { targetMachineId: "m-2", mode: "move" as const };
+const transferInput = { targetHostId: "m-2", mode: "move" as const };
 
 describe("useMoveStream", () => {
 	it("POSTs the transfer body to the surface's URL as an NDJSON operation", async () => {
@@ -155,7 +155,7 @@ describe("useMoveStream", () => {
 		expect(requests).toHaveLength(1);
 		expect(requests[0].method).toBe("POST");
 		expect(new URL(requests[0].url).pathname).toBe(
-			"/api/machines/m-1/things/app/move",
+			"/api/hosts/m-1/things/app/move",
 		);
 		expect(requests[0].headers.get("Content-Type")).toBe("application/json");
 		await waitFor(() => expect(result.current.isRunning).toBe(false));
@@ -210,7 +210,7 @@ describe("useMoveStream", () => {
 		expect(result.current.progress).toBeNull();
 	});
 
-	it("lands the terminal complete event's envelope in the result and invalidates both machines' lists", async () => {
+	it("lands the terminal complete event's envelope in the result and invalidates both hosts' lists", async () => {
 		mockMoveStream(() => moveStreamResponse([completeEvent(testMoveResult())]));
 		const { result, queryClient } = renderMoveStream();
 		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
@@ -229,7 +229,7 @@ describe("useMoveStream", () => {
 		});
 	});
 
-	it("invalidates both machines on a partial result too — the target install stands", async () => {
+	it("invalidates both hosts on a partial result too — the target install stands", async () => {
 		mockMoveStream(() =>
 			moveStreamResponse([
 				completeEvent(testMoveResult({ status: "partial" })),
@@ -257,7 +257,7 @@ describe("useMoveStream", () => {
 		const envelopeLess = {
 			operationId: "op-1",
 			type: "complete",
-			machineId: "m-1",
+			hostId: "m-1",
 		};
 		mockMoveStream(() => moveStreamResponse([envelopeLess]));
 		const { result, queryClient } = renderMoveStream();
@@ -361,20 +361,20 @@ interface TestPreview {
 	collision: boolean;
 }
 
-async function fetchTestPreview(targetMachineId: string): Promise<TestPreview> {
+async function fetchTestPreview(targetHostId: string): Promise<TestPreview> {
 	const response = await api.get<TestPreview>(
-		machineApiPath("m-1", "volumes", "app-data", "move-preview"),
-		{ params: { targetMachineId } },
+		hostApiPath("m-1", "volumes", "app-data", "move-preview"),
+		{ params: { targetHostId } },
 	);
 	return response.data;
 }
 
-function renderMovePreview(targetMachineId: string | null) {
+function renderMovePreview(targetHostId: string | null) {
 	return renderHookWithQuery(() =>
 		useMovePreview(
 			(target) => volumeMovePreviewQueryKey("m-1", "app-data", target),
 			fetchTestPreview,
-			targetMachineId,
+			targetHostId,
 		),
 	);
 }
@@ -383,7 +383,7 @@ describe("useMovePreview", () => {
 	it("stays disabled and fetches nothing while no target is chosen, keyed by the empty-string placeholder", () => {
 		let fetches = 0;
 		server.use(
-			http.get("*/api/machines/m-1/volumes/app-data/move-preview", () => {
+			http.get("*/api/hosts/m-1/volumes/app-data/move-preview", () => {
 				fetches++;
 				return HttpResponse.json({ collision: false });
 			}),
@@ -405,10 +405,10 @@ describe("useMovePreview", () => {
 		const targets: string[] = [];
 		server.use(
 			http.get(
-				"*/api/machines/m-1/volumes/app-data/move-preview",
+				"*/api/hosts/m-1/volumes/app-data/move-preview",
 				({ request }) => {
 					targets.push(
-						new URL(request.url).searchParams.get("targetMachineId") ?? "",
+						new URL(request.url).searchParams.get("targetHostId") ?? "",
 					);
 					return HttpResponse.json({ collision: false });
 				},
@@ -429,13 +429,13 @@ describe("useMovePreview", () => {
 });
 
 describe("invalidateMoveResult", () => {
-	it("invalidates the resource's lists on both machines from the envelope's machine ids", () => {
+	it("invalidates the resource's lists on both hosts from the envelope's host ids", () => {
 		const queryClient = new QueryClient();
 		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
 
 		invalidateMoveResult(
 			queryClient,
-			{ sourceMachineId: "m-1", targetMachineId: "m-2" },
+			{ sourceHostId: "m-1", targetHostId: "m-2" },
 			"volumes",
 		);
 

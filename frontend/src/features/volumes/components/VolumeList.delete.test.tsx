@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
-import { machineFixture, volumeFixture } from "@/test/factories";
+import { hostFixture, volumeFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -37,11 +37,11 @@ function installHandlers(
 	removeOnDelete = false,
 ) {
 	server.use(
-		http.get("*/api/machines/m-1/volumes", () => {
+		http.get("*/api/hosts/m-1/volumes", () => {
 			listRequests.count += 1;
 			return HttpResponse.json(listRequests.volumes());
 		}),
-		http.delete("*/api/machines/m-1/volumes/*", ({ request }) => {
+		http.delete("*/api/hosts/m-1/volumes/*", ({ request }) => {
 			deleteRequests.count += 1;
 			const url = new URL(request.url);
 			deleteRequests.pathname = url.pathname;
@@ -59,7 +59,7 @@ function installHandlers(
 }
 
 function renderVolumeList(permission: "read" | "write" | "admin" = "admin") {
-	renderWithQuery(<VolumeList machine={machineFixture({ permission })} />, {
+	renderWithQuery(<VolumeList host={hostFixture({ permission })} />, {
 		chakra: true,
 		router: true,
 	});
@@ -107,7 +107,7 @@ describe("VolumeList delete", () => {
 
 		await user.click(screen.getByTestId("confirm-delete-button"));
 		await waitFor(() => expect(deleteRequests.count).toBe(1));
-		expect(deleteRequests.pathname).toBe("/api/machines/m-1/volumes/victim");
+		expect(deleteRequests.pathname).toBe("/api/hosts/m-1/volumes/victim");
 		expect(deleteRequests.search).toBe("");
 
 		await waitFor(() =>

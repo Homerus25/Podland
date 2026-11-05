@@ -1,8 +1,8 @@
 import { createLogSource, type LogSource } from "@shared/streaming/logSource";
-import { api, machineApiPath, machineApiUrl } from "@shared/utils/api";
+import { api, hostApiPath, hostApiUrl } from "@shared/utils/api";
 import { keyValueRowsToRecord } from "@shared/utils/keyValueRows";
 
-// Pod as returned by GET /api/machines/{id}/pods
+// Pod as returned by GET /api/hosts/{id}/pods
 // (backend/internal/domain/pods/dto.go PodListResponse).
 export interface PodSummary {
 	id: string;
@@ -18,7 +18,7 @@ export interface PodSummary {
 	labels?: Record<string, string>;
 }
 
-// Envelope of GET /api/machines/{id}/pods
+// Envelope of GET /api/hosts/{id}/pods
 // (backend/internal/domain/pods/dto.go PodListResult), mirroring the
 // containers list envelope.
 interface PodListResult {
@@ -27,10 +27,8 @@ interface PodListResult {
 	timestamp: string;
 }
 
-export async function listPods(machineId: string): Promise<PodSummary[]> {
-	const response = await api.get<PodListResult>(
-		machineApiPath(machineId, "pods"),
-	);
+export async function listPods(hostId: string): Promise<PodSummary[]> {
+	const response = await api.get<PodListResult>(hostApiPath(hostId, "pods"));
 	return response.data.pods;
 }
 
@@ -42,7 +40,7 @@ export interface PodContainerRef {
 	state: string;
 }
 
-// Response of GET /api/machines/{id}/pods/{podId}
+// Response of GET /api/hosts/{id}/pods/{podId}
 // (backend/internal/domain/pods/dto.go PodDetailResponse): the fields the
 // pod detail page renders, mapped from podman's inspect report.
 export interface PodDetail {
@@ -60,24 +58,22 @@ export interface PodDetail {
 }
 
 export async function getPod(
-	machineId: string,
+	hostId: string,
 	podId: string,
 ): Promise<PodDetail> {
-	const response = await api.get<PodDetail>(
-		machineApiPath(machineId, "pods", podId),
-	);
+	const response = await api.get<PodDetail>(hostApiPath(hostId, "pods", podId));
 	return response.data;
 }
 
-// GET /api/machines/{id}/pods/{podId}/inspect -> 200 with the raw podman
+// GET /api/hosts/{id}/pods/{podId}/inspect -> 200 with the raw podman
 // inspect report as the top-level body. The report is deliberately untyped
 // on the client: no DTO is invented for it.
 export async function inspectPod(
-	machineId: string,
+	hostId: string,
 	podId: string,
 ): Promise<Record<string, unknown>> {
 	const response = await api.get<Record<string, unknown>>(
-		machineApiPath(machineId, "pods", podId, "inspect"),
+		hostApiPath(hostId, "pods", podId, "inspect"),
 	);
 	return response.data;
 }
@@ -134,7 +130,7 @@ export interface PodFormValues {
 	memory: string;
 }
 
-// Body of POST /api/machines/{id}/pods
+// Body of POST /api/hosts/{id}/pods
 // (backend/internal/domain/pods/dto.go PodCreateRequest).
 export interface CreatePodInput {
 	name: string;
@@ -218,7 +214,7 @@ function portRowsToInput(rows: PodPortRow[]): CreatePodInput["portMappings"] {
 	return mappings.length > 0 ? mappings : undefined;
 }
 
-// Builds the POST /api/machines/{id}/pods body from the create-pod
+// Builds the POST /api/hosts/{id}/pods body from the create-pod
 // dialog's form values: the single owner of the form-to-payload mapping
 // (the buildCreateContainerInput precedent, candidate C3) — name trim,
 // complete-row filtering for volumes and mounts, labels through the
@@ -246,7 +242,7 @@ export function buildCreatePodInput(values: PodFormValues): CreatePodInput {
 	};
 }
 
-// Response of POST /api/machines/{id}/pods -> 201
+// Response of POST /api/hosts/{id}/pods -> 201
 // (backend/internal/domain/pods/dto.go PodCreateResponse).
 export interface PodCreated {
 	id: string;
@@ -256,11 +252,11 @@ export interface PodCreated {
 }
 
 export async function createPod(
-	machineId: string,
+	hostId: string,
 	input: CreatePodInput,
 ): Promise<PodCreated> {
 	const response = await api.post<PodCreated>(
-		machineApiPath(machineId, "pods"),
+		hostApiPath(hostId, "pods"),
 		input,
 	);
 	return response.data;
@@ -283,35 +279,35 @@ export interface PodActionResult {
 }
 
 export async function podAction(
-	machineId: string,
+	hostId: string,
 	podId: string,
 	action: PodAction,
 ): Promise<PodActionResult> {
 	const response = await api.post<PodActionResult>(
-		machineApiPath(machineId, "pods", podId, action),
+		hostApiPath(hostId, "pods", podId, action),
 	);
 	return response.data;
 }
 
-// Log source for GET /api/machines/{machineId}/pods/{podId}/logs: the kit
+// Log source for GET /api/hosts/{hostId}/pods/{podId}/logs: the kit
 // owns the buffered tail fetch and the follow stream
 // (backend/internal/domain/pods handler pair). Podman aggregates every
 // container in the pod, infra included — plain output, no prefixing.
-export function podLogs(machineId: string, podId: string): LogSource {
+export function podLogs(hostId: string, podId: string): LogSource {
 	return createLogSource(
-		machineApiPath(machineId, "pods", podId, "logs"),
-		machineApiUrl(machineId, "pods", podId, "logs"),
+		hostApiPath(hostId, "pods", podId, "logs"),
+		hostApiUrl(hostId, "pods", podId, "logs"),
 	);
 }
 
-// DELETE /api/machines/{id}/pods/{podId} -> 204. Running containers refuse
+// DELETE /api/hosts/{id}/pods/{podId} -> 204. Running containers refuse
 // the removal unless force=true is passed, mirroring the container delete.
 export async function removePod(
-	machineId: string,
+	hostId: string,
 	podId: string,
 	force = false,
 ): Promise<void> {
-	await api.delete(machineApiPath(machineId, "pods", podId), {
+	await api.delete(hostApiPath(hostId, "pods", podId), {
 		params: force ? { force: "true" } : undefined,
 	});
 }
@@ -325,10 +321,10 @@ export interface PodPruneEntry {
 	error?: string;
 }
 
-// POST /api/machines/{id}/pods/prune -> 200 with the per-pod report.
-export async function prunePods(machineId: string): Promise<PodPruneEntry[]> {
+// POST /api/hosts/{id}/pods/prune -> 200 with the per-pod report.
+export async function prunePods(hostId: string): Promise<PodPruneEntry[]> {
 	const response = await api.post<PodPruneEntry[]>(
-		machineApiPath(machineId, "pods", "prune"),
+		hostApiPath(hostId, "pods", "prune"),
 	);
 	return response.data;
 }

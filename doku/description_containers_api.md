@@ -6,9 +6,9 @@ Part of the [API contract](description_api.md). See the main document for base U
 
 ## Container Endpoints
 
-### GET /api/machines/{id}/containers
+### GET /api/hosts/{id}/containers
 
-List all containers on a machine.
+List all containers on a host.
 
 **Authentication:** Required
 
@@ -50,15 +50,15 @@ List all containers on a machine.
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/containers
+### POST /api/hosts/{id}/containers
 
-Create a new container on a machine.
+Create a new container on a host.
 
 **Authentication:** Required
 
@@ -166,15 +166,15 @@ podman's own not-found text as the disambiguator.
 - 400: `VALIDATION_FAILED` (missing image; a mount with both `selinuxShared` and `selinuxPrivate`; unparseable `memory`), `INVALID_REQUEST`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `IMAGE_NOT_FOUND`, `POD_NOT_FOUND` (a create that requested a pod which does not exist)
+- 404: `HOST_NOT_FOUND`, `IMAGE_NOT_FOUND`, `POD_NOT_FOUND` (a create that requested a pod which does not exist)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/containers/prune
+### POST /api/hosts/{id}/containers/prune
 
-Remove all stopped containers on the machine in one call. Running
+Remove all stopped containers on the host in one call. Running
 containers are untouched.
 
 **Authentication:** Required
@@ -194,21 +194,21 @@ Notes:
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED` (no access row or read-level grantee)
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/containers/stats
+### GET /api/hosts/{id}/containers/stats
 
 One-shot resource-usage snapshot for every running container on the
-machine. Stats are sampled once per call (no streaming); stopped or
+host. Stats are sampled once per call (no streaming); stopped or
 created containers do not appear.
 
 **Authentication:** Required
 
-**Permission:** `read` (any grantee of the machine)
+**Permission:** `read` (any grantee of the host)
 
 **Response (Success - 200):**
 ```json
@@ -241,13 +241,13 @@ Notes:
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/containers/{containerId}
+### GET /api/hosts/{id}/containers/{containerId}
 
 Get details of a specific container.
 
@@ -344,13 +344,13 @@ the edit-configuration form served by `POST .../containers/{containerId}/update`
 **Response (Error):**
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/containers/{containerId}/inspect
+### GET /api/hosts/{id}/containers/{containerId}/inspect
 
 Get the raw podman inspect report for a specific container. The response
 body is podman's inspect report verbatim as the top-level JSON object —
@@ -358,7 +358,7 @@ no curated DTO mapping (unlike `GET .../containers/{containerId}`).
 
 **Authentication:** Required
 
-**Permission:** `read` (any grantee of the machine)
+**Permission:** `read` (any grantee of the host)
 
 **Response (Success - 200):**
 The raw podman container inspect report as the top-level JSON body:
@@ -379,13 +379,13 @@ returns, unmapped.
 - 400: `MISSING_CONTAINER_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/containers/{containerId}/start
+### POST /api/hosts/{id}/containers/{containerId}/start
 
 Start a stopped container.
 
@@ -404,13 +404,13 @@ Start a stopped container.
 - 400: `CONTAINER_ALREADY_RUNNING`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/containers/{containerId}/stop
+### POST /api/hosts/{id}/containers/{containerId}/stop
 
 Stop a running container.
 
@@ -437,13 +437,13 @@ Stop a running container.
 - 400: `CONTAINER_NOT_RUNNING`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/containers/{containerId}/restart
+### POST /api/hosts/{id}/containers/{containerId}/restart
 
 Restart a running container. The endpoint accepts no timeout or force
 parameters — podman's default timeout applies. A container that is not
@@ -466,13 +466,13 @@ the start endpoint for a stopped container.
 - 400: `CONTAINER_NOT_RUNNING`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/containers/{containerId}/rename
+### POST /api/hosts/{id}/containers/{containerId}/rename
 
 Rename a container. Podman renames running and stopped containers alike,
 so there is no state restriction and no quadlet-owned restriction. The
@@ -490,7 +490,7 @@ regex.
 ```
 
 **Response (Success - 200):** the updated container detail DTO, the same
-shape as `GET /api/machines/{id}/containers/{containerId}`, carrying the
+shape as `GET /api/hosts/{id}/containers/{containerId}`, carrying the
 new name.
 
 **Response (Error):**
@@ -499,15 +499,15 @@ new name.
   over-long name), `MISSING_CONTAINER_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
-- 409: `CONTAINER_ALREADY_EXISTS` (another container on the machine
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 409: `CONTAINER_ALREADY_EXISTS` (another container on the host
   already carries the new name)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### POST /api/machines/{id}/containers/{containerId}/update
+### POST /api/hosts/{id}/containers/{containerId}/update
 
 Change an existing container's resource limits (cpus, memory) and
 healthcheck configuration. The contract is patch semantics: omitted
@@ -542,7 +542,7 @@ the backend answers 400 without a round trip).
 ```
 
 **Response (Success - 200):** the updated container detail DTO, the same
-shape as `GET /api/machines/{id}/containers/{containerId}`, carrying the
+shape as `GET /api/hosts/{id}/containers/{containerId}`, carrying the
 new limits and healthcheck.
 
 **Response (Error):**
@@ -552,13 +552,13 @@ new limits and healthcheck.
   the message names the field), `MISSING_CONTAINER_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### DELETE /api/machines/{id}/containers/{containerId}
+### DELETE /api/hosts/{id}/containers/{containerId}
 Remove a container.
 
 **Authentication:** Required
@@ -574,13 +574,13 @@ Remove a container.
 - 400: `CONTAINER retroced` (if running and force not set)
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
 ---
 
-### GET /api/machines/{id}/containers/{containerId}/logs
+### GET /api/hosts/{id}/containers/{containerId}/logs
 
 Get logs for a container.
 
@@ -617,7 +617,7 @@ one terminal event:
 
 - A clean stream end (container stopped, podman EOF) emits `{"level": "INFO", "message": "STREAM_ENDED"}`.
 - A failure emits an ERROR-level event whose message embeds the error code:
-  `"CONTAINER_NOT_FOUND: Container not found"`, `"CONNECTION_FAILED: Failed to connect to machine"`, etc.
+  `"CONTAINER_NOT_FOUND: Container not found"`, `"CONNECTION_FAILED: Failed to connect to host"`, etc.
 - A client disconnect cancels the stream server-side and emits a WARN
   `OPERATION_CANCELLED` event (to the already-closed connection).
 
@@ -625,21 +625,21 @@ one terminal event:
 - 400: `INVALID_SINCE_PARAM` / `INVALID_TAIL_PARAM` (malformed `since`/`tail`, message says "use RFC3339"; answered through the JSON envelope even when `follow=true`), `MISSING_CONTAINER_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`
 - 500: `INTERNAL_ERROR` (also for a miswired route missing identity), `STREAMING_NOT_SUPPORTED`
 - 502: `CONNECTION_FAILED`
 - 504: `OPERATION_CANCELLED` (buffered fetch cancelled by a client disconnect; follow-mode cancellation is the WARN terminal event above)
 
 ---
 
-### GET /api/machines/{id}/containers/{containerId}/stats
+### GET /api/hosts/{id}/containers/{containerId}/stats
 
 One-shot resource-usage snapshot for one container. Stats are sampled
 once per call (no streaming); the container must be running.
 
 **Authentication:** Required
 
-**Permission:** `read` (any grantee of the machine)
+**Permission:** `read` (any grantee of the host)
 
 **Response (Success - 200):**
 ```json
@@ -666,7 +666,7 @@ Notes:
 - 400: `MISSING_CONTAINER_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
-- 404: `MACHINE_NOT_FOUND`, `CONTAINER_NOT_FOUND` (unknown container and
+- 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND` (unknown container and
   known-but-not-running container alike — podman's stats handler maps any
   first-report error to 404, so the two cannot be distinguished; podman's
   own message rides along as the error message)

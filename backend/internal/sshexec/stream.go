@@ -24,23 +24,23 @@ type OutputLine struct {
 	Text   string
 }
 
-// ExecStream runs a command on a remote machine like Exec, but invokes
+// ExecStream runs a command on a remote host like Exec, but invokes
 // onLine for each output line as it arrives (not batched after completion).
 // It still returns the fully captured result, so callers can parse a final
-// machine-readable report from the captured stdout and interpret the exit
+// parseable report from the captured stdout and interpret the exit
 // code exactly as with Exec.
 //
 // Seam semantics are identical to Exec: a non-zero exit code is a result,
 // not an error; SSH dial/session failures are errors; context cancellation
 // aborts the session and returns an error.
-func (s *Service) ExecStream(ctx context.Context, machineID, userID, command string, opts ExecOptions, onLine func(OutputLine)) (ExecResult, error) {
+func (s *Service) ExecStream(ctx context.Context, hostID, userID, command string, opts ExecOptions, onLine func(OutputLine)) (ExecResult, error) {
 	_ = userID // accepted for interface symmetry; see Service.Exec.
 
 	cmd := shellQuote(command, opts.Args)
 
-	runner, err := s.dialer.Dial(ctx, machineID)
+	runner, err := s.dialer.Dial(ctx, hostID)
 	if err != nil {
-		return ExecResult{}, fmt.Errorf("sshexec: failed to dial machine %q: %w", machineID, err)
+		return ExecResult{}, fmt.Errorf("sshexec: failed to dial host %q: %w", hostID, err)
 	}
 	defer runner.Close()
 
@@ -49,7 +49,7 @@ func (s *Service) ExecStream(ctx context.Context, machineID, userID, command str
 		// A real failure (network drop, session closed, ctx cancellation).
 		// The cached client is likely stale — drop it so the next call
 		// re-dials.
-		s.dialer.Invalidate(machineID)
+		s.dialer.Invalidate(hostID)
 		return ExecResult{}, runErr
 	}
 	return result, nil

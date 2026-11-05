@@ -9,7 +9,7 @@ import (
 )
 
 // ErrorEnvelope mirrors the structured error body the endpoint envelope
-// writes: request metadata at the top level, the machine-readable cause
+// writes: request metadata at the top level, the parseable cause
 // under "error".
 type ErrorEnvelope struct {
 	RequestID string `json:"requestId"`
@@ -20,7 +20,7 @@ type ErrorEnvelope struct {
 }
 
 // DecodeErrorEnvelope reads a structured error response into its
-// ErrorEnvelope, so failure tests can assert the exact machine-readable
+// ErrorEnvelope, so failure tests can assert the exact parseable
 // cause — and, where relevant, the message or request ID — instead of
 // substring-matching the raw body. One decode ritual serves every
 // package's error-code assertions.

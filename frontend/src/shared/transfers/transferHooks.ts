@@ -1,14 +1,14 @@
 // The transfer-hooks kit (issue 273, 2026-10-08 architecture-review
-// candidate 5): the one module behind the three cross-machine move/copy
+// candidate 5): the one module behind the three cross-host move/copy
 // surfaces (quadlet, volume, secret). It owns the ritual every transfer
-// shares — the target-scoped preview query, the both-machines list
+// shares — the target-scoped preview query, the both-hosts list
 // invalidation, and the move-stream lifecycle over the stream transport —
 // and a surface adapts with its key constructor and fetcher, its URL
 // builder, event vocabulary, shape guard, and progress fold. The plain move
 // mutations stay feature-local: with the invalidation rule owned here, each
 // is two lines.
-import type { MachineResource } from "@shared/queries/queryKeys";
-import { invalidateMachineResources } from "@shared/queries/useListInvalidatingMutation";
+import type { HostResource } from "@shared/queries/queryKeys";
+import { invalidateHostResources } from "@shared/queries/useListInvalidatingMutation";
 import { useNdjsonOperation } from "@shared/streaming/streamTransport";
 import type { ApiError } from "@shared/types/api";
 import {
@@ -18,50 +18,50 @@ import {
 } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 
-// The structural machine-id slice every transfer envelope carries
+// The structural host-id slice every transfer envelope carries
 // (QuadletMoveResult, VolumeMoveResult, and SecretMoveResult all answer
-// with it): a transfer touches two machines, so both lists invalidate from
+// with it): a transfer touches two hosts, so both lists invalidate from
 // what the server answered rather than from closure assumptions. A
 // "partial" result is still a success-shaped answer — the target install
 // stands — so both lists refresh there too.
-interface MoveResultMachines {
-	sourceMachineId: string;
-	targetMachineId: string;
+interface MoveResultHosts {
+	sourceHostId: string;
+	targetHostId: string;
 }
 
-// The both-machines list invalidation, owned once: the plain mutations'
+// The both-hosts list invalidation, owned once: the plain mutations'
 // onSuccess and the move-stream factory's complete handler both call this.
 export function invalidateMoveResult(
 	queryClient: QueryClient,
-	result: MoveResultMachines,
-	resource: MachineResource,
+	result: MoveResultHosts,
+	resource: HostResource,
 ): void {
-	invalidateMachineResources(queryClient, result.sourceMachineId, resource);
-	invalidateMachineResources(queryClient, result.targetMachineId, resource);
+	invalidateHostResources(queryClient, result.sourceHostId, resource);
+	invalidateHostResources(queryClient, result.targetHostId, resource);
 }
 
 // The target-scoped preview query behind every move/copy dialog: keyed by
 // the chosen target so a target change refetches, with the empty-string
 // placeholder while no target exists (the disabled query still needs a
 // stable key), disabled until a target exists — the dialog defaults the
-// select to the first writable machine once the machines list arrives — and
+// select to the first writable host once the hosts list arrives — and
 // guarded so a null target can never fetch. A surface adapts with its key
 // constructor (the shared query-key module stays the single owner of the
 // key vocabulary) and fetcher.
 export function useMovePreview<TPreview>(
-	queryKey: (targetMachineId: string) => readonly unknown[],
-	fetcher: (targetMachineId: string) => Promise<TPreview>,
-	targetMachineId: string | null,
+	queryKey: (targetHostId: string) => readonly unknown[],
+	fetcher: (targetHostId: string) => Promise<TPreview>,
+	targetHostId: string | null,
 ) {
 	return useQuery({
-		queryKey: queryKey(targetMachineId ?? ""),
+		queryKey: queryKey(targetHostId ?? ""),
 		queryFn: () => {
-			if (targetMachineId === null) {
-				throw new Error("move preview requires a target machine");
+			if (targetHostId === null) {
+				throw new Error("move preview requires a target host");
 			}
-			return fetcher(targetMachineId);
+			return fetcher(targetHostId);
 		},
-		enabled: targetMachineId !== null,
+		enabled: targetHostId !== null,
 	});
 }
 
@@ -88,7 +88,7 @@ function isCompleteEvent<Result>(
 }
 
 // A surface's adaptation of the move-stream factory: the resource whose
-// lists on both machines a completed transfer invalidates, the URL builder
+// lists on both hosts a completed transfer invalidates, the URL builder
 // (item id to the full stream URL), the shape guard over the surface's
 // event vocabulary, the progress fold (the event folded into the current
 // state; a single-value fold declares only the event), and the progress
@@ -97,7 +97,7 @@ export interface MoveStreamConfig<
 	TEvent extends MoveStreamEventBase,
 	TProgress,
 > {
-	resource: MachineResource;
+	resource: HostResource;
 	url: (id: string) => string;
 	isEvent: (value: unknown) => value is TEvent;
 	foldProgress: (event: TEvent, current: TProgress) => TProgress;
@@ -120,13 +120,13 @@ interface UseMoveStreamResult<TProgress, TResult> {
 // lifecycle, reset-on-run, the malformed-event warn-and-skip, the
 // complete-without-envelope warn-and-skip, the terminal handling (the
 // complete event's envelope lands in the result and invalidates both
-// machines' lists), and the invalidation call. Error terminals stay the
+// hosts' lists), and the invalidation call. Error terminals stay the
 // stream transport's, as today. A surface keeps its event vocabulary, shape
 // guard, progress fold, and URL builder.
 export function useMoveStream<
 	TEvent extends MoveStreamEventBase,
 	TProgress,
-	TResult extends MoveResultMachines,
+	TResult extends MoveResultHosts,
 >(
 	config: MoveStreamConfig<TEvent, TProgress>,
 ): UseMoveStreamResult<TProgress, TResult> {

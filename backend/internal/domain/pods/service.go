@@ -15,9 +15,9 @@ import (
 )
 
 // PodService provides business logic for pods. Pods live only in the
-// remote machine's podman; this service proxies podman directly and
+// remote host's podman; this service proxies podman directly and
 // persists nothing locally, matching VolumeService/NetworkService. Every
-// machine-scoped podman call crosses the PodEngineProvider (the
+// host-scoped podman call crosses the PodEngineProvider (the
 // connection seam); the service itself owns only domain mapping.
 type PodService struct {
 	engines PodEngineProvider
@@ -30,11 +30,11 @@ func NewPodService(engines PodEngineProvider) *PodService {
 	}
 }
 
-// List returns every pod on the specified machine — everything podman
+// List returns every pod on the specified host — everything podman
 // reports; no filtering.
-func (s *PodService) List(ctx context.Context, userID, machineID string, opts entities.PodPSOptions) ([]*entities.ListPodsReport, error) {
+func (s *PodService) List(ctx context.Context, userID, hostID string, opts entities.PodPSOptions) ([]*entities.ListPodsReport, error) {
 	var pods []*entities.ListPodsReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "pods.List", func(e PodEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "pods.List", func(e PodEngine) error {
 		p, err := e.List(opts)
 		if err != nil {
 			return fmt.Errorf("failed to list pods: %w", err)
@@ -45,7 +45,7 @@ func (s *PodService) List(ctx context.Context, userID, machineID string, opts en
 	return pods, err
 }
 
-// Create creates a new pod on the specified machine. The request →
+// Create creates a new pod on the specified host. The request →
 // specgen mapping lives in the pure builder (buildCreateSpec,
 // create_spec.go — the per-domain create builder settlement,
 // backend-conventions); the spec is built before the lease is acquired,
@@ -53,14 +53,14 @@ func (s *PodService) List(ctx context.Context, userID, machineID string, opts en
 // costs an engine lease, and this closure is a thin lease: the engine
 // call plus the podman-side 4xx classification. The service returns
 // podman's create report; the handler maps the response DTO.
-func (s *PodService) Create(ctx context.Context, userID, machineID string, request PodCreateRequest) (*entities.PodCreateReport, error) {
+func (s *PodService) Create(ctx context.Context, userID, hostID string, request PodCreateRequest) (*entities.PodCreateReport, error) {
 	spec, err := buildCreateSpec(request)
 	if err != nil {
 		return nil, err
 	}
 
 	var report *entities.PodCreateReport
-	err = s.engines.WithEngine(ctx, userID, machineID, "pods.Create", func(e PodEngine) error {
+	err = s.engines.WithEngine(ctx, userID, hostID, "pods.Create", func(e PodEngine) error {
 		// Create the pod. A podman-side 4xx rejection (duplicate name,
 		// invalid name format) means the request itself was bad: it
 		// surfaces as 400 INVALID_REQUEST carrying podman's message,
@@ -81,9 +81,9 @@ func (s *PodService) Create(ctx context.Context, userID, machineID string, reque
 
 // Get returns detailed information about a specific pod. The raw inspect
 // report crosses to the handler, which maps the detail DTO.
-func (s *PodService) Get(ctx context.Context, userID, machineID, podID string) (*entities.PodInspectReport, error) {
+func (s *PodService) Get(ctx context.Context, userID, hostID, podID string) (*entities.PodInspectReport, error) {
 	var report *entities.PodInspectReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "pods.Get", func(e PodEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "pods.Get", func(e PodEngine) error {
 		inspectReport, err := inspectPod(e, podID)
 		if err != nil {
 			return err
@@ -98,9 +98,9 @@ func (s *PodService) Get(ctx context.Context, userID, machineID, podID string) (
 // Inspect returns the pod's raw podman inspect report. Unlike Get, the
 // report crosses the wire unmapped: this endpoint is the raw inspect JSON
 // window, so no DTO mapping happens here or in the handler.
-func (s *PodService) Inspect(ctx context.Context, userID, machineID, podID string) (*entities.PodInspectReport, error) {
+func (s *PodService) Inspect(ctx context.Context, userID, hostID, podID string) (*entities.PodInspectReport, error) {
 	var report *entities.PodInspectReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "pods.Inspect", func(e PodEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "pods.Inspect", func(e PodEngine) error {
 		inspectReport, err := inspectPod(e, podID)
 		if err != nil {
 			return err
@@ -121,40 +121,40 @@ func inspectPod(e PodEngine, podID string) (*entities.PodInspectReport, error) {
 }
 
 // Pause pauses every running container in the pod.
-func (s *PodService) Pause(ctx context.Context, userID, machineID, podID string) error {
-	return s.action(ctx, userID, machineID, "pods.Pause", "pause", podID, PodEngine.Pause)
+func (s *PodService) Pause(ctx context.Context, userID, hostID, podID string) error {
+	return s.action(ctx, userID, hostID, "pods.Pause", "pause", podID, PodEngine.Pause)
 }
 
 // Unpause unpauses every paused container in the pod.
-func (s *PodService) Unpause(ctx context.Context, userID, machineID, podID string) error {
-	return s.action(ctx, userID, machineID, "pods.Unpause", "unpause", podID, PodEngine.Unpause)
+func (s *PodService) Unpause(ctx context.Context, userID, hostID, podID string) error {
+	return s.action(ctx, userID, hostID, "pods.Unpause", "unpause", podID, PodEngine.Unpause)
 }
 
 // Kill sends podman's default signal to the pod's running containers.
-func (s *PodService) Kill(ctx context.Context, userID, machineID, podID string) error {
-	return s.action(ctx, userID, machineID, "pods.Kill", "kill", podID, PodEngine.Kill)
+func (s *PodService) Kill(ctx context.Context, userID, hostID, podID string) error {
+	return s.action(ctx, userID, hostID, "pods.Kill", "kill", podID, PodEngine.Kill)
 }
 
 // Restart restarts the pod's containers.
-func (s *PodService) Restart(ctx context.Context, userID, machineID, podID string) error {
-	return s.action(ctx, userID, machineID, "pods.Restart", "restart", podID, PodEngine.Restart)
+func (s *PodService) Restart(ctx context.Context, userID, hostID, podID string) error {
+	return s.action(ctx, userID, hostID, "pods.Restart", "restart", podID, PodEngine.Restart)
 }
 
 // Start starts the pod's containers.
-func (s *PodService) Start(ctx context.Context, userID, machineID, podID string) error {
-	return s.action(ctx, userID, machineID, "pods.Start", "start", podID, PodEngine.Start)
+func (s *PodService) Start(ctx context.Context, userID, hostID, podID string) error {
+	return s.action(ctx, userID, hostID, "pods.Start", "start", podID, PodEngine.Start)
 }
 
 // Stop stops the pod's containers.
-func (s *PodService) Stop(ctx context.Context, userID, machineID, podID string) error {
-	return s.action(ctx, userID, machineID, "pods.Stop", "stop", podID, PodEngine.Stop)
+func (s *PodService) Stop(ctx context.Context, userID, hostID, podID string) error {
+	return s.action(ctx, userID, hostID, "pods.Stop", "stop", podID, PodEngine.Stop)
 }
 
 // action runs one lifecycle action against the pod: podman's answer is
 // classified into the domain's error vocabulary (mapActionError), and an
 // unclassified failure is wrapped.
-func (s *PodService) action(ctx context.Context, userID, machineID, op, verb, podID string, act func(PodEngine, string) error) error {
-	return s.engines.WithEngine(ctx, userID, machineID, op, func(e PodEngine) error {
+func (s *PodService) action(ctx context.Context, userID, hostID, op, verb, podID string, act func(PodEngine, string) error) error {
+	return s.engines.WithEngine(ctx, userID, hostID, op, func(e PodEngine) error {
 		if err := act(e, podID); err != nil {
 			if appErr := mapActionError(err); appErr != nil {
 				return appErr
@@ -169,8 +169,8 @@ func (s *PodService) action(ctx context.Context, userID, machineID, op, verb, po
 // The remove-and-classify ritual owns the outcome: a missing pod is the
 // 404 terminal, a refusal (podman's 409 conflict or the running-refusal
 // text) is the 409 POD_STATE_CONFLICT carrying podman's message.
-func (s *PodService) Remove(ctx context.Context, userID, machineID, podID string, force bool) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "pods.Remove", func(e PodEngine) error {
+func (s *PodService) Remove(ctx context.Context, userID, hostID, podID string, force bool) error {
+	return s.engines.WithEngine(ctx, userID, hostID, "pods.Remove", func(e PodEngine) error {
 		return removal.Run(func() error {
 			return e.Remove(podID, force)
 		}, removal.Terminals{
@@ -185,9 +185,9 @@ func (s *PodService) Remove(ctx context.Context, userID, machineID, podID string
 
 // Prune removes every stopped pod (podman's own selection) and answers
 // podman's per-pod reports; the handler maps the prune DTO.
-func (s *PodService) Prune(ctx context.Context, userID, machineID string) ([]*entities.PodPruneReport, error) {
+func (s *PodService) Prune(ctx context.Context, userID, hostID string) ([]*entities.PodPruneReport, error) {
 	var prunes []*entities.PodPruneReport
-	err := s.engines.WithEngine(ctx, userID, machineID, "pods.Prune", func(e PodEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "pods.Prune", func(e PodEngine) error {
 		p, err := e.Prune()
 		if err != nil {
 			return fmt.Errorf("failed to prune pods: %w", err)
@@ -198,13 +198,13 @@ func (s *PodService) Prune(ctx context.Context, userID, machineID string) ([]*en
 	return prunes, err
 }
 
-// GetLogs retrieves the pod's aggregated logs on the specified machine.
+// GetLogs retrieves the pod's aggregated logs on the specified host.
 // The buffered ritual (options build, writer pair, combine, not-found
 // and cancellation mapping) belongs to the kit's FetchLogs; the service
 // keeps validation, engine acquisition, and dispatch.
-func (s *PodService) GetLogs(ctx context.Context, userID, machineID, podID string, since time.Time, tail int64) (*PodLogsResponse, error) {
+func (s *PodService) GetLogs(ctx context.Context, userID, hostID, podID string, since time.Time, tail int64) (*PodLogsResponse, error) {
 	var response *PodLogsResponse
-	err := s.engines.WithEngine(ctx, userID, machineID, "pods.GetLogs", func(e PodEngine) error {
+	err := s.engines.WithEngine(ctx, userID, hostID, "pods.GetLogs", func(e PodEngine) error {
 		logs, err := streaming.FetchLogs(ctx, streaming.FetchLogsOp{
 			Target:   podID,
 			Since:    since,
@@ -229,8 +229,8 @@ func (s *PodService) GetLogs(ctx context.Context, userID, machineID, podID strin
 // callback. The follow ritual (options build, writer pair, not-found and
 // cancellation mapping) belongs to the kit's FollowLogs; the service
 // keeps validation, engine acquisition, and target dispatch.
-func (s *PodService) GetLogsWithStream(ctx context.Context, userID, machineID, podID string, since time.Time, tail int64, logCallback func(event streaming.LogEvent)) error {
-	return s.engines.WithEngine(ctx, userID, machineID, "pods.GetLogsWithStream", func(e PodEngine) error {
+func (s *PodService) GetLogsWithStream(ctx context.Context, userID, hostID, podID string, since time.Time, tail int64, logCallback func(event streaming.LogEvent)) error {
+	return s.engines.WithEngine(ctx, userID, hostID, "pods.GetLogsWithStream", func(e PodEngine) error {
 		return streaming.FollowLogs(ctx, streaming.FollowLogsOp{
 			Target:   podID,
 			Since:    since,

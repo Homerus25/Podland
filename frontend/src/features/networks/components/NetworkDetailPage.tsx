@@ -19,10 +19,10 @@ import { Link as ReactRouterLink, useParams } from "react-router-dom";
 // Each attached container links to its container detail page (spec 301
 // cross-links); a network without containers shows None.
 function NetworkOverview({
-	machineId,
+	hostId,
 	network,
 }: {
-	machineId: string;
+	hostId: string;
 	network: NetworkDetail;
 }) {
 	return (
@@ -45,7 +45,7 @@ function NetworkOverview({
 						renderItem={(container) => (
 							<Link
 								as={ReactRouterLink}
-								to={detailPath(machineId, "containers", container.id)}
+								to={detailPath(hostId, "containers", container.id)}
 								color="blue.500"
 								data-testid={`network-container-link-${container.id}`}
 							>
@@ -69,17 +69,13 @@ function NetworkOverview({
 // structural slices; the layout owns the shell. The back button returns
 // to the Networks tab.
 export function NetworkDetailPage() {
-	const { machineId, networkName } = useParams<{
-		machineId: string;
+	const { hostId, networkName } = useParams<{
+		hostId: string;
 		networkName: string;
 	}>();
 	const [revealed, setRevealed] = useState(false);
-	const {
-		data: network,
-		isPending,
-		error,
-	} = useNetwork(machineId!, networkName!);
-	const inspectQuery = useNetworkInspect(machineId!, networkName!, {
+	const { data: network, isPending, error } = useNetwork(hostId!, networkName!);
+	const inspectQuery = useNetworkInspect(hostId!, networkName!, {
 		enabled: revealed,
 	});
 
@@ -94,9 +90,7 @@ export function NetworkDetailPage() {
 			revealed={revealed}
 			onToggleInspect={() => setRevealed((value) => !value)}
 		>
-			{network ? (
-				<NetworkOverview machineId={machineId!} network={network} />
-			) : null}
+			{network ? <NetworkOverview hostId={hostId!} network={network} /> : null}
 		</DetailPage>
 	);
 }

@@ -10,7 +10,7 @@ import {
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import {
 	type DetailResource,
-	machineTabPath,
+	hostTabPath,
 	useHasInAppHistory,
 } from "@shared/routes/detailRoute";
 import { getApiError } from "@shared/utils/api";
@@ -35,7 +35,7 @@ export interface InspectQuerySlice {
 export type DetailPageProps = {
 	// The item's display name, rendered in the header.
 	title: string;
-	// The machine tab the back button falls back to on a deep link
+	// The host tab the back button falls back to on a deep link
 	// (?tab=<backTo>).
 	backTo: DetailResource;
 	// The overview query's pending flag: the loading state renders while true.
@@ -73,7 +73,7 @@ export function DetailPage({
 	children,
 	headerActions,
 }: DetailPageProps) {
-	const { machineId } = useParams<{ machineId: string }>();
+	const { hostId } = useParams<{ hostId: string }>();
 	const navigate = useNavigate();
 	const hasInAppHistory = useHasInAppHistory();
 	const report = inspectQuery.data;
@@ -96,11 +96,11 @@ export function DetailPage({
 					</Button>
 				) : (
 					// No in-app history (deep link, bookmark, fresh tab): Back
-					// links to the machine detail page with the resource's tab
+					// links to the host detail page with the resource's tab
 					// active (the spec 297 ?tab= deep link).
 					<Button
 						as={Link}
-						to={machineTabPath(machineId!, backTo)}
+						to={hostTabPath(hostId!, backTo)}
 						variant="outline"
 						data-testid="detail-back-button"
 					>
@@ -131,7 +131,7 @@ export function DetailPage({
 				</Box>
 			) : notFound ? (
 				<Text data-testid="detail-page-not-found">
-					This item no longer exists on the machine.
+					This item no longer exists on the host.
 				</Text>
 			) : error ? (
 				<ErrorDisplay

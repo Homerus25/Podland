@@ -14,24 +14,24 @@ import (
 )
 
 // dialer is the seam between the Service and the actual SSH work. Production
-// wires *sshDialer (which manages a per-machine sshClient cache); tests
+// wires *sshDialer (which manages a per-host sshClient cache); tests
 // wire a fake to script Dial/Run behaviour.
 type dialer interface {
-	// Dial returns a sessionRunner for the given machine, dialing (and
+	// Dial returns a sessionRunner for the given host, dialing (and
 	// caching) a fresh sshClient on a cache miss.
-	Dial(ctx context.Context, machineID string) (sessionRunner, error)
-	// Invalidate drops the cached sshClient for the given machine so the
+	Dial(ctx context.Context, hostID string) (sessionRunner, error)
+	// Invalidate drops the cached sshClient for the given host so the
 	// next Dial re-dials. Called by the Service after a real session
 	// failure (the cached client is likely stale). Fail-fast: the client
 	// closes even if a call is mid-flight (short-lived execs; the affected
 	// call surfaces the close as a session failure).
-	Invalidate(machineID string)
-	// RemoveMachine invalidates a machine's cached sshClient gracefully
-	// (mirrors connections.Manager.RemoveMachine): the entry leaves the
+	Invalidate(hostID string)
+	// RemoveHost invalidates a host's cached sshClient gracefully
+	// (mirrors connections.Manager.RemoveHost): the entry leaves the
 	// cache immediately, in-flight execs finish on the client they already
 	// hold, and the client closes when the last of them releases. Used at
-	// machine-deletion time so no live SSH session outlives the machine.
-	RemoveMachine(machineID string)
+	// host-deletion time so no live SSH session outlives the host.
+	RemoveHost(hostID string)
 	// Close stops any background goroutines owned by the dialer (the
 	// cleanup loop) and releases cached clients. It must be safe to call
 	// multiple times. Used by Service.Close so internal/app.App.Close can
@@ -39,11 +39,11 @@ type dialer interface {
 	Close() error
 }
 
-// sessionRunner runs a single command on a remote machine. Each Dial returns
+// sessionRunner runs a single command on a remote host. Each Dial returns
 // a fresh runner; the underlying sshClient may be shared across runners
 // (*ssh.Client is safe for concurrent NewSession calls).
 type sessionRunner interface {
-	// Run executes cmd on the remote machine and returns its captured
+	// Run executes cmd on the remote host and returns its captured
 	// stdout/stderr/exit-code. A non-zero exit code must NOT be reported
 	// as an error — only real failures (session closed, network drop, ctx
 	// cancellation surfacing as something other than an exit code) return
@@ -54,7 +54,7 @@ type sessionRunner interface {
 	// capturing the full result. Same error semantics as Run.
 	RunStream(ctx context.Context, cmd string, onLine func(OutputLine)) (ExecResult, error)
 	// Close releases this exec's hold on the cached client (the reference
-	// taken by Dial). For a machine removed via RemoveMachine, the last
+	// taken by Dial). For a host removed via RemoveHost, the last
 	// release closes the client — the graceful teardown.
 	Close() error
 }
@@ -70,27 +70,27 @@ type sshClient interface {
 	NewSession() (*ssh.Session, error)
 }
 
-// sshDialer is the production dialer. It owns a per-machine sshClient cache
+// sshDialer is the production dialer. It owns a per-host sshClient cache
 // (internal/rescache, architecture review 2026-10-19 candidate C1): the
 // cache owns the whole lifecycle — acquire with dial dedup (the dial runs
-// outside the lock, so cold dials to different machines never serialize),
+// outside the lock, so cold dials to different hosts never serialize),
 // refcounted release, LRU-idle eviction that never closes an in-flight
 // client, idle cleanup that skips in-use clients, graceful Remove, and
 // fail-fast Invalidate. This adapter hands over its dial and close and keeps
 // its own session-runner projection.
 type sshDialer struct {
-	machineRepo    machineRepo
+	hostRepo       hostRepo
 	encryption     encryptionSvc
 	connectTimeout time.Duration
 
-	// cache owns the per-machine sshClient lifecycle — internal/rescache.
+	// cache owns the per-host sshClient lifecycle — internal/rescache.
 	cache *rescache.Cache[sshClient]
 
 	// dialSSH is the seam that actually produces an sshClient. In
 	// production it is the real handshake; in dialer-level tests it is
 	// swapped for a fake so the cache can be exercised without a live SSH
 	// server.
-	dialSSH func(ctx context.Context, machineID string) (sshClient, error)
+	dialSSH func(ctx context.Context, hostID string) (sshClient, error)
 
 	// dialCount counts how many times dialSSH has been invoked. Test-only
 	// observable; production never reads it.
@@ -99,7 +99,7 @@ type sshDialer struct {
 
 // sshDialerConfig configures an sshDialer.
 type sshDialerConfig struct {
-	machineRepo     machineRepo
+	hostRepo        hostRepo
 	encryption      encryptionSvc
 	maxSize         int
 	idleTimeout     time.Duration
@@ -109,7 +109,7 @@ type sshDialerConfig struct {
 
 func newSSHDialer(cfg sshDialerConfig) *sshDialer {
 	d := &sshDialer{
-		machineRepo:    cfg.machineRepo,
+		hostRepo:       cfg.hostRepo,
 		encryption:     cfg.encryption,
 		connectTimeout: cfg.connectTimeout,
 	}
@@ -126,10 +126,10 @@ func newSSHDialer(cfg sshDialerConfig) *sshDialer {
 
 // dialForCache is the rescache Dial seam: it runs the dialSSH seam and counts
 // the successful dial (test-only observable). The dial runs outside the
-// cache lock, so cold dials to different machines never serialize and
-// concurrent cold dials for one machine share one dial.
-func (d *sshDialer) dialForCache(ctx context.Context, machineID string) (sshClient, error) {
-	client, err := d.dialSSH(ctx, machineID)
+// cache lock, so cold dials to different hosts never serialize and
+// concurrent cold dials for one host share one dial.
+func (d *sshDialer) dialForCache(ctx context.Context, hostID string) (sshClient, error) {
+	client, err := d.dialSSH(ctx, hostID)
 	if err != nil {
 		return nil, err
 	}
@@ -142,34 +142,34 @@ func closeSSHClient(c sshClient) {
 	_ = c.Close()
 }
 
-// Dial returns a sessionRunner for machineID. On a cache miss it dials a new
+// Dial returns a sessionRunner for hostID. On a cache miss it dials a new
 // sshClient (and may evict the LRU idle entry first if the cache is full).
 // On a cache hit the existing client is reused. Each Dial takes one
 // reference on the entry, released by the returned runner's Close — that is
-// what lets RemoveMachine wait out in-flight execs.
-func (d *sshDialer) Dial(ctx context.Context, machineID string) (sessionRunner, error) {
-	client, release, err := d.cache.Acquire(ctx, machineID)
+// what lets RemoveHost wait out in-flight execs.
+func (d *sshDialer) Dial(ctx context.Context, hostID string) (sessionRunner, error) {
+	client, release, err := d.cache.Acquire(ctx, hostID)
 	if err != nil {
 		return nil, err
 	}
 	return &sshSessionRunner{client: client, release: release}, nil
 }
 
-// Invalidate closes and drops the cached sshClient for machineID. Safe to
+// Invalidate closes and drops the cached sshClient for hostID. Safe to
 // call when no entry exists (no-op). Fail-fast: the client closes even if a
 // call is mid-flight (short-lived execs; the affected call surfaces the close
 // as a session failure).
-func (d *sshDialer) Invalidate(machineID string) {
-	d.cache.Invalidate(machineID)
+func (d *sshDialer) Invalidate(hostID string) {
+	d.cache.Invalidate(hostID)
 }
 
-// RemoveMachine invalidates a machine's cached sshClient gracefully: the
+// RemoveHost invalidates a host's cached sshClient gracefully: the
 // entry leaves the cache immediately (a later exec simply dials again), and
 // the client closes as soon as the last in-flight exec releases — an exec
-// already running on the machine finishes untouched. Unknown machines are a
-// no-op. Mirrors connections.Manager.RemoveMachine.
-func (d *sshDialer) RemoveMachine(machineID string) {
-	d.cache.Remove(machineID)
+// already running on the host finishes untouched. Unknown hosts are a
+// no-op. Mirrors connections.Manager.RemoveHost.
+func (d *sshDialer) RemoveHost(hostID string) {
+	d.cache.Remove(hostID)
 }
 
 // Close stops the cleanup goroutine (blocking until it has exited) and
@@ -184,20 +184,20 @@ func (d *sshDialer) Close() error {
 	return nil
 }
 
-// dialSSHProd is the production dial path: fetch the machine, decrypt its
+// dialSSHProd is the production dial path: fetch the host, decrypt its
 // SSH key, parse the key, dial TCP (honouring ctx), perform the SSH
 // handshake, and return the resulting *ssh.Client. Any failure is returned
 // unwrapped-by-retry (docs/architecture-decisions.md §4 fail-fast).
-func (d *sshDialer) dialSSHProd(ctx context.Context, machineID string) (sshClient, error) {
-	machine, err := d.machineRepo.GetByID(machineID)
+func (d *sshDialer) dialSSHProd(ctx context.Context, hostID string) (sshClient, error) {
+	host, err := d.hostRepo.GetByID(hostID)
 	if err != nil {
-		return nil, fmt.Errorf("sshexec: failed to fetch machine %q: %w", machineID, err)
+		return nil, fmt.Errorf("sshexec: failed to fetch host %q: %w", hostID, err)
 	}
-	if machine == nil {
-		return nil, fmt.Errorf("sshexec: machine not found: %s", machineID)
+	if host == nil {
+		return nil, fmt.Errorf("sshexec: host not found: %s", hostID)
 	}
 
-	privateKey, err := d.encryption.Decrypt(machine.SSHKeyEncrypted)
+	privateKey, err := d.encryption.Decrypt(host.SSHKeyEncrypted)
 	if err != nil {
 		return nil, fmt.Errorf("sshexec: failed to decrypt SSH key: %w", err)
 	}
@@ -207,13 +207,13 @@ func (d *sshDialer) dialSSHProd(ctx context.Context, machineID string) (sshClien
 		return nil, fmt.Errorf("sshexec: failed to parse SSH key: %w", err)
 	}
 
-	addr := fmt.Sprintf("%s:%d", machine.Hostname, machine.Port)
+	addr := fmt.Sprintf("%s:%d", host.Hostname, host.Port)
 	// SECURITY: InsecureIgnoreHostKey matches the existing connection
 	// factory's posture (it does not verify known_hosts either). This is a
 	// known gap; host-key verification should be added alongside
-	// machine-registration capturing the host public key.
+	// host-registration capturing the host public key.
 	cfg := &ssh.ClientConfig{
-		User:            machine.SSHUsername,
+		User:            host.SSHUsername,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 		Timeout:         d.connectTimeout,
@@ -312,9 +312,9 @@ func (r *sshSessionRunner) RunStream(ctx context.Context, cmd string, onLine fun
 }
 
 func (r *sshSessionRunner) Close() error {
-	// Release this exec's hold on the cached client. A removed machine's
+	// Release this exec's hold on the cached client. A removed host's
 	// entry closes its client here when the last in-flight exec lets go —
-	// that is RemoveMachine's graceful teardown.
+	// that is RemoveHost's graceful teardown.
 	r.release()
 	return nil
 }

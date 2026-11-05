@@ -1,35 +1,35 @@
 # Podland
 
-A web application for managing [Podman](https://podman.io/) containers on remote machines.
+A web application for managing [Podman](https://podman.io/) containers on remote hosts.
 
 ## Overview
 
-Podland is a full-stack web app that lets you register remote machines, manage their
-Podman containers, images, and quadlets, and share access to those machines with
+Podland is a full-stack web app that lets you register remote hosts, manage their
+Podman containers, images, and quadlets, and share access to those hosts with
 other users — all from a single browser interface.
 
 **Stack**
 
 - **Backend**: Go service talking to Podman's Service API over SSH tunnels
 - **Frontend**: React 18 + Chakra UI + Vite
-- **Database**: SQLite for machine metadata, users, and permissions
+- **Database**: SQLite for host metadata, users, and permissions
 - **Auth**: JWT (RS256) with revocable refresh sessions
 
 ## Features
 
-- Register remote machines and connect via the owner's SSH credentials
-- Machines are managed through Podman's Unix socket, exposed over an SSH tunnel
+- Register remote hosts and connect via the owner's SSH credentials
+- Hosts are managed through Podman's Unix socket, exposed over an SSH tunnel
 - Manage containers: create, start, stop, delete, stream logs
 - Browse and filter images
 - Manage quadlets with lifecycle integration over SSH/systemctl
-- Share machines with other users (`read` / `write` / `admin` permissions)
+- Share hosts with other users (`read` / `write` / `admin` permissions)
 - Multi-user authentication with refresh sessions and rate-limited login
 
 ## Requirements
 
 - Go 1.22+ (backend)
 - Node.js 18+ (frontend)
-- Podman pre-installed on every managed machine
+- Podman pre-installed on every managed host
 
 ## Getting Started
 
@@ -91,10 +91,10 @@ Vite bakes them into the frontend bundle (see `frontend/.env.example`).
 | `JWT_ISSUER` | `podland` | `iss` claim written into issued tokens |
 | `SESSION_TTL_DAYS` | `30` | Days a login's refresh session stays redeemable |
 | `SESSION_REMEMBER_TTL_DAYS` | `90` | Days a "remember this device" login's refresh session stays redeemable (must be >= `SESSION_TTL_DAYS`) |
-| `SSH_IDLE_TIMEOUT_SECONDS` | `900` | Idle timeout for SSH tunnels to managed machines |
-| `MAX_CONCURRENT_MACHINES` | `100` | Maximum number of concurrent machine connections |
-| `MACHINE_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | Timeout for the connection test when registering a machine |
-| `MACHINE_HOST_BLOCK_PRIVATE_RANGES` | `false` | Opt-in egress block on the machine registration/update probe target: reject hostnames whose IP (literal or resolved) falls in loopback, RFC1918, link-local, CGNAT, IPv6 ULA, or unspecified ranges with 400 `HOST_NOT_ALLOWED` (unresolvable fails closed). Off by default — LAN/localhost podman hosts are the primary use case |
+| `SSH_IDLE_TIMEOUT_SECONDS` | `900` | Idle timeout for SSH tunnels to managed hosts |
+| `MAX_CONCURRENT_HOSTS` | `100` | Maximum number of concurrent host connections |
+| `HOST_CONNECTION_TEST_TIMEOUT_SECONDS` | `10` | Timeout for the connection test when registering a host |
+| `HOST_BLOCK_PRIVATE_RANGES` | `false` | Opt-in egress block on the host registration/update probe target: reject hostnames whose IP (literal or resolved) falls in loopback, RFC1918, link-local, CGNAT, IPv6 ULA, or unspecified ranges with 400 `HOST_NOT_ALLOWED` (unresolvable fails closed). Off by default — LAN/localhost podman hosts are the primary use case |
 | `RATE_LIMIT_REQUESTS_PER_USER_PER_MINUTE` | `60` | Authenticated API requests allowed per minute per user |
 | `RATE_LIMIT_AUTH_REQUESTS_PER_IP_PER_MINUTE` | `10` | Login/refresh requests allowed per minute per client IP |
 | `RATE_LIMIT_AUTH_FAILURE_BUDGET` | `5` | Failed password attempts allowed per window before throttling (HTTP 429) |
@@ -112,10 +112,10 @@ Vite bakes them into the frontend bundle (see `frontend/.env.example`).
 ## Podman Integration
 
 Podland tightly integrates with Podman: it talks to the Podman Service API
-(REST over the Unix socket on each remote machine, accessed via SSH tunnel)
+(REST over the Unix socket on each remote host, accessed via SSH tunnel)
 using a patched fork of Podman's Go bindings —
 [github.com/Homerus25/podman](https://github.com/Homerus25/podman).
-Podman must be pre-installed on every managed machine.
+Podman must be pre-installed on every managed host.
 
 ## License
 

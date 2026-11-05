@@ -80,7 +80,7 @@ func TestExecStream_EmitsLinesInArrivalOrderAndReturnsResult(t *testing.T) {
 	svc := newServiceWithDialer(dialer)
 
 	onLine, lines := collectedCallback(t, context.Background())
-	result, err := svc.ExecStream(context.Background(), "machine-1", "user-1", "podman", ExecOptions{Args: []string{"info"}}, onLine)
+	result, err := svc.ExecStream(context.Background(), "host-1", "user-1", "podman", ExecOptions{Args: []string{"info"}}, onLine)
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
@@ -104,7 +104,7 @@ func TestExecStream_NonZeroExitCodeIsAResult(t *testing.T) {
 	svc := newServiceWithDialer(&fakeDialer{dialRunner: runner})
 
 	onLine, lines := collectedCallback(t, context.Background())
-	result, err := svc.ExecStream(context.Background(), "machine-1", "user-1", "systemctl", ExecOptions{}, onLine)
+	result, err := svc.ExecStream(context.Background(), "host-1", "user-1", "systemctl", ExecOptions{}, onLine)
 
 	require.NoError(t, err, "a non-zero exit code is a result, not an error")
 	assert.Equal(t, 3, result.ExitCode)
@@ -116,7 +116,7 @@ func TestExecStream_DialFailureIsAnError(t *testing.T) {
 	svc := newServiceWithDialer(dialer)
 
 	onLine, lines := collectedCallback(t, context.Background())
-	result, err := svc.ExecStream(context.Background(), "machine-1", "user-1", "systemctl", ExecOptions{}, onLine)
+	result, err := svc.ExecStream(context.Background(), "host-1", "user-1", "systemctl", ExecOptions{}, onLine)
 
 	require.Error(t, err)
 	assert.Equal(t, ExecResult{}, result)
@@ -130,10 +130,10 @@ func TestExecStream_SessionFailureInvalidatesAndErrors(t *testing.T) {
 	svc := newServiceWithDialer(dialer)
 
 	onLine, _ := collectedCallback(t, context.Background())
-	_, err := svc.ExecStream(context.Background(), "machine-1", "user-1", "systemctl", ExecOptions{}, onLine)
+	_, err := svc.ExecStream(context.Background(), "host-1", "user-1", "systemctl", ExecOptions{}, onLine)
 
 	require.Error(t, err)
-	assert.Equal(t, []string{"machine-1"}, dialer.Invalidated(), "session failure must invalidate the cached client")
+	assert.Equal(t, []string{"host-1"}, dialer.Invalidated(), "session failure must invalidate the cached client")
 }
 
 func TestExecStream_ContextCancellationMidStream(t *testing.T) {
@@ -147,7 +147,7 @@ func TestExecStream_ContextCancellationMidStream(t *testing.T) {
 	svc := newServiceWithDialer(&fakeDialer{dialRunner: runner})
 
 	onLine, lines := collectedCallback(t, ctx)
-	result, err := svc.ExecStream(ctx, "machine-1", "user-1", "podman", ExecOptions{}, onLine)
+	result, err := svc.ExecStream(ctx, "host-1", "user-1", "podman", ExecOptions{}, onLine)
 
 	require.ErrorIs(t, err, context.Canceled)
 	assert.Equal(t, ExecResult{}, result)

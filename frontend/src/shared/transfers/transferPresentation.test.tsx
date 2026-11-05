@@ -100,7 +100,7 @@ describe("TransferReport", () => {
 		);
 	});
 
-	it("nests the partial block under the header with the pinned both-machines tail and the error line", () => {
+	it("nests the partial block under the header with the pinned both-hosts tail and the error line", () => {
 		renderWithQuery(
 			<TransferReport
 				header={{
@@ -123,7 +123,7 @@ describe("TransferReport", () => {
 		);
 		const partial = within(report).getByTestId("move-partial-message");
 		expect(partial).toHaveTextContent(
-			"The data crossed but the source volume could not be removed. It currently exists on both machines and must be cleaned up manually.",
+			"The data crossed but the source volume could not be removed. It currently exists on both hosts and must be cleaned up manually.",
 		);
 		expect(partial).toHaveTextContent(
 			"failed to remove volume: volume is in use",
@@ -150,7 +150,7 @@ describe("TransferReport", () => {
 
 		const partial = screen.getByTestId("move-partial-message");
 		expect(partial).toHaveTextContent(
-			"The value crossed but the source secret could not be removed. It currently exists on both machines and must be cleaned up manually.",
+			"The value crossed but the source secret could not be removed. It currently exists on both hosts and must be cleaned up manually.",
 		);
 		// The cause line alone — no error paragraph.
 		expect(partial.querySelectorAll("p")).toHaveLength(1);
@@ -212,7 +212,7 @@ describe("TransferReport", () => {
 		);
 
 		expect(screen.getByTestId("move-partial-block")).toHaveTextContent(
-			"both machines",
+			"both hosts",
 		);
 		expect(
 			screen.queryByTestId("move-partial-message"),
@@ -239,7 +239,7 @@ describe("TransferReport", () => {
 		// under a second partial wrapper.
 		const message = screen.getByTestId("move-partial-message");
 		expect(message).toHaveTextContent(
-			"The quadlet was installed on “staging-01” but could not be removed from “prod-web-01”. It currently exists on both machines and must be cleaned up manually.",
+			"The quadlet was installed on “staging-01” but could not be removed from “prod-web-01”. It currently exists on both hosts and must be cleaned up manually.",
 		);
 		expect(message).toHaveTextContent(
 			"failed to remove quadlet: resource running",

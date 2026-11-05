@@ -44,9 +44,9 @@ export interface LogSource {
 	) => Promise<void>;
 }
 
-// Builds a LogSource for one log endpoint from its pre-built machine-scoped
-// path/url pair: the caller keeps the machine vocabulary (machineApiPath for
-// the axios call, machineApiUrl for the stream), the factory owns the whole
+// Builds a LogSource for one log endpoint from its pre-built host-scoped
+// path/url pair: the caller keeps the host vocabulary (hostApiPath for
+// the axios call, hostApiUrl for the stream), the factory owns the whole
 // log-endpoint ritual — the buffered tail fetch with its split-and-filter
 // parse, the URLSearchParams follow query, and the ApiError error wrap.
 export function createLogSource(path: string, url: string): LogSource {

@@ -45,7 +45,7 @@ func TestServiceImport_ImportsAndCollectsFailures(t *testing.T) {
 		},
 	}
 
-	response, err := service.Import(context.Background(), "user-1", "machine-1", req)
+	response, err := service.Import(context.Background(), "user-1", "host-1", req)
 
 	require.NoError(t, err, "per-entry failures are collected, not returned")
 	require.NotNil(t, response)
@@ -74,7 +74,7 @@ func TestServiceImport_InstallFailureIsCollected(t *testing.T) {
 	// wired for it.
 	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core"))
 
-	response, err := service.Import(context.Background(), "user-1", "machine-1", QuadletImportRequest{
+	response, err := service.Import(context.Background(), "user-1", "host-1", QuadletImportRequest{
 		Quadlets: []QuadletImportEntry{
 			{Name: "web", Resource: "container", Content: "[Container]\nImage=nginx\n"},
 		},
@@ -97,7 +97,7 @@ func TestServiceImport_EmptyRequest(t *testing.T) {
 		Quadlets: []QuadletImportEntry{},
 	}
 
-	response, err := service.Import(ctx, "user-1", "machine-1", req)
+	response, err := service.Import(ctx, "user-1", "host-1", req)
 
 	require.NoError(t, err)
 	require.NotNil(t, response)

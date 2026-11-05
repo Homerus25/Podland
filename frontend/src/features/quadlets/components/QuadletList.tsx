@@ -1,5 +1,5 @@
 import { Button, Checkbox, Text, VStack } from "@chakra-ui/react";
-import { can } from "@features/machines/permissions";
+import { can } from "@features/hosts/permissions";
 import { AutoUpdateModal } from "@features/quadlets/components/AutoUpdateModal";
 import { ImportComposeModal } from "@features/quadlets/components/ImportComposeModal";
 import { MoveQuadletDialog } from "@features/quadlets/components/MoveQuadletDialog";
@@ -20,7 +20,7 @@ import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { ActionDialog, ConfirmDialog } from "@shared/components/MutationDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { useOpenLogs } from "@shared/logs/logRoute";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { useState } from "react";
 
 // No delete request leaves the browser until the user explicitly confirms.
@@ -73,25 +73,25 @@ function DeleteQuadletModal({
 	);
 }
 
-// The toolbar/triad/table machinery, the plural testids, and the hint swap
+// The toolbar/triad/table plumbing, the plural testids, and the hint swap
 // are ResourceList's; this adapter owns the busiest toolbar of the five
 // (create plus the two auto-update buttons), the edit/delete/logs/auto-update
 // and move/copy feature code, and the now-tiny update-all pre-flight (an
 // ActionDialog: the confirm gates the caller-owned stream, so no mutation
-// machinery applies).
+// plumbing applies).
 // The row and its lifecycle options modal live in QuadletRow; the transfer
 // dialog (mode, target, volume warning) lives in MoveQuadletDialog. Create is
 // a write like every other toolbar action, so below manage level the module
 // swaps the whole toolbar for the canonical read hint.
-export function QuadletList({ machine }: { machine: Machine }) {
-	const machineId = machine.id;
-	const { data: quadlets, isPending, error } = useQuadlets(machineId);
-	const createQuadlet = useCreateQuadlet(machineId);
-	const updateQuadlet = useUpdateQuadlet(machineId);
-	const deleteQuadlet = useDeleteQuadlet(machineId);
-	const moveQuadlet = useMoveQuadlet(machineId);
-	const autoUpdate = useQuadletAutoUpdate(machineId);
-	const canManage = can(machine, "manage-quadlets");
+export function QuadletList({ host }: { host: Host }) {
+	const hostId = host.id;
+	const { data: quadlets, isPending, error } = useQuadlets(hostId);
+	const createQuadlet = useCreateQuadlet(hostId);
+	const updateQuadlet = useUpdateQuadlet(hostId);
+	const deleteQuadlet = useDeleteQuadlet(hostId);
+	const moveQuadlet = useMoveQuadlet(hostId);
+	const autoUpdate = useQuadletAutoUpdate(hostId);
+	const canManage = can(host, "manage-quadlets");
 	const [isConfirmUpdateOpen, setIsConfirmUpdateOpen] = useState(false);
 	const [isAutoUpdateOpen, setIsAutoUpdateOpen] = useState(false);
 	// How the auto-update modal was opened: the check button starts a dry run,
@@ -104,7 +104,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 	const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null);
 	const [deleteTarget, setDeleteTarget] = useState<QuadletSummary | null>(null);
 	const [moveTarget, setMoveTarget] = useState<QuadletSummary | null>(null);
-	const openLogs = useOpenLogs(machineId, "quadlet");
+	const openLogs = useOpenLogs(hostId, "quadlet");
 
 	return (
 		<>
@@ -128,7 +128,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 				renderRow={(row) => (
 					<QuadletRow
 						key={row.id}
-						machineId={machineId}
+						hostId={hostId}
 						quadlet={row}
 						canManage={canManage}
 						onEdit={setEditTarget}
@@ -183,7 +183,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 			/>
 			{editTarget ? (
 				<EditQuadletDialog
-					machineId={machineId}
+					hostId={hostId}
 					quadlet={editTarget}
 					mutation={updateQuadlet}
 					onClose={() => setEditTarget(null)}
@@ -198,7 +198,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 			) : null}
 			{moveTarget ? (
 				<MoveQuadletDialog
-					machine={machine}
+					host={host}
 					quadlet={moveTarget}
 					moveQuadlet={moveQuadlet}
 					onClose={() => setMoveTarget(null)}
@@ -244,7 +244,7 @@ export function QuadletList({ machine }: { machine: Machine }) {
 			) : null}
 			{isImportOpen ? (
 				<ImportComposeModal
-					machineId={machineId}
+					hostId={hostId}
 					onClose={() => setIsImportOpen(false)}
 				/>
 			) : null}

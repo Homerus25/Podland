@@ -66,11 +66,11 @@ func listFixture() []*entities.ListQuadlet {
 
 // quadletRequest builds a request carrying the identity and URL params
 // the mounted route would extract.
-func quadletRequest(method, target, userID, machineID, quadletID string, body io.Reader) *http.Request {
+func quadletRequest(method, target, userID, hostID, quadletID string, body io.Reader) *http.Request {
 	req := httptest.NewRequest(method, target, body)
 	ctx := context.WithValue(req.Context(), contextutils.UserIDContextKey, userID)
 	req = req.WithContext(ctx)
-	req.SetPathValue("id", machineID)
+	req.SetPathValue("id", hostID)
 	if quadletID != "" {
 		req.SetPathValue("quadletId", quadletID)
 	}
@@ -79,39 +79,39 @@ func quadletRequest(method, target, userID, machineID, quadletID string, body io
 
 func TestQuadletHandler_List(t *testing.T) {
 	tests := []struct {
-		name            string
-		queryParams     string
-		machineQuadlets []*entities.ListQuadlet
-		wantIDs         []string
-		expectedStatus  int
+		name           string
+		queryParams    string
+		hostQuadlets   []*entities.ListQuadlet
+		wantIDs        []string
+		expectedStatus int
 	}{
 		{
-			name:            "successful list",
-			queryParams:     "",
-			machineQuadlets: listFixture(),
-			wantIDs:         []string{"my-container.container", "my-pod.pod"},
-			expectedStatus:  http.StatusOK,
+			name:           "successful list",
+			queryParams:    "",
+			hostQuadlets:   listFixture(),
+			wantIDs:        []string{"my-container.container", "my-pod.pod"},
+			expectedStatus: http.StatusOK,
 		},
 		{
-			name:            "successful list empty",
-			queryParams:     "",
-			machineQuadlets: nil,
-			wantIDs:         []string{},
-			expectedStatus:  http.StatusOK,
+			name:           "successful list empty",
+			queryParams:    "",
+			hostQuadlets:   nil,
+			wantIDs:        []string{},
+			expectedStatus: http.StatusOK,
 		},
 		{
-			name:            "filter by resource",
-			queryParams:     "?resource=container",
-			machineQuadlets: listFixture(),
-			wantIDs:         []string{"my-container.container"},
-			expectedStatus:  http.StatusOK,
+			name:           "filter by resource",
+			queryParams:    "?resource=container",
+			hostQuadlets:   listFixture(),
+			wantIDs:        []string{"my-container.container"},
+			expectedStatus: http.StatusOK,
 		},
 		{
-			name:            "filter by name",
-			queryParams:     "?name=pod",
-			machineQuadlets: listFixture(),
-			wantIDs:         []string{"my-pod.pod"},
-			expectedStatus:  http.StatusOK,
+			name:           "filter by name",
+			queryParams:    "?name=pod",
+			hostQuadlets:   listFixture(),
+			wantIDs:        []string{"my-pod.pod"},
+			expectedStatus: http.StatusOK,
 		},
 	}
 
@@ -119,11 +119,11 @@ func TestQuadletHandler_List(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			engine := &fakeQuadletEngine{
 				listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
-					return tt.machineQuadlets, nil
+					return tt.hostQuadlets, nil
 				},
 			}
 
-			req := quadletRequest("GET", "/api/machines/machine123/quadlets"+tt.queryParams, "user123", "machine123", "", nil)
+			req := quadletRequest("GET", "/api/hosts/host123/quadlets"+tt.queryParams, "user123", "host123", "", nil)
 
 			rr := httptest.NewRecorder()
 			newTestHandler(engine).List(rr, req)
@@ -154,7 +154,7 @@ func TestQuadletHandler_List_PodResourceFields(t *testing.T) {
 		},
 	}
 
-	req := quadletRequest("GET", "/api/machines/machine123/quadlets?name=pod", "user123", "machine123", "", nil)
+	req := quadletRequest("GET", "/api/hosts/host123/quadlets?name=pod", "user123", "host123", "", nil)
 
 	rr := httptest.NewRecorder()
 	newTestHandler(engine).List(rr, req)
@@ -164,7 +164,7 @@ func TestQuadletHandler_List_PodResourceFields(t *testing.T) {
 }
 
 // TestQuadletHandler_Get pins the inspect contract through the real
-// service: the quadlet's metadata (resolved from the machine's list) is
+// service: the quadlet's metadata (resolved from the host's list) is
 // answered together with the unit file's content (resolved via print).
 func TestQuadletHandler_Get(t *testing.T) {
 	tests := []struct {
@@ -202,7 +202,7 @@ func TestQuadletHandler_Get(t *testing.T) {
 				},
 			}
 
-			req := quadletRequest("GET", "/api/machines/machine123/quadlets/"+tt.quadletID, "user123", "machine123", tt.quadletID, nil)
+			req := quadletRequest("GET", "/api/hosts/host123/quadlets/"+tt.quadletID, "user123", "host123", tt.quadletID, nil)
 
 			rr := httptest.NewRecorder()
 			newTestHandler(engine).Get(rr, req)
@@ -215,7 +215,7 @@ func TestQuadletHandler_Get(t *testing.T) {
 	t.Run("missing quadlet ID", func(t *testing.T) {
 		engine := &fakeQuadletEngine{}
 
-		req := quadletRequest("GET", "/api/machines/machine123/quadlets/", "user123", "machine123", "", nil)
+		req := quadletRequest("GET", "/api/hosts/host123/quadlets/", "user123", "host123", "", nil)
 
 		rr := httptest.NewRecorder()
 		newTestHandler(engine).Get(rr, req)
@@ -243,7 +243,7 @@ func TestQuadletHandler_Create_Cases(t *testing.T) {
 			},
 		}
 
-		req := quadletRequest("POST", "/api/machines/machine123/quadlets", "user123", "machine123", "", bytes.NewBufferString(successBody))
+		req := quadletRequest("POST", "/api/hosts/host123/quadlets", "user123", "host123", "", bytes.NewBufferString(successBody))
 
 		rr := httptest.NewRecorder()
 		newTestHandler(engine).Create(rr, req)
@@ -267,7 +267,7 @@ func TestQuadletHandler_Create_Cases(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := &fakeQuadletEngine{}
 
-			req := quadletRequest("POST", "/api/machines/machine123/quadlets", "user123", "machine123", "", bytes.NewBufferString(tc.requestBody))
+			req := quadletRequest("POST", "/api/hosts/host123/quadlets", "user123", "host123", "", bytes.NewBufferString(tc.requestBody))
 
 			rr := httptest.NewRecorder()
 			newTestHandler(engine).Create(rr, req)
@@ -278,7 +278,7 @@ func TestQuadletHandler_Create_Cases(t *testing.T) {
 }
 
 // TestQuadletHandler_Update pins the update contract through the real
-// service: existence is resolved from the machine's list, the old quadlet
+// service: existence is resolved from the host's list, the old quadlet
 // is removed forced, and the new content is installed with replace under
 // the preserved filename.
 func TestQuadletHandler_Update(t *testing.T) {
@@ -306,7 +306,7 @@ func TestQuadletHandler_Update(t *testing.T) {
 			},
 		}
 
-		req := quadletRequest("PUT", "/api/machines/machine123/quadlets/my-container.container", "user123", "machine123", "my-container.container", bytes.NewBufferString(successBody))
+		req := quadletRequest("PUT", "/api/hosts/host123/quadlets/my-container.container", "user123", "host123", "my-container.container", bytes.NewBufferString(successBody))
 
 		rr := httptest.NewRecorder()
 		newTestHandler(engine).Update(rr, req)
@@ -315,7 +315,7 @@ func TestQuadletHandler_Update(t *testing.T) {
 		assert.Equal(t, "my-container.container", removedName)
 		assert.True(t, removedForce, "an update must remove forced so an active resource does not block the replace")
 		assert.Equal(t, "my-container.container", gotFileName, "the rebuilt install must keep the original filename")
-		assert.Equal(t, "[Container]\nImage=nginx:1.25\n", string(gotContent), "the new content must reach the machine")
+		assert.Equal(t, "[Container]\nImage=nginx:1.25\n", string(gotContent), "the new content must reach the host")
 		assert.True(t, gotReplace, "an update must install with replace")
 		assert.JSONEq(t, `{"id":"my-container.container","name":"my-container.container","path":"/etc/containers/systemd/my-container.container","unit":"my-container.service","resource":"container","state":"unknown","content":"[Container]\nImage=nginx:1.25\n"}`, rr.Body.String())
 	})
@@ -332,7 +332,7 @@ func TestQuadletHandler_Update(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := &fakeQuadletEngine{}
 
-			req := quadletRequest("PUT", "/api/machines/machine123/quadlets/"+tc.quadletID, "user123", "machine123", tc.quadletID, bytes.NewBufferString(tc.requestBody))
+			req := quadletRequest("PUT", "/api/hosts/host123/quadlets/"+tc.quadletID, "user123", "host123", tc.quadletID, bytes.NewBufferString(tc.requestBody))
 
 			rr := httptest.NewRecorder()
 			newTestHandler(engine).Update(rr, req)
@@ -343,7 +343,7 @@ func TestQuadletHandler_Update(t *testing.T) {
 }
 
 // TestQuadletHandler_Delete pins the delete contract through the real
-// service: the parsed force flag reaches the machine's remove call
+// service: the parsed force flag reaches the host's remove call
 // (stop drives the pre-remove lifecycle stop and never reaches Remove),
 // a successful delete answers 204 with an empty body, and a malformed
 // force flag is ignored (deletes as unforced).
@@ -398,7 +398,7 @@ func TestQuadletHandler_Delete(t *testing.T) {
 				},
 			}
 
-			req := quadletRequest("DELETE", "/api/machines/machine123/quadlets/"+tt.quadletID+tt.queryParams, "user123", "machine123", tt.quadletID, nil)
+			req := quadletRequest("DELETE", "/api/hosts/host123/quadlets/"+tt.quadletID+tt.queryParams, "user123", "host123", tt.quadletID, nil)
 
 			rr := httptest.NewRecorder()
 			newTestHandler(engine).Delete(rr, req)
@@ -418,7 +418,7 @@ func TestQuadletHandler_Delete(t *testing.T) {
 			// removeFn stays unarmed: a refused delete must not remove.
 		}
 
-		req := quadletRequest("DELETE", "/api/machines/machine123/quadlets/my-container.container?stop=false", "user123", "machine123", "my-container.container", nil)
+		req := quadletRequest("DELETE", "/api/hosts/host123/quadlets/my-container.container?stop=false", "user123", "host123", "my-container.container", nil)
 
 		rr := httptest.NewRecorder()
 		newTestHandler(engine).Delete(rr, req)
@@ -436,7 +436,7 @@ func TestQuadletHandler_Delete(t *testing.T) {
 			},
 		}
 
-		req := quadletRequest("DELETE", "/api/machines/machine123/quadlets/my-container.container", "user123", "machine123", "my-container.container", nil)
+		req := quadletRequest("DELETE", "/api/hosts/host123/quadlets/my-container.container", "user123", "host123", "my-container.container", nil)
 
 		rr := httptest.NewRecorder()
 		newTestHandler(engine).Delete(rr, req)
@@ -448,7 +448,7 @@ func TestQuadletHandler_Delete(t *testing.T) {
 	t.Run("missing quadlet ID", func(t *testing.T) {
 		engine := &fakeQuadletEngine{}
 
-		req := quadletRequest("DELETE", "/api/machines/machine123/quadlets/", "user123", "machine123", "", nil)
+		req := quadletRequest("DELETE", "/api/hosts/host123/quadlets/", "user123", "host123", "", nil)
 
 		rr := httptest.NewRecorder()
 		newTestHandler(engine).Delete(rr, req)
@@ -476,7 +476,7 @@ func TestQuadletHandler_Start(t *testing.T) {
 			return sshexec.ExecResult{ExitCode: 0}, nil
 		})
 
-		req := quadletRequest("POST", "/api/machines/machine123/quadlets/my-container.container/start", "user123", "machine123", "my-container.container", nil)
+		req := quadletRequest("POST", "/api/hosts/host123/quadlets/my-container.container/start", "user123", "host123", "my-container.container", nil)
 
 		rr := httptest.NewRecorder()
 		newLifecycleTestHandler(engine, sshExec).Start(rr, req)
@@ -488,7 +488,7 @@ func TestQuadletHandler_Start(t *testing.T) {
 	t.Run("missing quadlet ID", func(t *testing.T) {
 		engine := &fakeQuadletEngine{}
 
-		req := quadletRequest("POST", "/api/machines/machine123/quadlets//start", "user123", "machine123", "", nil)
+		req := quadletRequest("POST", "/api/hosts/host123/quadlets//start", "user123", "host123", "", nil)
 
 		rr := httptest.NewRecorder()
 		newTestHandler(engine).Start(rr, req)
@@ -564,7 +564,7 @@ func TestQuadletHandler_Stop(t *testing.T) {
 				return tt.execResult, nil
 			})
 
-			req := quadletRequest("POST", "/api/machines/machine123/quadlets/my-container.container/stop"+tt.queryParams, "user123", "machine123", "my-container.container", nil)
+			req := quadletRequest("POST", "/api/hosts/host123/quadlets/my-container.container/stop"+tt.queryParams, "user123", "host123", "my-container.container", nil)
 
 			rr := httptest.NewRecorder()
 			newLifecycleTestHandler(engine, sshExec).Stop(rr, req)
@@ -579,7 +579,7 @@ func TestQuadletHandler_Stop(t *testing.T) {
 	t.Run("missing quadlet ID", func(t *testing.T) {
 		engine := &fakeQuadletEngine{}
 
-		req := quadletRequest("POST", "/api/machines/machine123/quadlets//stop", "user123", "machine123", "", nil)
+		req := quadletRequest("POST", "/api/hosts/host123/quadlets//stop", "user123", "host123", "", nil)
 
 		rr := httptest.NewRecorder()
 		newTestHandler(engine).Stop(rr, req)
@@ -604,7 +604,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 			return sshexec.ExecResult{ExitCode: 0}, nil
 		})
 
-		req := quadletRequest("POST", "/api/machines/machine123/quadlets/my-container.container/restart", "user123", "machine123", "my-container.container", nil)
+		req := quadletRequest("POST", "/api/hosts/host123/quadlets/my-container.container/restart", "user123", "host123", "my-container.container", nil)
 
 		rr := httptest.NewRecorder()
 		newLifecycleTestHandler(engine, sshExec).Restart(rr, req)
@@ -624,7 +624,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 			return sshexec.ExecResult{ExitCode: 0}, nil
 		})
 
-		req := quadletRequest("POST", "/api/machines/machine123/quadlets/my-container.container/restart?force=true&timeout=20", "user123", "machine123", "my-container.container", nil)
+		req := quadletRequest("POST", "/api/hosts/host123/quadlets/my-container.container/restart?force=true&timeout=20", "user123", "host123", "my-container.container", nil)
 
 		rr := httptest.NewRecorder()
 		newLifecycleTestHandler(engine, sshExec).Restart(rr, req)
@@ -636,7 +636,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 	t.Run("missing quadlet ID", func(t *testing.T) {
 		engine := &fakeQuadletEngine{}
 
-		req := quadletRequest("POST", "/api/machines/machine123/quadlets//restart", "user123", "machine123", "", nil)
+		req := quadletRequest("POST", "/api/hosts/host123/quadlets//restart", "user123", "host123", "", nil)
 
 		rr := httptest.NewRecorder()
 		newTestHandler(engine).Restart(rr, req)
@@ -646,7 +646,7 @@ func TestQuadletHandler_Restart(t *testing.T) {
 }
 
 // TestQuadletHandler_Generate pins the generate contract through the real
-// service: an existing container or pod on the machine is inspected and
+// service: an existing container or pod on the host is inspected and
 // converted into a quadlet unit file.
 func TestQuadletHandler_Generate(t *testing.T) {
 	t.Run("successful generate from container", func(t *testing.T) {
@@ -663,7 +663,7 @@ func TestQuadletHandler_Generate(t *testing.T) {
 			},
 		}
 
-		req := quadletRequest("POST", "/api/machines/machine123/quadlets/generate", "user123", "machine123", "generate",
+		req := quadletRequest("POST", "/api/hosts/host123/quadlets/generate", "user123", "host123", "generate",
 			bytes.NewBufferString(`{"resourceId":"my-container","resourceType":"container"}`))
 
 		rr := httptest.NewRecorder()
@@ -685,7 +685,7 @@ func TestQuadletHandler_Generate(t *testing.T) {
 			},
 		}
 
-		req := quadletRequest("POST", "/api/machines/machine123/quadlets/generate", "user123", "machine123", "generate",
+		req := quadletRequest("POST", "/api/hosts/host123/quadlets/generate", "user123", "host123", "generate",
 			bytes.NewBufferString(`{"resourceId":"my-pod","resourceType":"pod"}`))
 
 		rr := httptest.NewRecorder()
@@ -709,7 +709,7 @@ func TestQuadletHandler_Generate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := &fakeQuadletEngine{}
 
-			req := quadletRequest("POST", "/api/machines/machine123/quadlets/generate", "user123", "machine123", "generate",
+			req := quadletRequest("POST", "/api/hosts/host123/quadlets/generate", "user123", "host123", "generate",
 				bytes.NewBufferString(tc.requestBody))
 
 			rr := httptest.NewRecorder()

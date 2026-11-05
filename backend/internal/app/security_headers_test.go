@@ -67,8 +67,8 @@ func TestApp_SecurityHeaders_OnEveryResponse(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, apiMiss.StatusCode)
 	assertSecurityHeaders(t, apiMiss)
 
-	unauthorized, err := http.Get(srv.URL + "/api/machines")
-	require.NoError(t, err, "GET /api/machines must connect")
+	unauthorized, err := http.Get(srv.URL + "/api/hosts")
+	require.NoError(t, err, "GET /api/hosts must connect")
 	defer unauthorized.Body.Close()
 	require.Equal(t, http.StatusUnauthorized, unauthorized.StatusCode)
 	assertSecurityHeaders(t, unauthorized)

@@ -16,11 +16,11 @@ import (
 )
 
 // Test_Integration_Containers_Prune is the container prune vertical slice
-// against POST /api/machines/{id}/containers/prune. It seeds two stopped
+// against POST /api/hosts/{id}/containers/prune. It seeds two stopped
 // containers plus one running container, prunes, and verifies the report
 // entries and survival via the list endpoint:
 //
-//	POST /api/machines/{id}/containers/prune → 200, entry per removed container
+//	POST /api/hosts/{id}/containers/prune → 200, entry per removed container
 //
 // Isolation model matches the containers slice: run-scoped names for
 // assertions/cleanup, per-test t.Cleanup, and the shared suite sweep.
@@ -28,7 +28,7 @@ func Test_Integration_Containers_Prune(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerContainersSweep()
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	stoppedA := "it-" + suite.RunID + "-prune-a"
 	stoppedB := "it-" + suite.RunID + "-prune-b"
@@ -68,7 +68,7 @@ func Test_Integration_Containers_Prune(t *testing.T) {
 
 	// --- AC: prune returns 200 with a report entry per removed container
 	resp, err := suite.AuthenticatedClient().Post(
-		suite.ServerURL+"/api/machines/"+machineID+"/containers/prune", "application/json", nil)
+		suite.ServerURL+"/api/hosts/"+hostID+"/containers/prune", "application/json", nil)
 	require.NoError(t, err, "POST prune must connect to the in-process server")
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
@@ -90,7 +90,7 @@ func Test_Integration_Containers_Prune(t *testing.T) {
 	assert.False(t, reported[runningID], "running container must not be reported as removed")
 
 	// --- AC: stopped containers are gone; the running one survives ------
-	names := listContainerNames(t, machineID)
+	names := listContainerNames(t, hostID)
 	assert.NotContains(t, names, stoppedA, "pruned stopped container must be gone")
 	assert.NotContains(t, names, stoppedB, "pruned stopped container must be gone")
 	assert.Contains(t, names, running, "running container must survive the prune")
@@ -111,14 +111,14 @@ func Test_Integration_Containers_Prune_AccessControl(t *testing.T) {
 	t.Run("ReadLevelUserGets403", func(t *testing.T) {
 		client := levelUserClient(t, models.PermissionRead)
 		expectAPIError(t, client, http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/containers/prune",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/containers/prune",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 
 	t.Run("NoAccessUserGets403", func(t *testing.T) {
 		client := noAccessUserClient(t)
 		expectAPIError(t, client, http.MethodPost,
-			suite.ServerURL+"/api/machines/"+suite.MachineID+"/containers/prune",
+			suite.ServerURL+"/api/hosts/"+suite.HostID+"/containers/prune",
 			"", http.StatusForbidden, "ACCESS_DENIED")
 	})
 }

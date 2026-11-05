@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
 import { errorJson } from "@/test/errors";
-import { machineFixture, quadletFixture } from "@/test/factories";
+import { hostFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -21,7 +21,7 @@ function resetCounters() {
 }
 
 function quadletsHandler(quadlets: () => QuadletSummary[]) {
-	return http.get("*/api/machines/m-1/quadlets", () =>
+	return http.get("*/api/hosts/m-1/quadlets", () =>
 		HttpResponse.json(quadlets()),
 	);
 }
@@ -31,20 +31,17 @@ function deleteHandler(
 	body?: JsonBodyType,
 	onDeleted?: () => void,
 ) {
-	return http.delete(
-		"*/api/machines/m-1/quadlets/:quadletId",
-		({ request }) => {
-			deleteRequests.count++;
-			deleteRequests.url = new URL(request.url);
-			if (status !== 204) return HttpResponse.json(body, { status });
-			onDeleted?.();
-			return new HttpResponse(null, { status: 204 });
-		},
-	);
+	return http.delete("*/api/hosts/m-1/quadlets/:quadletId", ({ request }) => {
+		deleteRequests.count++;
+		deleteRequests.url = new URL(request.url);
+		if (status !== 204) return HttpResponse.json(body, { status });
+		onDeleted?.();
+		return new HttpResponse(null, { status: 204 });
+	});
 }
 
 function renderQuadletList() {
-	renderWithQuery(<QuadletList machine={machineFixture()} />, {
+	renderWithQuery(<QuadletList host={hostFixture()} />, {
 		router: true,
 	});
 }
@@ -83,7 +80,7 @@ describe("QuadletList delete", () => {
 		await user.click(screen.getByTestId("confirm-delete-button"));
 
 		await waitFor(() => expect(deleteRequests.count).toBe(1));
-		expect(deleteRequests.url?.pathname).toBe("/api/machines/m-1/quadlets/web");
+		expect(deleteRequests.url?.pathname).toBe("/api/hosts/m-1/quadlets/web");
 		expect(deleteRequests.url?.searchParams.get("stop")).toBe("true");
 		expect(deleteRequests.url?.searchParams.get("force")).toBe("false");
 	});

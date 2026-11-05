@@ -16,7 +16,7 @@ import (
 // the real-podman integration suite (PRD 080-12). It proves the bulk-install
 // + partial-failure path of the content-based import endpoint:
 //
-//	POST /api/machines/{id}/quadlets/import
+//	POST /api/hosts/{id}/quadlets/import
 //	     body {quadlets: [{name, resource, content}]} →
 //	     201 {imported: [{id, name, path, state}], failed: [{name, error}]}
 //
@@ -34,12 +34,12 @@ func Test_Integration_Quadlets_Import(t *testing.T) {
 	suite.SkipIfUnavailable(t)
 	registerQuadletsSweep()
 
-	// Quadlet install dials the user systemd over DBus on the machine
+	// Quadlet install dials the user systemd over DBus on the host
 	// (podman's own requirement); hosts without a user systemd manager
 	// (the systemd-free container test host) skip here.
 	requireUserSystemd(t)
 
-	machineID := suite.MachineID
+	hostID := suite.HostID
 
 	// The .container recipe reuses the shared runnable quadlet content.
 	// Install itself never starts the container, but keeping the recipe
@@ -57,14 +57,14 @@ func Test_Integration_Quadlets_Import(t *testing.T) {
 	// fails. deleteQuadlet accepts 404 (already gone) — idempotent.
 	for _, name := range []string{impA, impB, impC, impD, collide} {
 		t.Cleanup(func() {
-			deleteQuadlet(t, machineID, name+".container")
+			deleteQuadlet(t, hostID, name+".container")
 		})
 	}
 
 	// Seed the collision target: a pre-existing quadlet named `collide`.
 	// Parent-level setup like the generate slice's source container —
 	// createQuadlet's asserts are fatal, so no t.Failed guard is needed.
-	createQuadlet(t, machineID, quadletCreateBody{
+	createQuadlet(t, hostID, quadletCreateBody{
 		Name:     collide,
 		Resource: "container",
 		Content:  runnableContainerQuadletContent,
@@ -72,7 +72,7 @@ func Test_Integration_Quadlets_Import(t *testing.T) {
 
 	// --- AC #1: import multiple valid entries → 201, all in imported[] -
 	t.Run("AllValidEntriesImport", func(t *testing.T) {
-		imported, failed := importQuadlets(t, machineID, quadletImportBody{
+		imported, failed := importQuadlets(t, hostID, quadletImportBody{
 			Quadlets: []quadletImportEntry{
 				{Name: impA, Resource: "container", Content: runnableContainerQuadletContent},
 				{Name: impB, Resource: "container", Content: runnableContainerQuadletContent},
@@ -101,7 +101,7 @@ func Test_Integration_Quadlets_Import(t *testing.T) {
 	// import (partial success). Two valid entries bracket the colliding
 	// one to prove a mid-request failure doesn't abort the batch.
 	t.Run("CollisionFailsEntrySiblingsImport", func(t *testing.T) {
-		imported, failed := importQuadlets(t, machineID, quadletImportBody{
+		imported, failed := importQuadlets(t, hostID, quadletImportBody{
 			Quadlets: []quadletImportEntry{
 				{Name: impC, Resource: "container", Content: runnableContainerQuadletContent},
 				{Name: collide, Resource: "container", Content: runnableContainerQuadletContent},
@@ -133,28 +133,28 @@ func Test_Integration_Quadlets_Import(t *testing.T) {
 	// --- AC #3: imported quadlets visible via GET /quadlets -----------
 	t.Run("ImportedQuadletsAreListed", func(t *testing.T) {
 		for _, name := range []string{impA, impB, impC, impD} {
-			requireQuadletListed(t, machineID, name+".container",
+			requireQuadletListed(t, hostID, name+".container",
 				"imported quadlet must appear in the quadlet list (podman reports names with extension)")
 		}
 
 		// The collision must not have clobbered the pre-existing
 		// quadlet: the failed entry was rejected, so its content is
 		// still the seeded recipe.
-		got := getQuadlet(t, machineID, collide+".container")
+		got := getQuadlet(t, hostID, collide+".container")
 		require.Equal(t, runnableContainerQuadletContent, got.Content,
 			"a failed import entry must not overwrite the existing quadlet")
 	})
 
 	// --- AC #4: VALIDATION_FAILED (400) on malformed requests ---------
 	t.Run("EmptyEntriesReturns400", func(t *testing.T) {
-		importQuadletsExpectError(t, machineID, quadletImportBody{
+		importQuadletsExpectError(t, hostID, quadletImportBody{
 			Quadlets: []quadletImportEntry{},
 		}, http.StatusBadRequest, "VALIDATION_FAILED",
 			"import with no entries")
 	})
 
 	t.Run("InvalidResourceReturns400", func(t *testing.T) {
-		importQuadletsExpectError(t, machineID, quadletImportBody{
+		importQuadletsExpectError(t, hostID, quadletImportBody{
 			Quadlets: []quadletImportEntry{
 				{Name: "it-" + suite.RunID + "-badres", Resource: "instalment", Content: runnableContainerQuadletContent},
 			},
@@ -198,12 +198,12 @@ type quadletImportError struct {
 
 // importQuadlets POSTs /quadlets/import, asserts 201, and decodes the
 // {imported, failed} response.
-func importQuadlets(t *testing.T, machineID string, body quadletImportBody) (imported []quadletImportResult, failed []quadletImportError) {
+func importQuadlets(t *testing.T, hostID string, body quadletImportBody) (imported []quadletImportResult, failed []quadletImportError) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/import"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/import"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
 	require.NoError(t, err, "POST /quadlets/import must connect to the in-process server")
 	defer resp.Body.Close()
@@ -222,14 +222,14 @@ func importQuadlets(t *testing.T, machineID string, body quadletImportBody) (imp
 }
 
 // importQuadletsExpectError POSTs /quadlets/import and asserts the expected
-// HTTP status plus the machine-readable error code from the
+// HTTP status plus the parseable error code from the
 // {"error":{code,message}} envelope.
-func importQuadletsExpectError(t *testing.T, machineID string, body quadletImportBody, wantStatus int, wantCode, context string) {
+func importQuadletsExpectError(t *testing.T, hostID string, body quadletImportBody, wantStatus int, wantCode, context string) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	require.NoError(t, err)
 
-	url := suite.ServerURL + "/api/machines/" + machineID + "/quadlets/import"
+	url := suite.ServerURL + "/api/hosts/" + hostID + "/quadlets/import"
 	resp, err := suite.AuthenticatedClient().Post(url, "application/json", bytes.NewReader(payload))
 	require.NoErrorf(t, err, "%s: POST /quadlets/import must connect", context)
 	defer resp.Body.Close()

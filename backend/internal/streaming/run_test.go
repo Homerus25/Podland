@@ -203,7 +203,7 @@ func TestRunErrorMapping(t *testing.T) {
 		{
 			name: "wrapped AppError is unwrapped",
 			operation: func(ctx context.Context, onProgress func(int)) (string, error) {
-				return "", fmt.Errorf("dial %s: %w", "machine-1", notFound)
+				return "", fmt.Errorf("dial %s: %w", "host-1", notFound)
 			},
 			wantCode:    "THING_NOT_FOUND",
 			wantMessage: "Thing not found",

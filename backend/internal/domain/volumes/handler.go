@@ -50,12 +50,12 @@ func (h *VolumeHandler) WithMaxUploadBytes(max int64) *VolumeHandler {
 	return h
 }
 
-// List handles listing volumes on a machine. Route-level
-// RequireMachineAccess (app.go) gates the subtree; the endpoint
+// List handles listing volumes on a host. Route-level
+// RequireHostAccess (app.go) gates the subtree; the endpoint
 // envelope owns extraction, error mapping, and encoding.
 func (h *VolumeHandler) List(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]VolumeResponse, error) {
-		volumes, err := h.service.List(ctx, userID, machineID, entities.VolumeListOptions{})
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]VolumeResponse, error) {
+		volumes, err := h.service.List(ctx, userID, hostID, entities.VolumeListOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -63,15 +63,15 @@ func (h *VolumeHandler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Get handles inspecting a single volume on a machine
+// Get handles inspecting a single volume on a host
 func (h *VolumeHandler) Get(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (VolumeInspectResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (VolumeInspectResponse, error) {
 		volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
 		if guard != nil {
 			return VolumeInspectResponse{}, guard
 		}
 
-		report, err := h.service.Get(ctx, userID, machineID, volumeName)
+		report, err := h.service.Get(ctx, userID, hostID, volumeName)
 		if err != nil {
 			return VolumeInspectResponse{}, err
 		}
@@ -79,19 +79,19 @@ func (h *VolumeHandler) Get(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Create handles creating a volume on a machine. Route-level
-// RequireMachinePermission(write) (app.go) gates it at write. The body is
+// Create handles creating a volume on a host. Route-level
+// RequireHostPermission(write) (app.go) gates it at write. The body is
 // optional in shape: an absent/empty name creates an anonymous volume.
 // Name-format validation is podman's job; its rejections surface as 400
 // INVALID_REQUEST from the service.
 func (h *VolumeHandler) Create(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, machineID string) (VolumeInspectResponse, error) {
+	web.Handle(w, r, http.StatusCreated, func(ctx context.Context, userID, hostID string) (VolumeInspectResponse, error) {
 		var request VolumeCreateRequest
 		if appErr := web.Decode(w, r, &request); appErr != nil {
 			return VolumeInspectResponse{}, appErr
 		}
 
-		report, err := h.service.Create(ctx, userID, machineID, request)
+		report, err := h.service.Create(ctx, userID, hostID, request)
 		if err != nil {
 			return VolumeInspectResponse{}, err
 		}
@@ -100,12 +100,12 @@ func (h *VolumeHandler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 // Delete handles removing a volume by exact name. Route-level
-// RequireMachinePermission(write) (app.go) gates it at write. The force
+// RequireHostPermission(write) (app.go) gates it at write. The force
 // query flag (default false) lets podman stop dependent containers and
 // remove the volume anyway; without it an in-use volume surfaces as 409
 // VOLUME_IN_USE. Returns 204 with an empty body.
 func (h *VolumeHandler) Delete(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, machineID string) (struct{}, error) {
+	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, hostID string) (struct{}, error) {
 		volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
 		if guard != nil {
 			return struct{}{}, guard
@@ -113,17 +113,17 @@ func (h *VolumeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 		force := web.QueryBool(r, "force", false)
 
-		return struct{}{}, h.service.Delete(ctx, userID, machineID, volumeName, force)
+		return struct{}{}, h.service.Delete(ctx, userID, hostID, volumeName, force)
 	})
 }
 
-// Prune handles removing all unused volumes on a machine. Route-level
-// RequireMachinePermission(write) (app.go) gates it at write; podman
+// Prune handles removing all unused volumes on a host. Route-level
+// RequireHostPermission(write) (app.go) gates it at write; podman
 // leaves in-use volumes alone. Returns 200 with one report entry per
 // removed volume (name, reclaimed size, any per-volume error).
 func (h *VolumeHandler) Prune(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) ([]VolumePruneResponse, error) {
-		prunes, err := h.service.Prune(ctx, userID, machineID)
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]VolumePruneResponse, error) {
+		prunes, err := h.service.Prune(ctx, userID, hostID)
 		if err != nil {
 			return nil, err
 		}
@@ -132,8 +132,8 @@ func (h *VolumeHandler) Prune(w http.ResponseWriter, r *http.Request) {
 }
 
 // Export handles streaming a volume's contents as a tar download.
-// Read-level permission suffices (subtree RequireMachineAccess): users
-// who can read a machine's state can read its data. It crosses the
+// Read-level permission suffices (subtree RequireHostAccess): users
+// who can read a host's state can read its data. It crosses the
 // endpoint envelope's binary twin (web.HandleStream): identity guards,
 // AppError mapping, and the 500 fallback live there; the closure is tar
 // headers plus the streaming service call. Headers are set before the
@@ -144,7 +144,7 @@ func (h *VolumeHandler) Prune(w http.ResponseWriter, r *http.Request) {
 // Content-Type. Mid-stream failures can't retroactively change the
 // status — the connection just truncates.
 func (h *VolumeHandler) Export(w http.ResponseWriter, r *http.Request) {
-	web.HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+	web.HandleStream(w, r, func(ctx context.Context, userID, hostID string) error {
 		volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
 		if guard != nil {
 			return guard
@@ -153,7 +153,7 @@ func (h *VolumeHandler) Export(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-tar")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", volumeName+".tar"))
 
-		return h.service.Export(ctx, userID, machineID, volumeName, w)
+		return h.service.Export(ctx, userID, hostID, volumeName, w)
 	})
 }
 
@@ -173,7 +173,7 @@ func (h *VolumeHandler) Export(w http.ResponseWriter, r *http.Request) {
 // the max-bytes reader, and exceeding it yields 413
 // VOLUME_UPLOAD_TOO_LARGE. Temp files are removed on every path.
 func (h *VolumeHandler) Populate(w http.ResponseWriter, r *http.Request) {
-	web.HandleStream(w, r, func(ctx context.Context, userID, machineID string) error {
+	web.HandleStream(w, r, func(ctx context.Context, userID, hostID string) error {
 		volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
 		if guard != nil {
 			return guard
@@ -195,7 +195,7 @@ func (h *VolumeHandler) Populate(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		if err := h.service.Import(ctx, userID, machineID, volumeName, payload.reader()); err != nil {
+		if err := h.service.Import(ctx, userID, hostID, volumeName, payload.reader()); err != nil {
 			return err
 		}
 
@@ -206,28 +206,28 @@ func (h *VolumeHandler) Populate(w http.ResponseWriter, r *http.Request) {
 
 // MovePreview answers the copy/move dialog's facts (issue 238,
 // doku/description_volumes_api.md): collision, in-use, referencing
-// quadlets. Route-level RequireMachineAccess (app.go) gates the subtree
-// at read; the target machine's read access is enforced inside the
+// quadlets. Route-level RequireHostAccess (app.go) gates the subtree
+// at read; the target host's read access is enforced inside the
 // service against the access store.
 func (h *VolumeHandler) MovePreview(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, machineID string) (*VolumeMovePreviewResponse, error) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*VolumeMovePreviewResponse, error) {
 		volumeName, guard := web.URLParam(r, "volumeName", "MISSING_VOLUME_NAME")
 		if guard != nil {
 			return nil, guard
 		}
 
-		targetMachineID, guard := web.QueryString(r, "targetMachineId", "MISSING_TARGET_MACHINE_ID")
+		targetHostID, guard := web.QueryString(r, "targetHostId", "MISSING_TARGET_HOST_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		return h.service.MovePreview(ctx, userID, machineID, volumeName, targetMachineID)
+		return h.service.MovePreview(ctx, userID, hostID, volumeName, targetHostID)
 	})
 }
 
-// Move handles the cross-machine copy/move transfer of a volume (issue
+// Move handles the cross-host copy/move transfer of a volume (issue
 // 238, doku/description_volumes_api.md). The route sits at the
-// subtree's write gate for the SOURCE machine; the target machine's
+// subtree's write gate for the SOURCE host; the target host's
 // write-level access is enforced inside the service against the access
 // store.
 //
@@ -255,20 +255,20 @@ func (h *VolumeHandler) Move(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	streaming.HandleProgress(w, r, "Move volume across machines", []slog.Attr{slog.String("volumeName", volumeName)}, streaming.ProgressConfig[VolumeMoveEvent, *VolumeMoveResponse]{
+	streaming.HandleProgress(w, r, "Move volume across hosts", []slog.Attr{slog.String("volumeName", volumeName)}, streaming.ProgressConfig[VolumeMoveEvent, *VolumeMoveResponse]{
 		Operation: func(ctx context.Context, op streaming.OperationContext, onProgress func(VolumeMoveEvent)) (*VolumeMoveResponse, error) {
-			return h.service.Move(ctx, op.UserID, op.MachineID, volumeName, request, func(event VolumeMoveEvent) {
+			return h.service.Move(ctx, op.UserID, op.HostID, volumeName, request, func(event VolumeMoveEvent) {
 				event.OperationID = op.OperationID
-				event.MachineID = op.MachineID
+				event.HostID = op.HostID
 				onProgress(event)
 			})
 		},
 		CompleteEvent: func(op streaming.OperationContext, response *VolumeMoveResponse) any {
-			return NewVolumeMoveCompleteEvent(op.OperationID, op.MachineID, *response)
+			return NewVolumeMoveCompleteEvent(op.OperationID, op.HostID, *response)
 		},
 		ErrorDefault: errors.ErrConnectionFailed,
 		ErrorEvent: func(op streaming.OperationContext, code, message string, _ bool) any {
-			return NewVolumeMoveErrorEvent(op.OperationID, op.MachineID, code, message)
+			return NewVolumeMoveErrorEvent(op.OperationID, op.HostID, code, message)
 		},
 	})
 }

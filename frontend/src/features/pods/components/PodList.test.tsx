@@ -6,27 +6,27 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { Route, Routes, useParams } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import { machineFixture, podFixture } from "@/test/factories";
+import { hostFixture, podFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
 // The detail page's stand-in: the row click's navigation target, observed
 // through the route params the real detail page reads.
 function DetailProbe() {
-	const { machineId, podId } = useParams<{
-		machineId: string;
+	const { hostId, podId } = useParams<{
+		hostId: string;
 		podId: string;
 	}>();
 	return (
 		<div>
-			<span data-testid="probe-machine">{machineId}</span>
+			<span data-testid="probe-host">{hostId}</span>
 			<span data-testid="probe-pod">{podId}</span>
 		</div>
 	);
 }
 
 function mockPods(pods: PodSummary[]) {
-	server.use(http.get("*/api/machines/m-1/pods", () => podsListResponse(pods)));
+	server.use(http.get("*/api/hosts/m-1/pods", () => podsListResponse(pods)));
 }
 
 function podsListResponse(pods: PodSummary[]) {
@@ -39,7 +39,7 @@ function podsListResponse(pods: PodSummary[]) {
 
 function renderPodList(permission: "read" | "write" | "admin" = "admin") {
 	return renderWithQuery(
-		<PodList machine={machineFixture({ permission })} />,
+		<PodList host={hostFixture({ permission })} />,
 		// The row navigates on click, so the list renders inside a router.
 		{ router: true },
 	);
@@ -103,7 +103,7 @@ describe("PodList", () => {
 		expect(screen.getByText("db-net")).toBeInTheDocument();
 	});
 
-	it("caches pods under the per-machine query key hierarchy", async () => {
+	it("caches pods under the per-host query key hierarchy", async () => {
 		mockPods([podFixture()]);
 		const { queryClient } = renderPodList();
 
@@ -115,7 +115,7 @@ describe("PodList", () => {
 
 	it("shows a loading state before pods arrive", async () => {
 		server.use(
-			http.get("*/api/machines/m-1/pods", async () => {
+			http.get("*/api/hosts/m-1/pods", async () => {
 				await new Promise((resolve) => setTimeout(resolve, 50));
 				return podsListResponse([podFixture()]);
 			}),
@@ -144,21 +144,18 @@ describe("PodList", () => {
 		renderWithQuery(
 			<Routes>
 				<Route
-					path="/machines/:machineId"
-					element={<PodList machine={machineFixture()} />}
+					path="/hosts/:hostId"
+					element={<PodList host={hostFixture()} />}
 				/>
-				<Route
-					path="/machines/:machineId/pods/:podId"
-					element={<DetailProbe />}
-				/>
+				<Route path="/hosts/:hostId/pods/:podId" element={<DetailProbe />} />
 			</Routes>,
-			{ router: { initialEntries: ["/machines/m-1"] } },
+			{ router: { initialEntries: ["/hosts/m-1"] } },
 		);
 		const user = userEvent.setup();
 
 		await user.click(await screen.findByTestId("pod-row"));
 
-		expect(screen.getByTestId("probe-machine")).toHaveTextContent("m-1");
+		expect(screen.getByTestId("probe-host")).toHaveTextContent("m-1");
 		expect(screen.getByTestId("probe-pod")).toHaveTextContent("p-1");
 	});
 });

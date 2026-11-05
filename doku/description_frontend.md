@@ -30,21 +30,21 @@ frontend/
 │   │   │   │   └── authApi.ts
 │   │   │   ├── types.ts
 │   │   │   └── index.ts
-│   │   ├── machines/
+│   │   ├── hosts/
 │   │   │   ├── components/
-│   │   │   │   ├── MachineList.tsx
-│   │   │   │   ├── MachineCard.tsx
-│   │   │   │   ├── MachineForm.tsx
-│   │   │   │   ├── MachineDetails.tsx
-│   │   │   │   └── ShareMachineModal.tsx
+│   │   │   │   ├── HostList.tsx
+│   │   │   │   ├── HostCard.tsx
+│   │   │   │   ├── HostForm.tsx
+│   │   │   │   ├── HostDetails.tsx
+│   │   │   │   └── ShareHostModal.tsx
 │   │   │   ├── hooks/
-│   │   │   │   ├── useMachines.ts
-│   │   │   │   ├── useMachine.ts
-│   │   │   │   ├── useCreateMachine.ts
-│   │   │   │   ├── useUpdateMachine.ts
-│   │   │   │   └── useDeleteMachine.ts
+│   │   │   │   ├── useHosts.ts
+│   │   │   │   ├── useHost.ts
+│   │   │   │   ├── useCreateHost.ts
+│   │   │   │   ├── useUpdateHost.ts
+│   │   │   │   └── useDeleteHost.ts
 │   │   │   ├── services/
-│   │   │   │   └── machinesApi.ts
+│   │   │   │   └── hostsApi.ts
 │   │   │   ├── types.ts
 │   │   │   └── index.ts
 │   │   ├── containers/
@@ -141,7 +141,7 @@ frontend/
 │   │   │   └── validators.ts
 │   │   └── types/
 │   │       ├── api.ts
-│   │       ├── machine.ts
+│   │       ├── host.ts
 │   │       ├── container.ts
 │   │       ├── image.ts
 │   │       └── index.ts
@@ -149,8 +149,8 @@ frontend/
 │   │   ├── DashboardPage.tsx
 │   │   ├── LoginPage.tsx
 │   │   ├── RegisterPage.tsx
-│   │   ├── MachinesPage.tsx
-│   │   ├── MachineDetailPage.tsx
+│   │   ├── HostsPage.tsx
+│   │   ├── HostDetailPage.tsx
 │   │   ├── ContainersPage.tsx
 │   │   ├── ImagesPage.tsx
 │   │   ├── QuadletsPage.tsx
@@ -393,23 +393,23 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 ### Custom Hooks Pattern
 
 ```typescript
-// Example: features/machines/hooks/useMachines.ts
+// Example: features/hosts/hooks/useHosts.ts
 import { useQuery } from '@tanstack/react-query'
-import { machinesApi } from '../services/machinesApi'
+import { hostsApi } from '../services/hostsApi'
 
-export function useMachines() {
+export function useHosts() {
   return useQuery({
-    queryKey: ['machines'],
-    queryFn: machinesApi.listMachines,
+    queryKey: ['hosts'],
+    queryFn: hostsApi.listHosts,
     // Optionally add staleTime, cacheTime, etc.
   })
 }
 
-export function useMachine(machineId: string) {
+export function useHost(hostId: string) {
   return useQuery({
-    queryKey: ['machine', machineId],
-    queryFn: () => machinesApi.getMachine(machineId),
-    enabled: !!machineId,
+    queryKey: ['host', hostId],
+    queryFn: () => hostsApi.getHost(hostId),
+    enabled: !!hostId,
   })
 }
 ```
@@ -417,20 +417,20 @@ export function useMachine(machineId: string) {
 ### Mutation Hooks
 
 ```typescript
-// Example: features/machines/hooks/useCreateMachine.ts
+// Example: features/hosts/hooks/useCreateHost.ts
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { machinesApi } from '../services/machinesApi'
+import { hostsApi } from '../services/hostsApi'
 import { useError } from '@shared/hooks/useError'
 
-export function useCreateMachine() {
+export function useCreateHost() {
   const queryClient = useQueryClient()
   const { showError } = useError()
   
   return useMutation({
-    mutationFn: machinesApi.createMachine,
+    mutationFn: hostsApi.createHost,
     onSuccess: () => {
-      // Invalidate machines list to refetch
-      queryClient.invalidateQueries({ queryKey: ['machines'] })
+      // Invalidate hosts list to refetch
+      queryClient.invalidateQueries({ queryKey: ['hosts'] })
     },
     onError: (error) => {
       showError(error)
@@ -741,8 +741,8 @@ function App() {
         }
       >
         <Route index element={<DashboardPage />} />
-        <Route path="machines" element={<MachinesPage />} />
-        <Route path="machines/:id" element={<MachineDetailPage />} />
+        <Route path="hosts" element={<HostsPage />} />
+        <Route path="hosts/:id" element={<HostDetailPage />} />
         <Route path="containers" element={<ContainersPage />} />
         <Route path="images" element={<ImagesPage />} />
         <Route path="settings" element={<SettingsPage />} />
@@ -793,11 +793,11 @@ import { useNavigate } from 'react-router-dom'
 function SomeComponent() {
   const navigate = useNavigate()
   
-  const goToMachine = (machineId: string) => {
-    navigate(`/machines/${machineId}`)
+  const goToHost = (hostId: string) => {
+    navigate(`/hosts/${hostId}`)
   }
   
-  return <Button onClick={() => goToMachine('abc-123')}>View Machine</Button>
+  return <Button onClick={() => goToHost('abc-123')}>View Host</Button>
 }
 ```
 
@@ -839,13 +839,13 @@ export { api }
 
 ### Domain-Specific API Services
 
-#### Machines API
+#### Hosts API
 
 ```typescript
-// src/features/machines/services/machinesApi.ts
+// src/features/hosts/services/hostsApi.ts
 import { api } from '@shared/utils/api'
 
-export interface Machine {
+export interface Host {
   id: string
   name: string
   description: string
@@ -859,7 +859,7 @@ export interface Machine {
   updatedAt: string
 }
 
-export interface CreateMachineRequest {
+export interface CreateHostRequest {
   name: string
   description?: string
   hostname: string
@@ -869,47 +869,47 @@ export interface CreateMachineRequest {
   podmanSocketPath?: string
 }
 
-export interface ShareMachineRequest {
+export interface ShareHostRequest {
   userId: string
   permission: 'read' | 'write' | 'admin'
 }
 
-export const machinesApi = {
-  listMachines: async (): Promise<Machine[]> => {
-    const response = await api.get('/machines')
+export const hostsApi = {
+  listHosts: async (): Promise<Host[]> => {
+    const response = await api.get('/hosts')
     return response.data
   },
 
-  getMachine: async (machineId: string): Promise<Machine> => {
-    const response = await api.get(`/machines/${machineId}`)
+  getHost: async (hostId: string): Promise<Host> => {
+    const response = await api.get(`/hosts/${hostId}`)
     return response.data
   },
 
-  createMachine: async (data: CreateMachineRequest): Promise<Machine> => {
-    const response = await api.post('/machines', data)
+  createHost: async (data: CreateHostRequest): Promise<Host> => {
+    const response = await api.post('/hosts', data)
     return response.data
   },
 
-  updateMachine: async (machineId: string, data: Partial<CreateMachineRequest>): Promise<Machine> => {
-    const response = await api.put(`/machines/${machineId}`, data)
+  updateHost: async (hostId: string, data: Partial<CreateHostRequest>): Promise<Host> => {
+    const response = await api.put(`/hosts/${hostId}`, data)
     return response.data
   },
 
-  deleteMachine: async (machineId: string): Promise<void> => {
-    await api.delete(`/machines/${machineId}`)
+  deleteHost: async (hostId: string): Promise<void> => {
+    await api.delete(`/hosts/${hostId}`)
   },
 
-  listAccess: async (machineId: string): Promise<Array<{ userId: string; permission: string }>> => {
-    const response = await api.get(`/machines/${machineId}/access`)
+  listAccess: async (hostId: string): Promise<Array<{ userId: string; permission: string }>> => {
+    const response = await api.get(`/hosts/${hostId}/access`)
     return response.data
   },
 
-  grantAccess: async (machineId: string, data: ShareMachineRequest): Promise<void> => {
-    await api.post(`/machines/${machineId}/access`, data)
+  grantAccess: async (hostId: string, data: ShareHostRequest): Promise<void> => {
+    await api.post(`/hosts/${hostId}/access`, data)
   },
 
-  revokeAccess: async (machineId: string, userId: string): Promise<void> => {
-    await api.delete(`/machines/${machineId}/access/${userId}`)
+  revokeAccess: async (hostId: string, userId: string): Promise<void> => {
+    await api.delete(`/hosts/${hostId}/access/${userId}`)
   },
 }
 ```
@@ -937,31 +937,31 @@ export interface CreateContainerRequest {
 }
 
 export const containersApi = {
-  list: async (machineId: string): Promise<Container[]> => {
-    const response = await api.get(`/machines/${machineId}/containers`)
+  list: async (hostId: string): Promise<Container[]> => {
+    const response = await api.get(`/hosts/${hostId}/containers`)
     return response.data
   },
 
-  get: async (machineId: string, containerId: string): Promise<Container> => {
-    const response = await api.get(`/machines/${machineId}/containers/${containerId}`)
+  get: async (hostId: string, containerId: string): Promise<Container> => {
+    const response = await api.get(`/hosts/${hostId}/containers/${containerId}`)
     return response.data
   },
 
-  create: async (machineId: string, data: CreateContainerRequest): Promise<Container> => {
-    const response = await api.post(`/machines/${machineId}/containers`, data)
+  create: async (hostId: string, data: CreateContainerRequest): Promise<Container> => {
+    const response = await api.post(`/hosts/${hostId}/containers`, data)
     return response.data
   },
 
-  start: async (machineId: string, containerId: string): Promise<void> => {
-    await api.post(`/machines/${machineId}/containers/${containerId}/start`)
+  start: async (hostId: string, containerId: string): Promise<void> => {
+    await api.post(`/hosts/${hostId}/containers/${containerId}/start`)
   },
 
-  stop: async (machineId: string, containerId: string): Promise<void> => {
-    await api.post(`/machines/${machineId}/containers/${containerId}/stop`)
+  stop: async (hostId: string, containerId: string): Promise<void> => {
+    await api.post(`/hosts/${hostId}/containers/${containerId}/stop`)
   },
 
-  delete: async (machineId: string, containerId: string): Promise<void> => {
-    await api.delete(`/machines/${machineId}/containers/${containerId}`)
+  delete: async (hostId: string, containerId: string): Promise<void> => {
+    await api.delete(`/hosts/${hostId}/containers/${containerId}`)
   },
 }
 ```
@@ -987,13 +987,13 @@ export interface PullImageRequest {
 }
 
 export const imagesApi = {
-  list: async (machineId: string): Promise<Image[]> => {
-    const response = await api.get(`/machines/${machineId}/images`)
+  list: async (hostId: string): Promise<Image[]> => {
+    const response = await api.get(`/hosts/${hostId}/images`)
     return response.data
   },
 
   pull: async (
-    machineId: string, 
+    hostId: string, 
     data: PullImageRequest,
     onProgress?: (progress: ProgressEvent) => void
   ): Promise<Image> => {
@@ -1002,8 +1002,8 @@ export const imagesApi = {
     throw new Error('Use streaming pull instead')
   },
 
-  delete: async (machineId: string, imageId: string): Promise<void> => {
-    await api.delete(`/machines/${machineId}/images/${imageId}`)
+  delete: async (hostId: string, imageId: string): Promise<void> => {
+    await api.delete(`/hosts/${hostId}/images/${imageId}`)
   },
 }
 ```
@@ -1056,57 +1056,57 @@ export interface QuadletLogs {
 }
 
 export const quadletsApi = {
-  list: async (machineId: string): Promise<Quadlet[]> => {
-    const response = await api.get(`/machines/${machineId}/quadlets`)
+  list: async (hostId: string): Promise<Quadlet[]> => {
+    const response = await api.get(`/hosts/${hostId}/quadlets`)
     return response.data
   },
 
-  get: async (machineId: string, quadletId: string): Promise<Quadlet> => {
-    const response = await api.get(`/machines/${machineId}/quadlets/${quadletId}`)
+  get: async (hostId: string, quadletId: string): Promise<Quadlet> => {
+    const response = await api.get(`/hosts/${hostId}/quadlets/${quadletId}`)
     return response.data
   },
 
-  create: async (machineId: string, data: CreateQuadletRequest): Promise<Quadlet> => {
-    const response = await api.post(`/machines/${machineId}/quadlets`, data)
+  create: async (hostId: string, data: CreateQuadletRequest): Promise<Quadlet> => {
+    const response = await api.post(`/hosts/${hostId}/quadlets`, data)
     return response.data
   },
 
-  update: async (machineId: string, quadletId: string, data: UpdateQuadletRequest): Promise<Quadlet> => {
-    const response = await api.put(`/machines/${machineId}/quadlets/${quadletId}`, data)
+  update: async (hostId: string, quadletId: string, data: UpdateQuadletRequest): Promise<Quadlet> => {
+    const response = await api.put(`/hosts/${hostId}/quadlets/${quadletId}`, data)
     return response.data
   },
 
-  delete: async (machineId: string, quadletId: string, query?: { stop?: boolean; force?: boolean }): Promise<void> => {
-    await api.delete(`/machines/${machineId}/quadlets/${quadletId}`, { params: query })
+  delete: async (hostId: string, quadletId: string, query?: { stop?: boolean; force?: boolean }): Promise<void> => {
+    await api.delete(`/hosts/${hostId}/quadlets/${quadletId}`, { params: query })
   },
 
-  start: async (machineId: string, quadletId: string): Promise<Quadlet> => {
-    const response = await api.post(`/machines/${machineId}/quadlets/${quadletId}/start`)
+  start: async (hostId: string, quadletId: string): Promise<Quadlet> => {
+    const response = await api.post(`/hosts/${hostId}/quadlets/${quadletId}/start`)
     return response.data
   },
 
-  stop: async (machineId: string, quadletId: string, query?: { timeout?: number }): Promise<Quadlet> => {
-    const response = await api.post(`/machines/${machineId}/quadlets/${quadletId}/stop`, null, { params: query })
+  stop: async (hostId: string, quadletId: string, query?: { timeout?: number }): Promise<Quadlet> => {
+    const response = await api.post(`/hosts/${hostId}/quadlets/${quadletId}/stop`, null, { params: query })
     return response.data
   },
 
-  restart: async (machineId: string, quadletId: string, query?: { timeout?: number }): Promise<Quadlet> => {
-    const response = await api.post(`/machines/${machineId}/quadlets/${quadletId}/restart`, null, { params: query })
+  restart: async (hostId: string, quadletId: string, query?: { timeout?: number }): Promise<Quadlet> => {
+    const response = await api.post(`/hosts/${hostId}/quadlets/${quadletId}/restart`, null, { params: query })
     return response.data
   },
 
-  getLogs: async (machineId: string, quadletId: string, query?: { follow?: boolean; since?: string; tail?: number }): Promise<QuadletLogs> => {
-    const response = await api.get(`/machines/${machineId}/quadlets/${quadletId}/logs`, { params: query })
+  getLogs: async (hostId: string, quadletId: string, query?: { follow?: boolean; since?: string; tail?: number }): Promise<QuadletLogs> => {
+    const response = await api.get(`/hosts/${hostId}/quadlets/${quadletId}/logs`, { params: query })
     return response.data
   },
 
-  generate: async (machineId: string, quadletId: string, data: GenerateQuadletRequest): Promise<Quadlet> => {
-    const response = await api.post(`/machines/${machineId}/quadlets/${quadletId}/generate`, data)
+  generate: async (hostId: string, quadletId: string, data: GenerateQuadletRequest): Promise<Quadlet> => {
+    const response = await api.post(`/hosts/${hostId}/quadlets/${quadletId}/generate`, data)
     return response.data
   },
 
-  import: async (machineId: string, data: ImportQuadletRequest): Promise<{ imported: Quadlet[]; failed: Array<{ path: string; error: string }> }> => {
-    const response = await api.post(`/machines/${machineId}/quadlets/import`, data)
+  import: async (hostId: string, data: ImportQuadletRequest): Promise<{ imported: Quadlet[]; failed: Array<{ path: string; error: string }> }> => {
+    const response = await api.post(`/hosts/${hostId}/quadlets/import`, data)
     return response.data
   },
 }
@@ -1126,7 +1126,7 @@ import { useError } from '@shared/hooks/useError'
 interface ProgressEvent {
   operationId: string
   type: 'progress' | 'complete' | 'error'
-  machineId: string
+  hostId: string
   state?: {
     current: number
     total: number
@@ -1141,7 +1141,7 @@ interface ProgressEvent {
 }
 
 interface UsePullImageResult {
-  pullImage: (machineId: string, image: string) => Promise<void>
+  pullImage: (hostId: string, image: string) => Promise<void>
   progress: ProgressEvent | null
   isPulling: boolean
   abort: () => void
@@ -1161,7 +1161,7 @@ export function usePullImage(): UsePullImageResult {
   }, [abortController])
 
   const pullImage = useCallback(
-    async (machineId: string, image: string) => {
+    async (hostId: string, image: string) => {
       abort() // Cancel any existing pull
       
       setIsPulling(true)
@@ -1172,7 +1172,7 @@ export function usePullImage(): UsePullImageResult {
       
       try {
         const response = await fetch(
-          `/api/machines/${machineId}/images/pull`,
+          `/api/hosts/${hostId}/images/pull`,
           {
             method: 'POST',
             headers: {
@@ -1267,66 +1267,66 @@ interface EventListener {
 }
 
 interface EventBus {
-  subscribe: (machineId: string, eventType: string, listener: EventListener) => () => void
-  unsubscribe: (machineId: string, eventType: string, listener: EventListener) => void
-  publish: (machineId: string, eventType: string, data: any) => void
+  subscribe: (hostId: string, eventType: string, listener: EventListener) => () => void
+  unsubscribe: (hostId: string, eventType: string, listener: EventListener) => void
+  publish: (hostId: string, eventType: string, data: any) => void
 }
 
 const listeners: Map<string, Map<string, Set<EventListener>>> = new Map()
 
 const eventBus: EventBus = {
-  subscribe: (machineId: string, eventType: string, listener: EventListener) => {
-    if (!listeners.has(machineId)) {
-      listeners.set(machineId, new Map())
+  subscribe: (hostId: string, eventType: string, listener: EventListener) => {
+    if (!listeners.has(hostId)) {
+      listeners.set(hostId, new Map())
     }
-    const machineListeners = listeners.get(machineId)!
+    const hostListeners = listeners.get(hostId)!
     
-    if (!machineListeners.has(eventType)) {
-      machineListeners.set(eventType, new Set())
+    if (!hostListeners.has(eventType)) {
+      hostListeners.set(eventType, new Set())
     }
     
-    const typeListeners = machineListeners.get(eventType)!
+    const typeListeners = hostListeners.get(eventType)!
     typeListeners.add(listener)
     
-    // If this is the first listener for this machine, open the connection
+    // If this is the first listener for this host, open the connection
     if (typeListeners.size === 1) {
-      openConnection(machineId)
+      openConnection(hostId)
     }
     
     return () => {
       typeListeners.delete(listener)
       if (typeListeners.size === 0) {
-        machineListeners.delete(eventType)
+        hostListeners.delete(eventType)
       }
-      if (machineListeners.size === 0) {
-        listeners.delete(machineId)
-        closeConnection(machineId)
+      if (hostListeners.size === 0) {
+        listeners.delete(hostId)
+        closeConnection(hostId)
       }
     }
   },
 
-  unsubscribe: (machineId: string, eventType: string, listener: EventListener) => {
-    const machineListeners = listeners.get(machineId)
-    if (!machineListeners) return
+  unsubscribe: (hostId: string, eventType: string, listener: EventListener) => {
+    const hostListeners = listeners.get(hostId)
+    if (!hostListeners) return
     
-    const typeListeners = machineListeners.get(eventType)
+    const typeListeners = hostListeners.get(eventType)
     if (!typeListeners) return
     
     typeListeners.delete(listener)
     if (typeListeners.size === 0) {
-      machineListeners.delete(eventType)
+      hostListeners.delete(eventType)
     }
-    if (machineListeners.size === 0) {
-      listeners.delete(machineId)
-      closeConnection(machineId)
+    if (hostListeners.size === 0) {
+      listeners.delete(hostId)
+      closeConnection(hostId)
     }
   },
 
-  publish: (machineId: string, eventType: string, data: any) => {
-    const machineListeners = listeners.get(machineId)
-    if (!machineListeners) return
+  publish: (hostId: string, eventType: string, data: any) => {
+    const hostListeners = listeners.get(hostId)
+    if (!hostListeners) return
     
-    const typeListeners = machineListeners.get(eventType)
+    const typeListeners = hostListeners.get(eventType)
     if (!typeListeners) return
     
     typeListeners.forEach(listener => listener(data))
@@ -1336,21 +1336,21 @@ const eventBus: EventBus = {
 // Connection management
 const connections: Map<string, EventSource> = new Map()
 
-function openConnection(machineId: string) {
-  const eventSource = new EventSource(`/api/machines/${machineId}/events`)
+function openConnection(hostId: string) {
+  const eventSource = new EventSource(`/api/hosts/${hostId}/events`)
   
   eventSource.onopen = () => {
-    console.log(`SSE connected to machine ${machineId}`)
+    console.log(`SSE connected to host ${hostId}`)
   }
 
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
-      // Publish to all listeners for this machine
-      const machineListeners = listeners.get(machineId)
-      if (machineListeners) {
-        machineListeners.forEach((_, eventType) => {
-          eventBus.publish(machineId, eventType, data)
+      // Publish to all listeners for this host
+      const hostListeners = listeners.get(hostId)
+      if (hostListeners) {
+        hostListeners.forEach((_, eventType) => {
+          eventBus.publish(hostId, eventType, data)
         })
       }
     } catch (e) {
@@ -1359,22 +1359,22 @@ function openConnection(machineId: string) {
   }
 
   eventSource.onerror = () => {
-    console.error(`SSE error for machine ${machineId}`)
+    console.error(`SSE error for host ${hostId}`)
     eventSource.close()
-    connections.delete(machineId)
+    connections.delete(hostId)
     
     // Attempt to reconnect after delay
-    setTimeout(() => openConnection(machineId), 5000)
+    setTimeout(() => openConnection(hostId), 5000)
   }
   
-  connections.set(machineId, eventSource)
+  connections.set(hostId, eventSource)
 }
 
-function closeConnection(machineId: string) {
-  const eventSource = connections.get(machineId)
+function closeConnection(hostId: string) {
+  const eventSource = connections.get(hostId)
   if (eventSource) {
     eventSource.close()
-    connections.delete(machineId)
+    connections.delete(hostId)
   }
 }
 
@@ -1388,24 +1388,24 @@ export { eventBus }
 import { useEffect } from 'react'
 import { eventBus } from '../eventBus'
 
-export function useEvents(machineId: string, eventType: string, callback: (data: any) => void) {
+export function useEvents(hostId: string, eventType: string, callback: (data: any) => void) {
   useEffect(() => {
-    const unsubscribe = eventBus.subscribe(machineId, eventType, callback)
+    const unsubscribe = eventBus.subscribe(hostId, eventType, callback)
     return unsubscribe
-  }, [machineId, eventType, callback])
+  }, [hostId, eventType, callback])
 }
 
 // Specific event types
-export function useContainerEvents(machineId: string, callback: (data: any) => void) {
-  return useEvents(machineId, 'container', callback)
+export function useContainerEvents(hostId: string, callback: (data: any) => void) {
+  return useEvents(hostId, 'container', callback)
 }
 
-export function useImageEvents(machineId: string, callback: (data: any) => void) {
-  return useEvents(machineId, 'image', callback)
+export function useImageEvents(hostId: string, callback: (data: any) => void) {
+  return useEvents(hostId, 'image', callback)
 }
 
-export function usePodmanEvents(machineId: string, callback: (data: any) => void) {
-  return useEvents(machineId, 'event', callback)
+export function usePodmanEvents(hostId: string, callback: (data: any) => void) {
+  return useEvents(hostId, 'event', callback)
 }
 ```
 
@@ -1567,20 +1567,20 @@ export function OfflineBanner() {
 
 ## Feature Components
 
-### Machines Feature
+### Hosts Feature
 
-#### Machine List
+#### Host List
 
 ```typescript
-// src/features/machines/components/MachineList.tsx
-import { useMachines } from '../hooks/useMachines'
+// src/features/hosts/components/HostList.tsx
+import { useHosts } from '../hooks/useHosts'
 import { LoadingSpinner } from '@shared/components/LoadingSpinner'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
-import { MachineCard } from './MachineCard'
+import { HostCard } from './HostCard'
 import { SimpleGrid, Text } from '@chakra-ui/react'
 
-export function MachineList() {
-  const { data: machines, isLoading, isError, error } = useMachines()
+export function HostList() {
+  const { data: hosts, isLoading, isError, error } = useHosts()
 
   if (isLoading) {
     return <LoadingSpinner />
@@ -1590,47 +1590,47 @@ export function MachineList() {
     return <ErrorDisplay message={error.message} code={error.code} onClose={() => {}} />
   }
 
-  if (!machines || machines.length === 0) {
-    return <Text>No machines found. Add your first machine to get started.</Text>
+  if (!hosts || hosts.length === 0) {
+    return <Text>No hosts found. Add your first host to get started.</Text>
   }
 
   return (
     <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={6}>
-      {machines.map((machine) => (
-        <MachineCard key={machine.id} machine={machine} />
+      {hosts.map((host) => (
+        <HostCard key={host.id} host={host} />
       ))}
     </SimpleGrid>
   )
 }
 ```
 
-#### Machine Card
+#### Host Card
 
 ```typescript
-// src/features/machines/components/MachineCard.tsx
+// src/features/hosts/components/HostCard.tsx
 import { Card, CardHeader, CardBody, CardFooter, Heading, Text, Button, Badge, useDisclosure } from '@chakra-ui/react'
-import { Machine } from '../types'
-import { useDeleteMachine } from '../hooks/useDeleteMachine'
+import { Host } from '../types'
+import { useDeleteHost } from '../hooks/useDeleteHost'
 
-export function MachineCard({ machine }: { machine: Machine }) {
+export function HostCard({ host }: { host: Host }) {
   const { isOpen, onOpen, onClose } = useDisclosure()
-  const deleteMachine = useDeleteMachine()
+  const deleteHost = useDeleteHost()
 
   const handleDelete = () => {
-    deleteMachine.mutate(machine.id)
+    deleteHost.mutate(host.id)
   }
 
   return (
     <Card>
       <CardHeader>
-        <Heading size="md">{machine.name}</Heading>
-        <Badge colorScheme="blue">{machine.permission}</Badge>
+        <Heading size="md">{host.name}</Heading>
+        <Badge colorScheme="blue">{host.permission}</Badge>
       </CardHeader>
       <CardBody>
-        <Text noOfLines={2}>{machine.description || 'No description'}</Text>
+        <Text noOfLines={2}>{host.description || 'No description'}</Text>
         <Text fontSize="sm" color="gray.500" mt={2}>
-          {machine.hostname}:
-          {machine.port}
+          {host.hostname}:
+          {host.port}
         </Text>
       </CardBody>
       <CardFooter justify="space-between" flexWrap="wrap">
@@ -1644,27 +1644,27 @@ export function MachineCard({ machine }: { machine: Machine }) {
 }
 ```
 
-#### Machine Form
+#### Host Form
 
 ```typescript
-// src/features/machines/components/MachineForm.tsx
+// src/features/hosts/components/HostForm.tsx
 import { useForm } from 'react-hook-form'
 import { Button, FormControl, FormLabel, Input, Textarea, VStack } from '@chakra-ui/react'
-import { CreateMachineRequest } from '../types'
-import { useCreateMachine } from '../hooks/useCreateMachine'
+import { CreateHostRequest } from '../types'
+import { useCreateHost } from '../hooks/useCreateHost'
 
-type FormData = Omit<CreateMachineRequest, 'sshPrivateKey'> & {
+type FormData = Omit<CreateHostRequest, 'sshPrivateKey'> & {
   sshPrivateKey: FileList
 }
 
-export function MachineForm({ onSuccess }: { onSuccess: () => void }) {
+export function HostForm({ onSuccess }: { onSuccess: () => void }) {
   const { register, handleSubmit, formState: { isSubmitting, errors } } = useForm<FormData>()
-  const createMachine = useCreateMachine()
+  const createHost = useCreateHost()
 
   const onSubmit = async (data: FormData) => {
     const sshKey = await data.sshPrivateKey[0].text()
     
-    createMachine.mutate(
+    createHost.mutate(
       {
         ...data,
         sshPrivateKey: sshKey,
@@ -1732,7 +1732,7 @@ export function MachineForm({ onSuccess }: { onSuccess: () => void }) {
           isLoading={isSubmitting}
           width="full"
         >
-          Add Machine
+          Add Host
         </Button>
       </VStack>
     </form>
@@ -1752,8 +1752,8 @@ import { LoadingSpinner } from '@shared/components/LoadingSpinner'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { VStack, Text } from '@chakra-ui/react'
 
-export function ContainerList({ machineId }: { machineId: string }) {
-  const { data: containers, isLoading, isError, error } = useContainers(machineId)
+export function ContainerList({ hostId }: { hostId: string }) {
+  const { data: containers, isLoading, isError, error } = useContainers(hostId)
 
   if (isLoading) {
     return <LoadingSpinner />
@@ -1764,7 +1764,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
   }
 
   if (!containers || containers.length === 0) {
-    return <Text>No containers found on this machine.</Text>
+    return <Text>No containers found on this host.</Text>
   }
 
   return (
@@ -1772,7 +1772,7 @@ export function ContainerList({ machineId }: { machineId: string }) {
       {containers.map((container) => (
         <ContainerCard
           key={container.id}
-          machineId={machineId}
+          hostId={hostId}
           container={container}
         />
       ))}
@@ -1790,16 +1790,16 @@ import { Container } from '../types'
 import { useStartContainer, useStopContainer } from '../hooks'
 
 export function ContainerActions({
-  machineId,
+  hostId,
   container,
   onActionComplete,
 }: {
-  machineId: string
+  hostId: string
   container: Container
   onActionComplete?: () => void
 }) {
-  const startContainer = useStartContainer(machineId)
-  const stopContainer = useStopContainer(machineId)
+  const startContainer = useStartContainer(hostId)
+  const stopContainer = useStopContainer(hostId)
 
   const handleStart = () => {
     startContainer.mutate(container.id, {
@@ -1840,7 +1840,7 @@ import { useState } from 'react'
 import { Button, Input, VStack, Progress, Text } from '@chakra-ui/react'
 import { usePullImage } from '../hooks/usePullImage'
 
-export function ImagePullForm({ machineId, onComplete }: { machineId: string; onComplete?: () => void }) {
+export function ImagePullForm({ hostId, onComplete }: { hostId: string; onComplete?: () => void }) {
   const [imageName, setImageName] = useState('')
   const { pullImage, progress, isPulling, abort } = usePullImage()
 
@@ -1848,7 +1848,7 @@ export function ImagePullForm({ machineId, onComplete }: { machineId: string; on
     if (!imageName) return
     
     try {
-      await pullImage(machineId, imageName)
+      await pullImage(hostId, imageName)
       onComplete?.()
     } catch (error) {
       // Error is handled by usePullImage
@@ -1907,7 +1907,7 @@ export function ImagePullForm({ machineId, onComplete }: { machineId: string; on
 
 ```typescript
 // src/pages/DashboardPage.tsx
-import { useMachines } from '@features/machines/hooks/useMachines'
+import { useHosts } from '@features/hosts/hooks/useHosts'
 import { LoadingSpinner } from '@shared/components/LoadingSpinner'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { useAuth } from '@features/auth/hooks/useAuth'
@@ -1915,7 +1915,7 @@ import { Heading, VStack, Text } from '@chakra-ui/react'
 
 export function DashboardPage() {
   const { user } = useAuth()
-  const { data: machines, isLoading, isError, error } = useMachines()
+  const { data: hosts, isLoading, isError, error } = useHosts()
 
   if (isLoading) {
     return <LoadingSpinner />
@@ -1933,8 +1933,8 @@ export function DashboardPage() {
       </VStack>
 
       <VStack align="stretch" spacing={6}>
-        <Heading size="md">Your Machines</Heading>
-        {/* Machine list or "add your first machine" CTA */}
+        <Heading size="md">Your Hosts</Heading>
+        {/* Host list or "add your first host" CTA */}
       </VStack>
     </VStack>
   )
@@ -1967,7 +1967,7 @@ export function LoginPage() {
         <VStack spacing={8}>
           <VStack>
             <Heading>Welcome to Podland</Heading>
-            <Text>Manage Podman on remote machines</Text>
+            <Text>Manage Podman on remote hosts</Text>
           </VStack>
           
           <LoginForm />
@@ -1982,16 +1982,16 @@ export function LoginPage() {
 }
 ```
 
-### Machines Page
+### Hosts Page
 
 ```typescript
-// src/pages/MachinesPage.tsx
+// src/pages/HostsPage.tsx
 import { useState } from 'react'
-import { MachineList } from '@features/machines/components/MachineList'
-import { MachineForm } from '@features/machines/components/MachineForm'
+import { HostList } from '@features/hosts/components/HostList'
+import { HostForm } from '@features/hosts/components/HostForm'
 import { useDisclosure, Button, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, ModalFooter, Heading } from '@chakra-ui/react'
 
-export function MachinesPage() {
+export function HostsPage() {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [refreshKey, setRefreshKey] = useState(0)
 
@@ -2002,20 +2002,20 @@ export function MachinesPage() {
 
   return (
     <>
-      <Heading mb={6}>Machines</Heading>
+      <Heading mb={6}>Hosts</Heading>
       <Button onClick={onOpen} colorScheme="blue" mb={6}>
-        Add Machine
+        Add Host
       </Button>
       
-      <MachineList key={refreshKey} />
+      <HostList key={refreshKey} />
       
       <Modal isOpen={isOpen} onClose={onClose} size="xl">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>Add New Machine</ModalHeader>
+          <ModalHeader>Add New Host</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
-            <MachineForm onSuccess={handleSuccess} />
+            <HostForm onSuccess={handleSuccess} />
           </ModalBody>
         </ModalContent>
       </Modal>
@@ -2024,12 +2024,12 @@ export function MachinesPage() {
 }
 ```
 
-### Machine Detail Page
+### Host Detail Page
 
 ```typescript
-// src/pages/MachineDetailPage.tsx
+// src/pages/HostDetailPage.tsx
 import { useParams } from 'react-router-dom'
-import { useMachine } from '@features/machines/hooks/useMachine'
+import { useHost } from '@features/hosts/hooks/useHost'
 import { ContainerList } from '@features/containers/components/ContainerList'
 import { ImageList } from '@features/images/components/ImageList'
 import { QuadletList } from '@features/quadlets/components/QuadletList'
@@ -2037,9 +2037,9 @@ import { LoadingSpinner } from '@shared/components/LoadingSpinner'
 import { ErrorDisplay } from '@shared/components/ErrorDisplay'
 import { Tabs, TabList, TabPanels, Tab, TabPanel, Heading, Text } from '@chakra-ui/react'
 
-export function MachineDetailPage() {
+export function HostDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: machine, isLoading, isError, error } = useMachine(id || '')
+  const { data: host, isLoading, isError, error } = useHost(id || '')
 
   if (isLoading) {
     return <LoadingSpinner />
@@ -2049,13 +2049,13 @@ export function MachineDetailPage() {
     return <ErrorDisplay message={error.message} code={error.code} onClose={() => {}} />
   }
 
-  if (!machine) {
-    return <ErrorDisplay message="Machine not found" code="NOT_FOUND" onClose={() => {}} />
+  if (!host) {
+    return <ErrorDisplay message="Host not found" code="NOT_FOUND" onClose={() => {}} />
   }
 
   return (
     <>
-      <Heading mb={6}>{machine.name}</Heading>
+      <Heading mb={6}>{host.name}</Heading>
       
       <Tabs variant="enclosed" colorScheme="blue">
         <TabList>
@@ -2067,16 +2067,16 @@ export function MachineDetailPage() {
         
         <TabPanels>
           <TabPanel>
-            <ContainerList machineId={machine.id} />
+            <ContainerList hostId={host.id} />
           </TabPanel>
           <TabPanel>
-            <ImageList machineId={machine.id} />
+            <ImageList hostId={host.id} />
           </TabPanel>
           <TabPanel>
-            <QuadletList machineId={machine.id} />
+            <QuadletList hostId={host.id} />
           </TabPanel>
           <TabPanel>
-            <Text>Machine settings and sharing</Text>
+            <Text>Host settings and sharing</Text>
           </TabPanel>
         </TabPanels>
       </Tabs>
@@ -2169,10 +2169,10 @@ export function Sidebar() {
         
         <NavLink
           as={Link}
-          to="/machines"
-          isActive={location.pathname.startsWith('/machines')}
+          to="/hosts"
+          isActive={location.pathname.startsWith('/hosts')}
         >
-          Machines
+          Hosts
         </NavLink>
         
         <NavLink

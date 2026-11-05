@@ -10,15 +10,15 @@ import {
 	Text,
 	VStack,
 } from "@chakra-ui/react";
-import { useMachines } from "@features/machines/hooks/useMachines";
-import { type Capability, can } from "@features/machines/permissions";
+import { useHosts } from "@features/hosts/hooks/useHosts";
+import { type Capability, can } from "@features/hosts/permissions";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
-import type { ApiError, Machine } from "@shared/types/api";
+import type { ApiError, Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { type ReactNode, useEffect, useState } from "react";
 
-// The mode vocabulary every cross-machine transfer shares (the backend's
+// The mode vocabulary every cross-host transfer shares (the backend's
 // MoveMode* unions): "copy" installs on the target, "move" also removes the
 // source. The feature DTOs (QuadletMoveMode, VolumeMoveMode, SecretMoveMode)
 // are the same union; the preset speaks it once.
@@ -41,7 +41,7 @@ export interface TransferPreviewSlice {
 // surface never reads mode/setMode; the shared shape keeps them for the
 // mode-choosing surfaces.
 export interface TransferState {
-	targets: Machine[];
+	targets: Host[];
 	targetId: string;
 	targetName: string;
 	selectTarget: (targetId: string) => void;
@@ -52,18 +52,18 @@ export interface TransferState {
 // The state half of the transfer-dialog preset: the capability-filtered
 // target list (source excluded — the backend refuses below-write targets
 // with 403, so the picker never offers one) and the two states every
-// transfer dialog carries. The select starts on the first writable machine,
+// transfer dialog carries. The select starts on the first writable host,
 // so the preview loads immediately; empty means no writable target exists.
 // The mode defaults to Move. The adapter calls this first: its own
 // target-scoped preview hook needs targetId, and its domain body and report
 // need mode and targetName.
 export function useTransferState(
-	machine: Machine,
+	host: Host,
 	capability: Capability,
 ): TransferState {
-	const { data: machines } = useMachines();
-	const targets = (machines ?? []).filter(
-		(candidate) => candidate.id !== machine.id && can(candidate, capability),
+	const { data: hosts } = useHosts();
+	const targets = (hosts ?? []).filter(
+		(candidate) => candidate.id !== host.id && can(candidate, capability),
 	);
 	const [selectedTargetId, setSelectedTargetId] = useState("");
 	const targetId = selectedTargetId || targets[0]?.id || "";
@@ -81,7 +81,7 @@ export function useTransferState(
 }
 
 // One owner of the stay-open transfer dialog skeleton the three
-// cross-machine move surfaces (quadlet, volume, secret) hand-rolled: the
+// cross-host move surfaces (quadlet, volume, secret) hand-rolled: the
 // capability-filtered target select, the mode radio defaulting to Move, the
 // target-scoped preview's pending/error/collision states, the
 // referencing-quadlet warning, the confirm/report footer swap, and the
@@ -89,7 +89,7 @@ export function useTransferState(
 // standalone from MutationDialog because the two disagree on the headline
 // invariant: a transfer's success behavior is mixed — the report narrates
 // in place and a "partial" result must keep the dialog open naming the
-// both-machines state — which the core's unconditional close-on-success
+// both-hosts state — which the core's unconditional close-on-success
 // cannot express. The caller renders the dialog conditionally, so mount is
 // open and unmount is close.
 //
@@ -103,11 +103,11 @@ export function useTransferState(
 // react-query: the feature keeps its preview hook and its mutation or
 // stream hook as thin adapters over the shared transfer-hooks module
 // (`@shared/transfers`, issue 273), which owns the preview ritual, the
-// both-machines invalidation, and the move-stream lifecycle; the feature
+// both-hosts invalidation, and the move-stream lifecycle; the feature
 // keeps its domain — the key constructor and fetcher, the event
 // vocabulary, shape guard, progress fold, and URL builder.
 export function TransferDialog({
-	machine,
+	host,
 	transfer,
 	preview,
 	pinnedMode,
@@ -126,7 +126,7 @@ export function TransferDialog({
 	onConfirm,
 	onClose,
 }: {
-	machine: Machine;
+	host: Host;
 	transfer: TransferState;
 	preview: TransferPreviewSlice;
 	// A copy-only surface (the image copy, issue 376) pins the mode:
@@ -228,7 +228,7 @@ export function TransferDialog({
 			{report ?? (
 				<VStack align="flex-start" spacing={4}>
 					<FormControl isRequired>
-						<FormLabel htmlFor="move-target">Target machine</FormLabel>
+						<FormLabel htmlFor="move-target">Target host</FormLabel>
 						{targets.length > 0 ? (
 							<Select
 								id="move-target"
@@ -245,7 +245,7 @@ export function TransferDialog({
 						) : (
 							<Text color="gray.500" data-testid="move-no-targets">
 								{noTargetsMessage ??
-									`No other machine you can manage ${noun}s on.`}
+									`No other host you can manage ${noun}s on.`}
 							</Text>
 						)}
 					</FormControl>
@@ -265,10 +265,10 @@ export function TransferDialog({
 									align={{ base: "flex-start", md: "center" }}
 								>
 									<Radio value="move" data-testid="move-mode-move">
-										Move (remove from this machine)
+										Move (remove from this host)
 									</Radio>
 									<Radio value="copy" data-testid="move-mode-copy">
-										Copy (keep this machine&apos;s {noun})
+										Copy (keep this host&apos;s {noun})
 									</Radio>
 								</HStack>
 							</RadioGroup>
@@ -276,7 +276,7 @@ export function TransferDialog({
 					)}
 					{preview.isPending ? (
 						<Text color="gray.500" data-testid="move-preview-pending">
-							Checking the target machine…
+							Checking the target host…
 						</Text>
 					) : null}
 					{preview.isError ? (
@@ -295,8 +295,8 @@ export function TransferDialog({
 					{referencingQuadlets.length > 0 ? (
 						<Box data-testid="move-referencing-warning">
 							<Text>
-								Quadlets on this machine reference this {noun}. They are not
-								transferred and keep pointing at {machine.name}:
+								Quadlets on this host reference this {noun}. They are not
+								transferred and keep pointing at {host.name}:
 							</Text>
 							<VStack align="flex-start" mt={2} spacing={1}>
 								{referencingQuadlets.map((quadlet) => (
@@ -312,7 +312,7 @@ export function TransferDialog({
 							{effectiveMode === "move" ? (
 								<Text mt={2} color="orange.500">
 									After a move these references dangle — the {noun} they name is
-									gone from this machine.
+									gone from this host.
 								</Text>
 							) : null}
 						</Box>

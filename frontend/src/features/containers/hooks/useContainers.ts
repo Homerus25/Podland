@@ -29,79 +29,79 @@ import {
 	useOneShotQuery,
 } from "@shared/queries/useFreshQuery";
 import {
-	invalidateMachineResources,
+	invalidateHostResources,
 	useListInvalidatingMutation,
 } from "@shared/queries/useListInvalidatingMutation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-export function useContainers(machineId: string) {
-	return useAlwaysRefetchListQuery(containersQueryKey(machineId), () =>
-		listContainers(machineId),
+export function useContainers(hostId: string) {
+	return useAlwaysRefetchListQuery(containersQueryKey(hostId), () =>
+		listContainers(hostId),
 	);
 }
 
-export function useContainer(machineId: string, containerId: string) {
-	return useOneShotQuery(containerQueryKey(machineId, containerId), () =>
-		getContainer(machineId, containerId),
+export function useContainer(hostId: string, containerId: string) {
+	return useOneShotQuery(containerQueryKey(hostId, containerId), () =>
+		getContainer(hostId, containerId),
 	);
 }
 
 export function useContainerInspect(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 	options?: { enabled?: boolean },
 ) {
 	return useOneShotQuery(
-		containerInspectQueryKey(machineId, containerId),
-		() => inspectContainer(machineId, containerId),
+		containerInspectQueryKey(hostId, containerId),
+		() => inspectContainer(hostId, containerId),
 		options,
 	);
 }
 
 export function useContainerStatsList(
-	machineId: string,
+	hostId: string,
 	options?: { enabled?: boolean },
 ) {
 	return useOneShotQuery(
-		containersStatsQueryKey(machineId),
-		() => listContainerStats(machineId),
+		containersStatsQueryKey(hostId),
+		() => listContainerStats(hostId),
 		options,
 	);
 }
 
 export function useContainerStats(
-	machineId: string,
+	hostId: string,
 	containerId: string,
 	options?: { enabled?: boolean },
 ) {
 	return useOneShotQuery(
-		containerStatsQueryKey(machineId, containerId),
-		() => getContainerStats(machineId, containerId),
+		containerStatsQueryKey(hostId, containerId),
+		() => getContainerStats(hostId, containerId),
 		options,
 	);
 }
 
-export function useStartContainer(machineId: string) {
+export function useStartContainer(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"containers",
-		(containerId: string) => startContainer(machineId, containerId),
+		(containerId: string) => startContainer(hostId, containerId),
 	);
 }
 
-export function useStopContainer(machineId: string) {
+export function useStopContainer(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"containers",
-		(containerId: string) => stopContainer(machineId, containerId),
+		(containerId: string) => stopContainer(hostId, containerId),
 	);
 }
 
-export function useRestartContainer(machineId: string) {
+export function useRestartContainer(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"containers",
-		(containerId: string) => restartContainer(machineId, containerId),
+		(containerId: string) => restartContainer(hostId, containerId),
 	);
 }
 
@@ -109,11 +109,11 @@ export function useRestartContainer(machineId: string) {
 // the containers list, the container's own detail query (the detail key
 // extends the containers key, so the invalidation's prefix match covers
 // it), and the pods list (pod data carries its containers' names).
-export function useRenameContainer(machineId: string, containerId: string) {
+export function useRenameContainer(hostId: string, containerId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		["containers", "pods"],
-		(name: string) => renameContainer(machineId, containerId, name),
+		(name: string) => renameContainer(hostId, containerId, name),
 	);
 }
 
@@ -121,44 +121,43 @@ export function useRenameContainer(machineId: string, containerId: string) {
 // and healthcheck) and nothing else: the containers list and the detail and
 // inspect queries refetch (the detail and inspect keys extend the
 // containers key, so the invalidation's prefix match covers them).
-export function useUpdateContainer(machineId: string, containerId: string) {
+export function useUpdateContainer(hostId: string, containerId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"containers",
 		(input: UpdateContainerInput) =>
-			updateContainer(machineId, containerId, input),
+			updateContainer(hostId, containerId, input),
 	);
 }
 
-export function useDeleteContainer(machineId: string) {
+export function useDeleteContainer(hostId: string) {
 	return useListInvalidatingMutation(
-		machineId,
+		hostId,
 		"containers",
-		(containerId: string) => deleteContainer(machineId, containerId),
+		(containerId: string) => deleteContainer(hostId, containerId),
 	);
 }
 
-// A prune changes the machine's container set, so the list refetches on
+// A prune changes the host's container set, so the list refetches on
 // success and the report shows the server's post-prune state.
-export function usePruneContainers(machineId: string) {
-	return useListInvalidatingMutation(machineId, "containers", () =>
-		pruneContainers(machineId),
+export function usePruneContainers(hostId: string) {
+	return useListInvalidatingMutation(hostId, "containers", () =>
+		pruneContainers(hostId),
 	);
 }
 
-export function useCreateContainer(machineId: string) {
+export function useCreateContainer(hostId: string) {
 	const queryClient = useQueryClient();
 	// Hand-rolled instead of useListInvalidatingMutation (spec 356): the
 	// create additionally invalidates the pods list when the container
 	// joins one — a create that joins a pod changes the pods list's
 	// container counts (spec 352), so only then does the pods list refetch.
 	return useMutation({
-		mutationFn: (input: CreateContainerInput) =>
-			createContainer(machineId, input),
+		mutationFn: (input: CreateContainerInput) => createContainer(hostId, input),
 		onSuccess: (_created, input) => {
-			invalidateMachineResources(queryClient, machineId, "containers");
+			invalidateHostResources(queryClient, hostId, "containers");
 			if (input.pod) {
-				invalidateMachineResources(queryClient, machineId, "pods");
+				invalidateHostResources(queryClient, hostId, "pods");
 			}
 		},
 	});

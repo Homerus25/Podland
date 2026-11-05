@@ -17,7 +17,7 @@ import type { ReactNode } from "react";
 // the five pages adapt, they never re-declare.
 
 // True when the overview query's error is a 404: the item no longer exists
-// on the machine, and the detail page renders its not-found state.
+// on the host, and the detail page renders its not-found state.
 export function isNotFound(error: unknown): boolean {
 	return isAxiosError(error) && error.response?.status === 404;
 }

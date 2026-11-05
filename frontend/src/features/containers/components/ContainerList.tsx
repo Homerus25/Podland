@@ -10,7 +10,7 @@ import {
 	useStopContainer,
 } from "@features/containers/hooks/useContainers";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
-import { can } from "@features/machines/permissions";
+import { can } from "@features/hosts/permissions";
 import { ConnectDialog } from "@features/networks/components/ConnectDialog";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
@@ -19,7 +19,7 @@ import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { useOpenLogs } from "@shared/logs/logRoute";
 import { containerCreatePath, detailPath } from "@shared/routes/detailRoute";
-import type { Machine } from "@shared/types/api";
+import type { Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -57,7 +57,7 @@ function DeleteContainerModal({
 }
 
 // The prune adapter over PruneReportDialog, the twin of the volumes one:
-// the module owns the machinery, this adapter hands over the noun and the
+// the module owns the plumbing, this adapter hands over the noun and the
 // two entry accessors that make a container entry a report row. Podman's
 // container prune report carries no name, so rows are keyed by ID like the
 // pods one.
@@ -87,7 +87,7 @@ function PruneContainersModal({
 // (spec 301), and every action button stops propagation so a button click
 // never also fires the row action.
 function ContainerRow({
-	machineId,
+	hostId,
 	container,
 	canManage,
 	canManageNetworks,
@@ -95,7 +95,7 @@ function ContainerRow({
 	onShowLogs,
 	onConnect,
 }: {
-	machineId: string;
+	hostId: string;
 	container: ContainerSummary;
 	canManage: boolean;
 	canManageNetworks: boolean;
@@ -104,9 +104,9 @@ function ContainerRow({
 	onConnect: (container: ContainerSummary) => void;
 }) {
 	const navigate = useNavigate();
-	const startContainer = useStartContainer(machineId);
-	const stopContainer = useStopContainer(machineId);
-	const restartContainer = useRestartContainer(machineId);
+	const startContainer = useStartContainer(hostId);
+	const stopContainer = useStopContainer(hostId);
+	const restartContainer = useRestartContainer(hostId);
 	const name = containerDisplayName(container);
 	const isRunning = container.state === "running";
 	const action = isRunning
@@ -132,9 +132,7 @@ function ContainerRow({
 			<Tr
 				data-testid="container-row"
 				cursor="pointer"
-				onClick={() =>
-					navigate(detailPath(machineId, "containers", container.id))
-				}
+				onClick={() => navigate(detailPath(hostId, "containers", container.id))}
 			>
 				<Td fontFamily="mono">{containerDisplayName(container)}</Td>
 				<Td fontFamily="mono">{container.image}</Td>
@@ -237,18 +235,18 @@ function ContainerRow({
 // the row keeps its logs button.
 // Connect-to-network is gated on the separate manage-networks capability
 // (issue 256): the row button hides below it while Logs stays visible. The
-// toolbar/triad/table machinery and the derived testids are ResourceList's;
+// toolbar/triad/table plumbing and the derived testids are ResourceList's;
 // this adapter owns only the columns, the row, and the create/delete
 // modals. The row's connect button opens the networks feature's one
 // connect dialog (issue 274) with the container fixed — the containers
 // feature calls into networks for connect, never the reverse.
-export function ContainerList({ machine }: { machine: Machine }) {
-	const machineId = machine.id;
-	const { data: containers, isPending, error } = useContainers(machineId);
-	const deleteContainer = useDeleteContainer(machineId);
-	const pruneContainers = usePruneContainers(machineId);
-	const canManage = can(machine, "manage-containers");
-	const canManageNetworks = can(machine, "manage-networks");
+export function ContainerList({ host }: { host: Host }) {
+	const hostId = host.id;
+	const { data: containers, isPending, error } = useContainers(hostId);
+	const deleteContainer = useDeleteContainer(hostId);
+	const pruneContainers = usePruneContainers(hostId);
+	const canManage = can(host, "manage-containers");
+	const canManageNetworks = can(host, "manage-networks");
 	const navigate = useNavigate();
 	const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(
 		null,
@@ -258,7 +256,7 @@ export function ContainerList({ machine }: { machine: Machine }) {
 	);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [isStatsOpen, setIsStatsOpen] = useState(false);
-	const openLogs = useOpenLogs(machineId, "container");
+	const openLogs = useOpenLogs(hostId, "container");
 	// Stats is a read, so the button must survive ResourceList's manage
 	// gate: manage users get it in the toolbar beside Create/Prune, while
 	// read users — whose toolbar the module swaps for the permission hint
@@ -301,7 +299,7 @@ export function ContainerList({ machine }: { machine: Machine }) {
 				renderRow={(container) => (
 					<ContainerRow
 						key={container.id}
-						machineId={machineId}
+						hostId={hostId}
 						container={container}
 						canManage={canManage}
 						canManageNetworks={canManageNetworks}
@@ -320,7 +318,7 @@ export function ContainerList({ machine }: { machine: Machine }) {
 						<Button
 							size="sm"
 							colorScheme="blue"
-							onClick={() => navigate(containerCreatePath(machineId))}
+							onClick={() => navigate(containerCreatePath(hostId))}
 							data-testid="create-container-button"
 						>
 							Create container
@@ -354,13 +352,13 @@ export function ContainerList({ machine }: { machine: Machine }) {
 			) : null}
 			{isStatsOpen ? (
 				<ContainerStatsDialog
-					machineId={machineId}
+					hostId={hostId}
 					onClose={() => setIsStatsOpen(false)}
 				/>
 			) : null}
 			{pendingConnect ? (
 				<ConnectDialog
-					machineId={machineId}
+					hostId={hostId}
 					container={pendingConnect}
 					onClose={() => setPendingConnect(null)}
 				/>
