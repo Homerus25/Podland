@@ -1,5 +1,6 @@
 import {
 	DetailPage,
+	type DetailPageInspectProps,
 	type DetailPageProps,
 	type InspectQuerySlice,
 } from "@shared/components/DetailPage";
@@ -25,9 +26,11 @@ function makeQuery(
 	};
 }
 
+// The suite's default props are the inspect variant of the props union:
+// every test but the no-inspect one renders a page with a raw report.
 function defaultProps(
-	overrides: Partial<DetailPageProps> = {},
-): DetailPageProps {
+	overrides: Partial<DetailPageProps & DetailPageInspectProps> = {},
+): DetailPageProps & DetailPageInspectProps {
 	return {
 		title: "web",
 		backTo: "containers",
@@ -71,7 +74,10 @@ function LocationProbe() {
 // The reveal toggle is page-owned state: this harness wires it the way a
 // detail page does, so the toggle tests exercise the real contract.
 function StatefulDetailPage(
-	props: Omit<DetailPageProps, "revealed" | "onToggleInspect">,
+	props: Omit<
+		DetailPageProps & DetailPageInspectProps,
+		"revealed" | "onToggleInspect"
+	>,
 ) {
 	const [revealed, setRevealed] = useState(false);
 	return (
@@ -332,6 +338,21 @@ describe("DetailPage", () => {
 
 		expect(writeText).toHaveBeenCalledTimes(1);
 		expect(writeText).toHaveBeenCalledWith(JSON.stringify(data, null, 2));
+	});
+
+	// The optional inspect slice (issue #472): a resource with no podman
+	// inspect report (quadlets) passes no inspect query at all, and the
+	// layout renders no reveal — the section is the absence of the seam,
+	// not a disabled button.
+	it("renders no inspect reveal when the page passes no inspect query", () => {
+		const { inspectQuery, revealed, onToggleInspect, ...rest } = defaultProps();
+		renderDetailPage(<DetailPage {...rest} />);
+
+		expect(
+			screen.queryByTestId("toggle-inspect-button"),
+		).not.toBeInTheDocument();
+		expect(screen.queryByTestId("inspect-json")).not.toBeInTheDocument();
+		expect(screen.getByTestId("overview-name-row")).toBeInTheDocument();
 	});
 
 	it("renders the inspect JSON only after the lazy query delivers data on first reveal", async () => {

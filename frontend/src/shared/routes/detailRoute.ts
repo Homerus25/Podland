@@ -12,6 +12,7 @@ export type DetailResource =
 	| "volumes"
 	| "images"
 	| "networks"
+	| "quadlets"
 	| "secrets";
 
 // The one builder of resource detail paths: hostId and id are

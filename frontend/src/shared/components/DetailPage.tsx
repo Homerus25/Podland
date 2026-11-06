@@ -32,6 +32,26 @@ export interface InspectQuerySlice {
 // overview slot for the resource's label/value rows, and the "show inspect
 // JSON" collapsible at the bottom. The module never touches react-query:
 // the page adapter owns its queries and hands over their structural slices.
+// The inspect variant of the props union: the three props a page with a
+// raw podman inspect report hands over together.
+export type DetailPageInspectProps = {
+	// The lazy inspect query's structural slice (the module's
+	// InspectQuerySlice): the page enables the query on first reveal, so
+	// the report is fetched on the first "Show inspect JSON" click, never
+	// on page mount.
+	inspectQuery: InspectQuerySlice;
+	// Whether the inspect JSON section is revealed; the page owns this
+	// state.
+	revealed: boolean;
+	onToggleInspect: () => void;
+};
+
+// The inspect slice is a discriminated union (issue #472): the three
+// inspect props come together or not at all. A resource with no podman
+// inspect report (quadlets) passes none of them, and the layout renders
+// no reveal at all — the section is the absence of the seam, not a
+// disabled button. Passing inspectQuery without onToggleInspect is a
+// compile error, not a dead button at runtime.
 export type DetailPageProps = {
 	// The item's display name, rendered in the header.
 	title: string;
@@ -44,14 +64,6 @@ export type DetailPageProps = {
 	error: unknown;
 	// True when the overview query 404'd: the not-found state renders.
 	notFound: boolean;
-	// The lazy inspect query's structural slice (the module's
-	// InspectQuerySlice): the page enables the query on first reveal, so
-	// the report is fetched on the first "Show inspect JSON" click, never
-	// on page mount.
-	inspectQuery: InspectQuerySlice;
-	// Whether the inspect JSON section is revealed; the page owns this state.
-	revealed: boolean;
-	onToggleInspect: () => void;
 	// The overview: the resource's label/value rows.
 	children: ReactNode;
 	// Optional actions rendered in the header row beside the title (spec
@@ -59,7 +71,16 @@ export type DetailPageProps = {
 	// resource supports (the container detail page's "Edit configuration"
 	// button). Pages that pass nothing render the header they always did.
 	headerActions?: ReactNode;
-};
+} & (
+	| DetailPageInspectProps
+	// The no-inspect variant: a resource with no raw report passes none
+	// of the three, and the layout renders no reveal.
+	| {
+			inspectQuery?: undefined;
+			revealed?: undefined;
+			onToggleInspect?: undefined;
+	  }
+);
 
 export function DetailPage({
 	title,
@@ -76,7 +97,7 @@ export function DetailPage({
 	const { hostId } = useParams<{ hostId: string }>();
 	const navigate = useNavigate();
 	const hasInAppHistory = useHasInAppHistory();
-	const report = inspectQuery.data;
+	const report = inspectQuery?.data;
 	const pretty = report === undefined ? "" : JSON.stringify(report, null, 2);
 
 	return (
@@ -141,51 +162,56 @@ export function DetailPage({
 			) : (
 				<Box data-testid="detail-page-overview">{children}</Box>
 			)}
-			<Box>
-				<Button
-					variant="outline"
-					onClick={onToggleInspect}
-					aria-expanded={revealed}
-					data-testid="toggle-inspect-button"
-				>
-					{revealed ? "Hide inspect JSON" : "Show inspect JSON"}
-				</Button>
-				{revealed ? (
-					<Box mt={2}>
-						{inspectQuery.isPending ? (
-							<Box data-testid="inspect-json-loading">
-								<Spinner size="sm" /> Loading inspect data…
-							</Box>
-						) : inspectQuery.error ? (
-							<ErrorDisplay
-								error={getApiError(inspectQuery.error)}
-								data-testid="inspect-json-error"
-							/>
-						) : (
-							<>
-								<Box
-									as="pre"
-									overflow="auto"
-									maxHeight="60vh"
-									fontFamily="mono"
-									data-testid="inspect-json"
-								>
-									{pretty}
+			{/* The inspect reveal renders only for a page that handed over an
+			    inspect query; a resource with no raw report (quadlets)
+			    passes none, so nothing renders here. */}
+			{inspectQuery ? (
+				<Box>
+					<Button
+						variant="outline"
+						onClick={onToggleInspect}
+						aria-expanded={revealed}
+						data-testid="toggle-inspect-button"
+					>
+						{revealed ? "Hide inspect JSON" : "Show inspect JSON"}
+					</Button>
+					{revealed ? (
+						<Box mt={2}>
+							{inspectQuery.isPending ? (
+								<Box data-testid="inspect-json-loading">
+									<Spinner size="sm" /> Loading inspect data…
 								</Box>
-								{report !== undefined ? (
-									<Button
-										mt={2}
-										data-testid="copy-inspect-button"
-										onClick={() => navigator.clipboard.writeText(pretty)}
+							) : inspectQuery.error ? (
+								<ErrorDisplay
+									error={getApiError(inspectQuery.error)}
+									data-testid="inspect-json-error"
+								/>
+							) : (
+								<>
+									<Box
+										as="pre"
+										overflow="auto"
+										maxHeight="60vh"
+										fontFamily="mono"
+										data-testid="inspect-json"
 									>
-										Copy JSON
-									</Button>
-								) : null}
-							</>
-						)}
-					</Box>
-				) : null}
-			</Box>
+										{pretty}
+									</Box>
+									{report !== undefined ? (
+										<Button
+											mt={2}
+											data-testid="copy-inspect-button"
+											onClick={() => navigator.clipboard.writeText(pretty)}
+										>
+											Copy JSON
+										</Button>
+									) : null}
+								</>
+							)}
+						</Box>
+					) : null}
+				</Box>
+			) : null}
 		</VStack>
 	);
 }

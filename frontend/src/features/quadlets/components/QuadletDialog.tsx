@@ -9,10 +9,10 @@ import {
 	VStack,
 } from "@chakra-ui/react";
 import { useQuadlet } from "@features/quadlets/hooks/useQuadlets";
-import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import {
 	type CreateQuadletInput,
 	QUADLET_RESOURCES,
+	type QuadletRef,
 	type UpdateQuadletInput,
 } from "@features/quadlets/services/quadletsApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
@@ -180,7 +180,10 @@ export function CreateQuadletDialog({
 
 interface EditQuadletDialogProps {
 	hostId: string;
-	quadlet: QuadletSummary;
+	// The quadlet identity the dialog reads (issue #472): the id addresses
+	// the detail query and the update, the name labels the title. The
+	// detail page hands over its DTO directly.
+	quadlet: QuadletRef;
 	mutation: MutationSlice<{ quadletId: string } & UpdateQuadletInput>;
 	onClose: () => void;
 }

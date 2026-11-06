@@ -13,7 +13,10 @@ import type {
 	useStartQuadlet,
 	useStopQuadlet,
 } from "@features/quadlets/hooks/useQuadlets";
-import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
+import type {
+	QuadletRef,
+	QuadletSummary,
+} from "@features/quadlets/services/quadletsApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { StateBadge } from "@shared/components/StateBadge";
@@ -31,14 +34,15 @@ import { Fragment, useState } from "react";
 //
 // The list renders this, not the row: a plain row function cannot own the
 // open/closed state, so the list holds which action is open and mounts the
-// modal from there.
+// modal from there. The detail page mounts it too (issue #472), with the
+// same shape.
 export function LifecycleOptionsModal({
 	quadlet,
 	actionLabel,
 	lifecycle,
 	onClose,
 }: {
-	quadlet: QuadletSummary;
+	quadlet: QuadletRef;
 	actionLabel: string;
 	lifecycle:
 		| ReturnType<typeof useStopQuadlet>
@@ -109,9 +113,11 @@ export type QuadletLifecycleMutations = {
 // variables keeps other rows usable. Stop and restart run through the
 // options modal, which the list mounts — the row only names the action.
 //
-// The row carries no destructive button (spec 461, ticket #470): quadlets
-// have no detail page, so removal is the list's "Remove selected" — a single
-// quadlet is selected and removed through the same bulk button.
+// The row navigates to the quadlet's detail page on click (issue #472, the
+// volumes list's pattern), so every action button stops the click from
+// reaching the row. The row carries no destructive button (spec 461, ticket
+// #470): single-item removal lives on the detail page's Remove button, and
+// the list keeps its bulk "Remove selected".
 export function renderQuadletRow({
 	quadlet,
 	canManage,
@@ -120,6 +126,7 @@ export function renderQuadletRow({
 	onMove,
 	onShowLogs,
 	onLifecycle,
+	onOpen,
 }: {
 	quadlet: QuadletSummary;
 	canManage: boolean;
@@ -128,6 +135,7 @@ export function renderQuadletRow({
 	onMove: (quadlet: QuadletSummary) => void;
 	onShowLogs: (quadlet: QuadletSummary) => void;
 	onLifecycle: (quadlet: QuadletSummary, action: "stop" | "restart") => void;
+	onOpen: (quadlet: QuadletSummary) => void;
 }) {
 	const startPending =
 		lifecycle.start.isPending && lifecycle.start.variables === quadlet.id;
@@ -146,7 +154,11 @@ export function renderQuadletRow({
 	const isRunning = quadlet.state === "running";
 	return (
 		<Fragment key={quadlet.id}>
-			<Tr data-testid="quadlet-row">
+			<Tr
+				data-testid="quadlet-row"
+				cursor="pointer"
+				onClick={() => onOpen(quadlet)}
+			>
 				<Td fontFamily="mono">{quadlet.name}</Td>
 				<Td fontFamily="mono">{quadlet.resource}</Td>
 				<Td>
@@ -160,7 +172,10 @@ export function renderQuadletRow({
 								variant="outline"
 								colorScheme="green"
 								aria-label={`Start ${quadlet.name}`}
-								onClick={() => lifecycle.start.mutate(quadlet.id)}
+								onClick={(event) => {
+									event.stopPropagation();
+									lifecycle.start.mutate(quadlet.id);
+								}}
 								isLoading={startPending}
 								isDisabled={lifecyclePending}
 								data-testid="start-quadlet-button"
@@ -173,7 +188,10 @@ export function renderQuadletRow({
 								size="xs"
 								variant="outline"
 								aria-label={`Stop ${quadlet.name}`}
-								onClick={() => onLifecycle(quadlet, "stop")}
+								onClick={(event) => {
+									event.stopPropagation();
+									onLifecycle(quadlet, "stop");
+								}}
 								isDisabled={lifecyclePending}
 								data-testid="stop-quadlet-button"
 							>
@@ -184,7 +202,10 @@ export function renderQuadletRow({
 							size="xs"
 							variant="outline"
 							aria-label={`Restart ${quadlet.name}`}
-							onClick={() => onLifecycle(quadlet, "restart")}
+							onClick={(event) => {
+								event.stopPropagation();
+								onLifecycle(quadlet, "restart");
+							}}
 							isDisabled={lifecyclePending}
 							data-testid="restart-quadlet-button"
 						>
@@ -194,7 +215,10 @@ export function renderQuadletRow({
 							size="xs"
 							variant="outline"
 							aria-label={`Logs ${quadlet.name}`}
-							onClick={() => onShowLogs(quadlet)}
+							onClick={(event) => {
+								event.stopPropagation();
+								onShowLogs(quadlet);
+							}}
 						>
 							Logs
 						</Button>
@@ -205,7 +229,10 @@ export function renderQuadletRow({
 						size="xs"
 						variant="outline"
 						aria-label={`Edit ${quadlet.name}`}
-						onClick={() => onEdit(quadlet)}
+						onClick={(event) => {
+							event.stopPropagation();
+							onEdit(quadlet);
+						}}
 						data-testid="edit-quadlet-button"
 					>
 						Edit
@@ -217,7 +244,10 @@ export function renderQuadletRow({
 							size="xs"
 							variant="outline"
 							aria-label={`Move or copy ${quadlet.name}`}
-							onClick={() => onMove(quadlet)}
+							onClick={(event) => {
+								event.stopPropagation();
+								onMove(quadlet);
+							}}
 							data-testid="move-quadlet-button"
 						>
 							Move/Copy

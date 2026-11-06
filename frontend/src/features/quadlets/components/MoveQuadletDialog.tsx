@@ -19,8 +19,10 @@ import {
 	type useMoveQuadlet,
 	useQuadletMovePreview,
 } from "@features/quadlets/hooks/useQuadlets";
-import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
-import { buildMoveInput } from "@features/quadlets/services/quadletsApi";
+import {
+	buildMoveInput,
+	type QuadletRef,
+} from "@features/quadlets/services/quadletsApi";
 import {
 	TransferDialog,
 	useTransferState,
@@ -78,7 +80,10 @@ export function MoveQuadletDialog({
 	onClose,
 }: {
 	host: Host;
-	quadlet: QuadletSummary;
+	// The quadlet identity the dialog reads (issue #472): the id addresses
+	// the preview and the transfer, the name labels the copy. The detail
+	// page hands over its DTO directly.
+	quadlet: QuadletRef;
 	moveQuadlet: ReturnType<typeof useMoveQuadlet>;
 	onClose: () => void;
 }) {

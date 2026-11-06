@@ -10,6 +10,7 @@ import {
 	bulkRemoveQuadlets,
 	convertCompose,
 	createQuadlet,
+	deleteQuadlet,
 	generateQuadlet,
 	getQuadlet,
 	importQuadlets,
@@ -89,6 +90,16 @@ export function useBulkRemoveQuadlets(hostId: string) {
 		hostId,
 		"quadlets",
 		(input: BulkRemoveInput) => bulkRemoveQuadlets(hostId, input),
+	);
+}
+
+// A single-quadlet remove takes the unit off the host, so the list
+// refetches on success (issue #472). The detail page rides the endpoint's
+// defaults — stop=true, force=false — so the mutation's variable is the
+// bare quadlet id.
+export function useDeleteQuadlet(hostId: string) {
+	return useListInvalidatingMutation(hostId, "quadlets", (quadletId: string) =>
+		deleteQuadlet(hostId, quadletId),
 	);
 }
 

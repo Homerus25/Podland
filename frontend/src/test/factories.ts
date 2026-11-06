@@ -18,6 +18,7 @@ import type {
 } from "@features/networks/services/networksApi";
 import type { PodDetail, PodSummary } from "@features/pods/services/podsApi";
 import type {
+	QuadletDetail,
 	QuadletImportEntry,
 	QuadletImportResponse,
 	QuadletMoveCompanionState,
@@ -221,6 +222,23 @@ export function quadletFixture(
 		unit: "web.service",
 		resource: "container",
 		state: "running",
+		...overrides,
+	};
+}
+
+// The single-quadlet GET's response (backend QuadletGetResponse; issue
+// #472): the summary shape plus the file content the detail page renders.
+export function quadletDetailFixture(
+	overrides: Partial<QuadletDetail> = {},
+): QuadletDetail {
+	return {
+		id: "web",
+		name: "web",
+		path: "/etc/containers/systemd/web.container",
+		unit: "web.service",
+		resource: "container",
+		state: "running",
+		content: "[Container]\nImage=docker.io/library/nginx:1.27\n",
 		...overrides,
 	};
 }

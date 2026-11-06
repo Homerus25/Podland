@@ -29,8 +29,10 @@ import { ActionDialog } from "@shared/components/MutationDialog";
 
 import { ResourceList } from "@shared/components/ResourceList";
 import { useOpenLogs } from "@shared/logs/logRoute";
+import { detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 // The toolbar/triad/table plumbing, the plural testids, and the hint swap
 // are ResourceList's; this adapter owns the busiest toolbar of the five
@@ -43,9 +45,10 @@ import { useState } from "react";
 // a write like every other toolbar action, so below manage level the module
 // swaps the whole toolbar for the canonical read hint.
 //
-// Removal has no per-row button (spec 461, ticket #470), and quadlets have no
-// detail page either: a single quadlet is removed by selecting it and using
-// the toolbar's "Remove selected", exactly like a bulk selection.
+// The row navigates to the quadlet's detail page (issue #472), which is the
+// single-quadlet management surface — including its Remove button. The list
+// keeps its bulk "Remove selected" for multi-select removal (spec 461,
+// ticket #470).
 export function QuadletList({ host }: { host: Host }) {
 	const hostId = host.id;
 	const { data: quadlets, isPending, error } = useQuadlets(hostId);
@@ -91,6 +94,7 @@ export function QuadletList({ host }: { host: Host }) {
 		clear: () => void;
 	} | null>(null);
 	const openLogs = useOpenLogs(hostId, "quadlet");
+	const navigate = useNavigate();
 
 	return (
 		<>
@@ -121,6 +125,8 @@ export function QuadletList({ host }: { host: Host }) {
 							openLogs({ targetId: target.id, name: target.name }),
 						onLifecycle: (target, action) =>
 							setLifecycleTarget({ quadlet: target, action }),
+						onOpen: (target) =>
+							navigate(detailPath(hostId, "quadlets", target.id)),
 					})
 				}
 				toolbar={

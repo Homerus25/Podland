@@ -24,6 +24,16 @@ export async function listQuadlets(hostId: string): Promise<QuadletSummary[]> {
 	return response.data;
 }
 
+// The quadlet identity every reused quadlet surface reads (issue #472):
+// the row's summary shape narrowed to the fields the lifecycle modal, the
+// edit dialog, the move dialog, and the detail page's remove dialog
+// actually consume, so the detail page can hand over its DTO without a
+// shape adapter. One named type, owned beside the DTOs it narrows.
+export interface QuadletRef {
+	id: string;
+	name: string;
+}
+
 // The resource types the backend accepts
 // (QuadletCreateRequest validation: oneof container pod image volume network).
 // The list endpoint can additionally report "unknown" for unrecognized file
@@ -143,6 +153,21 @@ export async function updateQuadlet(
 		input,
 	);
 	return response.data;
+}
+
+// DELETE /api/hosts/{id}/quadlets/{quadletId} -> 204 (backend
+// internal/domain/quadlets/handler.go QuadletHandler.Delete): the
+// single-item remove with the stop-first ritual — stop defaults to true
+// server-side (a running resource is stopped through the lifecycle's
+// systemctl stop before the removal) and force defaults to false, so a
+// caller riding the defaults sends no query parameters at all. There is no
+// reachable refusal code with those defaults, hence no force path here
+// (the secret detail page's no-force remove adapter is the precedent).
+export async function deleteQuadlet(
+	hostId: string,
+	quadletId: string,
+): Promise<void> {
+	await api.delete(hostApiPath(hostId, "quadlets", quadletId));
 }
 
 // POST /api/hosts/{id}/quadlets/remove -> 200 (backend

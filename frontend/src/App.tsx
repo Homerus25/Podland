@@ -3,6 +3,7 @@ import { CreateContainerPage } from "@features/containers/components/CreateConta
 import { ImageDetailPage } from "@features/images/components/ImageDetailPage";
 import { NetworkDetailPage } from "@features/networks/components/NetworkDetailPage";
 import { PodDetailPage } from "@features/pods/components/PodDetailPage";
+import { QuadletDetailPage } from "@features/quadlets/components/QuadletDetailPage";
 import { SecretDetailPage } from "@features/secrets/components/SecretDetailPage";
 import { VolumeDetailPage } from "@features/volumes/components/VolumeDetailPage";
 import { AdminRoute } from "@shared/components/AdminRoute";
@@ -46,6 +47,10 @@ export function App() {
 					element={<ContainerDetailPage />}
 				/>
 				<Route path="hosts/:hostId/pods/:podId" element={<PodDetailPage />} />
+				<Route
+					path="hosts/:hostId/quadlets/:quadletId"
+					element={<QuadletDetailPage />}
+				/>
 				<Route
 					path="hosts/:hostId/volumes/:volumeName"
 					element={<VolumeDetailPage />}
