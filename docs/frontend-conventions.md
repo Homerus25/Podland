@@ -2,7 +2,7 @@
 
 How the React frontend (`frontend/src/`) is organized. System architecture lives in `docs/architecture-decisions.md`; domain language in `GLOSSARY.md`; API contracts in `doku/`. This file covers the patterns a new feature slice needs, so slices start from knowledge instead of re-reading sibling features.
 
-Formatting is automated: a Crush pre-edit hook (`.crushrc` → `.crush/hooks/biome-format.sh`) runs Biome on a file before every edit, so files are already formatted when you read them. Run `npx biome check <changed files>` once at the end as a gate; never interleave `--write` runs with your own reads and edits.
+Formatting is automated: a Crush pre-edit hook (`.crushrc` → `.crush/hooks/biome-format.sh`) runs Biome on a file before every edit, so files are already formatted when you read them. Run `./node_modules/.bin/biome check <changed files>` once at the end as a gate (`npx biome` does not resolve in this environment); never interleave `--write` runs with your own reads and edits. The gate is green on a clean tree — a red gate is always yours.
 
 ## Feature folder layout
 
@@ -69,6 +69,8 @@ Each feature lives in `src/features/<name>/`:
 - **Complex form-to-payload mappings are pure builders in the feature's services module** — a dialog's form-values-to-request mapping lives as an exported pure function next to the DTO types it produces, unit-tested there without a DOM; the dialog keeps form ownership only (react-hook-form wiring, field arrays, checkbox toggling, section composition, JSX) and its submit handler maps through the builder. The form-values shape and its row interfaces move to the services module with the builder, keeping the dependency direction one-way (the dialog imports them; the services module never imports components). `buildCreateContainerInput` in `containersApi.ts` is the reference (spec 313 dialog); `buildMoveInput` (quadlets) and `buildPopulateForm` (volumes) settled the pattern. This generalizes the upload payload-builder rule above from multipart endpoints to complex form payloads. Settled 2026-10-19 (architecture-review candidate C3).
 - Cross-realm caveat when asserting on parsed multipart parts outside this limitation: MSW parses bodies with its own `File`/`Blob` implementations, so `instanceof File` fails — check for `"name" in part` instead.
 - AbortSignal cross-realm caveat: under jsdom, `AbortController`/`AbortSignal` globals are jsdom's, and Node >= 24 (undici 7) rejects them in `fetch` (`instanceof` brand check), while DOM listeners (framer-motion) reject Node's — so neither global swap works. `src/test/setup.ts` installs a fetch relay after `server.listen` that passes a Node-realm signal to the fetch stack; don't create `fetch` calls with hand-built signals that bypass it, and don't swap the globals back.
+- **Error-state tests ride 4xx envelopes: `getApiError` collapses 5xx responses to the generic `INTERNAL_ERROR`** (the pass-through rule in `@shared/utils/api` keeps only sub-500 envelope codes) — a 500 handler with a specific code renders as the generic internal error, so assertions on error-code hints or specific copy must use a 4xx envelope (e.g. `errorResponse(403, "ACCESS_DENIED", …)`).
+- **Chakra's required `FormControl` marker changes the accessible name**: a required field labeled "Content" renders as "Content \*", so `getByLabelText("Content")` misses — query with a regex (`getByLabelText(/Content/)`).
 
 ## Host detail page
 

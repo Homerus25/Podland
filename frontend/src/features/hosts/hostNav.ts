@@ -69,10 +69,7 @@ export function hostNavScope(
 	pathname: string,
 	tabParam: string | null,
 ): HostNavScope | null {
-	const segments = pathname
-		.split("/")
-		.filter(Boolean)
-		.map(decodeSegment);
+	const segments = pathname.split("/").filter(Boolean).map(decodeSegment);
 	if (segments[0] !== "hosts" || segments[1] === undefined) {
 		return null;
 	}
