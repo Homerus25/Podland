@@ -122,60 +122,46 @@ func (h *ContainerHandler) Inspect(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Start handles starting a container. The service returns the
-// container's identity; the response DTO's state and timestamp are
-// stamped here, at mapping time.
+// Start handles starting a container. The lifecycle ritual and the
+// action's declaration live in the domain's lifecycle module
+// (lifecycle.go); the shared handler arm below maps the service's
+// identity result, stamping the action's post-action state and the
+// timestamp at mapping time.
 func (h *ContainerHandler) Start(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*ContainerStartResponse, error) {
-		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
-		if guard != nil {
-			return nil, guard
-		}
-
-		result, err := h.service.Start(ctx, userID, hostID, containerID)
-		if err != nil {
-			return nil, err
-		}
-		response := FromContainerStartResult(*result)
-		return &response, nil
-	})
+	h.handleLifecycle(w, r, actionStart, h.service.Start)
 }
 
-// Stop handles stopping a container. The service returns the
-// container's identity; the response DTO's state and timestamp are
-// stamped here, at mapping time.
+// Stop handles stopping a container, like Start above over the stop
+// action's declaration.
 func (h *ContainerHandler) Stop(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*ContainerStopResponse, error) {
-		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
-		if guard != nil {
-			return nil, guard
-		}
-
-		result, err := h.service.Stop(ctx, userID, hostID, containerID)
-		if err != nil {
-			return nil, err
-		}
-		response := FromContainerStopResult(*result)
-		return &response, nil
-	})
+	h.handleLifecycle(w, r, actionStop, h.service.Stop)
 }
 
-// Restart handles restarting a running container. The service returns
-// the container's identity; the response DTO's state and timestamp are
-// stamped here, at mapping time. The endpoint accepts no timeout or
+// Restart handles restarting a running container, like Start above over
+// the restart action's declaration. The endpoint accepts no timeout or
 // force parameters — podman's default timeout applies.
 func (h *ContainerHandler) Restart(w http.ResponseWriter, r *http.Request) {
-	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*ContainerRestartResponse, error) {
+	h.handleLifecycle(w, r, actionRestart, h.service.Restart)
+}
+
+// handleLifecycle is the one handler arm for the three lifecycle
+// actions: the URL-param guard, the service call, and the response
+// mapping ride the endpoint envelope, and the action's declaration
+// (lifecycle.go) supplies the post-action state the mapper stamps. The
+// service method crosses as a function so the exported Start/Stop/
+// Restart signatures stay the seam.
+func (h *ContainerHandler) handleLifecycle(w http.ResponseWriter, r *http.Request, action lifecycleAction, run func(ctx context.Context, userID, hostID, containerID string) (*ContainerLifecycleResult, error)) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) (*ContainerLifecycleResponse, error) {
 		containerID, guard := web.URLParam(r, "containerId", "MISSING_CONTAINER_ID")
 		if guard != nil {
 			return nil, guard
 		}
 
-		result, err := h.service.Restart(ctx, userID, hostID, containerID)
+		result, err := run(ctx, userID, hostID, containerID)
 		if err != nil {
 			return nil, err
 		}
-		response := FromContainerRestartResult(*result)
+		response := FromContainerLifecycleResult(*result, action.postState)
 		return &response, nil
 	})
 }

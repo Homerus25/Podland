@@ -18,6 +18,7 @@ import { useUsers } from "@features/users/hooks/useUsers";
 import type { UserSummary } from "@features/users/services/usersApi";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ResourceStates } from "@shared/components/ResourceStates";
+import { identityKey, rowScoped } from "@shared/queries/rowScopedMutation";
 import type { HostPermission } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { useMemo, useState } from "react";
@@ -108,9 +109,15 @@ export function ShareHostSection({
 								size="xs"
 								colorScheme="red"
 								variant="ghost"
+								// The revoke mutation is shared by every grant row, so
+								// the button's pending state is scoped to its own row
+								// through the shared projection; the mutation takes
+								// the user id as its variables, so the key extractor
+								// is the shared identity. The section-level error
+								// display below and the reset-before-mutate stay as
+								// they are.
 								isLoading={
-									revokeAccess.isPending &&
-									revokeAccess.variables === grant.userId
+									rowScoped(revokeAccess, grant.userId, identityKey).isPending
 								}
 								onClick={() => {
 									revokeAccess.reset();

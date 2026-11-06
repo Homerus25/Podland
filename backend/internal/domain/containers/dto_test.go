@@ -284,3 +284,43 @@ func TestToContainerStatsResult_EmptySnapshotIsLegal(t *testing.T) {
 	assert.Empty(t, got.Containers)
 	assert.Zero(t, got.Total)
 }
+
+// TestFromPodmanInspectContainer_ReportWithoutEmbeddedInspectData pins
+// the latent nil-panic's absence: a report without embedded inspect
+// data (podman's report embeds it as a pointer) maps to the empty
+// detail response instead of panicking on the promoted field access.
+func TestFromPodmanInspectContainer_ReportWithoutEmbeddedInspectData(t *testing.T) {
+	assert.Equal(t, ContainerGetResponse{}, FromPodmanInspectContainer(&entities.ContainerInspectReport{}))
+}
+
+// TestDetailReaders_DelegateToLifecycleReaders pins the detail DTO's
+// name/state/exited delegation to the lifecycle module's nil-safe
+// readers (lifecycle.go): a report without embedded inspect data
+// resolves through them instead of panicking — the name falls back to
+// the report's ID (empty here), the state resolves to created, and
+// exited stays false.
+func TestDetailReaders_DelegateToLifecycleReaders(t *testing.T) {
+	report := &entities.ContainerInspectReport{}
+
+	assert.Equal(t, "", getContainerName(report), "the name resolver must fall back, not panic")
+	assert.Equal(t, "created", getContainerState(report))
+	assert.False(t, isContainerExited(report))
+}
+
+// TestIsContainerExited_RunningReportWithNonzeroExitCodeIsNotExited pins
+// the precedence isContainerExited's delegation rides: the state
+// resolver answers running before it ever reads the exit code, so a
+// running report is not exited even when it carries a nonzero exit
+// code. Real podman reports never combine the two (podman resets the
+// exit code when a container starts), which is what makes the
+// delegation equivalent to the old exit-code-only check for real
+// reports; this pin documents the edge's precedence explicitly, so a
+// future resolver reorder that flips it fails here first.
+func TestIsContainerExited_RunningReportWithNonzeroExitCodeIsNotExited(t *testing.T) {
+	report := &entities.ContainerInspectReport{InspectContainerData: &define.InspectContainerData{
+		State: &define.InspectContainerState{Running: true, ExitCode: 137},
+	}}
+
+	assert.Equal(t, "running", getContainerState(report))
+	assert.False(t, isContainerExited(report), "a running report is not exited, whatever exit code it carries")
+}

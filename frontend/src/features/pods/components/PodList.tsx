@@ -18,6 +18,7 @@ import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 
 import { ResourceList } from "@shared/components/ResourceList";
 import { useOpenLogs } from "@shared/logs/logRoute";
+import { identityKey, rowScoped } from "@shared/queries/rowScopedMutation";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
@@ -50,8 +51,10 @@ function PrunePodsModal({
 
 // The list owns one mutation instance per lifecycle action — a plain row
 // function cannot own hooks — so a row's pending and error state are scoped
-// by the mutation's own variables: only the row whose id the in-flight (or
-// last-failed) call carried shows them, and the other rows stay usable.
+// by the mutation's own variables through the shared projection: only the
+// row whose id the in-flight (or last-failed) call carried shows them, and
+// the other rows stay usable. Every pod action takes the pod id as its
+// variables, so the key extractor is the shared identity.
 type PodActionMutations = {
 	start: ReturnType<typeof usePodAction>;
 	stop: ReturnType<typeof usePodAction>;
@@ -60,14 +63,6 @@ type PodActionMutations = {
 	kill: ReturnType<typeof usePodAction>;
 	restart: ReturnType<typeof usePodAction>;
 };
-
-function rowScoped(mutation: PodActionMutations["start"], podId: string) {
-	const mine = mutation.variables === podId;
-	return {
-		isPending: mutation.isPending && mine,
-		error: mine ? mutation.error : null,
-	};
-}
 
 // The row is a plain function returning a Fragment of <Tr>s, not a
 // component: the list's cell-cloning walk (mobile pinning and the selection
@@ -122,10 +117,10 @@ function renderPodRow({
 	// from the other action never masks the fresh one; a failed start or
 	// stop shows the row-level error like the containers surface does.
 	const sibling = isRunning ? actions.start : actions.stop;
-	const lifecycle = rowScoped(action.lifecycle, pod.id);
-	const pauseState = rowScoped(pauseAction, pod.id);
-	const killState = rowScoped(actions.kill, pod.id);
-	const restartState = rowScoped(actions.restart, pod.id);
+	const lifecycle = rowScoped(action.lifecycle, pod.id, identityKey);
+	const pauseState = rowScoped(pauseAction, pod.id, identityKey);
+	const killState = rowScoped(actions.kill, pod.id, identityKey);
+	const restartState = rowScoped(actions.restart, pod.id, identityKey);
 	const rowError = lifecycle.error;
 
 	return (

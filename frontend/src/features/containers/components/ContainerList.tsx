@@ -19,6 +19,7 @@ import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { useOpenLogs } from "@shared/logs/logRoute";
+import { identityKey, rowScoped } from "@shared/queries/rowScopedMutation";
 import { containerCreatePath, detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
@@ -50,7 +51,9 @@ function PruneContainersModal({
 
 // The lifecycle mutations the list owns, one instance per action, handed to
 // every row. A plain row function cannot own hooks, so the list keeps them
-// and each row scopes its own pending state off the mutation's variables.
+// and each row scopes its own pending state off the mutation's variables
+// through the shared projection; both actions take the container id as
+// their variables, so the key extractor is the shared identity.
 type ContainerLifecycleMutations = {
 	start: ReturnType<typeof useStartContainer>;
 	stop: ReturnType<typeof useStopContainer>;
@@ -107,21 +110,13 @@ function renderContainerRow({
 				label: "Start",
 				colorScheme: "green" as const,
 			};
-	const actionPending =
-		action.lifecycle.isPending && action.lifecycle.variables === container.id;
-	const restartPending =
-		lifecycle.restart.isPending && lifecycle.restart.variables === container.id;
+	const actionScoped = rowScoped(action.lifecycle, container.id, identityKey);
+	const restartScoped = rowScoped(lifecycle.restart, container.id, identityKey);
 	// A failed lifecycle action or restart shows the row-level error like
 	// Stop does. Each button resets its sibling mutation on click, so a
 	// stale error from the other action never masks the fresh one; the
 	// variables keep another row's failure out of this row.
-	const actionError =
-		action.lifecycle.variables === container.id ? action.lifecycle.error : null;
-	const restartError =
-		lifecycle.restart.variables === container.id
-			? lifecycle.restart.error
-			: null;
-	const rowError = actionError ?? restartError;
+	const rowError = actionScoped.error ?? restartScoped.error;
 
 	return (
 		<Fragment key={container.id}>
@@ -147,7 +142,7 @@ function renderContainerRow({
 									lifecycle.restart.reset();
 									action.lifecycle.mutate(container.id);
 								}}
-								isLoading={actionPending}
+								isLoading={actionScoped.isPending}
 								data-testid={action.testId}
 							>
 								{action.label}
@@ -163,7 +158,7 @@ function renderContainerRow({
 									action.lifecycle.reset();
 									lifecycle.restart.mutate(container.id);
 								}}
-								isLoading={restartPending}
+								isLoading={restartScoped.isPending}
 								data-testid="restart-container-button"
 							>
 								Restart

@@ -98,28 +98,52 @@ describe("ContainerList lifecycle", () => {
 		});
 	});
 
-	it("marks only the clicked row's restart as pending while the operation runs", async () => {
+	// The adapter-wiring smoke for the shared row-scoping projection: a
+	// row's pending state routes through it, so only the clicked row's
+	// buttons show pending while the operation runs. The projection's own
+	// contract is pinned once in shared/queries/rowScopedMutation.test.ts.
+	it("marks only the clicked row's lifecycle action as pending while the operation runs", async () => {
 		server.use(
 			containersHandler([
 				containerFixture({ id: "c-1", names: ["/runner"], state: "running" }),
 				containerFixture({ id: "c-2", names: ["/other"], state: "running" }),
+				containerFixture({ id: "c-3", names: ["/sleepy"], state: "exited" }),
+				containerFixture({ id: "c-4", names: ["/dozy"], state: "exited" }),
 			]),
 			lifecycleHandler("restart", "c-1", 100),
 			lifecycleHandler("restart", "c-2", 0),
+			lifecycleHandler("start", "c-3", 100),
+			lifecycleHandler("start", "c-4", 0),
 		);
 		const user = userEvent.setup();
 		renderContainerList();
 
-		const buttons = await screen.findAllByTestId("restart-container-button");
-		expect(buttons).toHaveLength(2);
-		await user.click(buttons[0]);
+		const restartButtons = await screen.findAllByTestId(
+			"restart-container-button",
+		);
+		await user.click(restartButtons[0]);
 
 		await waitFor(() => {
-			expect(buttons[0]).toBeDisabled();
-			expect(buttons[0]).toHaveAttribute("data-loading");
+			expect(restartButtons[0]).toBeDisabled();
+			expect(restartButtons[0]).toHaveAttribute("data-loading");
 		});
-		expect(buttons[1]).toBeEnabled();
-		expect(buttons[1]).not.toHaveAttribute("data-loading");
+		expect(restartButtons[1]).toBeEnabled();
+		expect(restartButtons[1]).not.toHaveAttribute("data-loading");
+
+		// A start click resets its sibling restart mutation (the stale-error
+		// ritual), so the restart must settle before the start scoping is
+		// pinned — the two actions cannot be in flight together on purpose.
+		await waitFor(() => expect(restartButtons[0]).toBeEnabled());
+
+		const startButtons = screen.getAllByTestId("start-container-button");
+		await user.click(startButtons[0]);
+
+		await waitFor(() => {
+			expect(startButtons[0]).toBeDisabled();
+			expect(startButtons[0]).toHaveAttribute("data-loading");
+		});
+		expect(startButtons[1]).toBeEnabled();
+		expect(startButtons[1]).not.toHaveAttribute("data-loading");
 	});
 
 	it("shows the row-level error envelope when the restart fails", async () => {
@@ -192,30 +216,6 @@ describe("ContainerList lifecycle", () => {
 			method: "POST",
 			pathname: "/api/hosts/m-1/containers/c-2/stop",
 		});
-	});
-
-	it("marks only the clicked row as pending while the operation runs", async () => {
-		server.use(
-			containersHandler([
-				containerFixture({ id: "c-1", names: ["/sleepy"], state: "exited" }),
-				containerFixture({ id: "c-2", names: ["/other"], state: "exited" }),
-			]),
-			lifecycleHandler("start", "c-1", 100),
-			lifecycleHandler("start", "c-2", 0),
-		);
-		const user = userEvent.setup();
-		renderContainerList();
-
-		const buttons = await screen.findAllByTestId("start-container-button");
-		expect(buttons).toHaveLength(2);
-		await user.click(buttons[0]);
-
-		await waitFor(() => {
-			expect(buttons[0]).toBeDisabled();
-			expect(buttons[0]).toHaveAttribute("data-loading");
-		});
-		expect(buttons[1]).toBeEnabled();
-		expect(buttons[1]).not.toHaveAttribute("data-loading");
 	});
 
 	it("invalidates the containers query on restart success so the list refetches", async () => {

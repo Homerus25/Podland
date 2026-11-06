@@ -3,7 +3,6 @@ package containers
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
@@ -120,118 +119,38 @@ func (s *ContainerService) Inspect(ctx context.Context, userID, hostID, containe
 	return report, err
 }
 
-// Start starts a container by ID on the specified host. The service
-// inspects the container first — one inspect serves existence, state,
-// and name — and answers the documented wrong-state terminal before
-// any start call: podman's already-running refusal produces no error
-// shape through the tunnel (verified live, issue #270), so the
-// precondition is state-based, mirroring the quadlets
-// checkPrecondition. The engine folds podman's report slice into one
-// error; a missing container answers ErrContainerNotFound, anything
-// else is wrapped, never answered as a running success; the handler
-// maps the result to the response DTO.
-func (s *ContainerService) Start(ctx context.Context, userID, hostID, containerID string) (*ContainerStartResult, error) {
-	var result *ContainerStartResult
-	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Start", func(e ContainerEngine) error {
-		report, err := inspectContainer(e, containerID)
-		if err != nil {
-			return err
-		}
-
-		if containerRunning(report) {
-			return appErrors.ErrContainerAlreadyRunning
-		}
-
-		if err := e.Start(containerID); err != nil {
-			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrContainerNotFound
-			}
-			return fmt.Errorf("failed to start container: %w", err)
-		}
-
-		result = &ContainerStartResult{
-			ID:   containerID,
-			Name: containerName(report, containerID),
-		}
-		return nil
-	})
-	return result, err
+// Start starts a container by ID on the specified host. The whole
+// pre-action ritual — inspect for existence, state, and name, the
+// already-running terminal before any start call (podman's refusal
+// produces no error shape through the tunnel, verified live, issue
+// #270, so the precondition is state-based), the engine call, podman's
+// not-found classification, and the identity result — lives once in
+// the domain's lifecycle module (lifecycle.go); this wrapper and its
+// siblings are one-line declarations of their differences as data.
+func (s *ContainerService) Start(ctx context.Context, userID, hostID, containerID string) (*ContainerLifecycleResult, error) {
+	return s.runLifecycleAction(ctx, userID, hostID, containerID, actionStart)
 }
 
-// Stop stops a container by ID on the specified host. The service
-// inspects the container first — one inspect serves existence, state,
-// and name — and answers the documented wrong-state terminal before
-// any stop call: podman's not-running refusal produces no error shape
-// through the tunnel (verified live, issue #270), so the precondition
-// is state-based, mirroring the quadlets checkPrecondition. The
+// Stop stops a container by ID on the specified host. The ritual is
+// the lifecycle module's (lifecycle.go): one inspect serves existence,
+// state, and name; the not-running terminal answers before any stop
+// call (podman's refusal produces no error shape through the tunnel,
+// verified live, issue #270, so the precondition is state-based); the
 // engine folds podman's report slice into one error; a missing
 // container answers ErrContainerNotFound, anything else is wrapped,
-// never answered as a stopped success; the handler maps the result to
-// the response DTO.
-func (s *ContainerService) Stop(ctx context.Context, userID, hostID, containerID string) (*ContainerStopResult, error) {
-	var result *ContainerStopResult
-	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Stop", func(e ContainerEngine) error {
-		report, err := inspectContainer(e, containerID)
-		if err != nil {
-			return err
-		}
-
-		if !containerRunning(report) {
-			return appErrors.ErrContainerNotRunning
-		}
-
-		if err := e.Stop(containerID); err != nil {
-			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrContainerNotFound
-			}
-			return fmt.Errorf("failed to stop container: %w", err)
-		}
-
-		result = &ContainerStopResult{
-			ID:   containerID,
-			Name: containerName(report, containerID),
-		}
-		return nil
-	})
-	return result, err
+// never answered as a stopped success.
+func (s *ContainerService) Stop(ctx context.Context, userID, hostID, containerID string) (*ContainerLifecycleResult, error) {
+	return s.runLifecycleAction(ctx, userID, hostID, containerID, actionStop)
 }
 
 // Restart restarts a running container by ID on the specified host.
-// Like Stop it inspects first — one inspect serves existence, state, and
-// name — and answers the documented wrong-state terminal before any
-// restart call: a stopped container is Start's caller, not this one, so
-// the precondition is state-based like Stop's. No timeout or force
-// parameters travel: podman's default timeout applies (the quadlets
-// restart's no-force precedent, issue 205). The engine folds podman's
-// report slice into one error; a missing container answers
-// ErrContainerNotFound, anything else is wrapped, never answered as a
-// restarted success; the handler maps the result to the response DTO.
-func (s *ContainerService) Restart(ctx context.Context, userID, hostID, containerID string) (*ContainerRestartResult, error) {
-	var result *ContainerRestartResult
-	err := s.engines.WithEngine(ctx, userID, hostID, "containers.Restart", func(e ContainerEngine) error {
-		report, err := inspectContainer(e, containerID)
-		if err != nil {
-			return err
-		}
-
-		if !containerRunning(report) {
-			return appErrors.ErrContainerNotRunning
-		}
-
-		if err := e.Restart(containerID); err != nil {
-			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrContainerNotFound
-			}
-			return fmt.Errorf("failed to restart container: %w", err)
-		}
-
-		result = &ContainerRestartResult{
-			ID:   containerID,
-			Name: containerName(report, containerID),
-		}
-		return nil
-	})
-	return result, err
+// Like Stop it requires a running container — a stopped container is
+// Start's caller, not this one — and no timeout or force parameters
+// travel: podman's default timeout applies (the quadlets restart's
+// no-force precedent, issue 205). The ritual itself is the lifecycle
+// module's (lifecycle.go).
+func (s *ContainerService) Restart(ctx context.Context, userID, hostID, containerID string) (*ContainerLifecycleResult, error) {
+	return s.runLifecycleAction(ctx, userID, hostID, containerID, actionRestart)
 }
 
 // inspectContainer resolves one container's inspect report through the
@@ -329,22 +248,6 @@ func (s *ContainerService) Update(ctx context.Context, userID, hostID, container
 		return nil
 	})
 	return report, err
-}
-
-// containerRunning reports the container's running state, nil-safe
-// through the embedded inspect data. A paused container counts as
-// running: podman's State.Running is true for it.
-func containerRunning(report *entities.ContainerInspectReport) bool {
-	return report != nil && report.InspectContainerData != nil && report.State != nil && report.State.Running
-}
-
-// containerName resolves the container's name from the inspect report,
-// trimming podman's leading slash and falling back to the container ID.
-func containerName(report *entities.ContainerInspectReport, containerID string) string {
-	if report != nil && report.InspectContainerData != nil && len(report.Name) > 0 {
-		return strings.TrimPrefix(report.Name, "/")
-	}
-	return containerID
 }
 
 // Delete removes a container by ID on the specified host. Without force,

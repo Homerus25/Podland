@@ -20,6 +20,7 @@ import type {
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { StateBadge } from "@shared/components/StateBadge";
+import { identityKey, rowScoped } from "@shared/queries/rowScopedMutation";
 import { getApiError } from "@shared/utils/api";
 import { Fragment, useState } from "react";
 
@@ -94,12 +95,18 @@ export function LifecycleOptionsModal({
 
 // The lifecycle mutations the list owns, one instance per action, handed to
 // every row. A plain row function cannot own hooks, so the list keeps them
-// and each row scopes its own pending state off the mutation's variables.
+// and each row scopes its own pending state off the mutation's variables
+// through the shared projection. Start takes the quadlet id as its
+// variables (the shared identity key); stop and restart take the
+// options object, so their key extractor reads the quadletId field.
 export type QuadletLifecycleMutations = {
 	start: ReturnType<typeof useStartQuadlet>;
 	stop: ReturnType<typeof useStopQuadlet>;
 	restart: ReturnType<typeof useRestartQuadlet>;
 };
+
+const quadletOptionsKey = (variables: { quadletId: string }) =>
+	variables.quadletId;
 
 // The row is a plain function returning a Fragment of <Tr>s, not a
 // component: the list's cell-cloning walk (mobile pinning and the selection
@@ -137,19 +144,20 @@ export function renderQuadletRow({
 	onLifecycle: (quadlet: QuadletSummary, action: "stop" | "restart") => void;
 	onOpen: (quadlet: QuadletSummary) => void;
 }) {
-	const startPending =
-		lifecycle.start.isPending && lifecycle.start.variables === quadlet.id;
-	const stopPending =
-		lifecycle.stop.isPending &&
-		lifecycle.stop.variables?.quadletId === quadlet.id;
-	const restartPending =
-		lifecycle.restart.isPending &&
-		lifecycle.restart.variables?.quadletId === quadlet.id;
+	const startScoped = rowScoped(lifecycle.start, quadlet.id, identityKey);
+	const stopScoped = rowScoped(lifecycle.stop, quadlet.id, quadletOptionsKey);
+	const restartScoped = rowScoped(
+		lifecycle.restart,
+		quadlet.id,
+		quadletOptionsKey,
+	);
+	const startPending = startScoped.isPending;
+	const stopPending = stopScoped.isPending;
+	const restartPending = restartScoped.isPending;
 	const lifecyclePending = startPending || stopPending || restartPending;
 	// Only a failed start shows under the row; stop and restart report inside
 	// their still-open options modal.
-	const rowError =
-		lifecycle.start.variables === quadlet.id ? lifecycle.start.error : null;
+	const rowError = startScoped.error;
 
 	const isRunning = quadlet.state === "running";
 	return (

@@ -381,7 +381,13 @@ type ContainerListResult struct {
 // FromPodmanInspectContainer converts a podman ContainerInspectReport entity to ContainerGetResponse
 // This is a simplified mapping function that only includes basic container information
 func FromPodmanInspectContainer(containerReport *entities.ContainerInspectReport) ContainerGetResponse {
-	if containerReport == nil {
+	// A report without embedded inspect data (podman's report embeds it
+	// as a pointer) maps to the empty response: every promoted field
+	// access below would panic on it. The name/state/exited readers
+	// delegate to the lifecycle module's nil-safe readers (lifecycle.go)
+	// and are safe on their own; this guard covers the rest of the
+	// mapping's direct field access.
+	if !hasInspectData(containerReport) {
 		return ContainerGetResponse{}
 	}
 
@@ -742,25 +748,22 @@ func parseExposedPortKey(key string) ([]int, string, bool) {
 	return []int{port}, protocol, true
 }
 
-// Helper function to get container ID from report
+// Helper function to get container ID from report. Nil-safe through the
+// lifecycle module's hasInspectData guard (lifecycle.go), so a report
+// without embedded inspect data answers "" instead of panicking on the
+// promoted field access.
 func getContainerID(containerReport *entities.ContainerInspectReport) string {
-	if containerReport != nil {
-		// Access ID safely - it might be from the embedded struct
+	if hasInspectData(containerReport) {
 		return containerReport.ID
 	}
 	return ""
 }
 
-// Helper function to get container name from report
+// Helper function to get container name from report. Delegates to the
+// lifecycle module's nil-safe name resolver (lifecycle.go); the detail
+// DTO's fallback is the report's ID.
 func getContainerName(containerReport *entities.ContainerInspectReport) string {
-	if containerReport != nil && len(containerReport.Name) > 0 {
-		// Remove leading "/" if present
-		return strings.TrimPrefix(containerReport.Name, "/")
-	}
-	if containerReport != nil {
-		return containerReport.ID
-	}
-	return ""
+	return containerName(containerReport, getContainerID(containerReport))
 }
 
 // Helper function to get container restart count from report
@@ -790,12 +793,17 @@ func getContainerImageID(containerReport *entities.ContainerInspectReport) strin
 	return ""
 }
 
-// Helper function to get container state from report
+// Helper function to get container state from report. The running
+// branch delegates to the lifecycle module's nil-safe running check
+// (lifecycle.go); the remaining branches guard the embedded inspect
+// data themselves, so a report without it answers "created" instead
+// of panicking on the promoted field access.
 func getContainerState(containerReport *entities.ContainerInspectReport) string {
-	if containerReport != nil && containerReport.State != nil {
-		if containerReport.State.Running {
-			return "running"
-		} else if containerReport.State.ExitCode != 0 {
+	if containerRunning(containerReport) {
+		return "running"
+	}
+	if hasInspectData(containerReport) && containerReport.State != nil {
+		if containerReport.State.ExitCode != 0 {
 			return "exited"
 		} else if containerReport.State.Paused {
 			return "paused"
@@ -828,107 +836,42 @@ func formatCreatedTime(containerReport *entities.ContainerInspectReport) string 
 	return ""
 }
 
-// ContainerStartResponse represents the response after starting a container
-type ContainerStartResponse struct {
+// ContainerLifecycleResponse represents the response after a lifecycle
+// action (start, stop, restart): the acted-on container's identity plus
+// the post-action state and the operation timestamp, both stamped at
+// mapping time. One shape serves all three actions — they differ only
+// in the state string (running for start/restart, stopped for stop).
+type ContainerLifecycleResponse struct {
 	// Container ID
 	ID string `json:"id"`
 	// Container name
 	Name string `json:"name"`
-	// Container state after start
+	// Container state after the action
 	State string `json:"state"`
 	// Operation timestamp
 	Timestamp string `json:"timestamp"`
 }
 
-// ContainerStopResponse represents the response after stopping a container
-type ContainerStopResponse struct {
-	// Container ID
-	ID string `json:"id"`
-	// Container name
-	Name string `json:"name"`
-	// Container state after stop
-	State string `json:"state"`
-	// Operation timestamp
-	Timestamp string `json:"timestamp"`
-}
-
-// ContainerRestartResponse represents the response after restarting a
-// container. It mirrors the start/stop response shape — the containers
-// domain's own precedent, not the pods action shape.
-type ContainerRestartResponse struct {
-	// Container ID
-	ID string `json:"id"`
-	// Container name
-	Name string `json:"name"`
-	// Container state after restart
-	State string `json:"state"`
-	// Operation timestamp
-	Timestamp string `json:"timestamp"`
-}
-
-// ContainerStartResult is the service-layer outcome of a start: the
-// container's identity only. The response DTO's state and timestamp are
-// stamped by the handler's mapping, not by the service.
-type ContainerStartResult struct {
+// ContainerLifecycleResult is the service-layer outcome of a lifecycle
+// action: the container's identity only. The response DTO's state and
+// timestamp are stamped by the handler's mapping, not by the service.
+type ContainerLifecycleResult struct {
 	// Container ID
 	ID string
 	// Container name (inspect-resolved, leading slash trimmed)
 	Name string
 }
 
-// ContainerStopResult is the service-layer outcome of a stop: the
-// container's identity only. The response DTO's state and timestamp are
-// stamped by the handler's mapping, not by the service.
-type ContainerStopResult struct {
-	// Container ID
-	ID string
-	// Container name (inspect-resolved, leading slash trimmed)
-	Name string
-}
-
-// ContainerRestartResult is the service-layer outcome of a restart: the
-// container's identity only, like the stop result. The response DTO's
-// state and timestamp are stamped by the handler's mapping, not by the
-// service.
-type ContainerRestartResult struct {
-	// Container ID
-	ID string
-	// Container name (inspect-resolved, leading slash trimmed)
-	Name string
-}
-
-// FromContainerStartResult maps the service's start result to the
-// response DTO, stamping the post-start state and the operation
-// timestamp at mapping time.
-func FromContainerStartResult(result ContainerStartResult) ContainerStartResponse {
-	return ContainerStartResponse{
+// FromContainerLifecycleResult maps the service's lifecycle result to
+// the response DTO, stamping the action's post-action state and the
+// operation timestamp at mapping time. The state comes from the
+// action's declaration (lifecycle.go), not the result — the service
+// answers identity only.
+func FromContainerLifecycleResult(result ContainerLifecycleResult, state string) ContainerLifecycleResponse {
+	return ContainerLifecycleResponse{
 		ID:        result.ID,
 		Name:      result.Name,
-		State:     "running",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-}
-
-// FromContainerStopResult maps the service's stop result to the
-// response DTO, stamping the post-stop state and the operation
-// timestamp at mapping time.
-func FromContainerStopResult(result ContainerStopResult) ContainerStopResponse {
-	return ContainerStopResponse{
-		ID:        result.ID,
-		Name:      result.Name,
-		State:     "stopped",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-}
-
-// FromContainerRestartResult maps the service's restart result to the
-// response DTO, stamping the post-restart state and the operation
-// timestamp at mapping time.
-func FromContainerRestartResult(result ContainerRestartResult) ContainerRestartResponse {
-	return ContainerRestartResponse{
-		ID:        result.ID,
-		Name:      result.Name,
-		State:     "running",
+		State:     state,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 }
@@ -1051,10 +994,12 @@ func ToContainerStatsResult(stats []libpoddefine.ContainerStats) ContainerStatsR
 	return result
 }
 
-// Helper function to check if container is exited
+// Helper function to check if container is exited. Delegates to the
+// state resolver, whose running branch rides the lifecycle module's
+// nil-safe running check: a container is exited exactly when its
+// resolved state is "exited" — a running container is never exited
+// (podman resets the exit code when a container starts, so a nonzero
+// exit code and Running never co-occur in a real report).
 func isContainerExited(containerReport *entities.ContainerInspectReport) bool {
-	if containerReport != nil && containerReport.State != nil {
-		return containerReport.State.ExitCode != 0
-	}
-	return false
+	return getContainerState(containerReport) == "exited"
 }

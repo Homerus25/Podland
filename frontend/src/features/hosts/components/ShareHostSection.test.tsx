@@ -275,6 +275,30 @@ describe("ShareHostSection", () => {
 		await waitFor(() => expect(grantsRequests).toBeGreaterThan(requestsBefore));
 	});
 
+	// The adapter-wiring smoke for the shared row-scoping projection: the
+	// revoke mutation is shared by every grant row, and only the clicked
+	// row's button shows pending while the revoke runs. The projection's
+	// own contract is pinned once in shared/queries/rowScopedMutation.test.ts.
+	it("marks only the clicked row's revoke as pending while the revoke runs", async () => {
+		const user = await renderWithGrants();
+		await screen.findByTestId("grant-row-u-bob");
+		server.use(
+			http.delete("*/api/hosts/m-1/access/:userId", async () => {
+				await new Promise((resolve) => setTimeout(resolve, 100));
+				return new HttpResponse(null, { status: 204 });
+			}),
+		);
+
+		await user.click(screen.getByTestId("revoke-access-u-bob"));
+
+		const bobButton = screen.getByTestId("revoke-access-u-bob");
+		expect(bobButton).toBeDisabled();
+		expect(bobButton).toHaveAttribute("data-loading");
+		const ownerButton = screen.getByTestId("revoke-access-u-owner");
+		expect(ownerButton).toBeEnabled();
+		expect(ownerButton).not.toHaveAttribute("data-loading");
+	});
+
 	it("renders the error envelope when a revoke fails", async () => {
 		const user = await renderWithGrants();
 		await screen.findByTestId("grant-row-u-bob");

@@ -215,6 +215,39 @@ describe("QuadletList lifecycle", () => {
 		await waitFor(() => expect(lifecycleRequests).toHaveLength(1));
 	});
 
+	// The adapter-wiring smoke for the shared row-scoping projection: a
+	// row's pending state routes through it, so only the clicked row's
+	// button shows pending while the operation runs — the other row stays
+	// usable. The projection's own contract is pinned once in
+	// shared/queries/rowScopedMutation.test.ts.
+	it("marks only the clicked row's start as pending while the operation runs", async () => {
+		server.use(
+			quadletsHandler(() => [
+				quadletFixture({ id: "web", name: "web", state: "stopped" }),
+				quadletFixture({
+					id: "db",
+					name: "db",
+					unit: "db.service",
+					state: "stopped",
+				}),
+			]),
+			captureLifecycle("start", 500),
+		);
+		const user = userEvent.setup();
+		renderQuadletList();
+
+		const startButtons = await screen.findAllByTestId("start-quadlet-button");
+		expect(startButtons).toHaveLength(2);
+		await user.click(startButtons[0]);
+
+		await waitFor(() => {
+			expect(startButtons[0]).toBeDisabled();
+			expect(startButtons[0]).toHaveAttribute("data-loading");
+		});
+		expect(startButtons[1]).toBeEnabled();
+		expect(startButtons[1]).not.toHaveAttribute("data-loading");
+	});
+
 	it("refetches the list on success so the state badge shows the new state", async () => {
 		let stopped = false;
 		server.use(

@@ -446,7 +446,9 @@ returns, unmapped.
 
 ### POST /api/hosts/{id}/containers/{containerId}/start
 
-Start a stopped container.
+Start a stopped container. A container that is already running
+(including a paused one) answers `CONTAINER_ALREADY_RUNNING`; use the
+restart endpoint for a running container.
 
 **Authentication:** Required
 
@@ -454,8 +456,9 @@ Start a stopped container.
 ```json
 {
   "id": "string",
+  "name": "string",
   "state": "running",
-  "startedAt": "ISO8601 timestamp"
+  "timestamp": "ISO8601 timestamp"
 }
 ```
 
@@ -471,24 +474,19 @@ Start a stopped container.
 
 ### POST /api/hosts/{id}/containers/{containerId}/stop
 
-Stop a running container.
+Stop a running container. The endpoint accepts no request body — no
+timeout or force parameters travel (podman's default timeout applies).
+A container that is not running answers `CONTAINER_NOT_RUNNING`.
 
 **Authentication:** Required
-
-**Request:**
-```json
-{
-  "force": boolean (optional, default: false),
-  "timeout": integer (optional, seconds, default: 10)
-}
-```
 
 **Response (Success - 200):**
 ```json
 {
   "id": "string",
+  "name": "string",
   "state": "stopped",
-  "finishedAt": "ISO8601 timestamp"
+  "timestamp": "ISO8601 timestamp"
 }
 ```
 

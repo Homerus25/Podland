@@ -166,6 +166,49 @@ describe("PodList lifecycle actions", () => {
 		});
 	});
 
+	// The adapter-wiring smoke for the shared row-scoping projection: a
+	// row's pending state routes through it, so only the clicked row's
+	// button shows pending while the operation runs. The projection's own
+	// contract is pinned once in shared/queries/rowScopedMutation.test.ts.
+	it("marks only the clicked row's action as pending while the operation runs", async () => {
+		server.use(
+			http.get("*/api/hosts/m-1/pods", () =>
+				podsListResponse([
+					podFixture({ id: "p-1", state: "Running" }),
+					podFixture({ id: "p-2", name: "other-pod", state: "Running" }),
+				]),
+			),
+			http.post("*/api/hosts/m-1/pods/p-1/stop", async () => {
+				await new Promise((resolve) => setTimeout(resolve, 100));
+				return HttpResponse.json({
+					id: "p-1",
+					state: "stopped",
+					timestamp: "2026-10-24T12:00:00Z",
+				});
+			}),
+			http.post("*/api/hosts/m-1/pods/p-2/stop", () =>
+				HttpResponse.json({
+					id: "p-2",
+					state: "stopped",
+					timestamp: "2026-10-24T12:00:00Z",
+				}),
+			),
+		);
+		const user = userEvent.setup();
+		renderPodList();
+
+		const buttons = await screen.findAllByTestId("stop-pod-button");
+		expect(buttons).toHaveLength(2);
+		await user.click(buttons[0]);
+
+		await waitFor(() => {
+			expect(buttons[0]).toBeDisabled();
+			expect(buttons[0]).toHaveAttribute("data-loading");
+		});
+		expect(buttons[1]).toBeEnabled();
+		expect(buttons[1]).not.toHaveAttribute("data-loading");
+	});
+
 	it("shows the row-level error envelope when the action fails", async () => {
 		server.use(
 			http.get("*/api/hosts/m-1/pods", () =>
