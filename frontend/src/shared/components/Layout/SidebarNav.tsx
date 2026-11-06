@@ -1,6 +1,10 @@
-import { Text, VStack } from "@chakra-ui/react";
+import { Heading, Text, VStack } from "@chakra-ui/react";
 import { useIsAdmin } from "@features/auth/hooks/useAuth";
+import { HostNavSection } from "@features/hosts/components/HostNavSection";
 import { NavLink } from "react-router-dom";
+import { navItemStyle } from "./navItemStyle";
+
+const appName = import.meta.env.VITE_APP_NAME || "Podland";
 
 interface NavItem {
 	label: string;
@@ -10,7 +14,10 @@ interface NavItem {
 
 const navItems: NavItem[] = [
 	{ label: "Dashboard", to: "/", end: true },
-	{ label: "Hosts", to: "/hosts" },
+	// end: the Hosts link is active only on the list page — never on the
+	// host-scoped routes, where the host tab section carries the active
+	// state instead (issue #459).
+	{ label: "Hosts", to: "/hosts", end: true },
 ];
 
 // The users admin surface exists for admins only, so its nav entry
@@ -20,13 +27,18 @@ const adminNavItems: NavItem[] = [{ label: "Users", to: "/users" }];
 // The nav list both navigation surfaces render — the desktop sidebar
 // and the mobile drawer share items, admin gating, and active styling.
 // onNavigate is the drawer's close-on-navigate seam; the sidebar passes
-// nothing.
+// nothing. The app title lives here as plain text above the links, and
+// the current host's tabs render as a second section below the main
+// links on host-scoped routes (issue #459).
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 	const isAdmin = useIsAdmin();
 	const items = isAdmin ? [...navItems, ...adminNavItems] : navItems;
 
 	return (
 		<VStack as="nav" spacing={1} align="stretch">
+			<Heading size="md" mb={6} px={3}>
+				{appName}
+			</Heading>
 			{items.map((item) => (
 				<NavLink
 					key={item.to}
@@ -36,25 +48,13 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 					style={{ textDecoration: "none" }}
 				>
 					{({ isActive }) => (
-						<Text
-							as="span"
-							display="block"
-							px={3}
-							py={2}
-							borderRadius="md"
-							fontWeight={isActive ? "semibold" : "normal"}
-							bg={isActive ? "brand.600" : "transparent"}
-							color={isActive ? "white" : "inherit"}
-							_hover={{
-								bg: isActive ? "brand.700" : "gray.100",
-								_dark: { bg: isActive ? "brand.700" : "gray.700" },
-							}}
-						>
+						<Text as="span" display="block" {...navItemStyle(isActive)}>
 							{item.label}
 						</Text>
 					)}
 				</NavLink>
 			))}
+			<HostNavSection onNavigate={onNavigate} />
 		</VStack>
 	);
 }

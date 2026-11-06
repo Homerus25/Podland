@@ -1,9 +1,12 @@
 import type { UserRole } from "@shared/types/api";
 import { setBearerToken } from "@shared/utils/api";
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderApp } from "@/test/auth";
+import { hostFixture, hostVersionFixture } from "@/test/factories";
+import { server } from "@/test/server";
 import { mockViewport } from "@/test/viewport";
 
 function renderShell(at = "/", username = "alice", role: UserRole = "user") {
@@ -234,6 +237,105 @@ describe("mobile navigation drawer", () => {
 				.sort()
 				.join(","),
 		).toBe(keysBefore);
+	});
+});
+
+describe("shell titles (issue 459)", () => {
+	const originalMatchMedia = window.matchMedia;
+
+	afterEach(() => {
+		window.matchMedia = originalMatchMedia;
+	});
+
+	it("shows the app title in the sidebar, never in the header", async () => {
+		mockViewport(true);
+		renderShell("/");
+
+		expect(
+			await screen.findByRole("heading", { name: "Dashboard" }),
+		).toBeInTheDocument();
+		// The sidebar owns the app title; the header's left slot is the
+		// page title.
+		expect(
+			screen.getByRole("heading", { name: "Podland" }),
+		).toBeInTheDocument();
+		expect(screen.getByRole("banner")).not.toHaveTextContent("Podland");
+		expect(screen.getByRole("banner")).toHaveTextContent("Dashboard");
+	});
+
+	it("shows the app title in the mobile drawer above the links", async () => {
+		mockViewport(false);
+		renderShell("/");
+
+		expect(
+			await screen.findByRole("heading", { name: "Dashboard" }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("heading", { name: "Podland" }),
+		).not.toBeInTheDocument();
+
+		await userEvent.click(
+			screen.getByRole("button", { name: "Toggle navigation" }),
+		);
+
+		expect(
+			screen.getByRole("heading", { name: "Podland" }),
+		).toBeInTheDocument();
+		expect(screen.getByRole("banner")).not.toHaveTextContent("Podland");
+	});
+
+	it("shows the page title in the header on the app-level pages", async () => {
+		mockViewport(true);
+		renderShell("/users", "alice", "admin");
+
+		expect(
+			await screen.findByRole("heading", { name: "Users" }),
+		).toBeInTheDocument();
+		expect(screen.getByRole("banner")).toHaveTextContent("Users");
+	});
+
+	it("shows the host identity in the header and the host tabs in the sidebar on a host-scoped route", async () => {
+		mockViewport(true);
+		const host = hostFixture();
+		server.use(
+			http.get(`*/api/hosts/${host.id}`, () => HttpResponse.json(host)),
+			http.get(`*/api/hosts/${host.id}/containers`, () =>
+				HttpResponse.json({
+					containers: [],
+					total: 0,
+					timestamp: "2026-08-26T00:00:00Z",
+				}),
+			),
+			http.get(`*/api/hosts/${host.id}/version`, () =>
+				HttpResponse.json(
+					hostVersionFixture({
+						podmanVersion: null,
+						apiVersion: null,
+					}),
+				),
+			),
+		);
+		renderShell(`/hosts/${host.id}`);
+
+		const banner = await screen.findByRole("banner");
+		expect(await within(banner).findByText(host.name)).toBeInTheDocument();
+		expect(within(banner).getByTestId("host-endpoint")).toBeInTheDocument();
+		expect(within(banner).getByTestId("host-ssh-user")).toBeInTheDocument();
+		expect(within(banner).getByTestId("host-permission")).toHaveTextContent(
+			"admin",
+		);
+
+		// The Hosts main link is active only on the list page; on the
+		// host-scoped route the matching host tab carries the active
+		// state instead.
+		expect(screen.getByRole("link", { name: "Hosts" })).not.toHaveAttribute(
+			"aria-current",
+		);
+		expect(screen.getByRole("link", { name: "Containers" })).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+		expect(banner).not.toHaveTextContent("Podland");
 	});
 });
 

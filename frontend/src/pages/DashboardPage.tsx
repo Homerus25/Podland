@@ -1,10 +1,7 @@
-import { Heading, Text, VStack } from "@chakra-ui/react";
+import { Text } from "@chakra-ui/react";
 
+// The header owns the page title (issue #459); the page keeps its
+// subtitle.
 export function DashboardPage() {
-	return (
-		<VStack spacing={4} align="flex-start">
-			<Heading size="lg">Dashboard</Heading>
-			<Text color="gray.500">Manage Podman on remote hosts</Text>
-		</VStack>
-	);
+	return <Text color="gray.500">Manage Podman on remote hosts</Text>;
 }

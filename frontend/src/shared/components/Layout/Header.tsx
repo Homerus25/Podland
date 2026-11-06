@@ -2,9 +2,19 @@ import { HamburgerIcon } from "@chakra-ui/icons";
 import { Flex, Heading, HStack, IconButton, Spacer } from "@chakra-ui/react";
 import { AccountMenu } from "@features/auth/components/AccountMenu";
 import { useAuth } from "@features/auth/hooks/useAuth";
+import { HostHeaderIdentity } from "@features/hosts/components/HostHeaderIdentity";
+import { useHostNavScope } from "@features/hosts/hostNav";
 import { ColorModeToggle } from "@shared/components/ColorModeToggle";
+import { useLocation } from "react-router-dom";
 
-const appName = import.meta.env.VITE_APP_NAME || "Podland";
+// The header's left slot (issue #459): the page title on the app-level
+// pages, the current host's identity on every host-scoped route. The
+// app name never renders here — it lives at the top of the sidebar.
+const pageTitles: Record<string, string> = {
+	"/": "Dashboard",
+	"/hosts": "Hosts",
+	"/users": "Users",
+};
 
 // The Layout hands this down only below the lg breakpoint, where the
 // sidebar is hidden and the drawer replaces it; on desktop the prop is
@@ -16,6 +26,9 @@ interface MobileNavToggle {
 
 export function Header({ mobileNav }: { mobileNav?: MobileNavToggle }) {
 	const { user } = useAuth();
+	const { pathname } = useLocation();
+	const scope = useHostNavScope();
+	const pageTitle = pageTitles[pathname];
 
 	return (
 		// Above the nav drawer's overlay (Layout), so the hamburger
@@ -40,7 +53,11 @@ export function Header({ mobileNav }: { mobileNav?: MobileNavToggle }) {
 					mr={2}
 				/>
 			)}
-			<Heading size="md">{appName}</Heading>
+			{scope ? (
+				<HostHeaderIdentity hostId={scope.hostId} />
+			) : (
+				pageTitle && <Heading size="md">{pageTitle}</Heading>
+			)}
 			<Spacer />
 			<HStack spacing={4}>
 				<ColorModeToggle />

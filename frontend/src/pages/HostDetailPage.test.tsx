@@ -8,6 +8,7 @@ import { errorResponse } from "@/test/errors";
 import { containerFixture, hostFixture } from "@/test/factories";
 import { breakpointRules } from "@/test/responsiveCss";
 import { server } from "@/test/server";
+import { mockViewport } from "@/test/viewport";
 
 function hostHandler(host: Host) {
 	return http.get(`*/api/hosts/${host.id}`, () => HttpResponse.json(host));
@@ -49,7 +50,10 @@ const emptyNetworksHandler = http.get(
 	emptyNetworksResolver,
 );
 
+// The tab links live in the desktop sidebar, so these renders pin the
+// desktop breakpoint the shell switches on.
 function renderHostDetailPage(id = "m-1") {
+	mockViewport(true);
 	return renderApp(`/hosts/${id}`, {
 		resolveInitialState: async () => ({ username: "alice", role: "user" }),
 	});
@@ -212,35 +216,24 @@ describe("HostDetailPage", () => {
 		renderHostDetailPage();
 
 		await screen.findByText("prod-web-01");
-		// The Pods tab sits after Quadlets, before Secrets (spec 352).
-		const tabNames = screen.getAllByRole("tab").map((tab) => tab.textContent);
-		expect(tabNames[0]).toBe("Containers");
-		expect(tabNames[5]).toBe("Pods");
-		expect(tabNames[6]).toBe("Secrets");
 		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
-		expect(
-			screen.queryByTestId("tab-containers-placeholder"),
-		).not.toBeInTheDocument();
 
-		await userEvent.click(screen.getByRole("tab", { name: /pods/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Pods" }));
 		expect(await screen.findByTestId("pods-empty")).toBeInTheDocument();
 
-		await userEvent.click(screen.getByRole("tab", { name: /images/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Images" }));
 		expect(await screen.findByTestId("images-empty")).toBeInTheDocument();
 
-		await userEvent.click(screen.getByRole("tab", { name: /networks/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Networks" }));
 		expect(await screen.findByTestId("networks-empty")).toBeInTheDocument();
 
-		await userEvent.click(screen.getByRole("tab", { name: /quadlets/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Quadlets" }));
 		expect(await screen.findByTestId("quadlets-empty")).toBeInTheDocument();
-		expect(
-			screen.queryByTestId("tab-quadlets-placeholder"),
-		).not.toBeInTheDocument();
 
-		await userEvent.click(screen.getByRole("tab", { name: /secrets/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Secrets" }));
 		expect(await screen.findByTestId("secrets-empty")).toBeInTheDocument();
 
-		await userEvent.click(screen.getByRole("tab", { name: /settings/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Settings" }));
 		expect(screen.getByTestId("host-form-submit")).toBeInTheDocument();
 	});
 
@@ -294,7 +287,8 @@ describe("HostDetailPage", () => {
 		);
 		renderHostDetailPage();
 
-		await userEvent.click(await screen.findByRole("tab", { name: /images/i }));
+		await screen.findByText("prod-web-01");
+		await userEvent.click(screen.getByRole("link", { name: "Images" }));
 		expect(
 			await screen.findByText("docker.io/library/nginx:1.27"),
 		).toBeInTheDocument();
@@ -321,9 +315,8 @@ describe("HostDetailPage", () => {
 		);
 		renderHostDetailPage();
 
-		await userEvent.click(
-			await screen.findByRole("tab", { name: /networks/i }),
-		);
+		await screen.findByText("prod-web-01");
+		await userEvent.click(screen.getByRole("link", { name: "Networks" }));
 		expect(await screen.findByText("app-net")).toBeInTheDocument();
 		expect(screen.getByText("bridge")).toBeInTheDocument();
 		expect(screen.getByText("10.88.0.0/16")).toBeInTheDocument();
@@ -347,9 +340,8 @@ describe("HostDetailPage", () => {
 		);
 		renderHostDetailPage();
 
-		await userEvent.click(
-			await screen.findByRole("tab", { name: /quadlets/i }),
-		);
+		await screen.findByText("prod-web-01");
+		await userEvent.click(screen.getByRole("link", { name: "Quadlets" }));
 		expect(await screen.findByText("web")).toBeInTheDocument();
 		expect(screen.getByTestId("state-badge")).toHaveTextContent("running");
 	});
@@ -375,7 +367,8 @@ describe("HostDetailPage", () => {
 		);
 		renderHostDetailPage();
 
-		await userEvent.click(await screen.findByRole("tab", { name: /secrets/i }));
+		await screen.findByText("prod-web-01");
+		await userEvent.click(screen.getByRole("link", { name: "Secrets" }));
 		expect(await screen.findByText("db-password")).toBeInTheDocument();
 		expect(screen.getByText("file")).toBeInTheDocument();
 	});
@@ -416,7 +409,7 @@ describe("page-level permission gating on the host detail page", () => {
 		await screen.findByText(hostFixture().name);
 		expect(screen.getByTestId("host-permission")).toHaveTextContent("read");
 
-		await userEvent.click(screen.getByRole("tab", { name: /secrets/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Secrets" }));
 		await screen.findByTestId("secrets-permission-hint");
 		expect(
 			screen.queryByTestId("create-secret-button"),
@@ -447,7 +440,7 @@ describe("lazy tab mounting", () => {
 		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
 		expect(counts.volumes).toBe(0);
 
-		await userEvent.click(screen.getByRole("tab", { name: /volumes/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Volumes" }));
 		expect(await screen.findByTestId("volumes-empty")).toBeInTheDocument();
 		expect(counts.volumes).toBe(1);
 	});
@@ -482,13 +475,13 @@ describe("lazy tab mounting", () => {
 		expect(rows[0]).toHaveTextContent("alpha");
 
 		// Leaving the tab unmounts the panel: the list leaves the DOM.
-		await userEvent.click(screen.getByRole("tab", { name: /images/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Images" }));
 		expect(await screen.findByTestId("images-empty")).toBeInTheDocument();
 		expect(screen.queryByTestId("containers-table")).not.toBeInTheDocument();
 
 		// Re-entry remounts the panel with the sort state reset: no
 		// aria-sort, the server's natural order restored.
-		await userEvent.click(screen.getByRole("tab", { name: /containers/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Containers" }));
 		rows = await screen.findAllByTestId("container-row");
 		expect(rows[0]).toHaveTextContent("zeta");
 		expect(screen.getByTestId("sort-container-0")).not.toHaveAttribute(
@@ -504,7 +497,7 @@ describe("lazy tab mounting", () => {
 		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
 		expect(counts.access).toBe(0);
 
-		await userEvent.click(screen.getByRole("tab", { name: /settings/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Settings" }));
 		expect(await screen.findByTestId("host-form-submit")).toBeInTheDocument();
 		await waitFor(() => expect(counts.access).toBe(1));
 	});
@@ -518,7 +511,7 @@ describe("lazy tab mounting", () => {
 		expect(await screen.findByText("prod-web-01")).toBeInTheDocument();
 		expect(counts.access).toBe(0);
 
-		await userEvent.click(screen.getByRole("tab", { name: /settings/i }));
+		await userEvent.click(screen.getByRole("link", { name: "Settings" }));
 		expect(
 			await screen.findByTestId("settings-permission-hint"),
 		).toBeInTheDocument();
@@ -529,6 +522,7 @@ describe("lazy tab mounting", () => {
 
 describe("deep-linked tab via ?tab=", () => {
 	function renderHostDetailPageWithTab(tab?: string) {
+		mockViewport(true);
 		return renderApp(`/hosts/m-1${tab === undefined ? "" : `?tab=${tab}`}`, {
 			resolveInitialState: async () => ({ username: "alice", role: "user" }),
 		});
@@ -545,16 +539,12 @@ describe("deep-linked tab via ?tab=", () => {
 		["settings", "Settings", "host-form-submit"],
 	] as const)(
 		"selects the %s tab and renders its panel when opened with ?tab=%s",
-		async (key, tabName, panelTestId) => {
+		async (key, _tabName, panelTestId) => {
 			server.use(...hostTabHandlers());
 			server.use(http.get("*/api/users", () => HttpResponse.json([])));
 			renderHostDetailPageWithTab(key);
 
 			expect(await screen.findByTestId(panelTestId)).toBeInTheDocument();
-			expect(screen.getByRole("tab", { name: tabName })).toHaveAttribute(
-				"aria-selected",
-				"true",
-			);
 		},
 	);
 
@@ -580,10 +570,6 @@ describe("deep-linked tab via ?tab=", () => {
 		renderHostDetailPageWithTab("bogus");
 
 		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
-		expect(screen.getByRole("tab", { name: "Containers" })).toHaveAttribute(
-			"aria-selected",
-			"true",
-		);
 		expect(counts.containers).toBe(1);
 		expect(counts.images).toBe(0);
 	});
@@ -593,10 +579,6 @@ describe("deep-linked tab via ?tab=", () => {
 		renderHostDetailPageWithTab();
 
 		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
-		expect(screen.getByRole("tab", { name: "Containers" })).toHaveAttribute(
-			"aria-selected",
-			"true",
-		);
 	});
 });
 
@@ -606,21 +588,6 @@ describe("deep-linked tab via ?tab=", () => {
 // breakpointRules over cssRulesFor. Chakra's lg breakpoint (992px) is
 // the spec's "desktop unchanged" line.
 describe("small-viewport layout (spec 393)", () => {
-	it("scrolls the tab strip horizontally below the breakpoint and restores the desktop strip at lg", async () => {
-		server.use(hostHandler(hostFixture()), emptyContainersHandler);
-		renderHostDetailPage();
-		await screen.findByText("prod-web-01");
-
-		const { base, lg } = breakpointRules(screen.getByRole("tablist"));
-		// Base: the eight-tab strip scrolls sideways instead of
-		// overflowing the viewport.
-		expect(base).toContain("overflow-x:auto");
-		expect(base).toContain("overflow-y:hidden");
-		// lg and up: the strip renders as on desktop today.
-		expect(lg).toContain("overflow-x:visible");
-		expect(lg).toContain("overflow-y:visible");
-	});
-
 	it("wraps the host header rows at base and keeps them inline at lg", async () => {
 		server.use(hostHandler(hostFixture()), emptyContainersHandler);
 		renderHostDetailPage();

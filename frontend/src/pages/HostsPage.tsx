@@ -1,10 +1,12 @@
-import { Button, Heading, HStack, SimpleGrid, VStack } from "@chakra-ui/react";
+import { Button, HStack, SimpleGrid, VStack } from "@chakra-ui/react";
 import { HostCard } from "@features/hosts/components/HostCard";
 import { HostForm } from "@features/hosts/components/HostForm";
 import { useCreateHost, useHosts } from "@features/hosts/hooks/useHosts";
 import { ResourceStates } from "@shared/components/ResourceStates";
 import { useState } from "react";
 
+// The header owns the page title (issue #459); the page keeps its
+// action row.
 export function HostsPage() {
 	const { data: hosts, isPending, error } = useHosts();
 	const createHost = useCreateHost();
@@ -12,8 +14,7 @@ export function HostsPage() {
 
 	return (
 		<VStack spacing={4} align="stretch">
-			<HStack justify="space-between">
-				<Heading size="lg">Hosts</Heading>
+			<HStack justify="flex-end">
 				<Button
 					colorScheme="blue"
 					onClick={() => setIsAddOpen(true)}
