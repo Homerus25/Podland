@@ -159,6 +159,11 @@ describe("NetworkDetailPage remove", () => {
 		expect(
 			screen.queryByTestId("networks-permission-hint"),
 		).not.toBeInTheDocument();
+		// The Connect action self-gates on the overview DTO, so a 404 page
+		// renders no control that would open nothing.
+		expect(
+			screen.queryByTestId("connect-network-button"),
+		).not.toBeInTheDocument();
 	});
 
 	it("opens the confirm naming the network and sends nothing before confirming", async () => {

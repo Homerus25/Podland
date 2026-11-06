@@ -1,10 +1,10 @@
 import { Box, HStack, Spinner, Text, VStack } from "@chakra-ui/react";
-import { displayTags } from "@features/images/components/imageDisplayTags";
 import {
 	type ImageCopyProgress,
 	useImageCopyStream,
 } from "@features/images/hooks/useImageCopyStream";
 import { useImageCopyPreview } from "@features/images/hooks/useImages";
+import { displayTags } from "@features/images/services/imageDisplayTags";
 import type { ImageSummary } from "@features/images/services/imagesApi";
 import {
 	TransferDialog,

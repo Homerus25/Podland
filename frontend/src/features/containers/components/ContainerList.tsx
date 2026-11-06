@@ -1,4 +1,8 @@
 import { Button, HStack, Td, Tr } from "@chakra-ui/react";
+import {
+	ContainerActionButtons,
+	type ContainerLifecycleMutations,
+} from "@features/containers/components/ContainerActionButtons";
 import { ContainerStatsDialog } from "@features/containers/components/ContainerStatsDialog";
 import { containerDisplayName } from "@features/containers/components/containerDisplayName";
 import {
@@ -53,12 +57,9 @@ function PruneContainersModal({
 // every row. A plain row function cannot own hooks, so the list keeps them
 // and each row scopes its own pending state off the mutation's variables
 // through the shared projection; both actions take the container id as
-// their variables, so the key extractor is the shared identity.
-type ContainerLifecycleMutations = {
-	start: ReturnType<typeof useStartContainer>;
-	stop: ReturnType<typeof useStopContainer>;
-	restart: ReturnType<typeof useRestartContainer>;
-};
+// their variables, so the key extractor is the shared identity. The record
+// type is the shared action set's, so the row and the detail page hand over
+// the same shape.
 
 // The row is a plain function returning a Fragment of <Tr>s, not a
 // component: the list's cell-cloning walk (mobile pinning and the selection
@@ -68,11 +69,11 @@ type ContainerLifecycleMutations = {
 // Fragment, which is the element the list's map places.
 //
 // Start/Stop and restart are scoped to the affected container by the
-// mutation's own variables, so other rows stay usable. Restart is additive:
-// it renders beside the Start/Stop toggle, only for running rows (issue
-// #384). The row itself is clickable: it navigates to the container's detail
-// page (spec 301), and every action button stops propagation so a button
-// click never also fires the row action.
+// mutation's own variables, so other rows stay usable. The buttons
+// themselves are the shared action set's (spec #477), which the container
+// detail page renders too. The row itself is clickable: it navigates to the
+// container's detail page (spec 301), and every action button stops
+// propagation so a button click never also fires the row action.
 //
 // The row carries no destructive button (spec 461, ticket #470): removal
 // lives on the container's detail page (single item) and in the toolbar's
@@ -95,28 +96,17 @@ function renderContainerRow({
 	onShowLogs: (container: ContainerSummary) => void;
 	onConnect: (container: ContainerSummary) => void;
 }) {
-	const name = containerDisplayName(container);
 	const isRunning = container.state === "running";
-	const action = isRunning
-		? {
-				lifecycle: lifecycle.stop,
-				testId: "stop-container-button",
-				label: "Stop",
-				colorScheme: undefined,
-			}
-		: {
-				lifecycle: lifecycle.start,
-				testId: "start-container-button",
-				label: "Start",
-				colorScheme: "green" as const,
-			};
-	const actionScoped = rowScoped(action.lifecycle, container.id, identityKey);
-	const restartScoped = rowScoped(lifecycle.restart, container.id, identityKey);
 	// A failed lifecycle action or restart shows the row-level error like
 	// Stop does. Each button resets its sibling mutation on click, so a
 	// stale error from the other action never masks the fresh one; the
 	// variables keep another row's failure out of this row.
-	const rowError = actionScoped.error ?? restartScoped.error;
+	const rowError =
+		rowScoped(
+			isRunning ? lifecycle.stop : lifecycle.start,
+			container.id,
+			identityKey,
+		).error ?? rowScoped(lifecycle.restart, container.id, identityKey).error;
 
 	return (
 		<Fragment key={container.id}>
@@ -131,64 +121,15 @@ function renderContainerRow({
 					<StateBadge state={container.state} />
 				</Td>
 				<Td>
-					<HStack spacing={2}>
-						{canManage ? (
-							<Button
-								size="xs"
-								variant="outline"
-								colorScheme={action.colorScheme}
-								onClick={(event) => {
-									event.stopPropagation();
-									lifecycle.restart.reset();
-									action.lifecycle.mutate(container.id);
-								}}
-								isLoading={actionScoped.isPending}
-								data-testid={action.testId}
-							>
-								{action.label}
-							</Button>
-						) : null}
-						{canManage && isRunning ? (
-							<Button
-								size="xs"
-								variant="outline"
-								aria-label={`Restart ${name}`}
-								onClick={(event) => {
-									event.stopPropagation();
-									action.lifecycle.reset();
-									lifecycle.restart.mutate(container.id);
-								}}
-								isLoading={restartScoped.isPending}
-								data-testid="restart-container-button"
-							>
-								Restart
-							</Button>
-						) : null}
-						{canManageNetworks ? (
-							<Button
-								size="xs"
-								variant="outline"
-								aria-label={`Connect to network ${name}`}
-								onClick={(event) => {
-									event.stopPropagation();
-									onConnect(container);
-								}}
-							>
-								Connect to network
-							</Button>
-						) : null}
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Logs ${name}`}
-							onClick={(event) => {
-								event.stopPropagation();
-								onShowLogs(container);
-							}}
-						>
-							Logs
-						</Button>
-					</HStack>
+					<ContainerActionButtons
+						container={container}
+						name={containerDisplayName(container)}
+						lifecycle={lifecycle}
+						canManage={canManage}
+						canManageNetworks={canManageNetworks}
+						onConnect={() => onConnect(container)}
+						onShowLogs={() => onShowLogs(container)}
+					/>
 				</Td>
 			</Tr>
 			{rowError ? (

@@ -11,12 +11,19 @@ import {
 	Tr,
 	VStack,
 } from "@chakra-ui/react";
+import {
+	ContainerActionButtons,
+	type ContainerLifecycleMutations,
+} from "@features/containers/components/ContainerActionButtons";
 import { ContainerStatsDialog } from "@features/containers/components/ContainerStatsDialog";
 import {
 	useContainer,
 	useContainerInspect,
 	useDeleteContainer,
 	useRenameContainer,
+	useRestartContainer,
+	useStartContainer,
+	useStopContainer,
 	useUpdateContainer,
 } from "@features/containers/hooks/useContainers";
 import type { ContainerDetail } from "@features/containers/services/containersApi";
@@ -24,17 +31,22 @@ import {
 	type CapabilityGate,
 	useCapabilityGate,
 } from "@features/hosts/hooks/useCapabilityGate";
+import { ConnectDialog } from "@features/networks/components/ConnectDialog";
 import { DetailPage } from "@shared/components/DetailPage";
 import {
 	DetailList,
 	DetailRow,
+	headerActionGroup,
 	isNotFound,
 	removalAction,
 } from "@shared/components/detailKit";
+import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ForceConfirmDialog } from "@shared/components/MutationDialog";
 import { PermissionHint } from "@shared/components/PermissionHint";
 import { StateBadge } from "@shared/components/StateBadge";
+import { useOpenLogs } from "@shared/logs/logRoute";
 import { detailPath, hostTabPath } from "@shared/routes/detailRoute";
+import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import {
@@ -328,9 +340,14 @@ function ContainerOverview({
 // shared freshness factory's one-shot flavor, so every visit refetches;
 // the raw inspect report fetches lazily on the
 // first "Show inspect JSON" click, never on page mount. The capability
-// gate (the hosts feature's hook) answers the per-caller facts both
-// gated affordances render from; the overview itself is readable at read
-// level.
+// gates (the hosts feature's hook) answer the per-caller facts every gated
+// affordance renders from; the overview itself is readable at read level.
+//
+// The header carries the row's action set (spec 477, ticket #478) beside
+// Remove: Start/Stop by state, Restart while running, Connect to network,
+// and Logs — the same dialogs, mutations and gates the list rows use, so
+// the two surfaces cannot drift. The buttons are the shared action set's
+// (ContainerActionButtons), which the row renders too.
 export function ContainerDetailPage() {
 	const { hostId, containerId } = useParams<{
 		hostId: string;
@@ -342,16 +359,37 @@ export function ContainerDetailPage() {
 	const [statsOpen, setStatsOpen] = useState(false);
 	const [editingConfig, setEditingConfig] = useState(false);
 	const [removing, setRemoving] = useState(false);
+	const [connecting, setConnecting] = useState(false);
 	const inspectQuery = useContainerInspect(hostId!, containerId!, {
 		enabled: revealed,
 	});
 	const gate = useCapabilityGate(hostId!, "manage-containers");
+	// Connect is gated on a different capability from the lifecycle actions
+	// beside it (issue 256), so the page carries a second gate.
+	const connectGate = useCapabilityGate(hostId!, "manage-networks");
 	const rename = useRenameContainer(hostId!, containerId!);
 	const update = useUpdateContainer(hostId!, containerId!);
 	const removeContainer = useDeleteContainer(hostId!);
+	// The row's lifecycle actions, page-sized (spec 477, ticket #478): the
+	// same mutations the list rides, so their containers-key invalidation
+	// refetches this page's overview — the detail key extends the list key —
+	// and the state badge follows the host's report without a reload.
+	const lifecycle: ContainerLifecycleMutations = {
+		start: useStartContainer(hostId!),
+		stop: useStopContainer(hostId!),
+		restart: useRestartContainer(hostId!),
+	};
 	const navigate = useNavigate();
+	// The row's logs action: the kind is bound once here, the target and its
+	// display name travel per click.
+	const openLogs = useOpenLogs(hostId!, "container");
 	const container = query.data;
 	const notFound = isNotFound(query.error);
+	// The row's error slot, page-sized: whichever lifecycle action failed
+	// reports here, and each button resets its siblings on click so a stale
+	// failure never masks the fresh one.
+	const lifecycleError =
+		lifecycle.start.error ?? lifecycle.stop.error ?? lifecycle.restart.error;
 
 	// The header's Remove action (spec 461, ticket #467) rides the detail
 	// kit's gate cascade: the button on allowed, the shared write-permission
@@ -367,6 +405,77 @@ export function ContainerDetailPage() {
 		onClick: () => setRemoving(true),
 	});
 
+	// The header's action row (spec #477), composed through the detail kit's
+	// one owner: the row's buttons beside Remove. The button set self-gates
+	// on the two capabilities (Start/Stop and Restart on manage-containers,
+	// Connect on manage-networks) and Logs reads at read level, so the group
+	// itself is ungated — an ungated action renders for every caller, and
+	// hiding Logs behind a pending write gate was the defect this fixes.
+	// Connect keeps its own hint because it answers a different capability
+	// from Remove's, and its copy names networks; the lifecycle actions pass
+	// none, because Remove's write hint already says the same sentence for
+	// the same capability (the one-hint rule). Every control self-gates on
+	// the container DTO, since the header renders while the overview query
+	// is still in flight.
+	const headerActions = headerActionGroup({
+		actions: [
+			{
+				control: container ? (
+					<ContainerActionButtons
+						container={container}
+						name={container.name}
+						lifecycle={lifecycle}
+						canManage={gate === "allowed"}
+						canManageNetworks={connectGate === "allowed"}
+						size="sm"
+						onConnect={() => setConnecting(true)}
+						onShowLogs={() =>
+							openLogs({ targetId: container.id, name: container.name })
+						}
+					/>
+				) : null,
+			},
+			{
+				// The connect hint alone: the button itself is the shared
+				// action set's (it renders for the row too), so this entry
+				// carries no control and exists only to answer a denied
+				// manage-networks caller — the one capability Remove's
+				// write hint does not cover. The hint self-gates on the
+				// container DTO like every control does: a not-found
+				// overview renders no hint for an action that could never
+				// fire, and a pending one renders neither.
+				gate: connectGate,
+				hint: container ? (
+					<PermissionHint
+						scope="container-connect"
+						requirement="write"
+						resource="network"
+						fontSize="sm"
+					/>
+				) : undefined,
+				control: null,
+			},
+			{
+				// The edit-configuration action (spec 412, ticket #414) rides
+				// the same capability gate as the rename control: rendered on
+				// allowed, nothing otherwise — hidden below write level and
+				// while the gate is pending, so a read-only caller is never
+				// baited into a 403.
+				gate,
+				control: container ? (
+					<Button
+						size="sm"
+						onClick={() => setEditingConfig(true)}
+						data-testid="edit-configuration-button"
+					>
+						Edit configuration
+					</Button>
+				) : null,
+			},
+		],
+		remove: removeAction,
+	});
+
 	return (
 		<>
 			<DetailPage
@@ -378,34 +487,23 @@ export function ContainerDetailPage() {
 				inspectQuery={inspectQuery}
 				revealed={revealed}
 				onToggleInspect={() => setRevealed((value) => !value)}
-				headerActions={
-					// The edit-configuration action (spec 412, ticket #414),
-					// riding the same capability gate as the rename control:
-					// rendered on allowed, nothing otherwise — hidden below
-					// write level and while the gate is pending, so a
-					// read-only caller is never baited into a 403.
-					gate === "allowed" || removeAction ? (
-						<>
-							{gate === "allowed" ? (
-								<Button
-									size="sm"
-									onClick={() => setEditingConfig(true)}
-									data-testid="edit-configuration-button"
-								>
-									Edit configuration
-								</Button>
-							) : null}
-							{removeAction}
-						</>
-					) : undefined
-				}
+				headerActions={headerActions}
 			>
 				{container ? (
 					<>
+						{/* A failed lifecycle action reports in place, the way the
+						row's spanning error cell does — the page stays mounted
+						and the next click retries. */}
+						{lifecycleError ? (
+							<ErrorDisplay
+								error={getApiError(lifecycleError)}
+								data-testid="container-lifecycle-error"
+							/>
+						) : null}
 						{/* Stats is a read, so the button renders for every caller.
-						It sits feature-locally at the top of the content area —
-						the shared layout's header actions are deliberately not
-						extended (ticket #414 owns that slot). */}
+						It stays feature-local at the top of the content area:
+						the header slot carries the row's actions (spec 477),
+						and Stats is a page-level read, not a row action. */}
 						<HStack justify="flex-end" mb={2}>
 							<Button
 								size="sm"
@@ -444,6 +542,13 @@ export function ContainerDetailPage() {
 					container={container}
 					mutation={update}
 					onClose={() => setEditingConfig(false)}
+				/>
+			) : null}
+			{connecting && container ? (
+				<ConnectDialog
+					hostId={hostId!}
+					container={container}
+					onClose={() => setConnecting(false)}
 				/>
 			) : null}
 			{removing && container ? (

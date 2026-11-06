@@ -1,5 +1,6 @@
-import { Link, Table, Tbody, Text } from "@chakra-ui/react";
+import { Button, Link, Table, Tbody, Text } from "@chakra-ui/react";
 import { useCapabilityGate } from "@features/hosts/hooks/useCapabilityGate";
+import { ConnectDialog } from "@features/networks/components/ConnectDialog";
 import { NETWORK_IN_USE_REFUSAL } from "@features/networks/components/networkRemoval";
 import {
 	useDeleteNetwork,
@@ -11,6 +12,7 @@ import { DetailPage } from "@shared/components/DetailPage";
 import {
 	DetailList,
 	DetailRow,
+	headerActionGroup,
 	isNotFound,
 	removalAction,
 } from "@shared/components/detailKit";
@@ -116,7 +118,10 @@ function RemoveNetworkDialog({
 // factory's one-shot flavor, so every page visit refetches) and the lazy
 // inspect query (enabled on first reveal), and hands the layout its
 // structural slices; the layout owns the shell. The back button returns
-// to the Networks tab.
+// to the Networks tab. Its header carries the network's row action —
+// Connect container (spec 477, ticket #480) — beside Remove, both on the
+// manage-networks gate; the connect dialog is the list's own, entered with
+// this network fixed, so the two surfaces share one ritual.
 export function NetworkDetailPage() {
 	const { hostId, networkName } = useParams<{
 		hostId: string;
@@ -127,6 +132,9 @@ export function NetworkDetailPage() {
 	// The remove confirm (spec 461, ticket #465): rendered conditionally, so
 	// mount is open and unmount is close.
 	const [removeOpen, setRemoveOpen] = useState(false);
+	// The connect dialog (spec 477, ticket #480): the row's one action,
+	// entered with this network fixed. Same conditional-mount idiom.
+	const [connectOpen, setConnectOpen] = useState(false);
 	const { data: network, isPending, error } = useNetwork(hostId!, networkName!);
 	const inspectQuery = useNetworkInspect(hostId!, networkName!, {
 		enabled: revealed,
@@ -147,6 +155,32 @@ export function NetworkDetailPage() {
 		onClick: () => setRemoveOpen(true),
 	});
 
+	// The header's action row (spec #477), composed through the detail kit's
+	// one owner: Connect container beside Remove, both on the manage-networks
+	// gate. The action passes no hint — Remove's cascade already renders the
+	// page's write hint for the same capability, so a denied caller reads one
+	// sentence, not two (the one-hint rule). The control self-gates on the
+	// network DTO: the header renders while the overview query is still in
+	// flight, and a not-found page has nothing to connect to.
+	const headerActions = headerActionGroup({
+		actions: [
+			{
+				gate,
+				control: network ? (
+					<Button
+						size="sm"
+						aria-label={`Connect container ${networkName!}`}
+						onClick={() => setConnectOpen(true)}
+						data-testid="connect-network-button"
+					>
+						Connect container
+					</Button>
+				) : null,
+			},
+		],
+		remove: removeAction,
+	});
+
 	return (
 		<>
 			<DetailPage
@@ -158,12 +192,24 @@ export function NetworkDetailPage() {
 				inspectQuery={inspectQuery}
 				revealed={revealed}
 				onToggleInspect={() => setRevealed((value) => !value)}
-				headerActions={removeAction}
+				headerActions={headerActions}
 			>
 				{network ? (
 					<NetworkOverview hostId={hostId!} network={network} />
 				) : null}
 			</DetailPage>
+			{/* The shared connect dialog with the network fixed (issue 274):
+			    it owns its options and the connect mutation, whose
+			    onSettled invalidation refetches this page's overview — the
+			    attached-containers row updates without a reload. It needs
+			    the network DTO, so it waits for the overview query. */}
+			{connectOpen && network ? (
+				<ConnectDialog
+					hostId={hostId!}
+					network={network}
+					onClose={() => setConnectOpen(false)}
+				/>
+			) : null}
 			{removeOpen ? (
 				<RemoveNetworkDialog
 					networkName={networkName!}

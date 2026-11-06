@@ -5,7 +5,10 @@ import { shortImageId } from "@shared/utils/format";
 // back to a bare "<none>". The images feature owns the image DTOs, so the
 // display-tag rule lives here — every surface that renders an image's tags
 // imports it. The rule accepts any shape carrying repoTags: the list
-// summary and the detail DTO both qualify.
+// summary and the detail DTO both qualify. The module is pure DTO
+// vocabulary, not a component, so it sits in the feature's services layer:
+// hooks (the download hook's failure toast) import it as readily as
+// components do — a hooks module never imports from components.
 function imageTags(image: { repoTags: string[] | null }): string[] {
 	const tags = (image.repoTags ?? []).filter((tag) => tag !== "<none>:<none>");
 	return tags.length > 0 ? tags : ["<none>"];

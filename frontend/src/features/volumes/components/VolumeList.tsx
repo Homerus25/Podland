@@ -1,17 +1,10 @@
-import {
-	Badge,
-	Box,
-	Button,
-	FormControl,
-	FormLabel,
-	Td,
-	Text,
-	Tr,
-	useToast,
-} from "@chakra-ui/react";
+import { Badge, Button, Td, Tr, useToast } from "@chakra-ui/react";
 import { can } from "@features/hosts/permissions";
 import { CreateVolumeDialog } from "@features/volumes/components/CreateVolumeDialog";
 import { MoveVolumeDialog } from "@features/volumes/components/MoveVolumeDialog";
+import { PopulateVolumeDialog } from "@features/volumes/components/PopulateVolumeDialog";
+import { VolumeActionButtons } from "@features/volumes/components/VolumeActionButtons";
+import { useVolumeExport } from "@features/volumes/hooks/useVolumeExport";
 import {
 	useBulkRemoveVolumes,
 	useCreateVolume,
@@ -19,21 +12,13 @@ import {
 	usePruneVolumes,
 	useVolumes,
 } from "@features/volumes/hooks/useVolumes";
-import {
-	buildPopulateForm,
-	type VolumeSummary,
-	volumeExportUrl,
-} from "@features/volumes/services/volumesApi";
+import type { VolumeSummary } from "@features/volumes/services/volumesApi";
 import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { MutationDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
-import { getApiError } from "@shared/utils/api";
-import { downloadFile } from "@shared/utils/download";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -44,6 +29,10 @@ import { useNavigate } from "react-router-dom";
 // `Fragment` of `Tr`s — a component element is opaque to it, so a row
 // wrapped in one silently loses both. The key rides the returned `Tr`, which
 // is the element the list's map places.
+//
+// The action cell is the shared action set's (spec #477), which the volume
+// detail page renders too: Export reads at read level, Move/Copy and
+// Populate ride the manage-volumes gate.
 function renderVolumeRow({
 	volume,
 	onSelect,
@@ -83,51 +72,18 @@ function renderVolumeRow({
 				{volume.size !== undefined ? formatBytes(volume.size) : "—"}
 			</Td>
 			<Td>
-				<Button
-					size="xs"
-					variant="outline"
-					aria-label={`Export ${volume.name}`}
-					isLoading={isExporting}
-					onClick={(event) => {
-						event.stopPropagation();
-						onExport(volume);
-					}}
-				>
-					Export
-				</Button>
-				{canManage ? (
-					<>
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Move or copy ${volume.name}`}
-							onClick={(event) => {
-								event.stopPropagation();
-								onMove(volume);
-							}}
-							data-testid="move-volume-button"
-						>
-							Move/Copy
-						</Button>
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Populate ${volume.name}`}
-							onClick={(event) => {
-								event.stopPropagation();
-								onPopulate(volume);
-							}}
-						>
-							Populate
-						</Button>
-					</>
-				) : null}
+				<VolumeActionButtons
+					volume={volume}
+					canManage={canManage}
+					isExporting={isExporting}
+					onExport={() => onExport(volume)}
+					onMove={() => onMove(volume)}
+					onPopulate={() => onPopulate(volume)}
+				/>
 			</Td>
 		</Tr>
 	);
 }
-
-const UPLOAD_TOO_LARGE_CODE = "VOLUME_UPLOAD_TOO_LARGE";
 
 // The prune adapter over PruneReportDialog, the twin of the images one:
 // the module owns the plumbing, this adapter hands over the noun and the
@@ -146,137 +102,6 @@ function PruneVolumesModal({
 			entryKey={(entry) => entry.name}
 			renderLabel={(entry) => entry.name}
 			onClose={onClose}
-		/>
-	);
-}
-
-// The populate adapter over the core. The body keeps its local state: the
-// files input or the tar archive with the shape-conflict guard, and the
-// payload building stays a pure function in the API module. The custom
-// footer expresses the confirm-populate-button with its progress text while
-// pending through the core's footer mechanism. The too-large failure maps
-// to its hint through renderError - the seam replaces the whole region, so
-// the adapter renders both branches itself; success toasts via onSuccess.
-function PopulateVolumeModal({
-	volume,
-	onClose,
-	populateVolume,
-}: {
-	volume: VolumeSummary;
-	onClose: () => void;
-	populateVolume: ReturnType<typeof usePopulateVolume>;
-}) {
-	const [files, setFiles] = useState<FileList | null>(null);
-	const [archive, setArchive] = useState<File | null>(null);
-	const [progress, setProgress] = useState(0);
-	const toast = useToast();
-
-	const hasFiles = files !== null && files.length > 0;
-	const hasArchive = archive !== null;
-	const shapeConflict = hasFiles && hasArchive;
-	const canSubmit = (hasFiles || hasArchive) && !shapeConflict;
-
-	const submit = () => {
-		if (!canSubmit) return;
-		setProgress(0);
-		const form = buildPopulateForm(
-			hasFiles ? Array.from(files!) : [],
-			hasArchive ? archive : undefined,
-		);
-		populateVolume.mutate({
-			volumeName: volume.name,
-			form,
-			onProgress: setProgress,
-		});
-	};
-
-	return (
-		<MutationDialog
-			mutation={populateVolume}
-			title={`Populate ${volume.name}`}
-			onClose={onClose}
-			onSuccess={() =>
-				toast({
-					title: `Volume populated: ${volume.name}`,
-					status: "success",
-					isClosable: true,
-				})
-			}
-			renderError={(apiError) =>
-				apiError.code === UPLOAD_TOO_LARGE_CODE ? (
-					<>
-						<ErrorDisplay error={apiError} />
-						<Text
-							mt={2}
-							color="orange.500"
-							data-testid="populate-too-large-hint"
-						>
-							The upload exceeds the configured size limit. Split or shrink it
-							and try again.
-						</Text>
-					</>
-				) : (
-					<ErrorDisplay error={apiError} />
-				)
-			}
-			footer={
-				<>
-					<Button variant="ghost" onClick={onClose}>
-						Cancel
-					</Button>
-					<Button
-						colorScheme="blue"
-						onClick={submit}
-						isDisabled={!canSubmit}
-						isLoading={populateVolume.isPending}
-						loadingText={`Populating ${Math.round(progress * 100)}%`}
-						data-testid="confirm-populate-button"
-					>
-						Upload and populate
-					</Button>
-				</>
-			}
-			body={
-				<>
-					<Text>
-						Populate merges into the volume: uploaded paths overwrite same-named
-						files, everything already in the volume is kept.
-					</Text>
-					<FormControl mt={3}>
-						<FormLabel htmlFor="populate-files">Files</FormLabel>
-						<Box data-testid="populate-files-input">
-							<input
-								id="populate-files"
-								type="file"
-								multiple
-								onChange={(event) => setFiles(event.target.files)}
-							/>
-						</Box>
-					</FormControl>
-					<FormControl mt={3}>
-						<FormLabel htmlFor="populate-archive">Or a tar archive</FormLabel>
-						<Box data-testid="populate-archive-input">
-							<input
-								id="populate-archive"
-								type="file"
-								accept=".tar"
-								onChange={(event) =>
-									setArchive(event.target.files?.[0] ?? null)
-								}
-							/>
-						</Box>
-					</FormControl>
-					{shapeConflict ? (
-						<Text
-							color="orange.500"
-							mt={2}
-							data-testid="populate-shape-conflict"
-						>
-							Choose either files or a single tar archive, not both.
-						</Text>
-					) : null}
-				</>
-			}
 		/>
 	);
 }
@@ -313,27 +138,11 @@ export function VolumeList({ host }: { host: Host }) {
 		volumes: VolumeSummary[];
 		clear: () => void;
 	} | null>(null);
-	const [exportingName, setExportingName] = useState<string | null>(null);
 	const toast = useToast();
-
-	const handleExport = async (volume: VolumeSummary) => {
-		setExportingName(volume.name);
-		try {
-			await downloadFile(
-				volumeExportUrl(hostId, volume.name),
-				`${volume.name}.tar`,
-			);
-		} catch (error) {
-			toast({
-				title: `Failed to export volume: ${volume.name}`,
-				description: getApiError(error).message,
-				status: "error",
-				isClosable: true,
-			});
-		} finally {
-			setExportingName(null);
-		}
-	};
+	// The export ritual is the shared hook's (spec #477), so the detail
+	// page's Export button runs the identical one: a per-volume busy state,
+	// the volume's own export endpoint, and an error toast naming it.
+	const { exportingName, exportVolume } = useVolumeExport(hostId);
 
 	const canManage = can(host, "manage-volumes");
 
@@ -366,7 +175,7 @@ export function VolumeList({ host }: { host: Host }) {
 						onSelect: (name) => navigate(detailPath(hostId, "volumes", name)),
 						canManage,
 						isExporting: exportingName === volume.name,
-						onExport: handleExport,
+						onExport: (target) => exportVolume(target.name),
 						onPopulate: setPopulateTarget,
 						onMove: setMoveTarget,
 					})
@@ -415,7 +224,7 @@ export function VolumeList({ host }: { host: Host }) {
 				/>
 			) : null}
 			{populateTarget ? (
-				<PopulateVolumeModal
+				<PopulateVolumeDialog
 					volume={populateTarget}
 					onClose={() => setPopulateTarget(null)}
 					populateVolume={populateVolume}

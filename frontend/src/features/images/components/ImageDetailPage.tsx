@@ -1,19 +1,23 @@
-import { Table, Tbody, Text } from "@chakra-ui/react";
+import { Button, Table, Tbody, Text } from "@chakra-ui/react";
 import { useCapabilityGate } from "@features/hosts/hooks/useCapabilityGate";
-import {
-	displayTags,
-	imageDisplayName,
-} from "@features/images/components/imageDisplayTags";
+import { useHost } from "@features/hosts/hooks/useHosts";
+import { CopyImageDialog } from "@features/images/components/CopyImageDialog";
 import { IMAGE_IN_USE_REFUSAL } from "@features/images/components/imageRemoval";
+import { useImageDownload } from "@features/images/hooks/useImageDownload";
 import {
 	useDeleteImage,
 	useImage,
 	useImageInspect,
 } from "@features/images/hooks/useImages";
+import {
+	displayTags,
+	imageDisplayName,
+} from "@features/images/services/imageDisplayTags";
 import type { ImageDetail } from "@features/images/services/imagesApi";
 import { DetailPage } from "@shared/components/DetailPage";
 import {
 	DetailRow,
+	headerActionGroup,
 	isNotFound,
 	KeyValueTable,
 	removalAction,
@@ -113,11 +117,19 @@ export function ImageDetailPage() {
 	// The remove confirm (spec 461, ticket #465): rendered conditionally, so
 	// mount is open and unmount is close.
 	const [removeOpen, setRemoveOpen] = useState(false);
+	// The copy dialog's open state (spec 477, ticket #481): rendered
+	// conditionally, so mount is open and unmount is close — the remove
+	// confirm's pattern.
+	const [copyOpen, setCopyOpen] = useState(false);
 	const { data: image, isPending, error } = useImage(hostId!, imageId!);
 	const inspectQuery = useImageInspect(hostId!, imageId!, {
 		enabled: revealed,
 	});
 	const gate = useCapabilityGate(hostId!, "manage-images");
+	// The copy dialog needs the host itself (its transfer state filters the
+	// targets by the caller's capability); the gate's hook rides the same
+	// host query, so this adds no request.
+	const host = useHost(hostId!);
 	const deleteImage = useDeleteImage(hostId!);
 	const notFound = isNotFound(error);
 
@@ -133,6 +145,54 @@ export function ImageDetailPage() {
 		onClick: () => setRemoveOpen(true),
 	});
 
+	// The archive download is read-level (the volume Export button's
+	// ruling), so it renders for every caller. The ritual — the busy state,
+	// the export endpoint, the error toast — is the shared hook's, so the
+	// list row's Download button runs the identical one.
+	const { downloadingId, download } = useImageDownload(hostId!);
+
+	// The header action row (spec #477), composed through the detail kit's
+	// one owner: the row's actions beside Remove. Download reads at read
+	// level, so it is ungated and renders for every caller; Copy to host
+	// rides the manage-images gate and passes no hint, because Remove's
+	// cascade already renders the page's write hint for the same capability
+	// (the one-hint rule). Every control self-gates on the image DTO, since
+	// the header renders while the overview query is still in flight.
+	const headerActions = headerActionGroup({
+		actions: [
+			{
+				control: image ? (
+					<Button
+						size="sm"
+						variant="outline"
+						aria-label={`Download ${displayTags(image)}`}
+						isLoading={downloadingId === image.id}
+						onClick={() => download(image)}
+						data-testid="download-image-button"
+					>
+						Download
+					</Button>
+				) : null,
+			},
+			{
+				gate,
+				control: image ? (
+					<Button
+						size="sm"
+						colorScheme="blue"
+						variant="outline"
+						aria-label={`Copy ${displayTags(image)} to another host`}
+						onClick={() => setCopyOpen(true)}
+						data-testid="copy-image-button"
+					>
+						Copy to host
+					</Button>
+				) : null,
+			},
+		],
+		remove: removeAction,
+	});
+
 	return (
 		<>
 			<DetailPage
@@ -144,7 +204,7 @@ export function ImageDetailPage() {
 				inspectQuery={inspectQuery}
 				revealed={revealed}
 				onToggleInspect={() => setRevealed((value) => !value)}
-				headerActions={removeAction}
+				headerActions={headerActions}
 			>
 				{image ? <ImageOverview image={image} /> : null}
 			</DetailPage>
@@ -157,6 +217,16 @@ export function ImageDetailPage() {
 					// the page leaves for the list tab; the mutation's own
 					// invalidation refetches that list.
 					onSuccess={() => navigate(hostTabPath(hostId!, "images"))}
+				/>
+			) : null}
+			{/* The shared copy dialog, the same one the list row opens, with
+			    this page's image fixed. It needs the full host object, so it
+			    waits for the host query the gate already rides. */}
+			{copyOpen && image && host.data ? (
+				<CopyImageDialog
+					host={host.data}
+					image={image}
+					onClose={() => setCopyOpen(false)}
 				/>
 			) : null}
 		</>

@@ -12,7 +12,7 @@ import {
 import type { CapabilityGate } from "@features/hosts/hooks/useCapabilityGate";
 import { PermissionHint } from "@shared/components/PermissionHint";
 import { isAxiosError } from "axios";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 
 // The detail kit owns the primitives every resource detail page's overview
 // composes (spec 301): the 404 predicate the pages derive their not-found
@@ -186,4 +186,74 @@ export function removalAction({
 			Remove
 		</Button>
 	);
+}
+
+// One action of a detail page's header row (spec #477): the capability gate
+// that answers it, the hint it renders when the gate denies, and the control
+// it renders when the action is available.
+export type HeaderAction = {
+	// The capability gate that answers this action. Omitted for a
+	// read-level action, which renders for every caller.
+	gate?: CapabilityGate;
+	// The hint rendered when the gate denies. Omitted when the action
+	// renders no hint, or when the Remove cascade already renders the
+	// same hint for the same capability (see the one-hint rule below).
+	hint?: ReactNode;
+	// The control rendered when the action is available.
+	control: ReactNode;
+};
+
+// The header action row's one owner (spec #477): the six resource detail
+// pages compose their actions here instead of hand-rolling the ritual, so
+// the tri-state cascade, the read-level rule, and the empty-group contract
+// cannot drift between them again. The gate's tri-state answers each action
+// — omitted or allowed renders the control, denied renders the action's own
+// hint if it has one, pending renders neither (never flash the read-only
+// hint at a write-capable caller). A falsy control is dropped, so a page can
+// self-gate a control on its overview DTO having loaded: the header slot
+// renders while that query is still in flight. `remove` renders last, and
+// the whole group is `undefined` — not an empty fragment — when nothing
+// renders, because a bare fragment is always truthy and would leave an
+// empty `detail-page-header-actions` row behind.
+//
+// The one-hint rule: a detail page's header renders at most one hint per
+// capability. The Remove cascade already renders the page's write hint on
+// denied, so an action gated on that same capability passes no `hint` —
+// otherwise a denied caller reads the identical sentence twice. Only a
+// genuinely different capability keeps its own hint: the container page's
+// `manage-networks` connect (whose copy names networks) and the secret
+// page's `reveal-secrets` admin move (Remove is write-level there).
+export function headerActionGroup({
+	actions,
+	remove,
+}: {
+	actions: readonly HeaderAction[];
+	remove: ReactNode;
+}): ReactNode {
+	// The group is a variable-length list, so each rendered node carries a
+	// key: the action's position in the page's static array, and `remove`
+	// last. Without them React warns about unkeyed children on every page.
+	const rendered: ReactNode[] = [];
+	for (const [index, action] of actions.entries()) {
+		const key = `header-action-${index}`;
+		if (action.gate === "pending") {
+			continue;
+		}
+		if (action.gate === "denied") {
+			if (action.hint) {
+				rendered.push(<Fragment key={key}>{action.hint}</Fragment>);
+			}
+			continue;
+		}
+		if (action.control) {
+			rendered.push(<Fragment key={key}>{action.control}</Fragment>);
+		}
+	}
+	if (remove) {
+		rendered.push(<Fragment key="remove">{remove}</Fragment>);
+	}
+	if (rendered.length === 0) {
+		return undefined;
+	}
+	return <>{rendered}</>;
 }

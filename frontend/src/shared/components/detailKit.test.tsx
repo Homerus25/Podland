@@ -1,6 +1,7 @@
 import { Table, Tbody } from "@chakra-ui/react";
 import {
 	DetailRow,
+	headerActionGroup,
 	isNotFound,
 	KeyValueTable,
 	removalAction,
@@ -179,5 +180,158 @@ describe("removalAction", () => {
 		expect(
 			screen.queryByTestId("volumes-permission-hint"),
 		).not.toBeInTheDocument();
+	});
+});
+
+// The detail pages' header action row (spec #477): one owner for the ritual
+// the six pages hand-rolled, so the tri-state cascade, the read-level rule,
+// and the empty-group contract cannot drift between them.
+describe("headerActionGroup", () => {
+	// The group treats controls and hints as opaque nodes, so the suite pins
+	// the cascade with plain markers rather than the real buttons and hints.
+	const control = (testId: string) => (
+		<span data-testid={testId}>{testId}</span>
+	);
+	const hint = (testId: string) => <span data-testid={testId}>{testId}</span>;
+
+	it("renders an ungated action's control for every caller", () => {
+		renderWithQuery(
+			<div>
+				{headerActionGroup({
+					actions: [{ control: control("logs-button") }],
+					remove: undefined,
+				})}
+			</div>,
+			{ chakra: true },
+		);
+
+		expect(screen.getByTestId("logs-button")).toBeInTheDocument();
+	});
+
+	it("renders the control on allowed and the hint on denied", () => {
+		renderWithQuery(
+			<div>
+				{headerActionGroup({
+					actions: [
+						{
+							gate: "allowed",
+							hint: hint("write-hint"),
+							control: control("start-button"),
+						},
+					],
+					remove: undefined,
+				})}
+			</div>,
+			{ chakra: true },
+		);
+
+		expect(screen.getByTestId("start-button")).toBeInTheDocument();
+		expect(screen.queryByTestId("write-hint")).not.toBeInTheDocument();
+	});
+
+	it("renders the hint instead of the control on denied", () => {
+		renderWithQuery(
+			<div>
+				{headerActionGroup({
+					actions: [
+						{
+							gate: "denied",
+							hint: hint("write-hint"),
+							control: control("start-button"),
+						},
+					],
+					remove: undefined,
+				})}
+			</div>,
+			{ chakra: true },
+		);
+
+		expect(screen.getByTestId("write-hint")).toBeInTheDocument();
+		expect(screen.queryByTestId("start-button")).not.toBeInTheDocument();
+	});
+
+	it("renders nothing for a denied action that carries no hint", () => {
+		renderWithQuery(
+			<div>
+				{headerActionGroup({
+					actions: [{ gate: "denied", control: control("start-button") }],
+					remove: undefined,
+				})}
+			</div>,
+			{ chakra: true },
+		);
+
+		expect(screen.queryByTestId("start-button")).not.toBeInTheDocument();
+		expect(screen.queryByTestId("write-hint")).not.toBeInTheDocument();
+	});
+
+	it("renders neither the control nor the hint while the gate is pending", () => {
+		renderWithQuery(
+			<div>
+				{headerActionGroup({
+					actions: [
+						{
+							gate: "pending",
+							hint: hint("write-hint"),
+							control: control("start-button"),
+						},
+					],
+					remove: undefined,
+				})}
+			</div>,
+			{ chakra: true },
+		);
+
+		expect(screen.queryByTestId("start-button")).not.toBeInTheDocument();
+		expect(screen.queryByTestId("write-hint")).not.toBeInTheDocument();
+	});
+
+	it("drops a falsy control, so a page can self-gate on its DTO", () => {
+		renderWithQuery(
+			<div>
+				{headerActionGroup({
+					actions: [
+						{ control: null },
+						{ gate: "allowed", control: undefined },
+						{ gate: "allowed", control: false },
+					],
+					remove: undefined,
+				})}
+			</div>,
+			{ chakra: true },
+		);
+
+		expect(screen.queryByTestId("start-button")).not.toBeInTheDocument();
+	});
+
+	it("returns undefined when nothing renders and there is no remove", () => {
+		expect(
+			headerActionGroup({
+				actions: [{ gate: "pending", control: control("start-button") }],
+				remove: undefined,
+			}),
+		).toBeUndefined();
+		expect(headerActionGroup({ actions: [], remove: null })).toBeUndefined();
+	});
+
+	it("renders remove last", () => {
+		renderWithQuery(
+			<div data-testid="header-row">
+				{headerActionGroup({
+					actions: [
+						{ control: control("logs-button") },
+						{ gate: "allowed", control: control("start-button") },
+					],
+					remove: control("remove-button"),
+				})}
+			</div>,
+			{ chakra: true },
+		);
+
+		const row = screen.getByTestId("header-row");
+		const order = Array.from(row.querySelectorAll("[data-testid]")).map(
+			(node) => node.getAttribute("data-testid"),
+		);
+		expect(order).toEqual(["logs-button", "start-button", "remove-button"]);
 	});
 });

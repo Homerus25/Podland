@@ -1,6 +1,10 @@
 import { Box, Button, HStack, Table, Tbody, Text } from "@chakra-ui/react";
 import { useCapabilityGate } from "@features/hosts/hooks/useCapabilityGate";
 import { GenerateQuadletModal } from "@features/pods/components/GenerateQuadletModal";
+import {
+	PodActionButtons,
+	type PodActionMutations,
+} from "@features/pods/components/PodActionButtons";
 import { POD_RUNNING_REFUSAL } from "@features/pods/components/podRemoval";
 import {
 	usePod,
@@ -11,80 +15,18 @@ import {
 import { DetailPage } from "@shared/components/DetailPage";
 import {
 	DetailRow,
+	headerActionGroup,
 	isNotFound,
 	removalAction,
 } from "@shared/components/detailKit";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ForceConfirmDialog } from "@shared/components/MutationDialog";
-import { PermissionHint } from "@shared/components/PermissionHint";
+import { useOpenLogs } from "@shared/logs/logRoute";
 import { detailPath, hostTabPath } from "@shared/routes/detailRoute";
 import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-
-// The start/stop toggle beside the overview (spec 402 ticket #407),
-// mirroring the container lifecycle buttons: one button whose label
-// follows the pod's state, with the sibling mutation reset on click so a
-// stale error from the other action never masks the fresh one. The
-// mutation invalidates the pods prefix, which covers this page's detail
-// query, so a success refetches the pod's current state; a failure
-// surfaces the API's error envelope above the button.
-function PodLifecycleSection({
-	hostId,
-	podId,
-	name,
-	state,
-}: {
-	hostId: string;
-	podId: string;
-	name: string;
-	state: string;
-}) {
-	const start = usePodAction(hostId, "start");
-	const stop = usePodAction(hostId, "stop");
-	// Podman's pod status is capitalized ("Running"); compare
-	// case-insensitively, like the list's toggle.
-	const isRunning = state.toLowerCase() === "running";
-	const action = isRunning
-		? {
-				lifecycle: stop,
-				testId: "stop-pod-button",
-				label: "Stop",
-				colorScheme: undefined,
-			}
-		: {
-				lifecycle: start,
-				testId: "start-pod-button",
-				label: "Start",
-				colorScheme: "green" as const,
-			};
-	const sibling = isRunning ? start : stop;
-
-	return (
-		<Box mb={4}>
-			{action.lifecycle.error ? (
-				<Box mb={2}>
-					<ErrorDisplay error={getApiError(action.lifecycle.error)} />
-				</Box>
-			) : null}
-			<Button
-				size="sm"
-				variant="outline"
-				colorScheme={action.colorScheme}
-				aria-label={`${action.label} ${name}`}
-				isLoading={action.lifecycle.isPending}
-				onClick={() => {
-					sibling.reset();
-					action.lifecycle.mutate(podId);
-				}}
-				data-testid={action.testId}
-			>
-				{action.label}
-			</Button>
-		</Box>
-	);
-}
 
 // The Remove action's confirm (spec 461, ticket #465): the shared
 // force-refusal preset, so the first confirm sends the plain remove and
@@ -127,7 +69,11 @@ function RemovePodDialog({
 // the pod. The overview is the usePod detail query (the freshness
 // factory's one-shot flavor, refetched on every visit); the raw inspect
 // report fetches lazily on the first
-// "Show inspect JSON" click and never on page mount.
+// "Show inspect JSON" click and never on page mount. The header carries
+// the list row's whole action set beside Remove (spec #477 ticket #479) —
+// Start/Stop, Pause/Unpause, Kill, Restart, and Logs — rendered from the
+// shared PodActionButtons component the row renders, so the two surfaces
+// cannot drift.
 export function PodDetailPage() {
 	const { hostId, podId } = useParams<{
 		hostId: string;
@@ -145,16 +91,43 @@ export function PodDetailPage() {
 		enabled: revealed,
 	});
 	// The capability gates (the hosts feature's hook) own the
-	// per-caller classification end to end: the lifecycle section and the
-	// header's Remove action render from the manage-pods tri-state —
-	// allowed renders the controls, denied renders the shared write hint
-	// (for a read-only caller and a failed host query alike, never a silent
-	// gap), pending renders neither — and the generate-quadlet modal's save
-	// flag derives from the manage-quadlets answer (allowed → savable).
+	// per-caller classification end to end: the header's lifecycle actions
+	// and Remove action render from the manage-pods tri-state — allowed
+	// renders the controls, denied renders the shared write hint (for a
+	// read-only caller and a failed host query alike, never a silent gap),
+	// pending renders neither — and the generate-quadlet modal's save flag
+	// derives from the manage-quadlets answer (allowed → savable).
 	const manageGate = useCapabilityGate(hostId!, "manage-pods");
 	const quadletGate = useCapabilityGate(hostId!, "manage-quadlets");
 	const removePod = useRemovePod(hostId!);
 	const notFound = isNotFound(pod.error);
+	// The row's action set, page-sized (spec #477 ticket #479): the same
+	// mutation hooks the list rows ride, one instance per action. Their
+	// pods-prefix invalidation is prefix-based and this page's detail key
+	// extends the list key, so a successful action refetches the overview
+	// and the state badge reflects the host's report without a reload.
+	const actions: PodActionMutations = {
+		start: usePodAction(hostId!, "start"),
+		stop: usePodAction(hostId!, "stop"),
+		pause: usePodAction(hostId!, "pause"),
+		unpause: usePodAction(hostId!, "unpause"),
+		kill: usePodAction(hostId!, "kill"),
+		restart: usePodAction(hostId!, "restart"),
+	};
+	const openLogs = useOpenLogs(hostId!, "pod");
+	// A failed action reports above the overview. The row shows only the
+	// start/stop error (its convention), but the page is a different
+	// surface: a Pause/Kill/Restart failure that reported nowhere would
+	// leave a page-sized silent failure, so the slot reads every action's
+	// error. Each button click resets its siblings, so a stale failure
+	// never masks the fresh one.
+	const lifecycleError =
+		actions.start.error ??
+		actions.stop.error ??
+		actions.pause.error ??
+		actions.unpause.error ??
+		actions.kill.error ??
+		actions.restart.error;
 
 	// The Remove action rides the detail-page capability gate (the kit owns
 	// the cascade): allowed renders the button, denied the shared write hint,
@@ -168,6 +141,34 @@ export function PodDetailPage() {
 		onClick: () => setRemoveOpen(true),
 	});
 
+	// The header's action group (spec #477), composed through the detail
+	// kit's one owner: the row's buttons beside Remove. The button set
+	// self-gates on manage-pods and Logs reads at read level, so the group
+	// itself is ungated — an ungated action renders for every caller, and
+	// hiding Logs behind a pending write gate was the defect this fixes. The
+	// lifecycle actions pass no hint: Remove's cascade already renders the
+	// page's write hint for the same capability, so a denied caller reads one
+	// sentence, not two (the one-hint rule). The control self-gates on the
+	// pod DTO, since the header renders while the overview query is still in
+	// flight.
+	const data = pod.data;
+	const headerActions = headerActionGroup({
+		actions: [
+			{
+				control: data ? (
+					<PodActionButtons
+						pod={data}
+						actions={actions}
+						canManage={manageGate === "allowed"}
+						size="sm"
+						onShowLogs={() => openLogs({ targetId: data.id, name: data.name })}
+					/>
+				) : null,
+			},
+		],
+		remove: removeAction,
+	});
+
 	return (
 		<>
 			<DetailPage
@@ -179,30 +180,13 @@ export function PodDetailPage() {
 				inspectQuery={inspectQuery}
 				revealed={revealed}
 				onToggleInspect={() => setRevealed((value) => !value)}
-				headerActions={removeAction}
+				headerActions={headerActions}
 			>
 				{pod.data ? (
 					<>
-						{manageGate === "allowed" ? (
-							<PodLifecycleSection
-								hostId={hostId!}
-								podId={podId!}
-								name={pod.data.name}
-								state={pod.data.state}
-							/>
-						) : null}
-						{manageGate === "denied" ? (
-							// The write hint in place of the lifecycle
-							// buttons: a read-only caller — and a caller
-							// whose host query failed — learns why the
-							// controls are gone instead of a bare gap.
-							<Box mb={4}>
-								<PermissionHint
-									scope="pod-lifecycle"
-									requirement="write"
-									resource="pod"
-									fontSize="sm"
-								/>
+						{lifecycleError ? (
+							<Box mb={2}>
+								<ErrorDisplay error={getApiError(lifecycleError)} />
 							</Box>
 						) : null}
 						<Button

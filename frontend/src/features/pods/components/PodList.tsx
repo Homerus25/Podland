@@ -1,6 +1,10 @@
-import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
+import { Button, Td, Text, Tr } from "@chakra-ui/react";
 import { can } from "@features/hosts/permissions";
 import { CreatePodDialog } from "@features/pods/components/CreatePodDialog";
+import {
+	PodActionButtons,
+	type PodActionMutations,
+} from "@features/pods/components/PodActionButtons";
 import {
 	useBulkRemovePods,
 	useCreatePod,
@@ -49,21 +53,6 @@ function PrunePodsModal({
 	);
 }
 
-// The list owns one mutation instance per lifecycle action — a plain row
-// function cannot own hooks — so a row's pending and error state are scoped
-// by the mutation's own variables through the shared projection: only the
-// row whose id the in-flight (or last-failed) call carried shows them, and
-// the other rows stay usable. Every pod action takes the pod id as its
-// variables, so the key extractor is the shared identity.
-type PodActionMutations = {
-	start: ReturnType<typeof usePodAction>;
-	stop: ReturnType<typeof usePodAction>;
-	pause: ReturnType<typeof usePodAction>;
-	unpause: ReturnType<typeof usePodAction>;
-	kill: ReturnType<typeof usePodAction>;
-	restart: ReturnType<typeof usePodAction>;
-};
-
 // The row is a plain function returning a Fragment of <Tr>s, not a
 // component: the list's cell-cloning walk (mobile pinning and the selection
 // checkbox column) reaches a row's cells only when `renderRow` hands back a
@@ -94,34 +83,16 @@ function renderPodRow({
 	onOpen: (pod: PodSummary) => void;
 	onShowLogs: (pod: PodSummary) => void;
 }) {
-	// Podman's pod status is capitalized ("Paused"); compare case-insensitively.
-	const paused = pod.state.toLowerCase() === "paused";
-	const pauseAction = paused ? actions.unpause : actions.pause;
 	// Podman's pod status is capitalized ("Running"); compare
-	// case-insensitively, like the pause toggle above.
+	// case-insensitively, like the shared action set does. A failed start or
+	// stop shows the row-level error like the containers surface does; the
+	// other actions report nowhere at row level (the row's convention).
 	const isRunning = pod.state.toLowerCase() === "running";
-	const action = isRunning
-		? {
-				lifecycle: actions.stop,
-				testId: "stop-pod-button",
-				label: "Stop",
-				colorScheme: undefined,
-			}
-		: {
-				lifecycle: actions.start,
-				testId: "start-pod-button",
-				label: "Start",
-				colorScheme: "green" as const,
-			};
-	// The toggle's sibling mutation resets on each click, so a stale error
-	// from the other action never masks the fresh one; a failed start or
-	// stop shows the row-level error like the containers surface does.
-	const sibling = isRunning ? actions.start : actions.stop;
-	const lifecycle = rowScoped(action.lifecycle, pod.id, identityKey);
-	const pauseState = rowScoped(pauseAction, pod.id, identityKey);
-	const killState = rowScoped(actions.kill, pod.id, identityKey);
-	const restartState = rowScoped(actions.restart, pod.id, identityKey);
-	const rowError = lifecycle.error;
+	const rowError = rowScoped(
+		isRunning ? actions.stop : actions.start,
+		pod.id,
+		identityKey,
+	).error;
 
 	return (
 		<Fragment key={pod.id}>
@@ -136,79 +107,12 @@ function renderPodRow({
 				</Td>
 				<Td>{formatRelativeDate(pod.createdAt)}</Td>
 				<Td>
-					<HStack spacing={2}>
-						{canManage ? (
-							<>
-								<Button
-									size="xs"
-									variant="outline"
-									colorScheme={action.colorScheme}
-									aria-label={`${action.label} ${pod.name}`}
-									isLoading={lifecycle.isPending}
-									onClick={(event) => {
-										event.stopPropagation();
-										sibling.reset();
-										action.lifecycle.mutate(pod.id);
-									}}
-									data-testid={action.testId}
-								>
-									{action.label}
-								</Button>
-								<Button
-									size="xs"
-									variant="outline"
-									aria-label={`${paused ? "Unpause" : "Pause"} ${pod.name}`}
-									isLoading={pauseState.isPending}
-									onClick={(event) => {
-										event.stopPropagation();
-										pauseAction.mutate(pod.id);
-									}}
-									data-testid={
-										paused ? "unpause-pod-button" : "pause-pod-button"
-									}
-								>
-									{paused ? "Unpause" : "Pause"}
-								</Button>
-								<Button
-									size="xs"
-									variant="outline"
-									aria-label={`Kill ${pod.name}`}
-									isLoading={killState.isPending}
-									onClick={(event) => {
-										event.stopPropagation();
-										actions.kill.mutate(pod.id);
-									}}
-									data-testid="kill-pod-button"
-								>
-									Kill
-								</Button>
-								<Button
-									size="xs"
-									variant="outline"
-									aria-label={`Restart ${pod.name}`}
-									isLoading={restartState.isPending}
-									onClick={(event) => {
-										event.stopPropagation();
-										actions.restart.mutate(pod.id);
-									}}
-									data-testid="restart-pod-button"
-								>
-									Restart
-								</Button>
-							</>
-						) : null}
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Logs ${pod.name}`}
-							onClick={(event) => {
-								event.stopPropagation();
-								onShowLogs(pod);
-							}}
-						>
-							Logs
-						</Button>
-					</HStack>
+					<PodActionButtons
+						pod={pod}
+						actions={actions}
+						canManage={canManage}
+						onShowLogs={() => onShowLogs(pod)}
+					/>
 				</Td>
 			</Tr>
 			{rowError ? (

@@ -3,6 +3,8 @@ import {
 	type CapabilityGate,
 	useCapabilityGate,
 } from "@features/hosts/hooks/useCapabilityGate";
+import { useHost } from "@features/hosts/hooks/useHosts";
+import { MoveSecretDialog } from "@features/secrets/components/MoveSecretDialog";
 import {
 	useDeleteSecret,
 	useRevealSecret,
@@ -13,6 +15,7 @@ import type { SecretInspect } from "@features/secrets/services/secretsApi";
 import { DetailPage } from "@shared/components/DetailPage";
 import {
 	DetailRow,
+	headerActionGroup,
 	isNotFound,
 	removalAction,
 } from "@shared/components/detailKit";
@@ -156,6 +159,13 @@ function RevealValueSection({
 // itself is readable at read level. The header's Remove action (spec 461,
 // ticket #467) rides a second gate on the manage capability, since removing
 // is a write while revealing is admin.
+//
+// The header also carries the row's one action, Move/Copy (spec 477,
+// ticket #483): the same shared transfer dialog and mutation the list row
+// opens, fixed on this secret. Its gate is the reveal-secrets one — the
+// value leaves the host during a transfer, so the source gate is admin,
+// exactly as the row's is — which is why the page keeps two gates: a
+// write-level caller keeps Remove and loses Move/Copy.
 export function SecretDetailPage() {
 	const { hostId, secretId } = useParams<{
 		hostId: string;
@@ -163,6 +173,7 @@ export function SecretDetailPage() {
 	}>();
 	const [revealed, setRevealed] = useState(false);
 	const [removing, setRemoving] = useState(false);
+	const [moving, setMoving] = useState(false);
 	const secret = useSecret(hostId!, secretId!);
 	const inspectQuery = useSecretInspect(hostId!, secretId!, {
 		enabled: revealed,
@@ -170,6 +181,10 @@ export function SecretDetailPage() {
 	const gate = useCapabilityGate(hostId!, "reveal-secrets");
 	const removeGate = useCapabilityGate(hostId!, "manage-secrets");
 	const removeSecret = useDeleteSecret(hostId!);
+	// The transfer dialog needs the host itself (its transfer state filters
+	// targets by the caller's capability); the gate's hook rides the same
+	// host query, so this adds no request.
+	const host = useHost(hostId!);
 	const navigate = useNavigate();
 	const notFound = isNotFound(secret.error);
 
@@ -187,6 +202,40 @@ export function SecretDetailPage() {
 		onClick: () => setRemoving(true),
 	});
 
+	// The header's action row (spec #477), composed through the detail kit's
+	// one owner: Move/Copy beside Remove. Move/Copy rides the reveal-secrets
+	// gate — the value leaves the host during a transfer, so the source gate
+	// is admin, exactly as the row's is — and keeps its own admin hint: Remove
+	// is write-level on a different capability, so the two sentences differ
+	// and the one-hint rule does not collapse them. The control self-gates on
+	// the secret DTO, since the header renders while the overview query is
+	// still in flight — and a not-found page has no secret to move.
+	const headerActions = headerActionGroup({
+		actions: [
+			{
+				gate,
+				hint: (
+					<PermissionHint
+						scope="secret-move"
+						requirement="admin"
+						fontSize="sm"
+					/>
+				),
+				control: secret.data ? (
+					<Button
+						size="sm"
+						onClick={() => setMoving(true)}
+						aria-label={`Move or copy ${secret.data.name}`}
+						data-testid="move-secret-button"
+					>
+						Move/Copy
+					</Button>
+				) : null,
+			},
+		],
+		remove: removeAction,
+	});
+
 	return (
 		<>
 			<DetailPage
@@ -198,7 +247,7 @@ export function SecretDetailPage() {
 				inspectQuery={inspectQuery}
 				revealed={revealed}
 				onToggleInspect={() => setRevealed((value) => !value)}
-				headerActions={removeAction}
+				headerActions={headerActions}
 			>
 				{secret.data ? (
 					<>
@@ -259,6 +308,17 @@ export function SecretDetailPage() {
 					removeSecret={removeSecret}
 					onClose={() => setRemoving(false)}
 					onRemoved={() => navigate(hostTabPath(hostId!, "secrets"))}
+				/>
+			) : null}
+			{/* The row's dialog, page-mounted: it owns the mutation and the
+			    both-hosts invalidation, and the detail key extends the secrets
+			    list key, so a completed transfer refetches this page too. It
+			    needs the resource DTO and the host, so it waits for both. */}
+			{moving && secret.data && host.data ? (
+				<MoveSecretDialog
+					host={host.data}
+					secret={secret.data}
+					onClose={() => setMoving(false)}
 				/>
 			) : null}
 		</>

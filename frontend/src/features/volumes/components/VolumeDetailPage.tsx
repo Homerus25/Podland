@@ -1,12 +1,21 @@
 import { Badge, Table, TableContainer, Tbody, Text } from "@chakra-ui/react";
 import { useCapabilityGate } from "@features/hosts/hooks/useCapabilityGate";
+import { useHost } from "@features/hosts/hooks/useHosts";
+import { MoveVolumeDialog } from "@features/volumes/components/MoveVolumeDialog";
+import { PopulateVolumeDialog } from "@features/volumes/components/PopulateVolumeDialog";
+import { VolumeActionButtons } from "@features/volumes/components/VolumeActionButtons";
 import { VOLUME_IN_USE_REFUSAL } from "@features/volumes/components/volumeRemoval";
 import { useVolume } from "@features/volumes/hooks/useVolume";
-import { useDeleteVolume } from "@features/volumes/hooks/useVolumes";
+import { useVolumeExport } from "@features/volumes/hooks/useVolumeExport";
+import {
+	useDeleteVolume,
+	usePopulateVolume,
+} from "@features/volumes/hooks/useVolumes";
 import type { VolumeDetail } from "@features/volumes/services/volumesApi";
 import { DetailPage } from "@shared/components/DetailPage";
 import {
 	DetailRow,
+	headerActionGroup,
 	isNotFound,
 	KeyValueTable,
 	removalAction,
@@ -123,13 +132,32 @@ export function VolumeDetailPage() {
 	// The remove confirm (spec 461, ticket #465): rendered conditionally, so
 	// mount is open and unmount is close.
 	const [removeOpen, setRemoveOpen] = useState(false);
+	// The move/copy transfer and the populate upload (spec 477, ticket #482):
+	// rendered conditionally, so mount is open and unmount is close.
+	const [moving, setMoving] = useState(false);
+	const [populating, setPopulating] = useState(false);
 	const { data: volume, isPending, error } = useVolume(hostId!, volumeName!);
 	const inspectQuery = useVolume(hostId!, volumeName!, {
 		enabled: revealed,
 	});
 	const gate = useCapabilityGate(hostId!, "manage-volumes");
+	// The transfer dialog needs the whole host, not just its id: the shared
+	// transfer state filters the target list by capability and excludes the
+	// source. The gate's hook rides the same host query, so this adds no
+	// request.
+	const host = useHost(hostId!);
 	const deleteVolume = useDeleteVolume(hostId!);
+	// The page owns its own populate mutation: the dialog takes it as a prop
+	// because the list keeps one instance for every row. It invalidates the
+	// volumes list, whose key this page's detail query extends, so the
+	// overview refetches on success.
+	const populateVolume = usePopulateVolume(hostId!);
 	const notFound = isNotFound(error);
+
+	// Export is a read, so it renders for every caller. The ritual — the busy
+	// state, the volume's own export endpoint, the error toast — is the
+	// shared hook's, so the list row's Export button runs the identical one.
+	const { exportingName, exportVolume } = useVolumeExport(hostId!);
 
 	// A 404 means the row was stale (the volume was deleted since the list
 	// loaded); refetch the list so the dead row disappears. The list key is
@@ -157,6 +185,33 @@ export function VolumeDetailPage() {
 		onClick: () => setRemoveOpen(true),
 	});
 
+	// The header's action row (spec #477), composed through the detail kit's
+	// one owner: the row's three buttons beside Remove. Export reads at read
+	// level, so it is ungated and renders for every caller; Move/Copy and
+	// Populate ride the manage-volumes gate and pass no hint, because
+	// Remove's cascade already renders the page's write hint for the same
+	// capability (the one-hint rule). The control self-gates on the volume
+	// DTO, since the header renders while the overview query is still in
+	// flight — and a not-found page has no volume to act on.
+	const headerActions = headerActionGroup({
+		actions: [
+			{
+				control: volume ? (
+					<VolumeActionButtons
+						volume={volume}
+						canManage={gate === "allowed"}
+						isExporting={exportingName === volume.name}
+						size="sm"
+						onExport={() => exportVolume(volume.name)}
+						onMove={() => setMoving(true)}
+						onPopulate={() => setPopulating(true)}
+					/>
+				) : null,
+			},
+		],
+		remove: removeAction,
+	});
+
 	return (
 		<>
 			<DetailPage
@@ -168,10 +223,24 @@ export function VolumeDetailPage() {
 				inspectQuery={inspectQuery}
 				revealed={revealed}
 				onToggleInspect={() => setRevealed((value) => !value)}
-				headerActions={removeAction}
+				headerActions={headerActions}
 			>
 				{volume ? <VolumeOverview volume={volume} /> : null}
 			</DetailPage>
+			{moving && volume && host.data ? (
+				<MoveVolumeDialog
+					host={host.data}
+					volume={volume}
+					onClose={() => setMoving(false)}
+				/>
+			) : null}
+			{populating && volume ? (
+				<PopulateVolumeDialog
+					volume={volume}
+					onClose={() => setPopulating(false)}
+					populateVolume={populateVolume}
+				/>
+			) : null}
 			{removeOpen ? (
 				<RemoveVolumeDialog
 					volumeName={volumeName!}

@@ -1,28 +1,24 @@
-import { Box, Button, Td, Tr, useToast } from "@chakra-ui/react";
+import { Box, Button, Td, Tr } from "@chakra-ui/react";
 import { can } from "@features/hosts/permissions";
 import { CopyImageDialog } from "@features/images/components/CopyImageDialog";
-import {
-	displayTags,
-	imageDisplayName,
-} from "@features/images/components/imageDisplayTags";
 import { PullImageForm } from "@features/images/components/PullImageForm";
+import { useImageDownload } from "@features/images/hooks/useImageDownload";
 import {
 	useBulkRemoveImages,
 	useImages,
 	usePruneImages,
 } from "@features/images/hooks/useImages";
 import {
-	type ImageSummary,
-	imageExportUrl,
-} from "@features/images/services/imagesApi";
+	displayTags,
+	imageDisplayName,
+} from "@features/images/services/imageDisplayTags";
+import type { ImageSummary } from "@features/images/services/imagesApi";
 import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
-import { getApiError } from "@shared/utils/api";
-import { downloadFile } from "@shared/utils/download";
 import {
 	formatBytes,
 	formatRelativeDate,
@@ -79,33 +75,13 @@ export function ImageList({ host }: { host: Host }) {
 	} | null>(null);
 	const [pendingCopy, setPendingCopy] = useState<ImageSummary | null>(null);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
-	const [downloadingId, setDownloadingId] = useState<string | null>(null);
 	const canManage = can(host, "manage-images");
 	const navigate = useNavigate();
-	const toast = useToast();
-
 	// The archive download is read-level (the volume Export button's
 	// ruling): the button renders for every grantee, with a per-row busy
-	// state while its download streams. No filename is passed — the
-	// server names the archive in its Content-Disposition and the shared
-	// download helper saves under that name.
-	const handleDownload = async (image: ImageSummary) => {
-		setDownloadingId(image.id);
-		try {
-			await downloadFile(imageExportUrl(hostId, image.id));
-		} catch (error) {
-			// The shared naming composite: tags alone render "<none>" for an
-			// untagged image, so the short ID names it.
-			toast({
-				title: `Failed to download image: ${imageDisplayName(image)}`,
-				description: getApiError(error).message,
-				status: "error",
-				isClosable: true,
-			});
-		} finally {
-			setDownloadingId(null);
-		}
-	};
+	// state while its download streams. The ritual is the shared hook's, so
+	// the detail page's Download button runs the identical one.
+	const { downloadingId, download } = useImageDownload(hostId);
 
 	return (
 		<>
@@ -145,7 +121,7 @@ export function ImageList({ host }: { host: Host }) {
 								isLoading={downloadingId === image.id}
 								onClick={(event) => {
 									event.stopPropagation();
-									handleDownload(image);
+									download(image);
 								}}
 							>
 								Download

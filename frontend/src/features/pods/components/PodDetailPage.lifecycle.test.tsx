@@ -1,5 +1,5 @@
 import { PodDetailPage } from "@features/pods/components/PodDetailPage";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
@@ -140,22 +140,60 @@ describe("PodDetailPage lifecycle actions", () => {
 		await waitFor(() => expect(button).toBeEnabled());
 	});
 
+	// The page's error slot reads every action's error, not just the
+	// start/stop toggle's: the row shows only the toggle's failure (its
+	// convention), but a Pause/Kill/Restart failure that reported nowhere
+	// would leave a page-sized silent failure.
+	it("shows the error envelope when a non-toggle action fails", async () => {
+		mockHost();
+		mockPodDetail();
+		server.use(
+			http.post("*/api/hosts/m-1/pods/p-1/kill", () =>
+				errorResponse(409, "POD_STATE_CONFLICT", "pod is not running"),
+			),
+		);
+		renderPodDetailPage();
+		const user = userEvent.setup();
+
+		const button = await screen.findByTestId("kill-pod-button");
+		await user.click(button);
+
+		expect(await screen.findByRole("alert")).toBeInTheDocument();
+		expect(screen.getByText("POD_STATE_CONFLICT")).toBeInTheDocument();
+		expect(screen.getByText("pod is not running")).toBeInTheDocument();
+		await waitFor(() => expect(button).toBeEnabled());
+	});
+
 	// The gate renders from the hook's tri-state (spec #437 ticket #436):
-	// allowed renders the lifecycle section, denied renders the shared
+	// allowed renders the lifecycle actions, denied renders the shared
 	// write hint — for a read-only caller and a failed host query
 	// alike, the divergence fix — and pending renders neither. The
-	// classification itself is pinned once in the hook's suite.
+	// classification itself is pinned once in the hook's suite. The
+	// actions moved from the content area into the header-actions slot in
+	// spec #477 ticket #479, and the lifecycle actions stopped carrying a
+	// hint of their own: Remove's cascade already renders the page's write
+	// hint for the same capability, so a denied caller reads one sentence,
+	// not two (the one-hint rule).
 	it("shows the write hint in place of the lifecycle buttons for a read-only caller", async () => {
 		mockHost("read");
 		mockPodDetail();
 		renderPodDetailPage();
 
 		await screen.findByTestId("pod-detail-name");
-		const hint = await screen.findByTestId("pod-lifecycle-permission-hint");
+		const hint = await screen.findByTestId("pods-permission-hint");
 		expect(hint).toHaveAttribute("data-requirement", "write");
 		expect(hint).toHaveTextContent(
 			"You have read-only access to this host. Ask an owner or admin for write access to manage its pods.",
 		);
+		// Exactly one hint in the header: the Remove cascade's.
+		expect(
+			within(screen.getByTestId("detail-page-header-actions")).getAllByTestId(
+				/permission-hint$/,
+			),
+		).toHaveLength(1);
+		expect(
+			screen.queryByTestId("pod-lifecycle-permission-hint"),
+		).not.toBeInTheDocument();
 		expect(screen.queryByTestId("stop-pod-button")).not.toBeInTheDocument();
 		expect(screen.queryByTestId("start-pod-button")).not.toBeInTheDocument();
 	});
@@ -167,7 +205,7 @@ describe("PodDetailPage lifecycle actions", () => {
 
 		await screen.findByTestId("pod-detail-name");
 		expect(
-			await screen.findByTestId("pod-lifecycle-permission-hint"),
+			await screen.findByTestId("pods-permission-hint"),
 		).toBeInTheDocument();
 		expect(screen.queryByTestId("stop-pod-button")).not.toBeInTheDocument();
 		expect(screen.queryByTestId("start-pod-button")).not.toBeInTheDocument();
@@ -191,7 +229,7 @@ describe("PodDetailPage lifecycle actions", () => {
 		expect(screen.queryByTestId("stop-pod-button")).not.toBeInTheDocument();
 		expect(screen.queryByTestId("start-pod-button")).not.toBeInTheDocument();
 		expect(
-			screen.queryByTestId("pod-lifecycle-permission-hint"),
+			screen.queryByTestId("pods-permission-hint"),
 		).not.toBeInTheDocument();
 
 		release();

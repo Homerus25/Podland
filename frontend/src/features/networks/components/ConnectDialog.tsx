@@ -10,9 +10,11 @@ import {
 	List,
 	ListItem,
 } from "@chakra-ui/react";
-import { containerDisplayName } from "@features/containers/components/containerDisplayName";
+import {
+	type ContainerNamed,
+	containerDisplayName,
+} from "@features/containers/components/containerDisplayName";
 import { useContainers } from "@features/containers/hooks/useContainers";
-import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { runningContainers } from "@features/networks/components/containerOptions";
 import {
 	ConnectError,
@@ -32,19 +34,30 @@ interface ConnectFormValues {
 	pick: string[];
 }
 
+// The container-fixed side reads exactly three facts off the container it is
+// pinned to: its id, its display name (the shared naming rule reads `names`
+// or `name`), and the networks it is already attached to. The prop is
+// ContainerNamed — the naming rule's own shape — plus the networks, so the
+// containers list's summary and the container detail page's detail DTO both
+// satisfy it as they are — no projection, and nothing silently dropped on
+// the way in.
+export type ConnectContainer = ContainerNamed & {
+	networks?: string[];
+};
+
 // The fixed side discriminates the flow: the Networks tab passes the
 // network and the dialog picks the containers; the Containers tab passes
 // the container and the dialog picks the networks.
 type ConnectSide =
 	| { kind: "network"; network: NetworkSummary }
-	| { kind: "container"; container: ContainerSummary };
+	| { kind: "container"; container: ConnectContainer };
 
 type ConnectDialogProps = {
 	hostId: string;
 	onClose: () => void;
 } & (
 	| { network: NetworkSummary; container?: never }
-	| { container: ContainerSummary; network?: never }
+	| { container: ConnectContainer; network?: never }
 );
 
 // The one owner of the connect ritual (issue 274), multi-select since

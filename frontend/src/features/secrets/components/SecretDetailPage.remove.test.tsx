@@ -145,6 +145,9 @@ describe("SecretDetailPage remove", () => {
 		expect(
 			screen.queryByTestId("remove-secret-button"),
 		).not.toBeInTheDocument();
+		// Move/Copy self-gates on the overview DTO, so a 404 page renders no
+		// control that would open nothing.
+		expect(screen.queryByTestId("move-secret-button")).not.toBeInTheDocument();
 	});
 
 	it("opens a confirmation naming the secret without sending a request", async () => {
