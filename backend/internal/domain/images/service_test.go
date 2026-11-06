@@ -303,3 +303,173 @@ func TestImageService_Export_StreamsEngineBytesUnchanged(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "tar-bytes", sink.String())
 }
+
+// TestImageService_BulkDelete_MapsBatchReportToEntries pins the batch
+// report's per-id mapping: an id the report lists in Deleted or Untagged
+// answers success, the ids it does not list answer the batch's failure
+// entry error, and the answer keeps the report contract — one entry per
+// requested id, in request order.
+func TestImageService_BulkDelete_MapsBatchReportToEntries(t *testing.T) {
+	engine := &fakeImageEngine{
+		removeAllFn: func(ids []string, force bool) (*entities.ImageRemoveReport, []error) {
+			assert.False(t, force)
+			return &entities.ImageRemoveReport{
+				Deleted:  []string{"sha256:gone", "sha256:dup"},
+				Untagged: []string{"registry.example.com/app:latest"},
+			}, nil
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
+
+	entries := service.BulkDelete(context.Background(), "user", "host",
+		[]string{"sha256:gone", "sha256:stays", "sha256:dup", "registry.example.com/app:latest"}, false)
+
+	require.Len(t, entries, 4)
+	assert.Equal(t, "sha256:gone", entries[0].ID)
+	assert.True(t, entries[0].Success, "an id in Deleted answers success")
+	assert.Equal(t, "sha256:stays", entries[1].ID)
+	require.NotNil(t, entries[1].Error, "an id absent from the report answers a failure entry")
+	assert.False(t, entries[1].Success)
+	assert.Equal(t, "sha256:dup", entries[2].ID)
+	assert.True(t, entries[2].Success, "a duplicate id matches the report's single Deleted entry")
+	assert.Equal(t, "registry.example.com/app:latest", entries[3].ID)
+	assert.True(t, entries[3].Success, "a tag request matches the report's Untagged entry")
+}
+
+// TestImageService_BulkDelete_ShortIDRequestMatchesFullReportEntry pins
+// the reference-form parity with the single-item delete: podman resolves
+// a short hex ID to the full one, so a removed short-ID request lands in
+// Deleted as the full sha256 ID and must answer success, not a false
+// failure entry.
+func TestImageService_BulkDelete_ShortIDRequestMatchesFullReportEntry(t *testing.T) {
+	engine := &fakeImageEngine{
+		removeAllFn: func([]string, bool) (*entities.ImageRemoveReport, []error) {
+			return &entities.ImageRemoveReport{
+				Deleted: []string{"sha256:abcdef0123456789"},
+			}, nil
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
+
+	entries := service.BulkDelete(context.Background(), "user", "host",
+		[]string{"abcdef", "sha256:abcdef"}, false)
+
+	require.Len(t, entries, 2)
+	assert.True(t, entries[0].Success, "a short hex ID podman resolved and removed answers success")
+	assert.True(t, entries[1].Success, "a short sha256-prefixed ID podman resolved and removed answers success")
+}
+
+// TestImageService_BulkDelete_UnanimousFailureAnswersTheSentinel pins the
+// attribution rule: podman's batch report carries an unkeyed error slice,
+// so when every cause classifies to the same sentinel every failed id
+// answers it — the single-item delete's own classification, shared
+// through classifyRemoveError.
+func TestImageService_BulkDelete_UnanimousFailureAnswersTheSentinel(t *testing.T) {
+	tests := []struct {
+		name string
+		errs []error
+		code string
+	}{
+		{
+			name: "every image in use answers IMAGE_USED_BY_CONTAINERS",
+			errs: []error{
+				&errorhandling.ErrorModel{ResponseCode: http.StatusConflict, Message: "image is in use"},
+				errors.New("sha256:other: image used by a container"),
+			},
+			code: appErrors.ErrImageUsedByContainers.Code,
+		},
+		{
+			name: "every image vanished answers IMAGE_NOT_FOUND",
+			errs: []error{
+				&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such image"},
+				errors.New("sha256:other: image not known"),
+			},
+			code: appErrors.ErrImageNotFound.Code,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := &fakeImageEngine{
+				removeAllFn: func([]string, bool) (*entities.ImageRemoveReport, []error) {
+					return &entities.ImageRemoveReport{}, tt.errs
+				},
+			}
+			service := NewImageService(fakeEngineProvider{engine: engine})
+
+			entries := service.BulkDelete(context.Background(), "user", "host", []string{"sha256:a", "sha256:b"}, false)
+
+			require.Len(t, entries, 2)
+			for _, entry := range entries {
+				require.NotNil(t, entry.Error)
+				assert.False(t, entry.Success)
+				assert.Equal(t, tt.code, entry.Error.Code)
+			}
+		})
+	}
+}
+
+// TestImageService_BulkDelete_MixedFailuresAnswerGenericEntry pins the
+// honest fallback: when the batch's causes classify to different
+// sentinels, podman's unkeyed error slice cannot attribute one to a
+// requested id, so every failed id answers the kit's generic internal
+// entry instead of a guessed sentinel.
+func TestImageService_BulkDelete_MixedFailuresAnswerGenericEntry(t *testing.T) {
+	engine := &fakeImageEngine{
+		removeAllFn: func([]string, bool) (*entities.ImageRemoveReport, []error) {
+			return &entities.ImageRemoveReport{Deleted: []string{"sha256:gone"}},
+				[]error{
+					&errorhandling.ErrorModel{ResponseCode: http.StatusConflict, Message: "image is in use"},
+					&errorhandling.ErrorModel{ResponseCode: http.StatusNotFound, Message: "no such image"},
+				}
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
+
+	entries := service.BulkDelete(context.Background(), "user", "host", []string{"sha256:gone", "sha256:busy", "sha256:ghost"}, false)
+
+	require.Len(t, entries, 3)
+	assert.True(t, entries[0].Success)
+	for _, entry := range entries[1:] {
+		require.NotNil(t, entry.Error)
+		assert.Equal(t, appErrors.ErrInternalError.Code, entry.Error.Code)
+	}
+}
+
+// TestImageService_BulkDelete_CallFailureFailsEveryEntry pins the
+// call-level failure branch: a nil report (transport or decode failure)
+// answers the classified cause on every entry — byte-identical to the
+// per-item loop's answer when every single-item call failed the same way.
+func TestImageService_BulkDelete_CallFailureFailsEveryEntry(t *testing.T) {
+	engine := &fakeImageEngine{
+		removeAllFn: func([]string, bool) (*entities.ImageRemoveReport, []error) {
+			return nil, []error{appErrors.ErrConnectionFailed}
+		},
+	}
+	service := NewImageService(fakeEngineProvider{engine: engine})
+
+	entries := service.BulkDelete(context.Background(), "user", "host", []string{"sha256:a", "sha256:b"}, false)
+
+	require.Len(t, entries, 2)
+	for _, entry := range entries {
+		require.NotNil(t, entry.Error)
+		assert.False(t, entry.Success)
+		assert.Equal(t, appErrors.ErrConnectionFailed.Code, entry.Error.Code)
+	}
+}
+
+// TestImageService_BulkDelete_AcquisitionFailureFailsEveryEntry pins the
+// lease branch: when the engine lease is never granted, every requested
+// id answers the classified acquisition error — the report stays 200 with
+// all-failed entries, never a status code.
+func TestImageService_BulkDelete_AcquisitionFailureFailsEveryEntry(t *testing.T) {
+	service := NewImageService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
+
+	entries := service.BulkDelete(context.Background(), "user", "host", []string{"sha256:a", "sha256:b"}, false)
+
+	require.Len(t, entries, 2)
+	for _, entry := range entries {
+		require.NotNil(t, entry.Error)
+		assert.False(t, entry.Success)
+		assert.Equal(t, appErrors.ErrConnectionFailed.Code, entry.Error.Code)
+	}
+}

@@ -1,20 +1,27 @@
 import { Box, Button, HStack, Table, Tbody, Text } from "@chakra-ui/react";
 import { useCapabilityGate } from "@features/hosts/hooks/useCapabilityGate";
 import { GenerateQuadletModal } from "@features/pods/components/GenerateQuadletModal";
+import { POD_RUNNING_REFUSAL } from "@features/pods/components/podRemoval";
 import {
 	usePod,
 	usePodAction,
 	usePodInspect,
+	useRemovePod,
 } from "@features/pods/hooks/usePods";
 import { DetailPage } from "@shared/components/DetailPage";
-import { DetailRow, isNotFound } from "@shared/components/detailKit";
+import {
+	DetailRow,
+	isNotFound,
+	removalAction,
+} from "@shared/components/detailKit";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
+import { ForceConfirmDialog } from "@shared/components/MutationDialog";
 import { PermissionHint } from "@shared/components/PermissionHint";
-import { detailPath } from "@shared/routes/detailRoute";
+import { detailPath, hostTabPath } from "@shared/routes/detailRoute";
 import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 // The start/stop toggle beside the overview (spec 402 ticket #407),
 // mirroring the container lifecycle buttons: one button whose label
@@ -79,6 +86,42 @@ function PodLifecycleSection({
 	);
 }
 
+// The Remove action's confirm (spec 461, ticket #465): the shared
+// force-refusal preset, so the first confirm sends the plain remove and
+// only the POD_STATE_CONFLICT refusal swaps in the running hint and the
+// force button whose retry carries force=true. The adapter keeps the domain
+// vocabulary only — the refusal words come from the podRemoval module the
+// list's modal reads too, and the success side effect (navigate back to the
+// list tab) arrives through the preset's onSuccess seam.
+function RemovePodDialog({
+	pod,
+	onClose,
+	removePod,
+	onSuccess,
+}: {
+	pod: { id: string; name: string };
+	onClose: () => void;
+	removePod: ReturnType<typeof useRemovePod>;
+	onSuccess: () => void;
+}) {
+	return (
+		<ForceConfirmDialog
+			mutation={removePod}
+			title="Remove pod"
+			onClose={onClose}
+			refusalCode={POD_RUNNING_REFUSAL.code}
+			hint={POD_RUNNING_REFUSAL.hint}
+			hintTestId={POD_RUNNING_REFUSAL.hintTestId}
+			confirmLabel="Remove pod"
+			forceLabel="Force remove"
+			forceTestId="force-remove-button"
+			confirm={(force) => ({ podId: pod.id, force })}
+			onSuccess={onSuccess}
+			body={<Text>Remove pod “{pod.name}”? This cannot be undone.</Text>}
+		/>
+	);
+}
+
 // The pod detail page (spec 352): the shared layout's shell with the
 // pod's detail DTO as overview rows and cross-links to the containers in
 // the pod. The overview is the usePod detail query (the freshness
@@ -90,23 +133,40 @@ export function PodDetailPage() {
 		hostId: string;
 		podId: string;
 	}>();
+	const navigate = useNavigate();
 	const [revealed, setRevealed] = useState(false);
-	// The generate-quadlet modal (spec #402 ticket #406): rendered
-	// conditionally, so mount is open and unmount is close.
+	// The generate-quadlet modal (spec #402 ticket #406) and the remove
+	// confirm (spec 461, ticket #465): both rendered conditionally, so mount
+	// is open and unmount is close.
 	const [generateOpen, setGenerateOpen] = useState(false);
+	const [removeOpen, setRemoveOpen] = useState(false);
 	const pod = usePod(hostId!, podId!);
 	const inspectQuery = usePodInspect(hostId!, podId!, {
 		enabled: revealed,
 	});
 	// The capability gates (the hosts feature's hook) own the
-	// per-caller classification end to end: the lifecycle section renders
-	// from the manage-pods tri-state — allowed renders the buttons, denied
-	// renders the shared write hint (for a read-only caller and a failed
-	// host query alike, never a silent gap), pending renders neither —
-	// and the generate-quadlet modal's save flag derives from the
-	// manage-quadlets answer (allowed → savable).
-	const lifecycleGate = useCapabilityGate(hostId!, "manage-pods");
+	// per-caller classification end to end: the lifecycle section and the
+	// header's Remove action render from the manage-pods tri-state —
+	// allowed renders the controls, denied renders the shared write hint
+	// (for a read-only caller and a failed host query alike, never a silent
+	// gap), pending renders neither — and the generate-quadlet modal's save
+	// flag derives from the manage-quadlets answer (allowed → savable).
+	const manageGate = useCapabilityGate(hostId!, "manage-pods");
 	const quadletGate = useCapabilityGate(hostId!, "manage-quadlets");
+	const removePod = useRemovePod(hostId!);
+	const notFound = isNotFound(pod.error);
+
+	// The Remove action rides the detail-page capability gate (the kit owns
+	// the cascade): allowed renders the button, denied the shared write hint,
+	// pending neither, and a not-found overview hides it outright.
+	const removeAction = removalAction({
+		gate: manageGate,
+		notFound,
+		scope: "pods",
+		resource: "pod",
+		testId: "remove-pod-button",
+		onClick: () => setRemoveOpen(true),
+	});
 
 	return (
 		<>
@@ -115,14 +175,15 @@ export function PodDetailPage() {
 				backTo="pods"
 				isPending={pod.isPending}
 				error={pod.error}
-				notFound={isNotFound(pod.error)}
+				notFound={notFound}
 				inspectQuery={inspectQuery}
 				revealed={revealed}
 				onToggleInspect={() => setRevealed((value) => !value)}
+				headerActions={removeAction}
 			>
 				{pod.data ? (
 					<>
-						{lifecycleGate === "allowed" ? (
+						{manageGate === "allowed" ? (
 							<PodLifecycleSection
 								hostId={hostId!}
 								podId={podId!}
@@ -130,7 +191,7 @@ export function PodDetailPage() {
 								state={pod.data.state}
 							/>
 						) : null}
-						{lifecycleGate === "denied" ? (
+						{manageGate === "denied" ? (
 							// The write hint in place of the lifecycle
 							// buttons: a read-only caller — and a caller
 							// whose host query failed — learns why the
@@ -235,6 +296,17 @@ export function PodDetailPage() {
 					</>
 				) : null}
 			</DetailPage>
+			{removeOpen && pod.data ? (
+				<RemovePodDialog
+					pod={pod.data}
+					onClose={() => setRemoveOpen(false)}
+					removePod={removePod}
+					// The removed pod's page would 404 on the next refetch, so the
+					// page leaves for the list tab; the mutation's own invalidation
+					// refetches that list.
+					onSuccess={() => navigate(hostTabPath(hostId!, "pods"))}
+				/>
+			) : null}
 			{generateOpen ? (
 				<GenerateQuadletModal
 					hostId={hostId!}

@@ -200,6 +200,65 @@ Notes:
 
 ---
 
+### POST /api/hosts/{id}/containers/remove
+
+Remove several containers by id in one request. Each id is removed
+through the same classification as the single-item
+`DELETE /api/hosts/{id}/containers/{containerId}`, so a running (or
+paused) container without `force` is refused in its own report entry
+while the rest of the batch still processes.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Request Body:**
+```json
+{
+  "ids": ["container-id-a", "container-id-b"],
+  "force": false
+}
+```
+
+- `ids` (array of strings, required): the container ids to remove. Must
+  be non-empty and carry no empty entry.
+- `force` (boolean, optional, default false): with `force=true` podman
+  removes the container regardless of its state — stopping a running one
+  first.
+
+**Response (Success - 200):** one entry per requested id, in request
+order.
+```json
+[
+  { "id": "container-id-a", "success": true },
+  {
+    "id": "container-id-b",
+    "success": false,
+    "error": { "code": "CONTAINER_RUNNING", "message": "string (podman's refusal text)" }
+  }
+]
+```
+
+Notes:
+- A per-id failure is a report entry, never a status code: the batch
+  answers 200 even when every entry failed.
+- `error` is present only on a failed entry. Its `code` is the same code
+  the single-item delete would answer — `CONTAINER_NOT_FOUND`,
+  `CONTAINER_RUNNING`, or `INTERNAL_ERROR` for an unclassified cause
+  (whose detail is never surfaced).
+- The report is `[]`, never `null`.
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body), `VALIDATION_FAILED` (missing
+  or empty `ids`, or an empty entry)
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`, `PERMISSION_DENIED` (read-level users)
+- 404: `HOST_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
 ### GET /api/hosts/{id}/containers/stats
 
 One-shot resource-usage snapshot for every running container on the
@@ -559,22 +618,37 @@ new limits and healthcheck.
 ---
 
 ### DELETE /api/hosts/{id}/containers/{containerId}
-Remove a container.
+Remove a container by ID. Query flag `force` (default false): with
+`force=true` podman removes the container regardless of its state —
+stopping a running one first. Without `force` a running (or paused)
+container makes the removal a 409 `CONTAINER_RUNNING`. A non-boolean
+`force` value is ignored (treated as false), matching every other boolean
+query flag in the API.
+
+A remove failing at the call itself — the race window where the container
+vanished or started between the request and podman's execution, no
+per-container report involved — is classified the same way: not-found
+answers 404 `CONTAINER_NOT_FOUND`, a running refusal 409
+`CONTAINER_RUNNING` carrying podman's message.
 
 **Authentication:** Required
 
+**Access:** Write level on `{id}`.
+
 **Query Parameters:**
-- `force` (boolean, optional): Force removal of running container
-- `volumes` (boolean, optional): Remove associated volumes
+- `force` (boolean, optional, default false; non-boolean values are
+  ignored and treated as false)
 
 **Response (Success - 204):**
 - No body
 
 **Response (Error):**
-- 400: `CONTAINER retroced` (if running and force not set)
+- 400: `MISSING_CONTAINER_ID`
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`, `PERMISSION_DENIED`
 - 404: `HOST_NOT_FOUND`, `CONTAINER_NOT_FOUND`
+- 409: `CONTAINER_RUNNING` (the container is running or paused and `force`
+  was not set; carries podman's message)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 

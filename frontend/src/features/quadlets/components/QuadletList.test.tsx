@@ -132,6 +132,29 @@ describe("QuadletList", () => {
 		expect(screen.getByTestId("compose-content-input")).toBeInTheDocument();
 	});
 
+	// Spec 461, ticket #470: quadlets have no detail page, so the row's delete
+	// button is gone and the bulk button is the only removal path — a
+	// mis-click on a row can never destroy a quadlet.
+	it("renders no per-row delete button", async () => {
+		mockQuadlets([quadletFixture()]);
+		renderQuadletList();
+
+		const row = await screen.findByTestId("quadlet-row");
+		expect(
+			within(row).queryByRole("button", { name: /delete/i }),
+		).not.toBeInTheDocument();
+		// The row keeps its surviving actions: lifecycle, logs, edit, move/copy.
+		expect(
+			within(row).getByRole("button", { name: "Restart web" }),
+		).toBeInTheDocument();
+		expect(
+			within(row).getByRole("button", { name: "Edit web" }),
+		).toBeInTheDocument();
+		expect(
+			within(row).getByRole("button", { name: "Move or copy web" }),
+		).toBeInTheDocument();
+	});
+
 	it("sorts rows when a column header is clicked", async () => {
 		mockQuadlets([
 			quadletFixture({ id: "z-1", name: "zebra" }),

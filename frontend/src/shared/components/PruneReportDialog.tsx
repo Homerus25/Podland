@@ -1,25 +1,11 @@
-import {
-	Box,
-	Button,
-	Table,
-	TableContainer,
-	Tbody,
-	Td,
-	Text,
-	Th,
-	Thead,
-	Tr,
-} from "@chakra-ui/react";
-import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { Modal } from "@shared/components/Modal";
-import { getApiError } from "@shared/utils/api";
+import { Td, Text, Th } from "@chakra-ui/react";
+import { ReportDialog } from "@shared/components/ReportDialog";
 import { formatBytes } from "@shared/utils/format";
-import { useEffect } from "react";
 
-// The structural slice of a react-query prune mutation result this module
-// drives: the ordinary mutation fields plus the success payload, whose
-// presence is what flips the dialog from confirm to report. Features keep
-// their mutation hooks; the module never touches react-query.
+// The structural slice of a react-query prune mutation result this adapter
+// drives. Prune takes no variables, so the generalized module's `void` case
+// is the whole of it: the adapter below hands the module a no-argument
+// mutate and a confirm that carries nothing.
 export interface PruneMutationSlice<TEntry> {
 	mutate: () => void;
 	isPending: boolean;
@@ -28,16 +14,14 @@ export interface PruneMutationSlice<TEntry> {
 	reset: () => void;
 }
 
-// One owner of the stay-open report dialog that every prune feature used
-// to hand-roll twice. Consumers render it conditionally, so mount is open
-// and unmount is close; the module runs reset() on both ends, owns the
-// confirm/report footer swap (a prune dialog's whole point is staying open
-// to render what the mutation returned), the report table, the empty-report
-// and confirm copy derived from the singular `resource` noun, and the
-// in-modal error region. Everything per-feature is handed over as data:
-// the noun, the entry key, and the label renderer. size is optional: the
-// pods prune (spec #355) reports removed IDs only, and a size-less entry
-// renders an em dash in the reclaimed column.
+// The prune adapter over the shared stay-open report dialog (spec 461,
+// ticket #468 generalized the skeleton out of this module). The module owns
+// the plumbing — the modal shell, the reset lifecycle, the confirm/report
+// footer swap, the pending wiring, the error region, and the report table's
+// chrome; this adapter keeps prune's domain: the noun-derived copy, the
+// entry accessors, and the reclaimed-size column. size is optional: the pods
+// prune (spec #355) reports removed IDs only, and a size-less entry renders
+// an em dash in the reclaimed column.
 export function PruneReportDialog<
 	TEntry extends { size?: number; error?: string },
 >({
@@ -53,82 +37,21 @@ export function PruneReportDialog<
 	renderLabel: (entry: TEntry) => string;
 	onClose: () => void;
 }) {
-	const { reset } = mutation;
-	useEffect(() => {
-		reset();
-		return () => reset();
-	}, [reset]);
-
 	const plural = `${resource}s`;
 	const capitalized = plural.charAt(0).toUpperCase() + plural.slice(1);
-	const report = mutation.data;
 
 	return (
-		<Modal
-			isOpen
-			onClose={onClose}
-			title={report ? "Prune report" : `Prune unused ${plural}`}
-			footer={
-				report ? (
-					<Button onClick={onClose} data-testid="close-prune-report-button">
-						Close
-					</Button>
-				) : (
-					<>
-						<Button variant="ghost" onClick={onClose}>
-							Cancel
-						</Button>
-						<Button
-							colorScheme="red"
-							onClick={() => mutation.mutate()}
-							isLoading={mutation.isPending}
-							data-testid="confirm-prune-button"
-						>
-							Prune {plural}
-						</Button>
-					</>
-				)
-			}
-		>
-			{mutation.error ? (
-				<Box mt={2}>
-					<ErrorDisplay error={getApiError(mutation.error)} />
-				</Box>
-			) : null}
-			{report ? (
-				report.length === 0 ? (
-					<Text data-testid="prune-report-empty">
-						Nothing to prune: no unused {plural} on this host.
-					</Text>
-				) : (
-					<TableContainer>
-						<Table data-testid="prune-report" size="sm">
-							<Thead>
-								<Tr>
-									<Th>Removed {resource}</Th>
-									<Th isNumeric>Reclaimed</Th>
-								</Tr>
-							</Thead>
-							<Tbody>
-								{report.map((entry) => (
-									<Tr key={entryKey(entry)} data-testid="prune-report-row">
-										<Td fontFamily="mono">{renderLabel(entry)}</Td>
-										{entry.error ? (
-											<Td color="red.500">{entry.error}</Td>
-										) : (
-											<Td isNumeric>
-												{entry.size === undefined
-													? "—"
-													: formatBytes(entry.size)}
-											</Td>
-										)}
-									</Tr>
-								))}
-							</Tbody>
-						</Table>
-					</TableContainer>
-				)
-			) : (
+		<ReportDialog<TEntry, void>
+			// Prune's mutation takes no variables; the module always hands its
+			// confirm variables over, so the adapter drops them here.
+			mutation={{ ...mutation, mutate: () => mutation.mutate() }}
+			title={`Prune unused ${plural}`}
+			reportTitle="Prune report"
+			confirmLabel={`Prune ${plural}`}
+			confirmTestId="confirm-prune-button"
+			closeTestId="close-prune-report-button"
+			confirmVariables={() => undefined}
+			confirmBody={
 				<>
 					<Text>
 						All unused {plural} on this host will be removed. This cannot be
@@ -139,7 +62,35 @@ export function PruneReportDialog<
 						touched.
 					</Text>
 				</>
+			}
+			reportHeaders={
+				<>
+					<Th>Removed {resource}</Th>
+					<Th isNumeric>Reclaimed</Th>
+				</>
+			}
+			reportTestId="prune-report"
+			reportRowTestId="prune-report-row"
+			entryKey={entryKey}
+			entryFailure={(entry) => entry.error}
+			renderEntry={(entry, failure) => (
+				<>
+					<Td fontFamily="mono">{renderLabel(entry)}</Td>
+					{failure ? (
+						<Td color="red.500">{failure}</Td>
+					) : (
+						<Td isNumeric>
+							{entry.size === undefined ? "—" : formatBytes(entry.size)}
+						</Td>
+					)}
+				</>
 			)}
-		</Modal>
+			emptyReport={
+				<Text data-testid="prune-report-empty">
+					Nothing to prune: no unused {plural} on this host.
+				</Text>
+			}
+			onClose={onClose}
+		/>
 	);
 }

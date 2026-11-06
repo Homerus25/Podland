@@ -198,8 +198,10 @@ describe("QuadletList move/copy", () => {
 			screen.queryByRole("button", { name: "Move or copy web" }),
 		).not.toBeInTheDocument();
 		// The header drops the move/copy column with the rows, so the read-only
-		// table stays aligned.
-		expect(screen.getAllByRole("columnheader")).toHaveLength(6);
+		// table stays aligned. Spec 461, ticket #470: the per-row delete column
+		// is gone too, so the read-only table is name, resource, state, the
+		// lifecycle/logs cell, and the edit cell.
+		expect(screen.getAllByRole("columnheader")).toHaveLength(5);
 	});
 
 	it("offers one dialog listing only writable hosts, source excluded", async () => {

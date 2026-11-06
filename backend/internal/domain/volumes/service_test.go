@@ -194,6 +194,33 @@ func TestVolumeService_Delete_MapsInUseTo409(t *testing.T) {
 	assert.Contains(t, appErr.Message, "volume is in use by a container", "podman's refusal text must reach the frontend")
 }
 
+// TestVolumeService_Delete_RunningContainerRefusalIsNotInUse pins the
+// scoping of podman's running-container refusal (issue 462): the phrase
+// "cannot be removed without force" is the containers domain's refusal,
+// not a volume in-use refusal, so a volume remove answering it wraps
+// unclassified instead of claiming VOLUME_IN_USE. The shared
+// podmanerr.IsConflict is this domain's IsRefusal, so this test fails if
+// the containers phrase leaks back into it.
+func TestVolumeService_Delete_RunningContainerRefusalIsNotInUse(t *testing.T) {
+	engine := &fakeVolumeEngine{
+		removeFn: func(string, bool) error {
+			return &errorhandling.ErrorModel{
+				ResponseCode: http.StatusInternalServerError,
+				Message:      "cannot remove container 3f2e1d0c as it is running - running or paused containers cannot be removed without force: container state improper",
+				Because:      "container state improper",
+			}
+		},
+	}
+	service := NewVolumeService(fakeEngineProvider{engine: engine})
+
+	err := service.Delete(context.Background(), "user", "host", "my-volume", false)
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, appErrors.ErrVolumeInUse,
+		"a running-container refusal is not this domain's in-use refusal")
+	assert.Contains(t, err.Error(), "failed to remove volume")
+}
+
 func TestVolumeService_Delete_PropagatesEngineFailure(t *testing.T) {
 	engine := &fakeVolumeEngine{
 		removeFn: func(string, bool) error {

@@ -1,4 +1,5 @@
 import {
+	bulkRemoveVolumes,
 	createVolume,
 	deleteVolume,
 	getVolumeMovePreview,
@@ -14,6 +15,7 @@ import {
 import { useAlwaysRefetchListQuery } from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import { useMovePreview } from "@shared/transfers/transferHooks";
+import type { BulkRemoveInput } from "@shared/types/api";
 
 export function useVolumes(hostId: string) {
 	return useAlwaysRefetchListQuery(volumesQueryKey(hostId), () =>
@@ -47,6 +49,18 @@ export function useDeleteVolume(hostId: string) {
 export function usePruneVolumes(hostId: string) {
 	return useListInvalidatingMutation(hostId, "volumes", () =>
 		pruneVolumes(hostId),
+	);
+}
+
+// A bulk remove changes the host's volume set, so the list refetches on
+// success — including after a partial run, where the successes are gone and
+// the refused volumes stay. The report is the mutation's own data, so the
+// dialog reads it straight off the result.
+export function useBulkRemoveVolumes(hostId: string) {
+	return useListInvalidatingMutation(
+		hostId,
+		"volumes",
+		(input: BulkRemoveInput) => bulkRemoveVolumes(hostId, input),
 	);
 }
 

@@ -4,14 +4,17 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/Homerus25/podland/backend/internal/connections"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"go.podman.io/podman/v6/pkg/bindings"
 	"go.podman.io/podman/v6/pkg/bindings/quadlets"
 	podmanSecrets "go.podman.io/podman/v6/pkg/bindings/secrets"
 	bindingsVolumes "go.podman.io/podman/v6/pkg/bindings/volumes"
@@ -36,6 +39,13 @@ type QuadletEngine interface {
 	// resource started between the locate and the remove), becomes the
 	// error; a clean removal answers nil.
 	Remove(name string, force bool) error
+	// RemoveAll is Remove's batch twin: one podman call for the whole
+	// bulk-remove request, answering the per-name outcome. The failure's
+	// cause does not cross the wire — podman's batch endpoint marshals
+	// the report's error values as empty objects, so it carries WHICH
+	// quadlet failed but never WHY (the adapter owns that fact); the
+	// service answers the failed names with the generic entry.
+	RemoveAll(names []string, force bool) (*QuadletBatchRemoveReport, error)
 	// Install installs one quadlet file: the adapter owns the tar framing
 	// podman's install primitive requires. replace overwrites an existing
 	// installation; systemd is always reloaded.
@@ -70,6 +80,18 @@ type QuadletEngine interface {
 type QuadletVolumeInspect struct {
 	Name string
 	Size *int64
+}
+
+// QuadletBatchRemoveReport is the batch remove's per-name outcome in
+// domain vocabulary: the names podman removed and the names it refused
+// or failed to remove. The failure's cause is deliberately absent —
+// podman's batch endpoint marshals the report's error values as empty
+// objects, so the wire carries WHICH quadlet failed but never WHY.
+type QuadletBatchRemoveReport struct {
+	// Removed lists the quadlets the call removed.
+	Removed []string
+	// Failed lists the quadlets podman reported an error for.
+	Failed []string
 }
 
 // QuadletEngineProvider is the quadlets domain's slice of the connection
@@ -155,6 +177,52 @@ func (e reportError) Unwrap() error { return e.err }
 func isReportError(err error) bool {
 	var rErr reportError
 	return errors.As(err, &rErr)
+}
+
+// RemoveAll is the batch twin of Remove: one podman call for the whole
+// bulk-remove request (podman's DELETE /quadlets accepts the array). The
+// bindings' own QuadletRemove decodes into entities.QuadletRemoveReport,
+// whose Errors map[string]error cannot cross the wire — podman marshals
+// the error values as empty objects, so the bindings' decode fails
+// outright whenever any quadlet failed, discarding the whole report. The
+// adapter therefore owns the call and decodes tolerantly: the error
+// values are empty either way, but the KEYS name the failed quadlets,
+// which is the per-name attribution the bulk report needs.
+func (e *podmanQuadletEngine) RemoveAll(names []string, force bool) (*QuadletBatchRemoveReport, error) {
+	options := new(quadlets.QuadletRemoveOptions).WithForce(force).WithReloadSystemd(true)
+	params, err := options.ToParams()
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range names {
+		params.Add("quadlets", name)
+	}
+	conn, err := bindings.GetClient(e.ctx)
+	if err != nil {
+		return nil, err
+	}
+	response, err := conn.DoRequest(e.ctx, nil, http.MethodDelete, "/quadlets", params, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if !response.IsSuccess() {
+		return nil, response.Process(nil)
+	}
+
+	var wire struct {
+		Removed []string
+		Errors  map[string]json.RawMessage
+	}
+	if err := response.Process(&wire); err != nil {
+		return nil, err
+	}
+
+	report := &QuadletBatchRemoveReport{Removed: wire.Removed, Failed: make([]string, 0, len(wire.Errors))}
+	for name := range wire.Errors {
+		report.Failed = append(report.Failed, name)
+	}
+	return report, nil
 }
 
 func (e *podmanQuadletEngine) Install(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {

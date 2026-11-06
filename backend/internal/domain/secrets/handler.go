@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Homerus25/podland/backend/internal/bulkremove"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -83,6 +84,32 @@ func (h *SecretHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 
 		return struct{}{}, h.service.Delete(ctx, userID, hostID, secretID)
+	})
+}
+
+// BulkRemove handles removing several secrets in one request. Route-level
+// RequireHostPermission(write) (app.go) gates it at write. The body
+// carries the secret names (the `ids` field — the same identity the
+// single-item Delete's {secretId} route addresses) and nothing else —
+// this endpoint's contract has
+// no force parameter at all (bulkremove.IDsRequest), because the
+// single-item Delete has none either. The answer is 200 with one report
+// entry per requested id, in request order — a per-id failure is an
+// entry, never a status code. Every entry rides the single-item Delete's
+// classification (internal/removal through internal/bulkremove), so an
+// in-use secret answers a SECRET_IN_USE entry carrying podman's message
+// while the rest of the batch still processes, and there is no force
+// retry that could remove it.
+func (h *SecretHandler) BulkRemove(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]bulkremove.Entry, error) {
+		var request bulkremove.IDsRequest
+		if appErr := web.Decode(w, r, &request); appErr != nil {
+			return nil, appErr
+		}
+
+		return bulkremove.Run(ctx, request.IDs, func(ctx context.Context, secretID string) error {
+			return h.service.Delete(ctx, userID, hostID, secretID)
+		}), nil
 	})
 }
 

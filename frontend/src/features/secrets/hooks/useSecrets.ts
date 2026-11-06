@@ -1,4 +1,5 @@
 import {
+	bulkRemoveSecrets,
 	type CreateSecretInput,
 	createSecret,
 	deleteSecret,
@@ -24,6 +25,7 @@ import {
 	invalidateMoveResult,
 	useMovePreview,
 } from "@shared/transfers/transferHooks";
+import type { BulkRemoveInput } from "@shared/types/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function useSecrets(hostId: string) {
@@ -75,6 +77,19 @@ export function useRevealSecret(hostId: string) {
 export function useDeleteSecret(hostId: string) {
 	return useListInvalidatingMutation(hostId, "secrets", (secretId: string) =>
 		deleteSecret(hostId, secretId),
+	);
+}
+
+// A bulk remove changes the host's secret set, so the list refetches on
+// success — including after a partial run, where the successes are gone and
+// the refused secrets stay. Secrets have no force path, so the request is
+// ids-only and the report offers no retry. The report is the mutation's own
+// data, so the dialog reads it straight off the result.
+export function useBulkRemoveSecrets(hostId: string) {
+	return useListInvalidatingMutation(
+		hostId,
+		"secrets",
+		(input: BulkRemoveInput) => bulkRemoveSecrets(hostId, input),
 	);
 }
 

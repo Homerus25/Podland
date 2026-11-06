@@ -8,7 +8,7 @@ import {
 	Text,
 	Tr,
 } from "@chakra-ui/react";
-import {
+import type {
 	useRestartQuadlet,
 	useStartQuadlet,
 	useStopQuadlet,
@@ -18,7 +18,7 @@ import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { StateBadge } from "@shared/components/StateBadge";
 import { getApiError } from "@shared/utils/api";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 // Stop and restart share the backend's option set (timeout only — there is
 // no force param, issue 205), so one modal serves both: the caller names the
@@ -28,7 +28,11 @@ import { useState } from "react";
 // destructive red — stopping a unit is routine, not danger — and the footer
 // plumbing (reset lifecycle, close-on-success, pending wiring, error region
 // above the body) is the module's.
-function LifecycleOptionsModal({
+//
+// The list renders this, not the row: a plain row function cannot own the
+// open/closed state, so the list holds which action is open and mounts the
+// modal from there.
+export function LifecycleOptionsModal({
 	quadlet,
 	actionLabel,
 	lifecycle,
@@ -84,53 +88,64 @@ function LifecycleOptionsModal({
 	);
 }
 
-// Each row owns its lifecycle mutation instances, so pending state and
-// errors are scoped to the affected quadlet and other rows stay usable.
-export function QuadletRow({
-	hostId,
+// The lifecycle mutations the list owns, one instance per action, handed to
+// every row. A plain row function cannot own hooks, so the list keeps them
+// and each row scopes its own pending state off the mutation's variables.
+export type QuadletLifecycleMutations = {
+	start: ReturnType<typeof useStartQuadlet>;
+	stop: ReturnType<typeof useStopQuadlet>;
+	restart: ReturnType<typeof useRestartQuadlet>;
+};
+
+// The row is a plain function returning a Fragment of <Tr>s, not a
+// component: the list's cell-cloning walk (mobile pinning and the selection
+// checkbox column) reaches a row's cells only when `renderRow` hands back a
+// `Tr` or a `Fragment` of `Tr`s — a component element is opaque to it, so a
+// row wrapped in one silently loses both. The key rides the returned
+// Fragment, which is the element the list's map places.
+//
+// Any in-flight lifecycle action takes the row's other lifecycle buttons with
+// it, so slow systemd operations don't invite double clicks; the scoping by
+// variables keeps other rows usable. Stop and restart run through the
+// options modal, which the list mounts — the row only names the action.
+//
+// The row carries no destructive button (spec 461, ticket #470): quadlets
+// have no detail page, so removal is the list's "Remove selected" — a single
+// quadlet is selected and removed through the same bulk button.
+export function renderQuadletRow({
 	quadlet,
 	canManage,
+	lifecycle,
 	onEdit,
 	onMove,
-	onDelete,
 	onShowLogs,
+	onLifecycle,
 }: {
-	hostId: string;
 	quadlet: QuadletSummary;
 	canManage: boolean;
+	lifecycle: QuadletLifecycleMutations;
 	onEdit: (quadlet: QuadletSummary) => void;
 	onMove: (quadlet: QuadletSummary) => void;
-	onDelete: (quadlet: QuadletSummary) => void;
 	onShowLogs: (quadlet: QuadletSummary) => void;
+	onLifecycle: (quadlet: QuadletSummary, action: "stop" | "restart") => void;
 }) {
-	const startQuadlet = useStartQuadlet(hostId);
-	const stopQuadlet = useStopQuadlet(hostId);
-	const restartQuadlet = useRestartQuadlet(hostId);
-	// Stop and restart both run through the options modal; this remembers
-	// which one is open (null = none).
-	const [pendingAction, setPendingAction] = useState<"stop" | "restart" | null>(
-		null,
-	);
-	// Any in-flight lifecycle action takes the row's other lifecycle buttons
-	// with it, so slow systemd operations don't invite double clicks. Other
-	// rows keep their own mutation instances and stay usable.
-	const lifecyclePending =
-		startQuadlet.isPending || stopQuadlet.isPending || restartQuadlet.isPending;
-
-	const actions = {
-		stop: { label: "Stop", mutation: stopQuadlet },
-		restart: { label: "Restart", mutation: restartQuadlet },
-	};
-	const openAction = pendingAction ? actions[pendingAction] : null;
-
-	// The modal mounts open and unmounts closed, and the module resets the
-	// mutation on both ends — reopening always starts clean without a
-	// hand-rolled reset here.
-	const closeLifecycleOptions = () => setPendingAction(null);
+	const startPending =
+		lifecycle.start.isPending && lifecycle.start.variables === quadlet.id;
+	const stopPending =
+		lifecycle.stop.isPending &&
+		lifecycle.stop.variables?.quadletId === quadlet.id;
+	const restartPending =
+		lifecycle.restart.isPending &&
+		lifecycle.restart.variables?.quadletId === quadlet.id;
+	const lifecyclePending = startPending || stopPending || restartPending;
+	// Only a failed start shows under the row; stop and restart report inside
+	// their still-open options modal.
+	const rowError =
+		lifecycle.start.variables === quadlet.id ? lifecycle.start.error : null;
 
 	const isRunning = quadlet.state === "running";
 	return (
-		<>
+		<Fragment key={quadlet.id}>
 			<Tr data-testid="quadlet-row">
 				<Td fontFamily="mono">{quadlet.name}</Td>
 				<Td fontFamily="mono">{quadlet.resource}</Td>
@@ -145,8 +160,8 @@ export function QuadletRow({
 								variant="outline"
 								colorScheme="green"
 								aria-label={`Start ${quadlet.name}`}
-								onClick={() => startQuadlet.mutate(quadlet.id)}
-								isLoading={startQuadlet.isPending}
+								onClick={() => lifecycle.start.mutate(quadlet.id)}
+								isLoading={startPending}
 								isDisabled={lifecyclePending}
 								data-testid="start-quadlet-button"
 							>
@@ -158,7 +173,7 @@ export function QuadletRow({
 								size="xs"
 								variant="outline"
 								aria-label={`Stop ${quadlet.name}`}
-								onClick={() => setPendingAction("stop")}
+								onClick={() => onLifecycle(quadlet, "stop")}
 								isDisabled={lifecyclePending}
 								data-testid="stop-quadlet-button"
 							>
@@ -169,7 +184,7 @@ export function QuadletRow({
 							size="xs"
 							variant="outline"
 							aria-label={`Restart ${quadlet.name}`}
-							onClick={() => setPendingAction("restart")}
+							onClick={() => onLifecycle(quadlet, "restart")}
 							isDisabled={lifecyclePending}
 							data-testid="restart-quadlet-button"
 						>
@@ -209,34 +224,14 @@ export function QuadletRow({
 						</Button>
 					</Td>
 				) : null}
-				<Td>
-					<Button
-						size="xs"
-						colorScheme="red"
-						variant="outline"
-						aria-label={`Delete ${quadlet.name}`}
-						onClick={() => onDelete(quadlet)}
-						data-testid="delete-quadlet-button"
-					>
-						Delete
-					</Button>
-				</Td>
 			</Tr>
-			{startQuadlet.error ? (
+			{rowError ? (
 				<Tr>
-					<Td colSpan={canManage ? 7 : 6}>
-						<ErrorDisplay error={getApiError(startQuadlet.error)} />
+					<Td colSpan={canManage ? 6 : 5}>
+						<ErrorDisplay error={getApiError(rowError)} />
 					</Td>
 				</Tr>
 			) : null}
-			{openAction ? (
-				<LifecycleOptionsModal
-					quadlet={quadlet}
-					actionLabel={openAction.label}
-					lifecycle={openAction.mutation}
-					onClose={closeLifecycleOptions}
-				/>
-			) : null}
-		</>
+		</Fragment>
 	);
 }

@@ -1,14 +1,15 @@
-import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
+import { Button, HStack, Td, Tr } from "@chakra-ui/react";
 import { can } from "@features/hosts/permissions";
 import { CreateSecretDialog } from "@features/secrets/components/CreateSecretDialog";
 import { MoveSecretDialog } from "@features/secrets/components/MoveSecretDialog";
 import {
+	useBulkRemoveSecrets,
 	useCreateSecret,
-	useDeleteSecret,
 	useSecrets,
 } from "@features/secrets/hooks/useSecrets";
 import type { SecretSummary } from "@features/secrets/services/secretsApi";
-import { ConfirmDialog } from "@shared/components/MutationDialog";
+import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
+
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
@@ -16,94 +17,62 @@ import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-// Each row owns its delete mutation instance, so pending state and errors
-// stay scoped to this secret's modal and other rows stay usable. The shell,
-// reset lifecycle, danger footer, close-on-success, and error region are
-// ConfirmDialog's; the failure envelopes (409 SECRET_IN_USE, 404) surface
-// through the default error region as plain envelopes, with no code-specific
-// hint. There are no delete options in v1: the backend exposes no force
-// parameter. The row itself is clickable: it navigates to the secret's
-// detail page (spec 301), and every action inside it — the move/copy and
-// delete buttons — stops propagation so it never also fires the row action.
-function SecretRow({
-	host,
+// The row is a plain function returning the <Tr>, not a component: the
+// list's cell-cloning walk (mobile pinning and the selection checkbox
+// column) reaches a row's cells only when `renderRow` hands back a `Tr` or a
+// `Fragment` of `Tr`s — a component element is opaque to it, so a row
+// wrapped in one silently loses both. The key rides the returned `Tr`, which
+// is the element the list's map places. The row's own modal (move/copy)
+// lives in the list, like every other list's: a plain function cannot own
+// the state that opens it.
+//
+// The row itself is clickable: it navigates to the secret's detail page
+// (spec 301), and the action inside it — the move/copy button — stops
+// propagation so it never also fires the row action.
+//
+// The row carries no destructive button (spec 461, ticket #470): a single
+// secret is removed from its detail page, several from the toolbar's "Remove
+// selected".
+function renderSecretRow({
 	secret,
-	canDelete,
 	canMove,
+	onOpen,
+	onMove,
 }: {
-	host: Host;
 	secret: SecretSummary;
-	canDelete: boolean;
 	canMove: boolean;
+	onOpen: (secret: SecretSummary) => void;
+	onMove: (secret: SecretSummary) => void;
 }) {
-	const hostId = host.id;
-	const navigate = useNavigate();
-	const deleteSecret = useDeleteSecret(hostId);
-	const [isDeleteOpen, setIsDeleteOpen] = useState(false);
-	const [isMoveOpen, setIsMoveOpen] = useState(false);
-
 	return (
-		<>
-			<Tr
-				data-testid="secret-row"
-				cursor="pointer"
-				onClick={() => navigate(detailPath(hostId, "secrets", secret.name))}
-			>
-				<Td fontFamily="mono">{secret.name}</Td>
-				<Td>{secret.driver}</Td>
-				<Td>{formatRelativeDate(secret.createdAt)}</Td>
-				{canDelete ? (
-					<Td>
-						<HStack spacing={2}>
-							{canMove ? (
-								<Button
-									size="xs"
-									variant="outline"
-									aria-label={`Move or copy ${secret.name}`}
-									onClick={(event) => {
-										event.stopPropagation();
-										setIsMoveOpen(true);
-									}}
-									data-testid="move-secret-button"
-								>
-									Move/Copy
-								</Button>
-							) : null}
-							<Button
-								size="xs"
-								colorScheme="red"
-								variant="outline"
-								aria-label={`Delete ${secret.name}`}
-								onClick={(event) => {
-									event.stopPropagation();
-									setIsDeleteOpen(true);
-								}}
-								data-testid="delete-secret-button"
-							>
-								Delete
-							</Button>
-						</HStack>
-					</Td>
-				) : null}
-			</Tr>
-			{isMoveOpen ? (
-				<MoveSecretDialog
-					host={host}
-					secret={secret}
-					onClose={() => setIsMoveOpen(false)}
-				/>
+		<Tr
+			key={secret.id}
+			data-testid="secret-row"
+			cursor="pointer"
+			onClick={() => onOpen(secret)}
+		>
+			<Td fontFamily="mono">{secret.name}</Td>
+			<Td>{secret.driver}</Td>
+			<Td>{formatRelativeDate(secret.createdAt)}</Td>
+			{canMove ? (
+				<Td>
+					<HStack spacing={2}>
+						<Button
+							size="xs"
+							variant="outline"
+							aria-label={`Move or copy ${secret.name}`}
+							onClick={(event) => {
+								event.stopPropagation();
+								onMove(secret);
+							}}
+							data-testid="move-secret-button"
+						>
+							Move/Copy
+						</Button>
+					</HStack>
+				</Td>
 			) : null}
-			{isDeleteOpen ? (
-				<ConfirmDialog
-					mutation={deleteSecret}
-					title="Delete secret"
-					confirmLabel="Delete secret"
-					confirm={() => secret.name}
-					onClose={() => setIsDeleteOpen(false)}
-					body={<Text>Delete “{secret.name}”? This cannot be undone.</Text>}
-				/>
-			) : null}
-		</>
+		</Tr>
 	);
 }
 
@@ -111,13 +80,25 @@ function SecretRow({
 // read level); write affordances are gated on the host's per-caller
 // facts. The toolbar/triad/table plumbing and the hint swap are
 // ResourceList's; this adapter owns only the columns, the row, and the
-// create modal (below the manage capability, the hint replaces the
-// controls — never bait users with disabled buttons).
+// create/move/bulk-remove modals (below the manage capability, the hint
+// replaces the controls — never bait users with disabled buttons).
 export function SecretList({ host }: { host: Host }) {
 	const hostId = host.id;
+	const navigate = useNavigate();
 	const { data: secrets, isPending, error } = useSecrets(hostId);
 	const createSecret = useCreateSecret(hostId);
+	const bulkRemoveSecrets = useBulkRemoveSecrets(hostId);
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
+	const [moveTarget, setMoveTarget] = useState<SecretSummary | null>(null);
+	// The bulk-remove dialog's snapshot: the selected secrets plus the
+	// selection's own clear, captured when the dialog opens. The list owns
+	// the selection, so the adapter never keeps a second copy of it — it
+	// holds the snapshot the run reports on and hands the clear back on
+	// close.
+	const [bulkRemoveTarget, setBulkRemoveTarget] = useState<{
+		secrets: SecretSummary[];
+		clear: () => void;
+	} | null>(null);
 	const canManage = can(host, "manage-secrets");
 	// The transfer's source gate is admin — the value leaving the host is
 	// a reveal — so the row's Move/Copy affordance sits behind
@@ -135,17 +116,21 @@ export function SecretList({ host }: { host: Host }) {
 					{ label: "Name", isName: true, sortBy: (s) => s.name },
 					{ label: "Driver", sortBy: (s) => s.driver },
 					{ label: "Created", sortBy: (s) => s.createdAt },
-					...(canManage ? [{}] : []),
+					// The action column exists only when the row can offer the
+					// action: Move/Copy is the one row action left (spec 461,
+					// ticket #470 retired the delete button), and it is gated on
+					// the admin-level reveal-secrets capability.
+					...(canMove ? [{}] : []),
 				]}
-				renderRow={(secret) => (
-					<SecretRow
-						key={secret.id}
-						host={host}
-						secret={secret}
-						canDelete={canManage}
-						canMove={canMove}
-					/>
-				)}
+				renderRow={(secret) =>
+					renderSecretRow({
+						secret,
+						canMove,
+						onOpen: (target) =>
+							navigate(detailPath(hostId, "secrets", target.name)),
+						onMove: setMoveTarget,
+					})
+				}
 				toolbar={
 					<Button
 						size="sm"
@@ -157,11 +142,43 @@ export function SecretList({ host }: { host: Host }) {
 					</Button>
 				}
 				canManage={canManage}
+				// The selection key is the secret's name, the identity the
+				// removal endpoint addresses — the same one the detail
+				// page's single-item Remove sends — so the bulk request and
+				// the report entries speak the feature's own vocabulary.
+				selection={{ getKey: (secret) => secret.name }}
+				onRemoveSelected={(selection) =>
+					setBulkRemoveTarget({
+						secrets: selection.selectedItems,
+						clear: selection.clear,
+					})
+				}
 			/>
+			{bulkRemoveTarget ? (
+				<BulkRemoveDialog
+					items={bulkRemoveTarget.secrets}
+					noun="secret"
+					itemKey={(secret) => secret.name}
+					itemLabel={(secret) => secret.name}
+					mutation={bulkRemoveSecrets}
+					force={false}
+					// The selection clears when the run succeeds, not when the
+					// dialog closes: a failed run keeps it for the retry.
+					onSuccess={bulkRemoveTarget.clear}
+					onClose={() => setBulkRemoveTarget(null)}
+				/>
+			) : null}
 			{isCreateOpen ? (
 				<CreateSecretDialog
 					mutation={createSecret}
 					onClose={() => setIsCreateOpen(false)}
+				/>
+			) : null}
+			{moveTarget ? (
+				<MoveSecretDialog
+					host={host}
+					secret={moveTarget}
+					onClose={() => setMoveTarget(null)}
 				/>
 			) : null}
 		</>

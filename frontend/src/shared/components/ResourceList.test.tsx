@@ -1,9 +1,9 @@
 import { Button, Td, Tr } from "@chakra-ui/react";
 import { ResourceList } from "@shared/components/ResourceList";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Fragment } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { renderWithQuery } from "@/test/render";
 import { breakpointRules } from "@/test/responsiveCss";
 
@@ -451,5 +451,300 @@ describe("ResourceList mobile pinning", () => {
 		expect(rowNames()).toEqual(["spinner", "doodad"]);
 		await user.click(screen.getByTestId("sort-gadget-0"));
 		expect(rowNames()).toEqual(["doodad", "spinner"]);
+	});
+});
+
+// The selection contract (spec 461, ticket 463): selection is opt-in through
+// the `selection` prop, the owner keeps the selected-key set as
+// component-local state (like the sort state), and the checkbox column is
+// injected into the feature-rendered rows by the same cell-cloning machinery
+// that owns mobile pinning — no feature row grows a <Td>. The adapter hands
+// over the row's stable identity (`getKey`) and may react to changes
+// (`onChange`) or open its bulk-remove dialog from the live selection
+// (`onRemoveSelected`, the owner-rendered left toolbar button).
+describe("ResourceList selection", () => {
+	function renderSelectableList(
+		overrides: Partial<Parameters<typeof ResourceList<Gadget>>[0]> = {},
+	) {
+		const onChange = vi.fn();
+		const props = {
+			resource: "gadget",
+			isPending: false,
+			error: undefined as unknown,
+			items: gadgets as Gadget[] | undefined,
+			columns: [{ label: "Name" }],
+			renderRow: renderGadgetRow,
+			// Selection is write-gated: the adapter must say so explicitly.
+			canManage: true,
+			selection: { getKey: (gadget: Gadget) => gadget.id, onChange },
+			...overrides,
+		};
+		return { onChange, ...render(<ResourceList {...props} />) };
+	}
+
+	function rowCheckboxes(): HTMLElement[] {
+		return screen
+			.getAllByTestId("gadget-row")
+			.map((row) => within(row).getByRole("checkbox"));
+	}
+
+	it("renders no checkboxes when the list does not ask for selection", () => {
+		renderResourceList();
+
+		expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+	});
+
+	it("renders a checkbox per row plus the select-all header when selection is on", () => {
+		renderSelectableList();
+
+		expect(rowCheckboxes()).toHaveLength(2);
+		expect(
+			screen.getByRole("checkbox", { name: "Select all gadgets" }),
+		).toBeInTheDocument();
+	});
+
+	it("toggles one row and reports the selected keys", async () => {
+		const user = userEvent.setup();
+		const { onChange } = renderSelectableList();
+
+		expect(onChange).not.toHaveBeenCalled();
+
+		const [first] = rowCheckboxes();
+		await user.click(first);
+		expect(first).toBeChecked();
+		expect(onChange).toHaveBeenLastCalledWith(["g-1"]);
+
+		await user.click(first);
+		expect(first).not.toBeChecked();
+		expect(onChange).toHaveBeenLastCalledWith([]);
+	});
+
+	it("selects every row from the header, and clears when all are selected", async () => {
+		const user = userEvent.setup();
+		const { onChange } = renderSelectableList();
+
+		const selectAll = screen.getByRole("checkbox", {
+			name: "Select all gadgets",
+		});
+		await user.click(selectAll);
+		expect(selectAll).toBeChecked();
+		for (const checkbox of rowCheckboxes()) {
+			expect(checkbox).toBeChecked();
+		}
+		expect(onChange).toHaveBeenLastCalledWith(["g-1", "g-2"]);
+
+		await user.click(selectAll);
+		expect(selectAll).not.toBeChecked();
+		for (const checkbox of rowCheckboxes()) {
+			expect(checkbox).not.toBeChecked();
+		}
+		expect(onChange).toHaveBeenLastCalledWith([]);
+	});
+
+	it("renders the owner's Remove selected button on the left of the toolbar row only while something is selected", async () => {
+		const user = userEvent.setup();
+		const onRemoveSelected = vi.fn();
+		renderSelectableList({
+			toolbar: (
+				<Button size="sm" data-testid="gadgets-toolbar-action">
+					Do a thing
+				</Button>
+			),
+			onRemoveSelected,
+		});
+
+		// The bulk action exists only while something is selected: no
+		// disabled button, ever.
+		expect(
+			screen.queryByTestId("remove-selected-gadgets-button"),
+		).not.toBeInTheDocument();
+		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
+
+		await user.click(rowCheckboxes()[1]);
+
+		const removeButton = screen.getByTestId("remove-selected-gadgets-button");
+		// The left edge is the contract: the button leads the toolbar row,
+		// before the adapter's own actions.
+		const toolbar = screen.getByTestId("gadgets-toolbar");
+		expect(toolbar.firstElementChild).toBe(removeButton);
+		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
+
+		await user.click(rowCheckboxes()[1]);
+		expect(
+			screen.queryByTestId("remove-selected-gadgets-button"),
+		).not.toBeInTheDocument();
+	});
+
+	it("hands the live selection to onRemoveSelected, and clears through the clear it hands back", async () => {
+		const user = userEvent.setup();
+		const onRemoveSelected = vi.fn();
+		const { onChange } = renderSelectableList({ onRemoveSelected });
+
+		await user.click(rowCheckboxes()[0]);
+		await user.click(rowCheckboxes()[1]);
+		await user.click(screen.getByTestId("remove-selected-gadgets-button"));
+
+		expect(onRemoveSelected).toHaveBeenCalledTimes(1);
+		const selection = onRemoveSelected.mock.calls[0][0];
+		expect(selection.selectedKeys).toEqual(["g-1", "g-2"]);
+		// The projection is the selected rows themselves, in list order.
+		expect(selection.selectedItems.map((item: Gadget) => item.name)).toEqual([
+			"spinner",
+			"doodad",
+		]);
+
+		act(() => selection.clear());
+		expect(rowCheckboxes()[0]).not.toBeChecked();
+		expect(onChange).toHaveBeenLastCalledWith([]);
+	});
+
+	it("renders no Remove selected button for a read-only caller", () => {
+		renderSelectableList({ canManage: false, onRemoveSelected: vi.fn() });
+
+		expect(
+			screen.queryByTestId("remove-selected-gadgets-button"),
+		).not.toBeInTheDocument();
+		expect(screen.getByTestId("gadgets-permission-hint")).toBeInTheDocument();
+	});
+
+	it("hides the checkbox column from read-only users", () => {
+		renderSelectableList({ canManage: false });
+
+		expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+		expect(screen.getByTestId("gadgets-permission-hint")).toBeInTheDocument();
+	});
+
+	// Selectability is write-gated, and an omitted `canManage` is not a
+	// write grant: a list that asks for selection without saying who may
+	// write renders no checkboxes rather than offering a read-only caller
+	// an action that would 403.
+	it("hides the checkbox column when canManage is omitted", () => {
+		renderSelectableList({ canManage: undefined });
+
+		expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+	});
+
+	it("resets the selection when the list remounts", async () => {
+		const user = userEvent.setup();
+		const { unmount } = renderSelectableList();
+
+		await user.click(rowCheckboxes()[0]);
+		expect(rowCheckboxes()[0]).toBeChecked();
+
+		unmount();
+		renderSelectableList();
+		for (const checkbox of rowCheckboxes()) {
+			expect(checkbox).not.toBeChecked();
+		}
+	});
+
+	it("keeps the selection when the list is sorted", async () => {
+		const user = userEvent.setup();
+		const { onChange } = renderSelectableList({
+			columns: [{ label: "Name", sortBy: (gadget: Gadget) => gadget.name }],
+		});
+
+		await user.click(screen.getByRole("checkbox", { name: "Select g-1" }));
+		expect(onChange).toHaveBeenCalledTimes(1);
+
+		await user.click(screen.getByTestId("sort-gadget-0"));
+
+		// Server order was spinner, doodad; ascending puts doodad first.
+		const [first, second] = screen.getAllByTestId("gadget-row");
+		expect(within(first).getByText("doodad")).toBeInTheDocument();
+		expect(within(first).getByRole("checkbox")).not.toBeChecked();
+		expect(within(second).getByText("spinner")).toBeInTheDocument();
+		expect(within(second).getByRole("checkbox")).toBeChecked();
+		// Reordering is not a selection change.
+		expect(onChange).toHaveBeenCalledTimes(1);
+	});
+
+	// The spanning row-error cells the container, pod, and quadlet rows
+	// render must widen with the checkbox column, or the table is invalid.
+	function renderErrorRow(gadget: Gadget) {
+		return (
+			<Fragment key={gadget.id}>
+				<Tr data-testid="gadget-row">
+					<Td>{gadget.name}</Td>
+				</Tr>
+				<Tr data-testid="gadget-error-row">
+					<Td colSpan={1} data-testid="gadget-error-cell">
+						boom
+					</Td>
+				</Tr>
+			</Fragment>
+		);
+	}
+
+	it("grows a spanning row-error cell by one column while selection is on", () => {
+		renderSelectableList({ renderRow: renderErrorRow });
+
+		expect(screen.getAllByTestId("gadget-error-cell")[0]).toHaveAttribute(
+			"colspan",
+			"2",
+		);
+		// A spanning row is an error row, not a data row: no checkbox.
+		expect(
+			within(screen.getAllByTestId("gadget-error-row")[0]).queryAllByRole(
+				"checkbox",
+			),
+		).toHaveLength(0);
+	});
+
+	it("leaves the spanning cell's colSpan alone without selection", () => {
+		renderResourceList({ renderRow: renderErrorRow });
+
+		expect(screen.getAllByTestId("gadget-error-cell")[0]).toHaveAttribute(
+			"colspan",
+			"1",
+		);
+	});
+
+	it("keeps the pins on the name and action columns and never pins the checkbox column", () => {
+		renderWithQuery(
+			<ResourceList
+				resource="gadget"
+				isPending={false}
+				error={undefined}
+				items={gadgets}
+				columns={[
+					{
+						label: "Name",
+						isName: true,
+						sortBy: (gadget: Gadget) => gadget.name,
+					},
+					{ label: "Size" },
+					{},
+				]}
+				renderRow={(gadget: Gadget) => (
+					<Tr key={gadget.id} data-testid="gadget-row">
+						<Td data-testid="gadget-name-cell">{gadget.name}</Td>
+						<Td data-testid="gadget-size-cell">{gadget.id}</Td>
+						<Td data-testid="gadget-actions-cell" />
+					</Tr>
+				)}
+				selection={{ getKey: (gadget: Gadget) => gadget.id }}
+				canManage
+			/>,
+			{ chakra: true },
+		);
+
+		const table = screen.getByTestId("gadgets-table");
+		const [selectHeader, nameHeader, , actionsHeader] =
+			within(table).getAllByRole("columnheader");
+		expect(selectHeader).not.toHaveStyle("position: sticky");
+		expect(nameHeader).toHaveStyle("position: sticky");
+		expect(nameHeader).toHaveStyle("left: 0px");
+		expect(actionsHeader).toHaveStyle("position: sticky");
+		expect(actionsHeader).toHaveStyle("right: 0px");
+
+		const row = screen.getAllByTestId("gadget-row")[0];
+		const [selectCell, nameCell, , actionsCell] =
+			within(row).getAllByRole("cell");
+		expect(selectCell).not.toHaveStyle("position: sticky");
+		expect(nameCell).toHaveStyle("position: sticky");
+		expect(nameCell).toHaveStyle("left: 0px");
+		expect(actionsCell).toHaveStyle("position: sticky");
+		expect(actionsCell).toHaveStyle("right: 0px");
 	});
 });

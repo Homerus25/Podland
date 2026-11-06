@@ -9,12 +9,13 @@ Endpoint documentation is split by domain:
 - [Auth](description_auth_api.md) - Login, logout, token status
 - [Users](description_users_api.md) - User creation (admin-only)
 - [Hosts](description_hosts_api.md) - Host CRUD, access management, event stream (SSE)
-- [Containers](description_containers_api.md) - Container CRUD, lifecycle, logs
-- [Images](description_images_api.md) - Image listing, pull, removal
-- [Networks](description_networks_api.md) - Network list, create, connect, delete, prune, inspect
-- [Pods](description_pods_api.md) - Pod list, create, lifecycle, prune, inspect
-- [Quadlets](description_quadlets_api.md) - Quadlet CRUD, lifecycle, generate, import
-- [Secrets](description_secrets_api.md) - Secret list/inspect/create/delete with admin-only value reveal
+- [Containers](description_containers_api.md) - Container CRUD, lifecycle, logs, bulk remove
+- [Images](description_images_api.md) - Image listing, pull, removal, bulk remove
+- [Networks](description_networks_api.md) - Network list, create, connect, delete, prune, inspect, bulk remove
+- [Volumes](description_volumes_api.md) - Volume list, create, inspect, delete, prune, transfer, bulk remove
+- [Pods](description_pods_api.md) - Pod list, create, lifecycle, prune, inspect, bulk remove
+- [Quadlets](description_quadlets_api.md) - Quadlet CRUD, lifecycle, generate, import, bulk remove
+- [Secrets](description_secrets_api.md) - Secret list/inspect/create/delete with admin-only value reveal, bulk remove
 
 Authentication uses JWT Bearer tokens; see the [Auth](description_auth_api.md) document for details.
 

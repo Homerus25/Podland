@@ -1,4 +1,5 @@
-import { api, hostApiPath } from "@shared/utils/api";
+import type { BulkRemoveEntry, BulkRemoveInput } from "@shared/types/api";
+import { api, bulkRemove, hostApiPath } from "@shared/utils/api";
 
 // Network as returned by GET /api/hosts/{id}/networks
 // (backend/internal/domain/networks/dto.go NetworkResponse). The DTO
@@ -147,4 +148,18 @@ export async function deleteNetwork(
 	await api.delete(hostApiPath(hostId, "networks", networkName), {
 		params: force ? { force: true } : undefined,
 	});
+}
+
+// POST /api/hosts/{id}/networks/remove -> 200 (backend
+// internal/bulkremove Entry): one report entry per requested name, in
+// request order. A per-name failure is an entry, never a status code, so an
+// in-use network without force answers a NETWORK_IN_USE entry while the
+// rest of the batch still processes. The POST is the shared bulkRemove helper's
+// (shared/utils/api.ts): the first pass is plain on the wire, and only the
+// report's retry carries force.
+export function bulkRemoveNetworks(
+	hostId: string,
+	input: BulkRemoveInput,
+): Promise<BulkRemoveEntry[]> {
+	return bulkRemove(hostId, "networks", input);
 }

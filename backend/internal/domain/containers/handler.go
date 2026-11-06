@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/Homerus25/podland/backend/internal/bulkremove"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	"github.com/Homerus25/podland/backend/internal/web"
@@ -240,6 +241,28 @@ func (h *ContainerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		force := web.QueryBool(r, "force", false)
 
 		return struct{}{}, h.service.Delete(ctx, userID, hostID, containerID, force)
+	})
+}
+
+// BulkRemove handles removing several containers in one request. Route-level
+// RequireHostPermission(write) (app.go) gates it at write. The body
+// carries the container ids and the force flag (default false); the answer
+// is 200 with one report entry per requested id, in request order — a
+// per-id failure is an entry, never a status code. Every entry rides the
+// single-item Delete's classification (internal/removal through
+// internal/bulkremove), so a running container without force answers a
+// CONTAINER_RUNNING entry carrying podman's message while the rest of the
+// batch still processes.
+func (h *ContainerHandler) BulkRemove(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]bulkremove.Entry, error) {
+		var request bulkremove.Request
+		if appErr := web.Decode(w, r, &request); appErr != nil {
+			return nil, appErr
+		}
+
+		return bulkremove.Run(ctx, request.IDs, func(ctx context.Context, containerID string) error {
+			return h.service.Delete(ctx, userID, hostID, containerID, request.Force)
+		}), nil
 	})
 }
 

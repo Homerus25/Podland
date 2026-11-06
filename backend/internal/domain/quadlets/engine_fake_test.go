@@ -15,6 +15,7 @@ type fakeQuadletEngine struct {
 	listFn             func(opts entities.QuadletListOptions) ([]*entities.ListQuadlet, error)
 	printFn            func(name string) (string, error)
 	removeFn           func(name string, force bool) error
+	removeAllFn        func(names []string, force bool) (*QuadletBatchRemoveReport, error)
 	installFn          func(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error)
 	logsFn             func(containerName string, opts entities.ContainerLogsOptions) error
 	inspectContainerFn func(id string) ([]*entities.ContainerInspectReport, []error, error)
@@ -44,6 +45,13 @@ func (f *fakeQuadletEngine) Remove(name string, force bool) error {
 		panic("unexpected QuadletEngine.Remove call")
 	}
 	return f.removeFn(name, force)
+}
+
+func (f *fakeQuadletEngine) RemoveAll(names []string, force bool) (*QuadletBatchRemoveReport, error) {
+	if f.removeAllFn == nil {
+		panic("unexpected QuadletEngine.RemoveAll call")
+	}
+	return f.removeAllFn(names, force)
 }
 
 func (f *fakeQuadletEngine) Install(fileName string, content []byte, replace bool) (*entities.QuadletInstallReport, error) {

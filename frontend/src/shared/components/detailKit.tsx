@@ -1,4 +1,5 @@
 import {
+	Button,
 	ListItem,
 	Table,
 	TableContainer,
@@ -8,13 +9,15 @@ import {
 	Tr,
 	UnorderedList,
 } from "@chakra-ui/react";
+import type { CapabilityGate } from "@features/hosts/hooks/useCapabilityGate";
+import { PermissionHint } from "@shared/components/PermissionHint";
 import { isAxiosError } from "axios";
 import type { ReactNode } from "react";
 
 // The detail kit owns the primitives every resource detail page's overview
 // composes (spec 301): the 404 predicate the pages derive their not-found
-// state from, the label/value row, and the key/value table. One copy each —
-// the five pages adapt, they never re-declare.
+// state from, the label/value row, the key/value table, and the header's
+// Remove action. One copy each — the pages adapt, they never re-declare.
 
 // True when the overview query's error is a 404: the item no longer exists
 // on the host, and the detail page renders its not-found state.
@@ -131,5 +134,56 @@ export function KeyValueTable({
 				</TableContainer>
 			)}
 		</>
+	);
+}
+
+// The header's Remove action (spec 461, ticket #467): one owner for the gate
+// cascade every resource detail page renders, so the six pages cannot drift
+// into two idioms again. The capability gate's tri-state answers it — allowed
+// renders the red outline button, denied the shared write-permission hint,
+// pending neither (never flash the read-only hint at a write-capable caller).
+// A not-found overview hides it outright whatever the gate says: there is
+// nothing left to remove, and the gate alone does not cover that case. The
+// absent case is `undefined`, not `null`, so the result drops straight into
+// `headerActions`.
+export function removalAction({
+	gate,
+	notFound,
+	scope,
+	resource,
+	testId,
+	onClick,
+}: {
+	gate: CapabilityGate;
+	notFound: boolean;
+	// The hint's testid scope and the resource family it names.
+	scope: string;
+	resource: string;
+	testId: string;
+	onClick: () => void;
+}): ReactNode {
+	if (notFound || gate === "pending") {
+		return undefined;
+	}
+	if (gate === "denied") {
+		return (
+			<PermissionHint
+				scope={scope}
+				requirement="write"
+				resource={resource}
+				fontSize="sm"
+			/>
+		);
+	}
+	return (
+		<Button
+			size="sm"
+			colorScheme="red"
+			variant="outline"
+			onClick={onClick}
+			data-testid={testId}
+		>
+			Remove
+		</Button>
 	);
 }

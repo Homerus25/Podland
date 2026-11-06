@@ -103,6 +103,8 @@ func TestIsConflict(t *testing.T) {
 		{"secret in-use 500 with message text", model(http.StatusInternalServerError, `secret "db-password" is in use by container 3f2e1d0c`, "secret in use"), true},
 		{"network in-use 500 with podman's real refusal text", model(http.StatusInternalServerError, `"podland-test" has associated containers with it. Use -f to forcibly delete containers and pods: network is being used`, "network is being used"), true},
 		{"bare ErrNetworkInUse sentinel text", errors.New("network is being used"), true},
+		{"running-container removal refusal is not a shared conflict", model(http.StatusInternalServerError, "cannot remove container 3f2e1d0c as it is running - running or paused containers cannot be removed without force: container state improper", "container state improper"), false},
+		{"paused-container removal refusal is not a shared conflict", errors.New("cannot remove container 3f2e1d0c as it is paused - running or paused containers cannot be removed without force: container state improper"), false},
 		{"case-insensitive", errors.New("Volume IN USE"), true},
 		{"already exists is not itself a conflict", errors.New("a Quadlet with name x.container already exists"), false},
 		{"unrelated", assert.AnError, false},
@@ -110,6 +112,35 @@ func TestIsConflict(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, IsConflict(tt.err))
+		})
+	}
+}
+
+// TestIsRunningContainerRefusal pins the containers-only refusal
+// predicate (issue 462): the running/paused container removal refusal is
+// the containers domain's own fact, deliberately not part of the shared
+// IsConflict that volumes, networks and secrets use as their IsRefusal —
+// a running-container refusal is not their in-use refusal.
+func TestIsRunningContainerRefusal(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"running-container removal refusal 500 with podman's real text", model(http.StatusInternalServerError, "cannot remove container 3f2e1d0c as it is running - running or paused containers cannot be removed without force: container state improper", "container state improper"), true},
+		{"paused-container removal refusal", errors.New("cannot remove container 3f2e1d0c as it is paused - running or paused containers cannot be removed without force: container state improper"), true},
+		{"digs through a wrap", fmt.Errorf("failed to remove container: %w", errors.New("cannot remove container abc as it is running - running or paused containers cannot be removed without force")), true},
+		{"typed 409 still classifies", model(http.StatusConflict, "container is running", ""), true},
+		{"case-insensitive", errors.New("CANNOT BE REMOVED WITHOUT FORCE"), true},
+		{"bare state-improper text is not enough", errors.New("container state improper"), false},
+		{"in-use refusal is not a running refusal", errors.New("volume is in use by a container"), false},
+		{"network in-use refusal is not a running refusal", model(http.StatusInternalServerError, `"podland-test" has associated containers with it. Use -f to forcibly delete containers and pods: network is being used`, "network is being used"), false},
+		{"unrelated", assert.AnError, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsRunningContainerRefusal(tt.err))
 		})
 	}
 }

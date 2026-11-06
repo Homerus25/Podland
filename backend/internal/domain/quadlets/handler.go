@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/Homerus25/podland/backend/internal/bulkremove"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
@@ -103,6 +104,32 @@ func (h *QuadletHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		stop := web.QueryBool(r, "stop", true)
 
 		return struct{}{}, h.service.Delete(ctx, userID, hostID, quadletID, force, stop)
+	})
+}
+
+// BulkRemove handles removing several quadlets in one request. Route-level
+// RequireHostPermission(write) (app.go) gates it at write. The body
+// carries the quadlet ids and the force flag (default false); the answer is
+// 200 with one report entry per requested id, in request order — a per-id
+// failure is an entry, never a status code. The removals cross as ONE
+// podman call — the batch remove endpoint accepts the whole array (the
+// service's BulkDelete) — behind the same stop-first ritual as the
+// single-item Delete: a missing id answers a QUADLET_NOT_FOUND entry, a
+// quadlet whose resource is still up is stopped first.
+//
+// stop stays true, always: a silent server-side default with no request
+// option, so containers running from a selected quadlet are stopped
+// through the lifecycle seam before the removal (spec 461, user story
+// 14). The service bakes the default in — the request has no stop
+// field, so a client cannot turn it off.
+func (h *QuadletHandler) BulkRemove(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]bulkremove.Entry, error) {
+		var request bulkremove.Request
+		if appErr := web.Decode(w, r, &request); appErr != nil {
+			return nil, appErr
+		}
+
+		return h.service.BulkDelete(ctx, userID, hostID, request.IDs, request.Force), nil
 	})
 }
 

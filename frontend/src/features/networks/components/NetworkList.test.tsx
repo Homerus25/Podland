@@ -129,7 +129,9 @@ describe("NetworkList", () => {
 		renderNetworkList();
 
 		const row = await screen.findByTestId("network-row");
-		const cells = within(row).getAllByRole("cell");
+		// The leading cell is the list's selection checkbox column (spec 461),
+		// not the feature's: the row's own cells start after it.
+		const cells = within(row).getAllByRole("cell").slice(1);
 		expect(cells.slice(0, 4).map((cell) => cell.textContent)).toEqual([
 			"app-net",
 			"bridge",
@@ -142,8 +144,24 @@ describe("NetworkList", () => {
 				name: "Connect container app-net",
 			}),
 		).toBeInTheDocument();
+	});
+
+	// Spec 461, ticket #470: single-item removal lives on the detail page and
+	// bulk removal on the toolbar, so no row carries a destructive button any
+	// more — a mis-click on a row can never destroy a network.
+	it("renders no per-row delete button", async () => {
+		mockNetworks([networkFixture()]);
+		renderNetworkList();
+
+		const row = await screen.findByTestId("network-row");
 		expect(
-			within(actions).getByRole("button", { name: "Delete app-net" }),
+			within(row).queryByRole("button", { name: /delete/i }),
+		).not.toBeInTheDocument();
+		// The row keeps its surviving action: connect.
+		expect(
+			within(row).getByRole("button", {
+				name: "Connect container app-net",
+			}),
 		).toBeInTheDocument();
 	});
 

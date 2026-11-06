@@ -1,6 +1,8 @@
 import type {
 	ApiError,
 	ApiErrorEnvelope,
+	BulkRemoveEntry,
+	BulkRemoveInput,
 	LoginResponse,
 } from "@shared/types/api";
 import axios, { type InternalAxiosRequestConfig } from "axios";
@@ -29,6 +31,34 @@ export function hostApiPath(hostId: string, ...segments: string[]): string {
 
 export function hostApiUrl(hostId: string, ...segments: string[]): string {
 	return `${apiBaseUrl.replace(/\/$/, "")}${hostApiPath(hostId, ...segments)}`;
+}
+
+// The one owner of the bulk-remove request body (backend
+// internal/bulkremove Request): the ids, plus the force flag only when it is
+// set. The first pass is always plain on the wire — force omitted, never
+// false — which is what the backend's `Force bool` default documents, and
+// the report's retry is the only caller that sets it. Every resource's
+// POST .../remove builds its body here so the seven services cannot drift.
+export function bulkRemoveBody({
+	ids,
+	force,
+}: BulkRemoveInput): BulkRemoveInput {
+	return force ? { ids, force } : { ids };
+}
+
+// The one owner of the bulk-remove POST itself: the .../remove path, the
+// body, and the report extraction. Each feature's service names it with
+// its domain segment and nothing else, so the seven POSTs cannot drift.
+export async function bulkRemove(
+	hostId: string,
+	resource: string,
+	input: BulkRemoveInput,
+): Promise<BulkRemoveEntry[]> {
+	const response = await api.post<BulkRemoveEntry[]>(
+		hostApiPath(hostId, resource, "remove"),
+		bulkRemoveBody(input),
+	);
+	return response.data;
 }
 
 // The access token is held only in this module variable for the lifetime of

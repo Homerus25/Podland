@@ -176,7 +176,15 @@ var (
 	// SECRET_ALREADY_EXISTS, VOLUME_ALREADY_EXISTS,
 	// NETWORK_ALREADY_EXISTS).
 	ErrContainerAlreadyExists = NewAppError("CONTAINER_ALREADY_EXISTS", "Container with this name already exists", http.StatusConflict)
-	ErrPodNotFound            = NewAppError("POD_NOT_FOUND", "Pod not found", http.StatusNotFound)
+	// ErrContainerRunning is 409: podman refuses to remove a running (or
+	// paused) container unless force is requested. The containers domain's
+	// entry in the in-use refusal family the other domains already speak
+	// (VOLUME_IN_USE, NETWORK_IN_USE, SECRET_IN_USE) — distinct from
+	// ErrContainerAlreadyRunning, which is the start path's 400. The
+	// refusal builder threads podman's message so the UI can explain the
+	// state and offer force (issue 462).
+	ErrContainerRunning = NewAppError("CONTAINER_RUNNING", "Container is running and cannot be removed without force", http.StatusConflict)
+	ErrPodNotFound      = NewAppError("POD_NOT_FOUND", "Pod not found", http.StatusNotFound)
 )
 
 // Pods

@@ -3,6 +3,7 @@ import type {
 	UpdateContainerInput,
 } from "@features/containers/services/containersApi";
 import {
+	bulkRemoveContainers,
 	createContainer,
 	deleteContainer,
 	getContainer,
@@ -32,6 +33,7 @@ import {
 	invalidateHostResources,
 	useListInvalidatingMutation,
 } from "@shared/queries/useListInvalidatingMutation";
+import type { BulkRemoveInput } from "@shared/types/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function useContainers(hostId: string) {
@@ -130,11 +132,27 @@ export function useUpdateContainer(hostId: string, containerId: string) {
 	);
 }
 
+// A delete removes the container from the host, so the list refetches on
+// success. The variables carry the force flag: the first confirm sends the
+// plain request, and only a 409 CONTAINER_RUNNING refusal earns the forced
+// retry (the force-refusal preset keys the flag off the current error).
 export function useDeleteContainer(hostId: string) {
 	return useListInvalidatingMutation(
 		hostId,
 		"containers",
-		(containerId: string) => deleteContainer(hostId, containerId),
+		({ containerId, force }: { containerId: string; force?: boolean }) =>
+			deleteContainer(hostId, containerId, force ?? false),
+	);
+}
+
+// A bulk remove takes several containers off the host in one request, so
+// the list refetches on success. The per-entry report rides the mutation's
+// data, not the cache.
+export function useBulkRemoveContainers(hostId: string) {
+	return useListInvalidatingMutation(
+		hostId,
+		"containers",
+		(input: BulkRemoveInput) => bulkRemoveContainers(hostId, input),
 	);
 }
 

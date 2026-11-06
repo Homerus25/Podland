@@ -9,6 +9,7 @@ import (
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/inspect"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/removal"
 	"github.com/Homerus25/podland/backend/internal/streaming"
 	libpoddefine "go.podman.io/podman/v6/libpod/define"
 	"go.podman.io/podman/v6/pkg/domain/entities"
@@ -346,20 +347,37 @@ func containerName(report *entities.ContainerInspectReport, containerID string) 
 	return containerID
 }
 
-// Delete removes a container by ID on the specified host.
-// The force option allows removing running containers. The engine
-// folds podman's report slice into one error; a missing container
-// answers ErrContainerNotFound, anything else is wrapped.
+// Delete removes a container by ID on the specified host. Without force,
+// podman refuses to remove a running (or paused) container — that refusal
+// surfaces as 409 CONTAINER_RUNNING carrying podman's message; with force,
+// podman removes it regardless of state. Unknown containers surface as the
+// clean 404 CONTAINER_NOT_FOUND.
+//
+// The classification covers the remove call's own failure too, like the
+// networks delete: a remove that errors at the call rather than in podman's
+// report — the race window where the container vanished or started between
+// the request and podman's execution — answers the same terminals (404
+// CONTAINER_NOT_FOUND / 409 CONTAINER_RUNNING) instead of a wrapped
+// unclassified error. The remove-and-classify ritual itself rides
+// internal/removal (issue 264).
 func (s *ContainerService) Delete(ctx context.Context, userID, hostID, containerID string, force bool) error {
 	return s.engines.WithEngine(ctx, userID, hostID, "containers.Delete", func(e ContainerEngine) error {
-		if err := e.Remove(containerID, force); err != nil {
-			if podmanerr.IsNotFound(err) {
-				return appErrors.ErrContainerNotFound
-			}
-			return fmt.Errorf("failed to remove container: %w", err)
-		}
-
-		return nil
+		return removal.Run(func() error {
+			return e.Remove(containerID, force)
+		}, removal.Terminals{
+			Missing: appErrors.ErrContainerNotFound,
+			// Podman's compat layer answers the running-container refusal as
+			// a 500 whose message ends in the ErrCtrStateInvalid text, not a
+			// 409; the containers-only predicate owns that shape (the shared
+			// podmanerr.IsConflict deliberately does not, so volumes,
+			// networks and secrets keep their own in-use refusals), and the
+			// builder threads podman's message so the UI can explain the
+			// state and offer force.
+			Refusal: func(cause string) error {
+				return appErrors.ErrContainerRunning.WithMessage(cause)
+			},
+			IsRefusal: podmanerr.IsRunningContainerRefusal,
+		}, "failed to remove container")
 	})
 }
 

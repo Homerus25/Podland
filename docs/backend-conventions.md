@@ -251,10 +251,11 @@ closest sibling that already exists. Rulings so far:
   nil-legal value; the refusal terminal as a builder threading podman's
   refusal text where the domain's wire shows it; the refusal predicate
   alongside, the domain's refusal phrases staying domain-local), and the
-  wrap text. The six call sites: volumes Delete and the volumes move
-  source half, secrets Delete and the secrets move source half, and the
+  wrap text. The eight call sites: volumes Delete and the volumes move
+  source half, secrets Delete and the secrets move source half, the
   quadlets' stop-and-remove tail (whose list/locate/running-gate/stop
-  preflight stays quadlet-local). The module imports no domain
+  preflight stays quadlet-local), networks Delete, pods Remove, and
+  containers Delete. The module imports no domain
   vocabulary; the classification matrix is pinned once in its suite, the
   domains keep their composition pins. Settled 2026-10-09 (issue 264,
   riding the seam flattened by issue 263).
@@ -288,6 +289,53 @@ closest sibling that already exists. Rulings so far:
   (`Prune`), `dto.go` (`FromPodmanPruneReports`), and
   `internal/domain/volumes/handler_prune_test.go` plus
   `test/integration/volumes_test.go` (`Test_Integration_Volumes_Prune`).
+- **Bulk-remove endpoints** — `internal/bulkremove` is the one kit behind
+  every resource's `POST /{id}/<domain>/remove` (issue 464, spec 461). It
+  owns four things and nothing else: the request DTO (`Request` — `ids`,
+  one field name carrying whatever the resource's single-item delete
+  addresses, an id for containers/images/pods/quadlets/secrets and a name
+  for volumes/networks, plus `force`, default false; the struct tags are
+  the whole request contract, so `web.Decode` owns the 400s —
+  `VALIDATION_FAILED` for a missing/empty `ids` or an empty entry,
+  `INVALID_REQUEST` for a malformed body), the report DTO (`Entry` —
+  `id`, `success`, and an `error` `{code, message}` pair present only on a
+  failure), the per-item classification loop (`Run`), and the exported
+  `Classify` the batch-report domains call directly on their one batch
+  call's errors. The loop calls
+  the domain's EXISTING single-item service method per id, so every entry
+  rides that domain's `internal/removal` classification for free and the
+  single-item and bulk surfaces cannot drift; an `*AppError` contributes
+  its own code and message, anything else the generic `INTERNAL_ERROR`
+  with the cause logged once and never surfaced. Images and quadlets are
+  the two exceptions to the loop: podman offers batch remove endpoints
+  for them, so their services own a `BulkDelete` that makes ONE batch
+  call and classifies each entry with the exported `bulkremove.Classify`
+  (the same predicate their single-item delete uses), keeping the
+  surfaces undrifted while the wire cost drops from N calls to one —
+  podman's batch reports carry no per-id cause attribution (images) or
+  no cause at all (quadlets), so those entries answer the sentinel the
+  causes agree on, or `INTERNAL_ERROR` when they disagree or are absent.
+  A per-item failure never
+  aborts the batch and never changes the status code: the endpoint answers
+  200 with one entry per requested id, in request order, `[]` never
+  `null`. The route is a literal segment registered next to the domain's
+  prune route and gated with `requireWrite` like every bulk operation. A
+  resource without a force path (secrets) takes `IDsRequest` instead —
+  the same `ids` contract with no `force` field at all, so "there is no
+  force parameter" is a fact of the type rather than a convention
+  (`Request` embeds `IDsRequest`, so the two cannot drift); a resource
+  with a silent default (the quadlets' `stop=true`) keeps it
+  server-side, out of the request. The classification matrix and the
+  request/report wire shapes are pinned once in the kit's suite; the
+  domains keep their composition pins (the request shape reaching the
+  engine, the per-entry report, the write gate). The handler method is
+  `BulkRemove` on every domain, not `Remove`: the pods domain's
+  single-item handler already owns `Remove`, and one name across all
+  seven resources beats mirroring the route segment. The volumes handler
+  (`internal/domain/volumes/handler.go`, `BulkRemove`) is the reference
+  adapter; containers, images, and networks are its first three
+  compositions, and pods, quadlets, and secrets adopt it mechanically
+  (issue 466). Settled 2026-11-06 (issue 464, spec 461).
 - **Streaming progress (pull/logs)** — `streaming.HandleProgress`
   (`internal/streaming/progress.go`) is the seam; images pull
   (`internal/domain/images/handler.go`, `Pull`) is the reference
@@ -385,7 +433,7 @@ already diverged, extraction triggers even below the third copy — the
 log-stream kit (`.scratch/380-log-stream-kit`) is the precedent, where
 two timestamp parsers that disagreed on a spaceless podman line made
 the streaming path un-changeable in one place. The threshold has been
-crossed nine times and all nine extractions are now the reference: the
+crossed ten times and all ten extractions are now the reference: the
 endpoint ritual became `internal/web.Handle`, the handler-test
 scaffolding became `testutils.Perform`, the decode+validate ritual
 became `web.Decode`, podman error classification became
@@ -411,11 +459,16 @@ most-specific first, and map the results to their own sentinels; the
 podmanerr adapter never imports `internal/errors`, so sentinels stay
 domain-owned (the failurebudget module does import it — to classify
 the budget's own 429 — but returns no sentinel; the domains'
-ErrRateLimitExceeded stays theirs). Two vocabularies deliberately stay quadlet-local: the
-quadlet running-refusal phrases (podman phrases that refusal outside
-its shared conflict vocabulary) and lifecycle.go's systemctl/stderr
-classification (a different transport). A second consumer for either
-earns it a place in the adapter. The single-report inspect resolution
+ErrRateLimitExceeded stays theirs). The running-refusal phrase (`cannot be removed without force`) is its
+own predicate, `IsRunningContainerRefusal`, deliberately outside the
+shared conflict vocabulary: `IsConflict` is also the in-use refusal for
+volumes, networks and secrets (delete and move source), so folding the
+phrase in would classify a running-container refusal as their own
+in-use refusal. Containers map it to their 409 sentinel; pods keep
+their own state-refusal composition. One vocabulary deliberately stays
+quadlet-local: lifecycle.go's systemctl/stderr classification (a
+different transport). A second consumer for it earns it a place in the
+adapter. The single-report inspect resolution
 ritual became `internal/inspect` (issue 287: one `Resolve` per inspect
 call site, the caller's sentinel and domain label passed in, the
 (report slice, per-item errors, transport error) triple resolved into
@@ -423,7 +476,13 @@ one report — the classification matrix pinned once in the kit's suite,
 the domains keep their composition pins; the slice-report domains
 containers, networks, and images are its three compositions, secrets
 hand-rolls its single-report classification because its engine returns
-a single report plus one error, not the triple).
+a single report plus one error, not the triple), and the bulk-remove
+contract became `internal/bulkremove` (issue 464: one `Run` per
+resource's `POST /{id}/<domain>/remove`, the request and report DTOs
+and the per-item classification loop owned once, the per-item removal
+being the domain's own single-item service method passed in — seven
+domains would otherwise have copied the same shape, and the
+single-item/bulk drift is exactly what the kit makes impossible).
 
 ## API documentation sync
 

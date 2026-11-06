@@ -3,6 +3,7 @@ import type {
 	CreateNetworkInput,
 } from "@features/networks/services/networksApi";
 import {
+	bulkRemoveNetworks,
 	connectContainer,
 	createNetwork,
 	deleteNetwork,
@@ -25,7 +26,7 @@ import {
 	invalidateHostResources,
 	useListInvalidatingMutation,
 } from "@shared/queries/useListInvalidatingMutation";
-import type { ApiError } from "@shared/types/api";
+import type { ApiError, BulkRemoveInput } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -86,6 +87,21 @@ export function useDeleteNetwork(hostId: string) {
 		NETWORK_MUTATION_INVALIDATIONS,
 		({ networkName, force }: { networkName: string; force: boolean }) =>
 			deleteNetwork(hostId, networkName, force),
+	);
+}
+
+// A bulk remove changes the host's network set, so the list refetches on
+// success — including after a partial run, where the successes are gone and
+// the refused networks stay. It invalidates both lists for the same reason
+// the single-item delete does: a forced removal takes the attached
+// containers with it, and the containers DTO carries each container's
+// networks. The report is the mutation's own data, so the dialog reads it
+// straight off the result.
+export function useBulkRemoveNetworks(hostId: string) {
+	return useListInvalidatingMutation(
+		hostId,
+		NETWORK_MUTATION_INVALIDATIONS,
+		(input: BulkRemoveInput) => bulkRemoveNetworks(hostId, input),
 	);
 }
 

@@ -1,4 +1,5 @@
 import {
+	bulkRemoveImages,
 	deleteImage,
 	getImage,
 	getImageCopyPreview,
@@ -18,6 +19,7 @@ import {
 } from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
 import { useMovePreview } from "@shared/transfers/transferHooks";
+import type { BulkRemoveInput } from "@shared/types/api";
 
 export function useImages(hostId: string) {
 	return useAlwaysRefetchListQuery(imagesQueryKey(hostId), () =>
@@ -49,6 +51,18 @@ export function useDeleteImage(hostId: string) {
 		"images",
 		({ imageId, force }: { imageId: string; force?: boolean }) =>
 			deleteImage(hostId, imageId, force ?? false),
+	);
+}
+
+// A bulk remove changes the host's image set, so the list refetches on
+// success — including after a partial run, where the successes are gone and
+// the refused images stay. The report is the mutation's own data, so the
+// dialog reads it straight off the result.
+export function useBulkRemoveImages(hostId: string) {
+	return useListInvalidatingMutation(
+		hostId,
+		"images",
+		(input: BulkRemoveInput) => bulkRemoveImages(hostId, input),
 	);
 }
 

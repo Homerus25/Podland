@@ -138,6 +138,63 @@ Notes:
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
+### POST /api/hosts/{id}/pods/remove
+
+Remove several pods by id in one request. Each id is removed through the
+same classification as the single-item `DELETE /api/hosts/{id}/pods/{podId}`,
+so a pod whose state refuses the removal without `force` is refused in its
+own report entry while the rest of the batch still processes.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Request Body:**
+```json
+{
+  "ids": ["pod-id-a", "pod-id-b"],
+  "force": false
+}
+```
+
+- `ids` (array of strings, required): the pod ids to remove. Must be
+  non-empty and carry no empty entry.
+- `force` (boolean, optional, default false): with `force=true` the pod's
+  running containers are removed too, exactly like the single-item
+  delete's `force` query flag.
+
+**Response (Success - 200):** one entry per requested id, in request
+order.
+```json
+[
+  { "id": "pod-id-a", "success": true },
+  {
+    "id": "pod-id-b",
+    "success": false,
+    "error": { "code": "POD_STATE_CONFLICT", "message": "string (podman's refusal text)" }
+  }
+]
+```
+
+Notes:
+- A per-id failure is a report entry, never a status code: the batch
+  answers 200 even when every entry failed.
+- `error` is present only on a failed entry. Its `code` is the same code
+  the single-item delete would answer — `POD_NOT_FOUND`,
+  `POD_STATE_CONFLICT` (removing a running pod without `force`; the
+  message carries podman's refusal text), or `INTERNAL_ERROR` for an
+  unclassified cause (whose detail is never surfaced).
+- The report is `[]`, never `null`.
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body), `VALIDATION_FAILED` (missing
+  or empty `ids`, or an empty entry)
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row or read-level grantee)
+- 404: `HOST_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
 ### GET /api/hosts/{id}/pods/{podId}
 
 Return one pod's detail DTO — the fields the pod detail page renders, mapped from podman's inspect report: name, id, state, creation time, labels, restart policy, mounts as `--mount`-style strings, the pod's containers (id, name, state, ordered by container ID), and the networks on the infra container.

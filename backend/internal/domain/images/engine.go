@@ -20,6 +20,14 @@ type ImageEngine interface {
 	// Remove reports podman's per-item failures through the error slice,
 	// not an error return — the service classifies them.
 	Remove(id string, force bool) (*entities.ImageRemoveReport, []error)
+	// RemoveAll is Remove's batch twin: one podman call for the whole
+	// bulk-remove request (podman's DELETE /images/remove accepts the
+	// array), answering the combined report — Deleted/Untagged carry
+	// every reference the call removed, the error slice podman's flat
+	// per-item failures (unkeyed: the batch endpoint cannot attribute an
+	// error to a requested image). A nil report answers a call-level
+	// failure (transport or decode); the service classifies.
+	RemoveAll(ids []string, force bool) (*entities.ImageRemoveReport, []error)
 	Pull(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error)
 	// Prune removes every unused image, tagged or not (the equivalent of
 	// `podman image prune -a`).
@@ -86,6 +94,10 @@ func (e *podmanImageEngine) List(opts entities.ImageListOptions) ([]*entities.Im
 
 func (e *podmanImageEngine) Remove(id string, force bool) (*entities.ImageRemoveReport, []error) {
 	return e.tunnelEngine().Remove(e.ctx, []string{id}, entities.ImageRemoveOptions{Force: force})
+}
+
+func (e *podmanImageEngine) RemoveAll(ids []string, force bool) (*entities.ImageRemoveReport, []error) {
+	return e.tunnelEngine().Remove(e.ctx, ids, entities.ImageRemoveOptions{Force: force})
 }
 
 func (e *podmanImageEngine) Pull(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {

@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"strings"
 
+	"github.com/Homerus25/podland/backend/internal/bulkremove"
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/inspect"
 	"github.com/Homerus25/podland/backend/internal/permission"
@@ -62,16 +65,7 @@ func (s *ImageService) Delete(ctx context.Context, userID, hostID, imageID strin
 		report, errs := e.Remove(imageID, force)
 
 		if len(errs) > 0 && errs[0] != nil {
-			// The adapter's conflict predicate is a superset of the pair of
-			// phrases this slice used to match: podman also refuses via the
-			// "in use" family and typed 409 ErrorModels.
-			if podmanerr.IsNotFound(errs[0]) {
-				return appErrors.ErrImageNotFound
-			}
-			if podmanerr.IsConflict(errs[0]) {
-				return appErrors.ErrImageUsedByContainers
-			}
-			return fmt.Errorf("failed to remove image: %w", errs[0])
+			return classifyRemoveError(errs[0])
 		}
 
 		if report == nil {
@@ -80,6 +74,157 @@ func (s *ImageService) Delete(ctx context.Context, userID, hostID, imageID strin
 
 		return nil
 	})
+}
+
+// classifyRemoveError maps one podman remove failure onto the domain's
+// wire vocabulary — the single classification behind both removal
+// surfaces (Delete's per-item error and the bulk report's per-batch
+// errors), so the two cannot drift.
+func classifyRemoveError(err error) error {
+	// The adapter's conflict predicate is a superset of the pair of
+	// phrases this slice used to match: podman also refuses via the
+	// "in use" family and typed 409 ErrorModels.
+	if podmanerr.IsNotFound(err) {
+		return appErrors.ErrImageNotFound
+	}
+	if podmanerr.IsConflict(err) {
+		return appErrors.ErrImageUsedByContainers
+	}
+	return fmt.Errorf("failed to remove image: %w", err)
+}
+
+// BulkDelete removes several images through ONE podman call — the batch
+// remove endpoint accepts the whole array, so the bulk surface stops
+// paying one podman call per id. The answer keeps the bulk-remove
+// report contract (internal/bulkremove): one entry per requested id,
+// in request order, a failure an entry and never a status code.
+//
+// Per-id attribution rides the batch report: Deleted and Untagged carry
+// every reference the call removed (full image IDs land in Deleted, tag
+// requests in Untagged), so an id the report shows removed answers
+// success — a short-ID request included, which podman resolves to the
+// full ID (imageRemovedBy). Podman's batch report carries an UNKEYED error
+// slice — it cannot attribute an error to a requested id — so the
+// failed ids answer one entry error: the sentinel every cause classifies
+// to when they agree (the common batches: all in use, all vanished), the
+// kit's generic internal entry otherwise, with the causes logged once
+// and never surfaced. An acquisition failure (the lease never granted)
+// answers the classified cause on every entry — byte-identical to the
+// per-item loop's answer when every single-item call failed the same
+// way (e.g. the host is down).
+func (s *ImageService) BulkDelete(ctx context.Context, userID, hostID string, ids []string, force bool) []bulkremove.Entry {
+	entries := make([]bulkremove.Entry, 0, len(ids))
+	err := s.engines.WithEngine(ctx, userID, hostID, "images.BulkRemove", func(e ImageEngine) error {
+		report, errs := e.RemoveAll(ids, force)
+		entries = bulkRemoveEntries(ctx, ids, report, errs)
+		return nil
+	})
+	if err != nil {
+		for _, id := range ids {
+			entries = append(entries, bulkremove.Entry{ID: id, Error: bulkremove.Classify(ctx, id, err)})
+		}
+	}
+	return entries
+}
+
+// bulkRemoveEntries maps one batch remove call's report onto the
+// per-id report entries: an id the report shows removed (Deleted or
+// Untagged, short-ID requests included) answers success; the rest
+// answer the batch's failure entry error. A nil report answers a
+// call-level failure (transport or decode) — nothing was removed, so
+// every id answers the classified cause.
+func bulkRemoveEntries(ctx context.Context, ids []string, report *entities.ImageRemoveReport, errs []error) []bulkremove.Entry {
+	entries := make([]bulkremove.Entry, len(ids))
+	if report == nil {
+		var cause error = fmt.Errorf("no remove report returned for bulk remove")
+		if len(errs) > 0 && errs[0] != nil {
+			cause = errs[0]
+		}
+		for i, id := range ids {
+			entries[i] = bulkremove.Entry{ID: id, Error: bulkremove.Classify(ctx, id, cause)}
+		}
+		return entries
+	}
+
+	var failed []int
+	for i, id := range ids {
+		if imageRemovedBy(report, id) {
+			entries[i] = bulkremove.Entry{ID: id, Success: true}
+			continue
+		}
+		entries[i] = bulkremove.Entry{ID: id}
+		failed = append(failed, i)
+	}
+	if len(failed) == 0 {
+		return entries
+	}
+
+	entryErr := bulkFailureEntryError(ctx, errs)
+	for _, i := range failed {
+		entries[i].Error = entryErr
+	}
+	return entries
+}
+
+// imageRemovedBy reports whether the batch report shows the requested
+// id removed. A full ID or tag answers by equality, but podman resolves
+// a short hex ID to the full one, so a removed short-ID request lands in
+// Deleted as the full sha256 ID — the prefix match keeps the batch from
+// regressing a reference form the single-item delete accepts (it counts
+// any non-error call as success) into a false failure entry.
+func imageRemovedBy(report *entities.ImageRemoveReport, id string) bool {
+	match := func(ref string) bool {
+		return ref == id ||
+			strings.HasPrefix(ref, id) ||
+			strings.HasPrefix(ref, "sha256:"+id)
+	}
+	for _, ref := range report.Deleted {
+		if match(ref) {
+			return true
+		}
+	}
+	for _, ref := range report.Untagged {
+		if match(ref) {
+			return true
+		}
+	}
+	return false
+}
+
+// bulkFailureEntryError answers the one entry error every id the batch
+// report did not remove carries. Podman's batch remove answers an
+// unkeyed error slice — an error cannot be attributed to a requested id
+// — so the failed ids share one entry: the sentinel every cause
+// classifies to when they agree (the common batches: all in use, all
+// vanished), the kit's generic internal entry otherwise. The causes are
+// logged once and never surfaced; an id the report does not list while
+// podman reports no error at all (an out-of-contract reference form)
+// answers the generic entry too.
+func bulkFailureEntryError(ctx context.Context, errs []error) *bulkremove.EntryError {
+	sentinels := make(map[string]*appErrors.AppError)
+	var causes []error
+	for _, err := range errs {
+		if err == nil {
+			continue
+		}
+		causes = append(causes, err)
+		if appErr, ok := errors.AsType[*appErrors.AppError](classifyRemoveError(err)); ok {
+			sentinels[appErr.Code] = appErr
+		}
+	}
+	if len(sentinels) == 1 {
+		for _, appErr := range sentinels {
+			return &bulkremove.EntryError{Code: appErr.Code, Message: appErr.Message}
+		}
+	}
+	for _, cause := range causes {
+		slog.ErrorContext(ctx, "bulk remove: unattributed per-image error",
+			slog.Any("error", cause))
+	}
+	if len(causes) == 0 {
+		slog.ErrorContext(ctx, "bulk remove: ids absent from the report with no error reported")
+	}
+	return &bulkremove.EntryError{Code: appErrors.ErrInternalError.Code, Message: appErrors.ErrInternalError.Message}
 }
 
 // Inspect returns the raw podman inspect report for one image on the

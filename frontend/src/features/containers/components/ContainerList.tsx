@@ -1,9 +1,9 @@
-import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
+import { Button, HStack, Td, Tr } from "@chakra-ui/react";
 import { ContainerStatsDialog } from "@features/containers/components/ContainerStatsDialog";
 import { containerDisplayName } from "@features/containers/components/containerDisplayName";
 import {
+	useBulkRemoveContainers,
 	useContainers,
-	useDeleteContainer,
 	usePruneContainers,
 	useRestartContainer,
 	useStartContainer,
@@ -12,49 +12,18 @@ import {
 import type { ContainerSummary } from "@features/containers/services/containersApi";
 import { can } from "@features/hosts/permissions";
 import { ConnectDialog } from "@features/networks/components/ConnectDialog";
+import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { ConfirmDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
+
 import { ResourceList } from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { useOpenLogs } from "@shared/logs/logRoute";
 import { containerCreatePath, detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-// No delete request leaves the browser until the user explicitly confirms.
-// The shell, reset lifecycle, danger footer, pending wiring, close-on-success,
-// and error region are ConfirmDialog's; this adapter owns only the domain
-// body and the variables (the container id). A failure (e.g. the 409
-// CONTAINER_RUNNING envelope) keeps the modal open through the module's
-// default error region.
-function DeleteContainerModal({
-	container,
-	deleteContainer,
-	onClose,
-}: {
-	container: ContainerSummary;
-	deleteContainer: ReturnType<typeof useDeleteContainer>;
-	onClose: () => void;
-}) {
-	return (
-		<ConfirmDialog
-			mutation={deleteContainer}
-			title="Delete container"
-			confirmLabel="Delete container"
-			confirm={() => container.id}
-			onClose={onClose}
-			body={
-				<Text>
-					Delete “{containerDisplayName(container)}” ({container.image})? This
-					cannot be undone.
-				</Text>
-			}
-		/>
-	);
-}
 
 // The prune adapter over PruneReportDialog, the twin of the volumes one:
 // the module owns the plumbing, this adapter hands over the noun and the
@@ -79,60 +48,87 @@ function PruneContainersModal({
 	);
 }
 
-// Each row owns its lifecycle mutation instances (start/stop and
-// restart), so pending state and errors are scoped to the affected
-// container and other rows stay usable. Restart is additive: it renders
-// beside the Start/Stop toggle, only for running rows (issue #384).
-// The row itself is clickable: it navigates to the container's detail page
-// (spec 301), and every action button stops propagation so a button click
-// never also fires the row action.
-function ContainerRow({
-	hostId,
+// The lifecycle mutations the list owns, one instance per action, handed to
+// every row. A plain row function cannot own hooks, so the list keeps them
+// and each row scopes its own pending state off the mutation's variables.
+type ContainerLifecycleMutations = {
+	start: ReturnType<typeof useStartContainer>;
+	stop: ReturnType<typeof useStopContainer>;
+	restart: ReturnType<typeof useRestartContainer>;
+};
+
+// The row is a plain function returning a Fragment of <Tr>s, not a
+// component: the list's cell-cloning walk (mobile pinning and the selection
+// checkbox column) reaches a row's cells only when `renderRow` hands back a
+// `Tr` or a `Fragment` of `Tr`s — a component element is opaque to it, so a
+// row wrapped in one silently loses both. The key rides the returned
+// Fragment, which is the element the list's map places.
+//
+// Start/Stop and restart are scoped to the affected container by the
+// mutation's own variables, so other rows stay usable. Restart is additive:
+// it renders beside the Start/Stop toggle, only for running rows (issue
+// #384). The row itself is clickable: it navigates to the container's detail
+// page (spec 301), and every action button stops propagation so a button
+// click never also fires the row action.
+//
+// The row carries no destructive button (spec 461, ticket #470): removal
+// lives on the container's detail page (single item) and in the toolbar's
+// "Remove selected" (bulk), so a mis-click on a row can never destroy a
+// container.
+function renderContainerRow({
 	container,
 	canManage,
 	canManageNetworks,
-	onDelete,
+	lifecycle,
+	onOpen,
 	onShowLogs,
 	onConnect,
 }: {
-	hostId: string;
 	container: ContainerSummary;
 	canManage: boolean;
 	canManageNetworks: boolean;
-	onDelete: (container: ContainerSummary) => void;
+	lifecycle: ContainerLifecycleMutations;
+	onOpen: (container: ContainerSummary) => void;
 	onShowLogs: (container: ContainerSummary) => void;
 	onConnect: (container: ContainerSummary) => void;
 }) {
-	const navigate = useNavigate();
-	const startContainer = useStartContainer(hostId);
-	const stopContainer = useStopContainer(hostId);
-	const restartContainer = useRestartContainer(hostId);
 	const name = containerDisplayName(container);
 	const isRunning = container.state === "running";
 	const action = isRunning
 		? {
-				lifecycle: stopContainer,
+				lifecycle: lifecycle.stop,
 				testId: "stop-container-button",
 				label: "Stop",
 				colorScheme: undefined,
 			}
 		: {
-				lifecycle: startContainer,
+				lifecycle: lifecycle.start,
 				testId: "start-container-button",
 				label: "Start",
 				colorScheme: "green" as const,
 			};
+	const actionPending =
+		action.lifecycle.isPending && action.lifecycle.variables === container.id;
+	const restartPending =
+		lifecycle.restart.isPending && lifecycle.restart.variables === container.id;
 	// A failed lifecycle action or restart shows the row-level error like
 	// Stop does. Each button resets its sibling mutation on click, so a
-	// stale error from the other action never masks the fresh one.
-	const rowError = action.lifecycle.error ?? restartContainer.error;
+	// stale error from the other action never masks the fresh one; the
+	// variables keep another row's failure out of this row.
+	const actionError =
+		action.lifecycle.variables === container.id ? action.lifecycle.error : null;
+	const restartError =
+		lifecycle.restart.variables === container.id
+			? lifecycle.restart.error
+			: null;
+	const rowError = actionError ?? restartError;
 
 	return (
-		<>
+		<Fragment key={container.id}>
 			<Tr
 				data-testid="container-row"
 				cursor="pointer"
-				onClick={() => navigate(detailPath(hostId, "containers", container.id))}
+				onClick={() => onOpen(container)}
 			>
 				<Td fontFamily="mono">{containerDisplayName(container)}</Td>
 				<Td fontFamily="mono">{container.image}</Td>
@@ -148,10 +144,10 @@ function ContainerRow({
 								colorScheme={action.colorScheme}
 								onClick={(event) => {
 									event.stopPropagation();
-									restartContainer.reset();
+									lifecycle.restart.reset();
 									action.lifecycle.mutate(container.id);
 								}}
-								isLoading={action.lifecycle.isPending}
+								isLoading={actionPending}
 								data-testid={action.testId}
 							>
 								{action.label}
@@ -165,9 +161,9 @@ function ContainerRow({
 								onClick={(event) => {
 									event.stopPropagation();
 									action.lifecycle.reset();
-									restartContainer.mutate(container.id);
+									lifecycle.restart.mutate(container.id);
 								}}
-								isLoading={restartContainer.isPending}
+								isLoading={restartPending}
 								data-testid="restart-container-button"
 							>
 								Restart
@@ -199,63 +195,63 @@ function ContainerRow({
 						</Button>
 					</HStack>
 				</Td>
-				{canManage ? (
-					<Td>
-						<Button
-							size="xs"
-							colorScheme="red"
-							variant="outline"
-							aria-label={`Delete ${name}`}
-							onClick={(event) => {
-								event.stopPropagation();
-								onDelete(container);
-							}}
-						>
-							Delete
-						</Button>
-					</Td>
-				) : null}
 			</Tr>
 			{rowError ? (
 				<Tr>
-					<Td colSpan={canManage ? 5 : 4}>
+					<Td colSpan={4}>
 						<ErrorDisplay error={getApiError(rowError)} />
 					</Td>
 				</Tr>
 			) : null}
-		</>
+		</Fragment>
 	);
 }
 
-// The Containers tab body. Create, start, stop, restart, delete, and
-// prune are
-// write-gated backend routes, so below manage level the module swaps the
-// whole toolbar for the canonical read hint and the rows drop their
-// start/stop/restart/delete affordances; logs reads at read level, so
+// The Containers tab body. Create, start, stop, restart, prune, and bulk
+// remove are write-gated backend routes, so below manage level the module
+// swaps the whole toolbar for the canonical read hint and the rows drop
+// their start/stop/restart affordances; logs reads at read level, so
 // the row keeps its logs button.
 // Connect-to-network is gated on the separate manage-networks capability
 // (issue 256): the row button hides below it while Logs stays visible. The
 // toolbar/triad/table plumbing and the derived testids are ResourceList's;
-// this adapter owns only the columns, the row, and the create/delete
-// modals. The row's connect button opens the networks feature's one
+// this adapter owns only the columns, the row, and the create/prune/bulk
+// remove modals. The row's connect button opens the networks feature's one
 // connect dialog (issue 274) with the container fixed — the containers
 // feature calls into networks for connect, never the reverse.
+//
+// Removal has no per-row button (spec 461, ticket #470): a single container
+// is removed from its detail page, several from the toolbar's "Remove
+// selected".
 export function ContainerList({ host }: { host: Host }) {
 	const hostId = host.id;
 	const { data: containers, isPending, error } = useContainers(hostId);
-	const deleteContainer = useDeleteContainer(hostId);
 	const pruneContainers = usePruneContainers(hostId);
+	const bulkRemoveContainers = useBulkRemoveContainers(hostId);
+	// One instance per lifecycle action, shared by every row: the row scopes
+	// its own pending and error state off the mutation's variables.
+	const lifecycle: ContainerLifecycleMutations = {
+		start: useStartContainer(hostId),
+		stop: useStopContainer(hostId),
+		restart: useRestartContainer(hostId),
+	};
 	const canManage = can(host, "manage-containers");
 	const canManageNetworks = can(host, "manage-networks");
 	const navigate = useNavigate();
-	const [pendingDelete, setPendingDelete] = useState<ContainerSummary | null>(
-		null,
-	);
 	const [pendingConnect, setPendingConnect] = useState<ContainerSummary | null>(
 		null,
 	);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [isStatsOpen, setIsStatsOpen] = useState(false);
+	// The bulk-remove dialog's snapshot: the selected containers plus the
+	// selection's own clear, captured when the dialog opens. The list owns
+	// the selection, so the adapter never keeps a second copy of it — it
+	// holds the snapshot the run reports on and hands the clear back on
+	// close.
+	const [bulkRemoveTarget, setBulkRemoveTarget] = useState<{
+		containers: ContainerSummary[];
+		clear: () => void;
+	} | null>(null);
 	const openLogs = useOpenLogs(hostId, "container");
 	// Stats is a read, so the button must survive ResourceList's manage
 	// gate: manage users get it in the toolbar beside Create/Prune, while
@@ -294,25 +290,23 @@ export function ContainerList({ host }: { host: Host }) {
 					{ label: "Image", sortBy: (c) => c.image },
 					{ label: "State", sortBy: (c) => c.state },
 					{},
-					...(canManage ? [{}] : []),
 				]}
-				renderRow={(container) => (
-					<ContainerRow
-						key={container.id}
-						hostId={hostId}
-						container={container}
-						canManage={canManage}
-						canManageNetworks={canManageNetworks}
-						onDelete={setPendingDelete}
-						onShowLogs={(container) =>
+				renderRow={(container) =>
+					renderContainerRow({
+						container,
+						canManage,
+						canManageNetworks,
+						lifecycle,
+						onOpen: (target) =>
+							navigate(detailPath(hostId, "containers", target.id)),
+						onShowLogs: (target) =>
 							openLogs({
-								targetId: container.id,
-								name: containerDisplayName(container),
-							})
-						}
-						onConnect={setPendingConnect}
-					/>
-				)}
+								targetId: target.id,
+								name: containerDisplayName(target),
+							}),
+						onConnect: setPendingConnect,
+					})
+				}
 				toolbar={
 					<>
 						<Button
@@ -336,12 +330,25 @@ export function ContainerList({ host }: { host: Host }) {
 					</>
 				}
 				canManage={canManage}
+				selection={{ getKey: (container) => container.id }}
+				onRemoveSelected={(selection) =>
+					setBulkRemoveTarget({
+						containers: selection.selectedItems,
+						clear: selection.clear,
+					})
+				}
 			/>
-			{pendingDelete ? (
-				<DeleteContainerModal
-					container={pendingDelete}
-					deleteContainer={deleteContainer}
-					onClose={() => setPendingDelete(null)}
+			{bulkRemoveTarget ? (
+				<BulkRemoveDialog
+					items={bulkRemoveTarget.containers}
+					noun="container"
+					itemKey={(container) => container.id}
+					itemLabel={(container) => containerDisplayName(container)}
+					mutation={bulkRemoveContainers}
+					// The selection clears when the run succeeds, not when the
+					// dialog closes: a failed run keeps it for the retry.
+					onSuccess={bulkRemoveTarget.clear}
+					onClose={() => setBulkRemoveTarget(null)}
 				/>
 			) : null}
 			{isPruneOpen ? (

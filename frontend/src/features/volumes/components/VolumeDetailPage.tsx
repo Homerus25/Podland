@@ -1,17 +1,23 @@
 import { Badge, Table, TableContainer, Tbody, Text } from "@chakra-ui/react";
+import { useCapabilityGate } from "@features/hosts/hooks/useCapabilityGate";
+import { VOLUME_IN_USE_REFUSAL } from "@features/volumes/components/volumeRemoval";
 import { useVolume } from "@features/volumes/hooks/useVolume";
+import { useDeleteVolume } from "@features/volumes/hooks/useVolumes";
 import type { VolumeDetail } from "@features/volumes/services/volumesApi";
 import { DetailPage } from "@shared/components/DetailPage";
 import {
 	DetailRow,
 	isNotFound,
 	KeyValueTable,
+	removalAction,
 } from "@shared/components/detailKit";
+import { ForceConfirmDialog } from "@shared/components/MutationDialog";
 import { invalidateHostResources } from "@shared/queries/useListInvalidatingMutation";
+import { hostTabPath } from "@shared/routes/detailRoute";
 import { formatBytes, formatRelativeDate } from "@shared/utils/format";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 
 // The volume's overview rows, adapted from the former VolumeInspectDrawer:
 // the same label/value table, with the key-value tables for labels/options.
@@ -61,6 +67,46 @@ function VolumeOverview({ volume }: { volume: VolumeDetail }) {
 	);
 }
 
+// The Remove action's confirm (spec 461, ticket #465): the shared
+// force-refusal preset, so the first confirm sends the plain delete and
+// only the VOLUME_IN_USE refusal swaps in the in-use hint and the force
+// button whose retry carries force=true. The adapter keeps the domain
+// vocabulary only — the refusal words come from the volumeRemoval module
+// the list's modal reads too, and the success side effect (navigate back
+// to the list tab) arrives through the preset's onSuccess seam.
+function RemoveVolumeDialog({
+	volumeName,
+	onClose,
+	deleteVolume,
+	onSuccess,
+}: {
+	volumeName: string;
+	onClose: () => void;
+	deleteVolume: ReturnType<typeof useDeleteVolume>;
+	onSuccess: () => void;
+}) {
+	return (
+		<ForceConfirmDialog
+			mutation={deleteVolume}
+			title="Remove volume"
+			onClose={onClose}
+			refusalCode={VOLUME_IN_USE_REFUSAL.code}
+			hint={VOLUME_IN_USE_REFUSAL.hint}
+			hintTestId={VOLUME_IN_USE_REFUSAL.hintTestId}
+			confirmLabel="Remove volume"
+			forceLabel="Force remove"
+			forceTestId="force-remove-button"
+			confirm={(force) => ({ volumeName, force })}
+			onSuccess={onSuccess}
+			body={
+				<Text>
+					Remove volume {volumeName} from this host? This cannot be undone.
+				</Text>
+			}
+		/>
+	);
+}
+
 // The volume detail page (spec 301, ticket #307): the shared DetailPage
 // layout over the volume's inspect response. The overview query is the
 // volume detail (GET .../volumes/{name}); the "Show inspect JSON" reveal
@@ -72,11 +118,18 @@ export function VolumeDetailPage() {
 		volumeName: string;
 	}>();
 	const queryClient = useQueryClient();
+	const navigate = useNavigate();
 	const [revealed, setRevealed] = useState(false);
+	// The remove confirm (spec 461, ticket #465): rendered conditionally, so
+	// mount is open and unmount is close.
+	const [removeOpen, setRemoveOpen] = useState(false);
 	const { data: volume, isPending, error } = useVolume(hostId!, volumeName!);
 	const inspectQuery = useVolume(hostId!, volumeName!, {
 		enabled: revealed,
 	});
+	const gate = useCapabilityGate(hostId!, "manage-volumes");
+	const deleteVolume = useDeleteVolume(hostId!);
+	const notFound = isNotFound(error);
 
 	// A 404 means the row was stale (the volume was deleted since the list
 	// loaded); refetch the list so the dead row disappears. The list key is
@@ -92,18 +145,44 @@ export function VolumeDetailPage() {
 		}
 	}, [volumeName, error, queryClient, hostId]);
 
+	// The Remove action rides the detail-page capability gate (the kit owns
+	// the cascade): allowed renders the button, denied the shared write hint,
+	// pending neither, and a not-found overview hides it outright.
+	const removeAction = removalAction({
+		gate,
+		notFound,
+		scope: "volumes",
+		resource: "volume",
+		testId: "remove-volume-button",
+		onClick: () => setRemoveOpen(true),
+	});
+
 	return (
-		<DetailPage
-			title={volumeName!}
-			backTo="volumes"
-			isPending={isPending}
-			error={error}
-			notFound={isNotFound(error)}
-			inspectQuery={inspectQuery}
-			revealed={revealed}
-			onToggleInspect={() => setRevealed((value) => !value)}
-		>
-			{volume ? <VolumeOverview volume={volume} /> : null}
-		</DetailPage>
+		<>
+			<DetailPage
+				title={volumeName!}
+				backTo="volumes"
+				isPending={isPending}
+				error={error}
+				notFound={notFound}
+				inspectQuery={inspectQuery}
+				revealed={revealed}
+				onToggleInspect={() => setRevealed((value) => !value)}
+				headerActions={removeAction}
+			>
+				{volume ? <VolumeOverview volume={volume} /> : null}
+			</DetailPage>
+			{removeOpen ? (
+				<RemoveVolumeDialog
+					volumeName={volumeName!}
+					onClose={() => setRemoveOpen(false)}
+					deleteVolume={deleteVolume}
+					// The removed volume's page would 404 on the next refetch, so
+					// the page leaves for the list tab; the mutation's own
+					// invalidation refetches that list.
+					onSuccess={() => navigate(hostTabPath(hostId!, "volumes"))}
+				/>
+			) : null}
+		</>
 	);
 }

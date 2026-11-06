@@ -1,4 +1,5 @@
-import { api, hostApiPath } from "@shared/utils/api";
+import type { BulkRemoveEntry, BulkRemoveInput } from "@shared/types/api";
+import { api, bulkRemove, hostApiPath } from "@shared/utils/api";
 
 // Secret as returned by GET /api/hosts/{id}/secrets
 // (backend/internal/domain/secrets/dto.go SecretListResponse). The backend
@@ -173,4 +174,16 @@ export async function moveSecret(
 		input,
 	);
 	return response.data;
+}
+
+// POST /api/hosts/{id}/secrets/remove -> 200 (backend
+// internal/bulkremove Entry): one report entry per requested id, in request
+// order. A per-id failure is an entry, never a status code, so an in-use
+// secret answers a SECRET_IN_USE entry while the rest of the batch still
+// processes. Secrets have no force path, so the body never carries the flag.
+export function bulkRemoveSecrets(
+	hostId: string,
+	input: BulkRemoveInput,
+): Promise<BulkRemoveEntry[]> {
+	return bulkRemove(hostId, "secrets", input);
 }

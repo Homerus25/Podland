@@ -166,27 +166,33 @@ describe("ImageList", () => {
 		expect(screen.queryByTestId("modal")).not.toBeInTheDocument();
 	});
 
-	it("does not navigate when the row's delete button is clicked", async () => {
+	// Spec 461, ticket #470: single-item removal lives on the detail page and
+	// bulk removal on the toolbar, so no row carries a destructive button any
+	// more — a mis-click on a row can never destroy an image.
+	it("renders no per-row delete button", async () => {
 		server.use(
 			http.get("*/api/hosts/m-1/images", () =>
 				HttpResponse.json(imagesFixture),
 			),
 		);
-		renderImageListWithLocationProbe();
-		const user = userEvent.setup();
+		renderImageList();
 
 		const row = await screen.findByTestId("image-row");
-		await user.click(
-			within(row).getByRole("button", {
-				name: "Delete docker.io/library/nginx:1.27",
-			}),
-		);
-
-		// The delete confirm opens, not a navigation.
 		expect(
-			await screen.findByTestId("confirm-delete-button"),
+			within(row).queryByRole("button", { name: /delete/i }),
+		).not.toBeInTheDocument();
+		// The row keeps its surviving actions: the read-level download and the
+		// write-gated copy.
+		expect(
+			within(row).getByRole("button", {
+				name: "Download docker.io/library/nginx:1.27",
+			}),
 		).toBeInTheDocument();
-		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
+		expect(
+			within(row).getByRole("button", {
+				name: "Copy docker.io/library/nginx:1.27 to another host",
+			}),
+		).toBeInTheDocument();
 	});
 });
 

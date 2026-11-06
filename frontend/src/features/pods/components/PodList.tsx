@@ -2,58 +2,28 @@ import { Button, HStack, Td, Text, Tr } from "@chakra-ui/react";
 import { can } from "@features/hosts/permissions";
 import { CreatePodDialog } from "@features/pods/components/CreatePodDialog";
 import {
+	useBulkRemovePods,
 	useCreatePod,
 	usePodAction,
 	usePods,
 	usePrunePods,
-	useRemovePod,
 } from "@features/pods/hooks/usePods";
 import type {
 	PodPruneEntry,
 	PodSummary,
 } from "@features/pods/services/podsApi";
+import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import { ForceConfirmDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
+
 import { ResourceList } from "@shared/components/ResourceList";
 import { useOpenLogs } from "@shared/logs/logRoute";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { formatRelativeDate } from "@shared/utils/format";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-// The remove adapter over the shared force-refusal preset: the module owns
-// the confirm-to-force ritual (the running hint, the footer swap, the force
-// flag keyed off the current error); this adapter keeps its domain only —
-// the POD_STATE_CONFLICT refusal code, the hint copy, the labels, the
-// testids, and the payload shape.
-function RemovePodModal({
-	pod,
-	onClose,
-	removePod,
-}: {
-	pod: PodSummary;
-	onClose: () => void;
-	removePod: ReturnType<typeof useRemovePod>;
-}) {
-	return (
-		<ForceConfirmDialog
-			mutation={removePod}
-			title="Remove pod"
-			onClose={onClose}
-			refusalCode="POD_STATE_CONFLICT"
-			hint="This pod has running containers, so it cannot be removed normally. Force remove also removes its running containers; they may lose work."
-			hintTestId="pod-running-warning"
-			confirmLabel="Remove pod"
-			forceLabel="Force remove"
-			forceTestId="force-remove-button"
-			confirm={(force) => ({ podId: pod.id, force })}
-			body={<Text>Remove pod “{pod.name}”? This cannot be undone.</Text>}
-		/>
-	);
-}
 
 // The prune adapter over PruneReportDialog. The module owns the reset
 // lifecycle, the confirm/report footer swap, the report table, and the
@@ -78,51 +48,72 @@ function PrunePodsModal({
 	);
 }
 
-// Each row owns its lifecycle mutation instances, so pending state and
-// errors stay scoped to the affected pod and other rows stay usable. The
-// row itself is clickable: it navigates to the pod's detail page, and every
-// action button stops propagation so a button click never also fires the
-// row action. Start/Stop is one toggle whose label follows the pod's
+// The list owns one mutation instance per lifecycle action — a plain row
+// function cannot own hooks — so a row's pending and error state are scoped
+// by the mutation's own variables: only the row whose id the in-flight (or
+// last-failed) call carried shows them, and the other rows stay usable.
+type PodActionMutations = {
+	start: ReturnType<typeof usePodAction>;
+	stop: ReturnType<typeof usePodAction>;
+	pause: ReturnType<typeof usePodAction>;
+	unpause: ReturnType<typeof usePodAction>;
+	kill: ReturnType<typeof usePodAction>;
+	restart: ReturnType<typeof usePodAction>;
+};
+
+function rowScoped(mutation: PodActionMutations["start"], podId: string) {
+	const mine = mutation.variables === podId;
+	return {
+		isPending: mutation.isPending && mine,
+		error: mine ? mutation.error : null,
+	};
+}
+
+// The row is a plain function returning a Fragment of <Tr>s, not a
+// component: the list's cell-cloning walk (mobile pinning and the selection
+// checkbox column) reaches a row's cells only when `renderRow` hands back a
+// `Tr` or a `Fragment` of `Tr`s — a component element is opaque to it, so a
+// row wrapped in one silently loses both. The key rides the returned
+// Fragment, which is the element the list's map places.
+//
+// The row itself is clickable: it navigates to the pod's detail page, and
+// every action button stops propagation so a button click never also fires
+// the row action. Start/Stop is one toggle whose label follows the pod's
 // state, mirroring the container lifecycle buttons; Pause/Unpause is one
 // button whose label follows the pod's state; kill and restart take no
-// parameters (podman's defaults). The lifecycle affordances are
-// write-gated, but logs reads at read level, so the row keeps its logs
-// button below the manage capability.
-function PodRow({
-	hostId,
+// parameters (podman's defaults). The lifecycle affordances are write-gated,
+// but logs reads at read level, so the row keeps its logs button below the
+// manage capability. The row carries no destructive button (spec 461, ticket
+// #470): removal lives on the pod's detail page and in the toolbar's "Remove
+// selected".
+function renderPodRow({
 	pod,
 	canManage,
-	onRemove,
+	actions,
+	onOpen,
 	onShowLogs,
 }: {
-	hostId: string;
 	pod: PodSummary;
 	canManage: boolean;
-	onRemove: (pod: PodSummary) => void;
+	actions: PodActionMutations;
+	onOpen: (pod: PodSummary) => void;
 	onShowLogs: (pod: PodSummary) => void;
 }) {
-	const navigate = useNavigate();
-	const start = usePodAction(hostId, "start");
-	const stop = usePodAction(hostId, "stop");
-	const pause = usePodAction(hostId, "pause");
-	const unpause = usePodAction(hostId, "unpause");
-	const kill = usePodAction(hostId, "kill");
-	const restart = usePodAction(hostId, "restart");
 	// Podman's pod status is capitalized ("Paused"); compare case-insensitively.
 	const paused = pod.state.toLowerCase() === "paused";
-	const pauseAction = paused ? unpause : pause;
+	const pauseAction = paused ? actions.unpause : actions.pause;
 	// Podman's pod status is capitalized ("Running"); compare
 	// case-insensitively, like the pause toggle above.
 	const isRunning = pod.state.toLowerCase() === "running";
 	const action = isRunning
 		? {
-				lifecycle: stop,
+				lifecycle: actions.stop,
 				testId: "stop-pod-button",
 				label: "Stop",
 				colorScheme: undefined,
 			}
 		: {
-				lifecycle: start,
+				lifecycle: actions.start,
 				testId: "start-pod-button",
 				label: "Start",
 				colorScheme: "green" as const,
@@ -130,16 +121,16 @@ function PodRow({
 	// The toggle's sibling mutation resets on each click, so a stale error
 	// from the other action never masks the fresh one; a failed start or
 	// stop shows the row-level error like the containers surface does.
-	const sibling = isRunning ? start : stop;
-	const rowError = action.lifecycle.error;
+	const sibling = isRunning ? actions.start : actions.stop;
+	const lifecycle = rowScoped(action.lifecycle, pod.id);
+	const pauseState = rowScoped(pauseAction, pod.id);
+	const killState = rowScoped(actions.kill, pod.id);
+	const restartState = rowScoped(actions.restart, pod.id);
+	const rowError = lifecycle.error;
 
 	return (
-		<>
-			<Tr
-				data-testid="pod-row"
-				cursor="pointer"
-				onClick={() => navigate(detailPath(hostId, "pods", pod.id))}
-			>
+		<Fragment key={pod.id}>
+			<Tr data-testid="pod-row" cursor="pointer" onClick={() => onOpen(pod)}>
 				<Td fontFamily="mono">{pod.name}</Td>
 				<Td>
 					<Text data-testid={`pod-state-${pod.id}`}>{pod.state}</Text>
@@ -158,7 +149,7 @@ function PodRow({
 									variant="outline"
 									colorScheme={action.colorScheme}
 									aria-label={`${action.label} ${pod.name}`}
-									isLoading={action.lifecycle.isPending}
+									isLoading={lifecycle.isPending}
 									onClick={(event) => {
 										event.stopPropagation();
 										sibling.reset();
@@ -172,7 +163,7 @@ function PodRow({
 									size="xs"
 									variant="outline"
 									aria-label={`${paused ? "Unpause" : "Pause"} ${pod.name}`}
-									isLoading={pauseAction.isPending}
+									isLoading={pauseState.isPending}
 									onClick={(event) => {
 										event.stopPropagation();
 										pauseAction.mutate(pod.id);
@@ -187,10 +178,10 @@ function PodRow({
 									size="xs"
 									variant="outline"
 									aria-label={`Kill ${pod.name}`}
-									isLoading={kill.isPending}
+									isLoading={killState.isPending}
 									onClick={(event) => {
 										event.stopPropagation();
-										kill.mutate(pod.id);
+										actions.kill.mutate(pod.id);
 									}}
 									data-testid="kill-pod-button"
 								>
@@ -200,27 +191,14 @@ function PodRow({
 									size="xs"
 									variant="outline"
 									aria-label={`Restart ${pod.name}`}
-									isLoading={restart.isPending}
+									isLoading={restartState.isPending}
 									onClick={(event) => {
 										event.stopPropagation();
-										restart.mutate(pod.id);
+										actions.restart.mutate(pod.id);
 									}}
 									data-testid="restart-pod-button"
 								>
 									Restart
-								</Button>
-								<Button
-									size="xs"
-									colorScheme="red"
-									variant="outline"
-									aria-label={`Remove ${pod.name}`}
-									onClick={(event) => {
-										event.stopPropagation();
-										onRemove(pod);
-									}}
-									data-testid="remove-pod-button"
-								>
-									Remove
 								</Button>
 							</>
 						) : null}
@@ -245,7 +223,7 @@ function PodRow({
 					</Td>
 				</Tr>
 			) : null}
-		</>
+		</Fragment>
 	);
 }
 
@@ -253,17 +231,40 @@ function PodRow({
 // read level); write affordances are gated on the host's per-caller
 // facts. The toolbar/triad/table plumbing and the hint swap are
 // ResourceList's; this adapter owns only the columns, the row, and the
-// create/prune/remove modals (below the manage capability, the hint
+// create/prune/bulk-remove modals (below the manage capability, the hint
 // replaces the controls — never bait users with disabled buttons).
+//
+// Removal has no per-row button (spec 461, ticket #470): a single pod is
+// removed from its detail page, several from the toolbar's "Remove
+// selected".
 export function PodList({ host }: { host: Host }) {
 	const hostId = host.id;
+	const navigate = useNavigate();
 	const { data: pods, isPending, error } = usePods(hostId);
 	const createPod = useCreatePod(hostId);
-	const removePod = useRemovePod(hostId);
 	const prunePods = usePrunePods(hostId);
+	const bulkRemovePods = useBulkRemovePods(hostId);
+	// One instance per lifecycle action, shared by every row: the row scopes
+	// its own pending and error state off the mutation's variables.
+	const actions: PodActionMutations = {
+		start: usePodAction(hostId, "start"),
+		stop: usePodAction(hostId, "stop"),
+		pause: usePodAction(hostId, "pause"),
+		unpause: usePodAction(hostId, "unpause"),
+		kill: usePodAction(hostId, "kill"),
+		restart: usePodAction(hostId, "restart"),
+	};
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
-	const [pendingRemove, setPendingRemove] = useState<PodSummary | null>(null);
+	// The bulk-remove dialog's snapshot: the selected pods plus the
+	// selection's own clear, captured when the dialog opens. The list owns
+	// the selection, so the adapter never keeps a second copy of it — it
+	// holds the snapshot the run reports on and hands the clear back on
+	// close.
+	const [bulkRemoveTarget, setBulkRemoveTarget] = useState<{
+		pods: PodSummary[];
+		clear: () => void;
+	} | null>(null);
 	const canManage = can(host, "manage-pods");
 	const openLogs = useOpenLogs(hostId, "pod");
 
@@ -289,16 +290,16 @@ export function PodList({ host }: { host: Host }) {
 					{ label: "Created", sortBy: (pod) => pod.createdAt },
 					{},
 				]}
-				renderRow={(pod) => (
-					<PodRow
-						key={pod.id}
-						hostId={hostId}
-						pod={pod}
-						canManage={canManage}
-						onRemove={setPendingRemove}
-						onShowLogs={(pod) => openLogs({ targetId: pod.id, name: pod.name })}
-					/>
-				)}
+				renderRow={(pod) =>
+					renderPodRow({
+						pod,
+						canManage,
+						actions,
+						onOpen: (target) => navigate(detailPath(hostId, "pods", target.id)),
+						onShowLogs: (target) =>
+							openLogs({ targetId: target.id, name: target.name }),
+					})
+				}
 				toolbar={
 					<>
 						<Button
@@ -321,7 +322,27 @@ export function PodList({ host }: { host: Host }) {
 					</>
 				}
 				canManage={canManage}
+				selection={{ getKey: (pod) => pod.id }}
+				onRemoveSelected={(selection) =>
+					setBulkRemoveTarget({
+						pods: selection.selectedItems,
+						clear: selection.clear,
+					})
+				}
 			/>
+			{bulkRemoveTarget ? (
+				<BulkRemoveDialog
+					items={bulkRemoveTarget.pods}
+					noun="pod"
+					itemKey={(pod) => pod.id}
+					itemLabel={(pod) => pod.name}
+					mutation={bulkRemovePods}
+					// The selection clears when the run succeeds, not when the
+					// dialog closes: a failed run keeps it for the retry.
+					onSuccess={bulkRemoveTarget.clear}
+					onClose={() => setBulkRemoveTarget(null)}
+				/>
+			) : null}
 			{isCreateOpen ? (
 				<CreatePodDialog
 					mutation={createPod}
@@ -333,13 +354,6 @@ export function PodList({ host }: { host: Host }) {
 				<PrunePodsModal
 					onClose={() => setIsPruneOpen(false)}
 					prunePods={prunePods}
-				/>
-			) : null}
-			{pendingRemove ? (
-				<RemovePodModal
-					pod={pendingRemove}
-					onClose={() => setPendingRemove(null)}
-					removePod={removePod}
 				/>
 			) : null}
 		</>

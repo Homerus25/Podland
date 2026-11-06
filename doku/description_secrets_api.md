@@ -5,7 +5,7 @@ Part of the [API contract](description_api.md). See the main document for base U
 Secrets live only in the remote host's podman; the backend proxies podman's service API and persists nothing locally. The permission model maps onto the host levels:
 
 - **read** — see secret **metadata** (name, ID, driver, timestamps, labels)
-- **write** — additionally create and delete secrets
+- **write** — additionally create, delete, and bulk-remove secrets
 - **admin** — additionally **reveal secret values** (`?reveal=true`)
 
 **Redaction discipline:** a secret's value reaches the client exactly twice — in the create request and in an admin reveal response. It is never persisted by the backend, never logged at any level, and never appears in any other response (list and metadata inspect responses have no value field at all). The one server-side exception is the quadlet move/copy transfer's opt-in secret phase (issue 215, see the [quadlets doc](description_quadlets_api.md)): a `transferSecrets` request reveals a referenced secret's value on the source — requiring **admin** on the source host, the same gate as `?reveal=true` — and recreates the secret, value identical, on the target; the value never reaches the client, and each moved secret is audit-logged by name only. The standalone secret copy/move (issue 239, below) is the second server-side exception with the same shape: the transfer reveals the value on the source (admin) and recreates it on the target; the value never reaches the client and the audit event carries the name only.
@@ -169,6 +169,69 @@ Removes a secret from the host. The `{secretId}` path segment accepts a secret n
 - 502: `CONNECTION_FAILED`
 
 Podman secrets are immutable — an update is a conscious non-goal in v1; replacing a value means delete + recreate.
+
+---
+
+### POST /api/hosts/{id}/secrets/remove
+
+Remove several secrets by name or ID in one request. Each id is removed
+through the same classification as the single-item
+`DELETE /api/hosts/{id}/secrets/{secretId}`, so an in-use secret is
+refused in its own report entry while the rest of the batch still
+processes.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Request Body:**
+```json
+{
+  "ids": ["db-password", "api-token"]
+}
+```
+
+- `ids` (array of strings, required): the secret names to remove — the
+  same identity the single-item delete addresses. Must be non-empty and
+  carry no empty entry.
+
+Notes:
+- **There is no `force` parameter** — not in the request body, not as a
+  query parameter. Podman's secret removal has no force path, so an
+  in-use secret is refused with no retry that could remove it. A body
+  that carries `force` anyway is ignored.
+
+**Response (Success - 200):** one entry per requested id, in request
+order.
+```json
+[
+  { "id": "db-password", "success": true },
+  {
+    "id": "3f2e1d0c",
+    "success": false,
+    "error": { "code": "SECRET_IN_USE", "message": "string (podman's refusal text, naming the container)" }
+  }
+]
+```
+
+Notes:
+- A per-id failure is a report entry, never a status code: the batch
+  answers 200 even when every entry failed.
+- `error` is present only on a failed entry. Its `code` is the same code
+  the single-item delete would answer — `SECRET_NOT_FOUND`,
+  `SECRET_IN_USE` (podman's own refusal message, naming the container
+  that holds the secret, is forwarded), or `INTERNAL_ERROR` for an
+  unclassified cause (whose detail is never surfaced).
+- The report is `[]`, never `null`.
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body), `VALIDATION_FAILED` (missing
+  or empty `ids`, or an empty entry)
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row or read-level grantee)
+- 404: `HOST_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
 
 ---
 

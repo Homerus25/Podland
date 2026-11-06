@@ -1,3 +1,5 @@
+import { shortImageId } from "@shared/utils/format";
+
 // Podman reports an image's tags in repoTags, and an untagged image carries
 // the placeholder "<none>:<none>", which reads as noise — the display falls
 // back to a bare "<none>". The images feature owns the image DTOs, so the
@@ -11,4 +13,15 @@ function imageTags(image: { repoTags: string[] | null }): string[] {
 
 export function displayTags(image: { repoTags: string[] | null }): string {
 	return imageTags(image).join(", ");
+}
+
+// The naming composite every surface that must name one image unambiguously
+// uses: the tags alone render "<none>" for an untagged image, so the short
+// id disambiguates. The delete confirm, the download failure toast, and the
+// bulk-remove report all read it from here.
+export function imageDisplayName(image: {
+	id: string;
+	repoTags: string[] | null;
+}): string {
+	return `${displayTags(image)} (${shortImageId(image.id)})`;
 }

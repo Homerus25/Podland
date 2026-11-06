@@ -166,6 +166,19 @@ export function ConfirmDialog<TVariables>({
 	);
 }
 
+// The refusal vocabulary a force-refusal surface hands the preset: the
+// server's refusal code, the hint copy that explains it, and the hint's
+// testid. Each feature's `*Removal.ts` module owns one of these per resource
+// — the detail page's confirm and any other surface read the same words from
+// it — so the triple is a named type here, next to the preset that consumes
+// exactly these three fields, rather than an anonymous object literal per
+// feature.
+export interface RefusalVocabulary {
+	code: string;
+	hint: string;
+	hintTestId: string;
+}
+
 // The force-refusal preset over ConfirmDialog: the confirm-to-force ritual
 // a destructive delete hand-rolled per feature until now. The preset owns
 // the ritual through ConfirmDialog's existing replacement seams — the

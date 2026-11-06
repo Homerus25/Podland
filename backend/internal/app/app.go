@@ -326,6 +326,13 @@ func New(cfg *config.Config) (*App, error) {
 	containersMux.Handle("POST /{id}/containers", requireWrite(containerHandler.Create))
 	// Bulk deletion, so write-level like the volume prune.
 	containersMux.Handle("POST /{id}/containers/prune", requireWrite(containerHandler.Prune))
+	// Bulk removal by id, so write-level like the prune. The literal
+	// /remove segment cannot be shadowed by the {containerId} subtree:
+	// no POST route takes a bare {containerId} at this depth (the
+	// parametric POSTs are all one segment deeper). Registered as a
+	// literal anyway, like /prune and /stats, so a future same-depth
+	// wildcard cannot swallow it.
+	containersMux.Handle("POST /{id}/containers/remove", requireWrite(containerHandler.BulkRemove))
 	// One-shot stats snapshot for every running container, read-level
 	// like list/get/logs.
 	containersMux.HandleFunc("GET /{id}/containers/stats", containerHandler.Stats)
@@ -351,6 +358,13 @@ func New(cfg *config.Config) (*App, error) {
 	imagesMux.HandleFunc("GET /{id}/images", imageHandler.List)
 	imagesMux.Handle("POST /{id}/images/pull", requireWrite(imageHandler.Pull))
 	imagesMux.Handle("POST /{id}/images/prune", requireWrite(imageHandler.Prune))
+	// Bulk removal by id, so write-level like the prune. The literal
+	// /remove segment cannot be shadowed by the {imageId} subtree: no
+	// POST route takes a bare {imageId} at this depth (the parametric
+	// POSTs are all one segment deeper). Registered as a literal anyway,
+	// like /prune and /pull, so a future same-depth wildcard cannot
+	// swallow it.
+	imagesMux.Handle("POST /{id}/images/remove", requireWrite(imageHandler.BulkRemove))
 	// Detail DTO (list fields + inspect config), read-level like the
 	// raw inspect route below.
 	imagesMux.HandleFunc("GET /{id}/images/{imageId}", imageHandler.Get)
@@ -380,6 +394,13 @@ func New(cfg *config.Config) (*App, error) {
 	quadletsMux.Handle("POST /{id}/quadlets", requireWrite(quadletHandler.Create))
 	quadletsMux.Handle("POST /{id}/quadlets/import", requireWrite(quadletHandler.Import))
 	quadletsMux.Handle("POST /{id}/quadlets/auto-update", requireWrite(quadletHandler.AutoUpdate))
+	// Bulk removal by id, so write-level like every other bulk
+	// operation. The literal /remove segment cannot be shadowed by the
+	// {quadletId} subtree: no POST route takes a bare {quadletId} at
+	// this depth (the parametric POSTs are all one segment deeper).
+	// Registered as a literal anyway, like /import and /auto-update, so
+	// a future same-depth wildcard cannot swallow it.
+	quadletsMux.Handle("POST /{id}/quadlets/remove", requireWrite(quadletHandler.BulkRemove))
 	quadletsMux.HandleFunc("GET /{id}/quadlets/{quadletId}", quadletHandler.Get)
 	quadletsMux.Handle("PUT /{id}/quadlets/{quadletId}", requireWrite(quadletHandler.Update))
 	quadletsMux.Handle("DELETE /{id}/quadlets/{quadletId}", requireWrite(quadletHandler.Delete))
@@ -406,12 +427,19 @@ func New(cfg *config.Config) (*App, error) {
 	// is visible to any grantee (subtree membership is the read
 	// gate). The value reveal is NOT a route-level gate: ?reveal=true
 	// is a query param, so Service.Get checks the caller's level
-	// itself and answers 403 ACCESS_DENIED below admin. Creating and
-	// deleting secrets are remote-state mutations, so both are gated
-	// at write (160-03/160-04).
+	// itself and answers 403 ACCESS_DENIED below admin. Creating,
+	// deleting, and bulk-removing secrets are remote-state mutations, so
+	// all three are gated at write (160-03/160-04; bulk remove issue
+	// 466).
 	secretsMux := http.NewServeMux()
 	secretsMux.HandleFunc("GET /{id}/secrets", secretHandler.List)
 	secretsMux.Handle("POST /{id}/secrets", requireWrite(secretHandler.Create))
+	// Bulk removal by id, so write-level like the single-item delete.
+	// The literal /remove segment cannot be shadowed by the {secretId}
+	// subtree: no POST route takes a bare {secretId} at this depth (the
+	// parametric POSTs are all one segment deeper). Registered as a
+	// literal anyway, so a future same-depth wildcard cannot swallow it.
+	secretsMux.Handle("POST /{id}/secrets/remove", requireWrite(secretHandler.BulkRemove))
 	secretsMux.HandleFunc("GET /{id}/secrets/{secretId}", secretHandler.Get)
 	secretsMux.HandleFunc("GET /{id}/secrets/{secretId}/inspect", secretHandler.Inspect)
 	// Move/copy preview stays read-level: it mutates nothing and
@@ -440,6 +468,13 @@ func New(cfg *config.Config) (*App, error) {
 	volumesMux.HandleFunc("GET /{id}/volumes", volumeHandler.List)
 	volumesMux.Handle("POST /{id}/volumes", requireWrite(volumeHandler.Create))
 	volumesMux.Handle("POST /{id}/volumes/prune", requireWrite(volumeHandler.Prune))
+	// Bulk removal by name, so write-level like the prune. The literal
+	// /remove segment cannot be shadowed by the {volumeName} subtree:
+	// no POST route takes a bare {volumeName} at this depth (the
+	// parametric POSTs are all one segment deeper). Registered as a
+	// literal anyway, like /prune, so a future same-depth wildcard
+	// cannot swallow it.
+	volumesMux.Handle("POST /{id}/volumes/remove", requireWrite(volumeHandler.BulkRemove))
 	volumesMux.HandleFunc("GET /{id}/volumes/{volumeName}", volumeHandler.Get)
 	// Export stays read-level: users who can read a host's state
 	// can read its data.
@@ -468,6 +503,13 @@ func New(cfg *config.Config) (*App, error) {
 	networksMux := http.NewServeMux()
 	networksMux.HandleFunc("GET /{id}/networks", networkHandler.List)
 	networksMux.Handle("POST /{id}/networks/prune", requireWrite(networkHandler.Prune))
+	// Bulk removal by name, so write-level like the prune. The literal
+	// /remove segment cannot be shadowed by the {networkName} subtree:
+	// no POST route takes a bare {networkName} at this depth (the
+	// parametric POSTs are all one segment deeper). Registered as a
+	// literal anyway, like /prune, so a future same-depth wildcard
+	// cannot swallow it.
+	networksMux.Handle("POST /{id}/networks/remove", requireWrite(networkHandler.BulkRemove))
 	networksMux.HandleFunc("GET /{id}/networks/{networkName}", networkHandler.Get)
 	networksMux.HandleFunc("GET /{id}/networks/{networkName}/inspect", networkHandler.Inspect)
 	networksMux.Handle("POST /{id}/networks", requireWrite(networkHandler.Create))
@@ -486,6 +528,13 @@ func New(cfg *config.Config) (*App, error) {
 	podsMux.HandleFunc("GET /{id}/pods", podHandler.List)
 	podsMux.Handle("POST /{id}/pods", requireWrite(podHandler.Create))
 	podsMux.Handle("POST /{id}/pods/prune", requireWrite(podHandler.Prune))
+	// Bulk removal by id, so write-level like the prune. The literal
+	// /remove segment cannot be shadowed by the {podId} subtree: no
+	// POST route takes a bare {podId} at this depth (the parametric
+	// POSTs are all one segment deeper). Registered as a literal
+	// anyway, like /prune, so a future same-depth wildcard cannot
+	// swallow it.
+	podsMux.Handle("POST /{id}/pods/remove", requireWrite(podHandler.BulkRemove))
 	podsMux.HandleFunc("GET /{id}/pods/{podId}", podHandler.Get)
 	podsMux.HandleFunc("GET /{id}/pods/{podId}/inspect", podHandler.Inspect)
 	podsMux.HandleFunc("GET /{id}/pods/{podId}/logs", podHandler.Logs)

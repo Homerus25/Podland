@@ -15,6 +15,7 @@ import { ContainerStatsDialog } from "@features/containers/components/ContainerS
 import {
 	useContainer,
 	useContainerInspect,
+	useDeleteContainer,
 	useRenameContainer,
 	useUpdateContainer,
 } from "@features/containers/hooks/useContainers";
@@ -28,15 +29,62 @@ import {
 	DetailList,
 	DetailRow,
 	isNotFound,
+	removalAction,
 } from "@shared/components/detailKit";
+import { ForceConfirmDialog } from "@shared/components/MutationDialog";
 import { PermissionHint } from "@shared/components/PermissionHint";
 import { StateBadge } from "@shared/components/StateBadge";
-import { detailPath } from "@shared/routes/detailRoute";
+import { detailPath, hostTabPath } from "@shared/routes/detailRoute";
 import { formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
-import { Link as ReactRouterLink, useParams } from "react-router-dom";
+import {
+	Link as ReactRouterLink,
+	useNavigate,
+	useParams,
+} from "react-router-dom";
+import { CONTAINER_RUNNING_REFUSAL } from "./containerRemoval";
 import { EditConfigurationDialog } from "./EditConfigurationDialog";
 import { RenameContainerDialog } from "./RenameContainerDialog";
+
+// The detail page's Remove adapter over the shared force-refusal preset
+// (spec 461, ticket #467). The preset owns the ritual — the refusal-code
+// predicate, the hint replacing the error region, the confirm-to-force
+// footer swap, the pending wiring, and the force flag keyed off the current
+// error — so this adapter keeps only the domain: the refusal vocabulary
+// (containerRemoval.ts), the labels, and the payload builder taking the
+// force flag. Success navigates away (the overview query would 404 next).
+function RemoveContainerDialog({
+	container,
+	removeContainer,
+	onClose,
+	onRemoved,
+}: {
+	container: ContainerDetail;
+	removeContainer: ReturnType<typeof useDeleteContainer>;
+	onClose: () => void;
+	onRemoved: () => void;
+}) {
+	return (
+		<ForceConfirmDialog
+			mutation={removeContainer}
+			title="Remove container"
+			onClose={onClose}
+			refusalCode={CONTAINER_RUNNING_REFUSAL.code}
+			hint={CONTAINER_RUNNING_REFUSAL.hint}
+			hintTestId={CONTAINER_RUNNING_REFUSAL.hintTestId}
+			confirmLabel="Remove container"
+			forceLabel="Force remove"
+			forceTestId="force-remove-button"
+			confirm={(force) => ({ containerId: container.id, force })}
+			onSuccess={onRemoved}
+			body={
+				<Text>
+					Remove “{container.name}” ({container.image})? This cannot be undone.
+				</Text>
+			}
+		/>
+	);
+}
 
 // The container's overview: one label/value row per attribute the spec
 // lists. Cross-links (image, volumes, secrets) point at the related
@@ -293,13 +341,31 @@ export function ContainerDetailPage() {
 	const [renaming, setRenaming] = useState(false);
 	const [statsOpen, setStatsOpen] = useState(false);
 	const [editingConfig, setEditingConfig] = useState(false);
+	const [removing, setRemoving] = useState(false);
 	const inspectQuery = useContainerInspect(hostId!, containerId!, {
 		enabled: revealed,
 	});
 	const gate = useCapabilityGate(hostId!, "manage-containers");
 	const rename = useRenameContainer(hostId!, containerId!);
 	const update = useUpdateContainer(hostId!, containerId!);
+	const removeContainer = useDeleteContainer(hostId!);
+	const navigate = useNavigate();
 	const container = query.data;
+	const notFound = isNotFound(query.error);
+
+	// The header's Remove action (spec 461, ticket #467) rides the detail
+	// kit's gate cascade: the button on allowed, the shared write-permission
+	// hint on denied, neither while pending. The header actions sit outside
+	// the layout's state ternary, so the action also hides itself once the
+	// overview 404s — there is nothing left to remove.
+	const removeAction = removalAction({
+		gate,
+		notFound,
+		scope: "containers",
+		resource: "container",
+		testId: "remove-container-button",
+		onClick: () => setRemoving(true),
+	});
 
 	return (
 		<>
@@ -308,7 +374,7 @@ export function ContainerDetailPage() {
 				backTo="containers"
 				isPending={query.isPending}
 				error={query.error}
-				notFound={isNotFound(query.error)}
+				notFound={notFound}
 				inspectQuery={inspectQuery}
 				revealed={revealed}
 				onToggleInspect={() => setRevealed((value) => !value)}
@@ -318,14 +384,19 @@ export function ContainerDetailPage() {
 					// rendered on allowed, nothing otherwise — hidden below
 					// write level and while the gate is pending, so a
 					// read-only caller is never baited into a 403.
-					gate === "allowed" ? (
-						<Button
-							size="sm"
-							onClick={() => setEditingConfig(true)}
-							data-testid="edit-configuration-button"
-						>
-							Edit configuration
-						</Button>
+					gate === "allowed" || removeAction ? (
+						<>
+							{gate === "allowed" ? (
+								<Button
+									size="sm"
+									onClick={() => setEditingConfig(true)}
+									data-testid="edit-configuration-button"
+								>
+									Edit configuration
+								</Button>
+							) : null}
+							{removeAction}
+						</>
 					) : undefined
 				}
 			>
@@ -373,6 +444,14 @@ export function ContainerDetailPage() {
 					container={container}
 					mutation={update}
 					onClose={() => setEditingConfig(false)}
+				/>
+			) : null}
+			{removing && container ? (
+				<RemoveContainerDialog
+					container={container}
+					removeContainer={removeContainer}
+					onClose={() => setRemoving(false)}
+					onRemoved={() => navigate(hostTabPath(hostId!, "containers"))}
 				/>
 			) : null}
 		</>

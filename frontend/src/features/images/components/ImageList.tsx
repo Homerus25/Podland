@@ -1,10 +1,13 @@
-import { Box, Button, Td, Text, Tr, useToast } from "@chakra-ui/react";
+import { Box, Button, Td, Tr, useToast } from "@chakra-ui/react";
 import { can } from "@features/hosts/permissions";
 import { CopyImageDialog } from "@features/images/components/CopyImageDialog";
-import { displayTags } from "@features/images/components/imageDisplayTags";
+import {
+	displayTags,
+	imageDisplayName,
+} from "@features/images/components/imageDisplayTags";
 import { PullImageForm } from "@features/images/components/PullImageForm";
 import {
-	useDeleteImage,
+	useBulkRemoveImages,
 	useImages,
 	usePruneImages,
 } from "@features/images/hooks/useImages";
@@ -12,8 +15,9 @@ import {
 	type ImageSummary,
 	imageExportUrl,
 } from "@features/images/services/imagesApi";
-import { ForceConfirmDialog } from "@shared/components/MutationDialog";
+import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
+
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
@@ -26,42 +30,6 @@ import {
 } from "@shared/utils/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-// The delete adapter over the shared force-refusal preset: the module owns
-// the confirm-to-force ritual (the in-use hint, the footer swap, the force
-// flag keyed off the current error); this adapter keeps its domain only —
-// the IMAGE_USED_BY_CONTAINERS refusal code, the hint copy, the labels,
-// the testids, and the payload shape.
-function DeleteImageModal({
-	image,
-	onClose,
-	deleteImage,
-}: {
-	image: ImageSummary;
-	onClose: () => void;
-	deleteImage: ReturnType<typeof useDeleteImage>;
-}) {
-	return (
-		<ForceConfirmDialog
-			mutation={deleteImage}
-			title="Delete image"
-			onClose={onClose}
-			refusalCode="IMAGE_USED_BY_CONTAINERS"
-			hint="One or more containers use this image, so it cannot be deleted normally. Force delete removes the image even though containers still use it; those containers may stop working."
-			hintTestId="image-in-use-warning"
-			confirmLabel="Delete image"
-			forceLabel="Force delete"
-			forceTestId="force-delete-button"
-			confirm={(force) => ({ imageId: image.id, force })}
-			body={
-				<Text>
-					Delete {displayTags(image)} ({shortImageId(image.id)}) from this host?
-					This cannot be undone.
-				</Text>
-			}
-		/>
-	);
-}
 
 // The prune adapter over PruneReportDialog. The module owns the reset
 // lifecycle, the confirm/report footer swap, the report table, and the
@@ -87,16 +55,28 @@ function PruneImagesModal({
 
 // The Images tab body. The toolbar/triad/table plumbing, the plural testids,
 // and the hint swap are ResourceList's; this adapter owns only the columns,
-// the row, and the pull/prune/delete feature code. The pull form is a write,
-// so it rides the gated toolbar: a flex box first keeps it left-aligned with
-// the prune button right-aligned, and below the write-gated manage capability
-// the module swaps the whole toolbar for the canonical read hint.
+// the row, and the pull/prune/bulk-remove feature code. The pull form is a
+// write, so it rides the gated toolbar: a flex box first keeps it
+// left-aligned with the prune button right-aligned, and below the write-gated
+// manage capability the module swaps the whole toolbar for the canonical read
+// hint.
+//
+// Removal has no per-row button (spec 461, ticket #470): a single image is
+// removed from its detail page, several from the toolbar's "Remove selected".
 export function ImageList({ host }: { host: Host }) {
 	const hostId = host.id;
 	const { data: images, isPending, error } = useImages(hostId);
-	const deleteImage = useDeleteImage(hostId);
 	const pruneImages = usePruneImages(hostId);
-	const [pendingDelete, setPendingDelete] = useState<ImageSummary | null>(null);
+	const bulkRemoveImages = useBulkRemoveImages(hostId);
+	// The bulk-remove dialog's snapshot: the selected images plus the
+	// selection's own clear, captured when the dialog opens. The list owns
+	// the selection, so the adapter never keeps a second copy of it — it
+	// holds the snapshot the run reports on and hands the clear back on
+	// close.
+	const [bulkRemoveTarget, setBulkRemoveTarget] = useState<{
+		images: ImageSummary[];
+		clear: () => void;
+	} | null>(null);
 	const [pendingCopy, setPendingCopy] = useState<ImageSummary | null>(null);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -114,10 +94,10 @@ export function ImageList({ host }: { host: Host }) {
 		try {
 			await downloadFile(imageExportUrl(hostId, image.id));
 		} catch (error) {
-			// The delete modal's naming composite: tags alone render
-			// "<none>" for an untagged image, so the short ID names it.
+			// The shared naming composite: tags alone render "<none>" for an
+			// untagged image, so the short ID names it.
 			toast({
-				title: `Failed to download image: ${displayTags(image)} (${shortImageId(image.id)})`,
+				title: `Failed to download image: ${imageDisplayName(image)}`,
 				description: getApiError(error).message,
 				status: "error",
 				isClosable: true,
@@ -143,8 +123,8 @@ export function ImageList({ host }: { host: Host }) {
 				]}
 				renderRow={(image) => (
 					// The row is clickable: it navigates to the image's detail
-					// page, and the delete button stops propagation so a button
-					// click never also fires the row action.
+					// page, and every action button stops propagation so a
+					// button click never also fires the row action.
 					<Tr
 						key={image.id}
 						data-testid="image-row"
@@ -185,51 +165,53 @@ export function ImageList({ host }: { host: Host }) {
 									Copy to host
 								</Button>
 							) : null}
-							<Button
-								size="xs"
-								colorScheme="red"
-								variant="outline"
-								aria-label={`Delete ${displayTags(image)}`}
-								onClick={(event) => {
-									event.stopPropagation();
-									setPendingDelete(image);
-								}}
-							>
-								Delete
-							</Button>
 						</Td>
 					</Tr>
 				)}
-				toolbar={[
-					<Box key="pull-image-form" flex={1}>
-						<PullImageForm hostId={hostId} />
-					</Box>,
-					<Button
-						key="prune-images-button"
-						size="sm"
-						colorScheme="red"
-						variant="outline"
-						alignSelf="flex-start"
-						onClick={() => setIsPruneOpen(true)}
-						data-testid="prune-images-button"
-					>
-						Prune
-					</Button>,
-				]}
+				toolbar={
+					<>
+						<Box flex={1}>
+							<PullImageForm hostId={hostId} />
+						</Box>
+						<Button
+							size="sm"
+							colorScheme="red"
+							variant="outline"
+							alignSelf="flex-start"
+							onClick={() => setIsPruneOpen(true)}
+							data-testid="prune-images-button"
+						>
+							Prune
+						</Button>
+					</>
+				}
 				canManage={canManage}
+				selection={{ getKey: (image) => image.id }}
+				onRemoveSelected={(selection) =>
+					setBulkRemoveTarget({
+						images: selection.selectedItems,
+						clear: selection.clear,
+					})
+				}
 				emptyMessage="No images on this host yet. Pull one to get started."
 			/>
+			{bulkRemoveTarget ? (
+				<BulkRemoveDialog
+					items={bulkRemoveTarget.images}
+					noun="image"
+					itemKey={(image) => image.id}
+					itemLabel={(image) => imageDisplayName(image)}
+					mutation={bulkRemoveImages}
+					// The selection clears when the run succeeds, not when the
+					// dialog closes: a failed run keeps it for the retry.
+					onSuccess={bulkRemoveTarget.clear}
+					onClose={() => setBulkRemoveTarget(null)}
+				/>
+			) : null}
 			{isPruneOpen ? (
 				<PruneImagesModal
 					onClose={() => setIsPruneOpen(false)}
 					pruneImages={pruneImages}
-				/>
-			) : null}
-			{pendingDelete ? (
-				<DeleteImageModal
-					image={pendingDelete}
-					onClose={() => setPendingDelete(null)}
-					deleteImage={deleteImage}
 				/>
 			) : null}
 			{pendingCopy ? (

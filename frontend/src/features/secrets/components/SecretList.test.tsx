@@ -99,6 +99,23 @@ describe("SecretList", () => {
 		expect(screen.getByTestId("secrets-loading")).toBeInTheDocument();
 	});
 
+	// Spec 461, ticket #470: single-item removal lives on the detail page and
+	// bulk removal on the toolbar, so no row carries a destructive button any
+	// more — a mis-click on a row can never destroy a secret.
+	it("renders no per-row delete button", async () => {
+		mockSecrets([secretFixture()]);
+		renderSecretList();
+
+		const row = await screen.findByTestId("secret-row");
+		expect(
+			within(row).queryByRole("button", { name: /delete/i }),
+		).not.toBeInTheDocument();
+		// The row keeps its surviving action: the admin-gated move/copy.
+		expect(
+			within(row).getByRole("button", { name: "Move or copy db-password" }),
+		).toBeInTheDocument();
+	});
+
 	it("sorts rows when a column header is clicked", async () => {
 		mockSecrets([
 			secretFixture({ id: "z-1", name: "zebra-secret" }),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/Homerus25/podland/backend/internal/bulkremove"
 	"github.com/Homerus25/podland/backend/internal/web"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -90,6 +91,28 @@ func (h *NetworkHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		force := web.QueryBool(r, "force", false)
 
 		return struct{}{}, h.service.Delete(ctx, userID, hostID, networkName, force)
+	})
+}
+
+// BulkRemove handles removing several networks in one request. Route-level
+// RequireHostPermission(write) (app.go) gates it at write. The body
+// carries the network names and the force flag (default false); the answer
+// is 200 with one report entry per requested name, in request order — a
+// per-name failure is an entry, never a status code. Every entry rides the
+// single-item Delete's classification (internal/removal through
+// internal/bulkremove), so an in-use network without force answers a
+// NETWORK_IN_USE entry carrying podman's message while the rest of the
+// batch still processes.
+func (h *NetworkHandler) BulkRemove(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]bulkremove.Entry, error) {
+		var request bulkremove.Request
+		if appErr := web.Decode(w, r, &request); appErr != nil {
+			return nil, appErr
+		}
+
+		return bulkremove.Run(ctx, request.IDs, func(ctx context.Context, networkName string) error {
+			return h.service.Delete(ctx, userID, hostID, networkName, request.Force)
+		}), nil
 	})
 }
 

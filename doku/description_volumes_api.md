@@ -135,6 +135,62 @@ Notes:
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
+### POST /api/hosts/{id}/volumes/remove
+
+Remove several volumes by exact name in one request. Each name is
+removed through the same classification as the single-item
+`DELETE /api/hosts/{id}/volumes/{volumeName}`, so an in-use volume
+without `force` is refused in its own report entry while the rest of the
+batch still processes.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Request Body:**
+```json
+{
+  "ids": ["volume-name-a", "volume-name-b"],
+  "force": false
+}
+```
+
+- `ids` (array of strings, required): the volume names to remove. Must be
+  non-empty and carry no empty entry.
+- `force` (boolean, optional, default false): with `force=true` podman
+  stops dependent containers first and removes the volume anyway.
+
+**Response (Success - 200):** one entry per requested name, in request
+order.
+```json
+[
+  { "id": "volume-name-a", "success": true },
+  {
+    "id": "volume-name-b",
+    "success": false,
+    "error": { "code": "VOLUME_IN_USE", "message": "string (podman's refusal text)" }
+  }
+]
+```
+
+Notes:
+- A per-name failure is a report entry, never a status code: the batch
+  answers 200 even when every entry failed.
+- `error` is present only on a failed entry. Its `code` is the same code
+  the single-item delete would answer — `VOLUME_NOT_FOUND`,
+  `VOLUME_IN_USE`, or `INTERNAL_ERROR` for an unclassified cause (whose
+  detail is never surfaced).
+- The report is `[]`, never `null`.
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body), `VALIDATION_FAILED` (missing
+  or empty `ids`, or an empty entry)
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row or read-level grantee)
+- 404: `HOST_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
 ### GET /api/hosts/{id}/volumes/{volumeName}/export
 
 Stream the volume's contents as a tar archive download. Bytes flow

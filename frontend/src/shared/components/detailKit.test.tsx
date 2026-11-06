@@ -3,9 +3,11 @@ import {
 	DetailRow,
 	isNotFound,
 	KeyValueTable,
+	removalAction,
 } from "@shared/components/detailKit";
 import { screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { axiosError } from "@/test/errors";
 import { renderWithQuery } from "@/test/render";
 
@@ -108,5 +110,74 @@ describe("KeyValueTable", () => {
 
 		expect(screen.queryByText("Labels")).not.toBeInTheDocument();
 		expect(screen.getByTestId("kit-labels")).toHaveTextContent("team");
+	});
+});
+
+// The detail pages' header Remove action (spec 461, ticket #467): one owner
+// for the gate cascade, so the six pages cannot drift into two idioms again.
+describe("removalAction", () => {
+	const base = {
+		notFound: false,
+		scope: "volumes",
+		resource: "volume",
+		testId: "remove-volume-button",
+		onClick: vi.fn(),
+	};
+
+	it("renders the red outline button on allowed and wires the click", async () => {
+		const user = userEvent.setup();
+		const onClick = vi.fn();
+		renderWithQuery(
+			<div>{removalAction({ ...base, gate: "allowed", onClick })}</div>,
+			{
+				chakra: true,
+			},
+		);
+
+		const button = screen.getByTestId("remove-volume-button");
+		expect(button).toHaveTextContent("Remove");
+		await user.click(button);
+
+		expect(onClick).toHaveBeenCalledTimes(1);
+	});
+
+	it("renders the shared write hint on denied, and no button", () => {
+		renderWithQuery(<div>{removalAction({ ...base, gate: "denied" })}</div>, {
+			chakra: true,
+		});
+
+		const hint = screen.getByTestId("volumes-permission-hint");
+		expect(hint).toHaveAttribute("data-requirement", "write");
+		expect(hint).toHaveTextContent("manage its volumes");
+		expect(
+			screen.queryByTestId("remove-volume-button"),
+		).not.toBeInTheDocument();
+	});
+
+	it("renders neither while the gate is pending", () => {
+		renderWithQuery(<div>{removalAction({ ...base, gate: "pending" })}</div>, {
+			chakra: true,
+		});
+
+		expect(
+			screen.queryByTestId("remove-volume-button"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("volumes-permission-hint"),
+		).not.toBeInTheDocument();
+	});
+
+	it("renders neither once the overview 404s, whatever the gate says", () => {
+		renderWithQuery(
+			<div>{removalAction({ ...base, gate: "allowed", notFound: true })}</div>,
+			{ chakra: true },
+		);
+
+		expect(
+			screen.queryByTestId("remove-volume-button"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("volumes-permission-hint"),
+		).not.toBeInTheDocument();
 	});
 });

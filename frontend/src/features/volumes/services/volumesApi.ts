@@ -1,4 +1,5 @@
-import { api, hostApiPath, hostApiUrl } from "@shared/utils/api";
+import type { BulkRemoveEntry, BulkRemoveInput } from "@shared/types/api";
+import { api, bulkRemove, hostApiPath, hostApiUrl } from "@shared/utils/api";
 
 // Volume as returned by GET /api/hosts/{id}/volumes
 // (backend/internal/domain/volumes volume DTO). size is only present when
@@ -96,6 +97,20 @@ export async function pruneVolumes(
 		hostApiPath(hostId, "volumes", "prune"),
 	);
 	return response.data;
+}
+
+// POST /api/hosts/{id}/volumes/remove -> 200 (backend
+// internal/bulkremove Entry): one report entry per requested name, in
+// request order. A per-name failure is an entry, never a status code, so
+// an in-use volume without force answers a VOLUME_IN_USE entry while the
+// rest of the batch still processes. The POST is the shared bulkRemove helper's
+// (shared/utils/api.ts): the first pass is plain on the wire, and only the
+// report's retry carries force.
+export function bulkRemoveVolumes(
+	hostId: string,
+	input: BulkRemoveInput,
+): Promise<BulkRemoveEntry[]> {
+	return bulkRemove(hostId, "volumes", input);
 }
 
 // Builds the populate request body in exactly one of the backend's two

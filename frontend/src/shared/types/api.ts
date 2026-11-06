@@ -84,3 +84,34 @@ export interface ApiError {
 	code: string;
 	message: string;
 }
+
+// One entry of a bulk-remove report (backend/internal/bulkremove Entry):
+// the requested id — an id for containers, images, pods and quadlets, a
+// name for volumes and networks — the outcome, and, on a failure, the code
+// and message the client shows. Every resource's
+// POST /api/hosts/{id}/<domain>/remove answers one entry per requested id,
+// in request order, always 200: a per-item failure is an entry, never a
+// status code. Shared here rather than colocated in one feature's services
+// module because all seven host-scoped resources answer the same shape.
+export interface BulkRemoveEntry {
+	id: string;
+	success: boolean;
+	error?: ApiError;
+}
+
+// The request body every resource's POST /api/hosts/{id}/<domain>/remove
+// takes (backend/internal/bulkremove Request): the ids to remove — an id for
+// containers, images, pods and quadlets, a name for volumes and networks —
+// and the force flag. One type for all seven resources because the body is
+// one contract; the per-feature copies this replaces were byte-identical.
+//
+// `force` is optional because the wire omits it on the first pass (the
+// backend defaults it to false) and because secrets have no force path at
+// all: their single-item delete has no force parameter either, so the
+// secrets service never sends the flag and the bulk-remove dialog is told
+// `force={false}` for that resource. `bulkRemoveBody` (shared/utils/api.ts)
+// is the one place that decides whether the flag travels.
+export interface BulkRemoveInput {
+	ids: string[];
+	force?: boolean;
+}

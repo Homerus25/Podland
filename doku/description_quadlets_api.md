@@ -165,6 +165,80 @@ Remove a quadlet from a host.
 
 ---
 
+### POST /api/hosts/{id}/quadlets/remove
+
+Remove several quadlets by id in one request. The batch is answered with
+one podman call (podman's batch quadlet remove endpoint accepts the whole
+array), after the same pre-flight ritual as the single-item
+`DELETE /api/hosts/{id}/quadlets/{quadletId}`: a running resource is
+stopped first when `force` is not set, and a missing id is refused in its
+own report entry while the rest of the batch still processes.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Request Body:**
+```json
+{
+  "ids": ["my-container.container", "my-pod.pod"],
+  "force": false
+}
+```
+
+- `ids` (array of strings, required): the quadlet ids (file names) to
+  remove. Must be non-empty and carry no empty entry.
+- `force` (boolean, optional, default false): with `force=true` the
+  removal is forced even if the resource is running (no explicit stop is
+  performed), exactly like the single-item delete's `force` query flag.
+
+Notes:
+- **There is no `stop` field.** `stop=true` is a silent server-side
+  default: a running resource is stopped through the lifecycle's
+  `systemctl stop` before the removal, so containers running from a
+  selected quadlet are stopped first without any request option. A body
+  that carries `stop` anyway is ignored.
+- The ritual lists the host's quadlets once for the whole batch, so a
+  batch of N costs one list call plus one batch remove call.
+
+**Response (Success - 200):** one entry per requested id, in request
+order.
+```json
+[
+  { "id": "my-container.container", "success": true },
+  {
+    "id": "my-pod.pod",
+    "success": false,
+    "error": { "code": "INTERNAL_ERROR", "message": "string" }
+  }
+]
+```
+
+Notes:
+- A per-id failure is a report entry, never a status code: the batch
+  answers 200 even when every entry failed.
+- `error` is present only on a failed entry. Its `code` is
+  `QUADLET_NOT_FOUND` for an id missing from the host, or
+  `INTERNAL_ERROR` for a quadlet the batch call failed to remove (podman's
+  batch report names the failed quadlets but carries no cause on the
+  wire, so no finer code is answerable; the cause is logged server-side).
+- `QUADLET_RESOURCE_RUNNING` is not answerable by the batch: a running
+  resource is stopped through the lifecycle before the batch call when
+  `force` is not set, and a resource that comes up between that stop and
+  the batch call surfaces as `INTERNAL_ERROR` on its entry.
+- The report is `[]`, never `null`.
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body), `VALIDATION_FAILED` (missing
+  or empty `ids`, or an empty entry)
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row or read-level grantee)
+- 404: `HOST_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
 ### POST /api/hosts/{id}/quadlets/{quadletId}/start
 
 Start a stopped quadlet-managed resource.

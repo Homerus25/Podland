@@ -74,7 +74,9 @@ describe("VolumeList", () => {
 		renderVolumeList();
 
 		const row = await screen.findByTestId("volume-row");
-		expect(within(row).getAllByRole("cell")).toHaveLength(6);
+		// Six data cells plus the list's leading selection checkbox cell
+		// (spec 461, ticket #468).
+		expect(within(row).getAllByRole("cell")).toHaveLength(7);
 		expect(within(row).getByText("—")).toBeInTheDocument();
 	});
 
@@ -137,15 +139,26 @@ describe("VolumeList", () => {
 		expect(await screen.findByText(/move or copy/i)).toBeInTheDocument();
 		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
+	});
 
-		// Delete — opens the confirm dialog, not the detail page.
-		await user.click(
-			within(row).getByRole("button", { name: "Delete app-data" }),
-		);
+	// Spec 461, ticket #470: single-item removal lives on the detail page and
+	// bulk removal on the toolbar, so no row carries a destructive button any
+	// more — a mis-click on a row can never destroy a volume.
+	it("renders no per-row delete button", async () => {
+		mockVolumes([volumeFixture()]);
+		renderVolumeList();
+
+		const row = await screen.findByTestId("volume-row");
 		expect(
-			await screen.findByTestId("confirm-delete-button"),
+			within(row).queryByRole("button", { name: /delete/i }),
+		).not.toBeInTheDocument();
+		// The row keeps its surviving actions: export, move/copy, populate.
+		expect(
+			within(row).getByRole("button", { name: "Export app-data" }),
 		).toBeInTheDocument();
-		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
+		expect(
+			within(row).getByRole("button", { name: "Populate app-data" }),
+		).toBeInTheDocument();
 	});
 
 	it("sorts rows when a column header is clicked", async () => {

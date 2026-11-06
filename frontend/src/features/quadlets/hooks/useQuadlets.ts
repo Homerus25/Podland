@@ -1,6 +1,5 @@
 import type {
 	CreateQuadletInput,
-	DeleteQuadletOptions,
 	GenerateQuadletInput,
 	QuadletImportRequest,
 	QuadletLifecycleOptions,
@@ -8,9 +7,9 @@ import type {
 	UpdateQuadletInput,
 } from "@features/quadlets/services/quadletsApi";
 import {
+	bulkRemoveQuadlets,
 	convertCompose,
 	createQuadlet,
-	deleteQuadlet,
 	generateQuadlet,
 	getQuadlet,
 	importQuadlets,
@@ -36,6 +35,7 @@ import {
 	invalidateMoveResult,
 	useMovePreview,
 } from "@shared/transfers/transferHooks";
+import type { BulkRemoveInput } from "@shared/types/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 export function useQuadlets(hostId: string) {
@@ -81,14 +81,14 @@ export function useUpdateQuadlet(hostId: string) {
 	);
 }
 
-// A delete removes the unit from the host, so the list refetches on
-// success and the quadlet disappears.
-export function useDeleteQuadlet(hostId: string) {
+// A bulk remove takes several units off the host in one request, so the
+// list refetches on success and the removed quadlets disappear. The
+// per-entry report rides the mutation's data, not the cache.
+export function useBulkRemoveQuadlets(hostId: string) {
 	return useListInvalidatingMutation(
 		hostId,
 		"quadlets",
-		({ quadletId, ...options }: { quadletId: string } & DeleteQuadletOptions) =>
-			deleteQuadlet(hostId, quadletId, options),
+		(input: BulkRemoveInput) => bulkRemoveQuadlets(hostId, input),
 	);
 }
 

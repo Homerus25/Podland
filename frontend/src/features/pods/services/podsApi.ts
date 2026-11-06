@@ -1,5 +1,6 @@
 import { createLogSource, type LogSource } from "@shared/streaming/logSource";
-import { api, hostApiPath, hostApiUrl } from "@shared/utils/api";
+import type { BulkRemoveEntry, BulkRemoveInput } from "@shared/types/api";
+import { api, bulkRemove, hostApiPath, hostApiUrl } from "@shared/utils/api";
 import { keyValueRowsToRecord } from "@shared/utils/keyValueRows";
 
 // Pod as returned by GET /api/hosts/{id}/pods
@@ -327,4 +328,18 @@ export async function prunePods(hostId: string): Promise<PodPruneEntry[]> {
 		hostApiPath(hostId, "pods", "prune"),
 	);
 	return response.data;
+}
+
+// POST /api/hosts/{id}/pods/remove -> 200 (backend
+// internal/bulkremove Entry): one report entry per requested id, in request
+// order. A per-id failure is an entry, never a status code, so a pod whose
+// state refuses the removal without force answers a POD_STATE_CONFLICT entry
+// while the rest of the batch still processes. The POST is the shared bulkRemove helper's
+// (shared/utils/api.ts): the first pass is plain on the wire, and only the
+// report's retry carries force.
+export function bulkRemovePods(
+	hostId: string,
+	input: BulkRemoveInput,
+): Promise<BulkRemoveEntry[]> {
+	return bulkRemove(hostId, "pods", input);
 }

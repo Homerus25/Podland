@@ -2,7 +2,6 @@ import {
 	Badge,
 	Box,
 	Button,
-	Checkbox,
 	FormControl,
 	FormLabel,
 	Td,
@@ -14,8 +13,8 @@ import { can } from "@features/hosts/permissions";
 import { CreateVolumeDialog } from "@features/volumes/components/CreateVolumeDialog";
 import { MoveVolumeDialog } from "@features/volumes/components/MoveVolumeDialog";
 import {
+	useBulkRemoveVolumes,
 	useCreateVolume,
-	useDeleteVolume,
 	usePopulateVolume,
 	usePruneVolumes,
 	useVolumes,
@@ -25,12 +24,11 @@ import {
 	type VolumeSummary,
 	volumeExportUrl,
 } from "@features/volumes/services/volumesApi";
+import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
-import {
-	ConfirmDialog,
-	MutationDialog,
-} from "@shared/components/MutationDialog";
+import { MutationDialog } from "@shared/components/MutationDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
+
 import { ResourceList } from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
@@ -40,11 +38,16 @@ import { formatBytes, formatRelativeDate } from "@shared/utils/format";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-function VolumeRow({
+// The row is a plain function returning the <Tr>, not a component: the
+// list's cell-cloning walk (mobile pinning and the selection checkbox
+// column) reaches a row's cells only when `renderRow` hands back a `Tr` or a
+// `Fragment` of `Tr`s — a component element is opaque to it, so a row
+// wrapped in one silently loses both. The key rides the returned `Tr`, which
+// is the element the list's map places.
+function renderVolumeRow({
 	volume,
 	onSelect,
 	canManage,
-	onDelete,
 	isExporting,
 	onExport,
 	onPopulate,
@@ -53,7 +56,6 @@ function VolumeRow({
 	volume: VolumeSummary;
 	onSelect: (name: string) => void;
 	canManage: boolean;
-	onDelete: (volume: VolumeSummary) => void;
 	isExporting: boolean;
 	onExport: (volume: VolumeSummary) => void;
 	onPopulate: (volume: VolumeSummary) => void;
@@ -61,6 +63,7 @@ function VolumeRow({
 }) {
 	return (
 		<Tr
+			key={volume.name}
 			data-testid="volume-row"
 			cursor="pointer"
 			onClick={() => onSelect(volume.name)}
@@ -117,18 +120,6 @@ function VolumeRow({
 						>
 							Populate
 						</Button>
-						<Button
-							size="xs"
-							colorScheme="red"
-							variant="outline"
-							aria-label={`Delete ${volume.name}`}
-							onClick={(event) => {
-								event.stopPropagation();
-								onDelete(volume);
-							}}
-						>
-							Delete
-						</Button>
 					</>
 				) : null}
 			</Td>
@@ -136,78 +127,7 @@ function VolumeRow({
 	);
 }
 
-const VOLUME_IN_USE_CODE = "VOLUME_IN_USE";
 const UPLOAD_TOO_LARGE_CODE = "VOLUME_UPLOAD_TOO_LARGE";
-
-// The delete adapter over ConfirmDialog. The module owns the danger footer,
-// pending wiring, close-on-success, and the reset lifecycle (on open and on
-// close); this adapter keeps the domain body (the force checkbox) and the
-// toasts, expressed through the onSuccess/onError seams. The error region is
-// composed in renderError: the shared ErrorDisplay always, plus the in-use
-// hint when the failure is VOLUME_IN_USE - the seam replaces the region, it
-// does not append to it.
-function DeleteVolumeModal({
-	volume,
-	onClose,
-	deleteVolume,
-}: {
-	volume: VolumeSummary;
-	onClose: () => void;
-	deleteVolume: ReturnType<typeof useDeleteVolume>;
-}) {
-	const [force, setForce] = useState(false);
-	const toast = useToast();
-
-	return (
-		<ConfirmDialog
-			mutation={deleteVolume}
-			title="Delete volume"
-			confirmLabel="Delete volume"
-			confirm={() => ({ volumeName: volume.name, force })}
-			onClose={onClose}
-			onSuccess={() =>
-				toast({
-					title: `Volume deleted: ${volume.name}`,
-					status: "success",
-					isClosable: true,
-				})
-			}
-			onError={() =>
-				toast({
-					title: `Failed to delete volume: ${volume.name}`,
-					status: "error",
-					isClosable: true,
-				})
-			}
-			body={
-				<>
-					<Text>
-						Delete volume {volume.name} from this host? This cannot be undone.
-					</Text>
-					<Checkbox
-						mt={3}
-						isChecked={force}
-						onChange={(event) => setForce(event.target.checked)}
-						data-testid="force-delete-checkbox"
-					>
-						Force delete (stops containers using this volume before removal)
-					</Checkbox>
-				</>
-			}
-			renderError={(apiError) => (
-				<>
-					<ErrorDisplay error={apiError} />
-					{apiError.code === VOLUME_IN_USE_CODE ? (
-						<Text mt={2} color="orange.500" data-testid="volume-in-use-warning">
-							Force is required to delete a volume that containers are using.
-							Tick force delete and confirm to stop them and remove the volume.
-						</Text>
-					) : null}
-				</>
-			)}
-		/>
-	);
-}
 
 // The prune adapter over PruneReportDialog, the twin of the images one:
 // the module owns the plumbing, this adapter hands over the noun and the
@@ -364,24 +284,35 @@ function PopulateVolumeModal({
 // The Volumes tab body. The toolbar/triad/table plumbing, the plural
 // testids, and the hint swap are ResourceList's; this adapter owns only the
 // columns, the clickable row navigating to the volume's detail page, and
-// the create, export, populate, move/copy, delete, and prune feature code.
+// the create, export, populate, move/copy, prune, and bulk-remove feature
+// code.
+//
+// Removal has no per-row button (spec 461, ticket #470): a single volume is
+// removed from its detail page, several from the toolbar's "Remove
+// selected".
 export function VolumeList({ host }: { host: Host }) {
 	const hostId = host.id;
 	const navigate = useNavigate();
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const { data: volumes, isPending, error } = useVolumes(hostId);
 	const createVolume = useCreateVolume(hostId);
-	const deleteVolume = useDeleteVolume(hostId);
 	const pruneVolumes = usePruneVolumes(hostId);
+	const bulkRemoveVolumes = useBulkRemoveVolumes(hostId);
 	const populateVolume = usePopulateVolume(hostId);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [populateTarget, setPopulateTarget] = useState<VolumeSummary | null>(
 		null,
 	);
-	const [pendingDelete, setPendingDelete] = useState<VolumeSummary | null>(
-		null,
-	);
 	const [moveTarget, setMoveTarget] = useState<VolumeSummary | null>(null);
+	// The bulk-remove dialog's snapshot: the selected volumes plus the
+	// selection's own clear, captured when the dialog opens. The list owns
+	// the selection, so the adapter never keeps a second copy of it — it
+	// holds the snapshot the run reports on and hands the clear back on
+	// close.
+	const [bulkRemoveTarget, setBulkRemoveTarget] = useState<{
+		volumes: VolumeSummary[];
+		clear: () => void;
+	} | null>(null);
 	const [exportingName, setExportingName] = useState<string | null>(null);
 	const toast = useToast();
 
@@ -429,19 +360,17 @@ export function VolumeList({ host }: { host: Host }) {
 					},
 					{},
 				]}
-				renderRow={(volume) => (
-					<VolumeRow
-						key={volume.name}
-						volume={volume}
-						onSelect={(name) => navigate(detailPath(hostId, "volumes", name))}
-						canManage={canManage}
-						onDelete={setPendingDelete}
-						isExporting={exportingName === volume.name}
-						onExport={handleExport}
-						onPopulate={setPopulateTarget}
-						onMove={setMoveTarget}
-					/>
-				)}
+				renderRow={(volume) =>
+					renderVolumeRow({
+						volume,
+						onSelect: (name) => navigate(detailPath(hostId, "volumes", name)),
+						canManage,
+						isExporting: exportingName === volume.name,
+						onExport: handleExport,
+						onPopulate: setPopulateTarget,
+						onMove: setMoveTarget,
+					})
+				}
 				toolbar={
 					<>
 						<Button
@@ -464,7 +393,27 @@ export function VolumeList({ host }: { host: Host }) {
 					</>
 				}
 				canManage={canManage}
+				selection={{ getKey: (volume) => volume.name }}
+				onRemoveSelected={(selection) =>
+					setBulkRemoveTarget({
+						volumes: selection.selectedItems,
+						clear: selection.clear,
+					})
+				}
 			/>
+			{bulkRemoveTarget ? (
+				<BulkRemoveDialog
+					items={bulkRemoveTarget.volumes}
+					noun="volume"
+					itemKey={(volume) => volume.name}
+					itemLabel={(volume) => volume.name}
+					mutation={bulkRemoveVolumes}
+					// The selection clears when the run succeeds, not when the
+					// dialog closes: a failed run keeps it for the retry.
+					onSuccess={bulkRemoveTarget.clear}
+					onClose={() => setBulkRemoveTarget(null)}
+				/>
+			) : null}
 			{populateTarget ? (
 				<PopulateVolumeModal
 					volume={populateTarget}
@@ -476,13 +425,6 @@ export function VolumeList({ host }: { host: Host }) {
 				<PruneVolumesModal
 					onClose={() => setIsPruneOpen(false)}
 					pruneVolumes={pruneVolumes}
-				/>
-			) : null}
-			{pendingDelete ? (
-				<DeleteVolumeModal
-					volume={pendingDelete}
-					onClose={() => setPendingDelete(null)}
-					deleteVolume={deleteVolume}
 				/>
 			) : null}
 			{moveTarget ? (

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Homerus25/podland/backend/internal/bulkremove"
 	"github.com/Homerus25/podland/backend/internal/contextutils"
 	"github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/streaming"
@@ -98,6 +99,27 @@ func (h *ImageHandler) Pull(w http.ResponseWriter, r *http.Request) {
 		ErrorEvent: func(op streaming.OperationContext, code, message string, _ bool) any {
 			return NewErrorEvent(op.OperationID, op.HostID, code, message)
 		},
+	})
+}
+
+// BulkRemove handles removing several images in one request. Route-level
+// RequireHostPermission(write) (app.go) gates it at write. The body
+// carries the image ids and the force flag (default false); the answer is
+// 200 with one report entry per requested id, in request order — a per-id
+// failure is an entry, never a status code. The removal is ONE podman
+// call — the batch remove endpoint accepts the whole array (the service's
+// BulkDelete) — and the entries ride the same classification as the
+// single-item Delete, so an image used by containers without force
+// answers an IMAGE_USED_BY_CONTAINERS entry while the rest of the batch
+// still processes.
+func (h *ImageHandler) BulkRemove(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusOK, func(ctx context.Context, userID, hostID string) ([]bulkremove.Entry, error) {
+		var request bulkremove.Request
+		if appErr := web.Decode(w, r, &request); appErr != nil {
+			return nil, appErr
+		}
+
+		return h.service.BulkDelete(ctx, userID, hostID, request.IDs, request.Force), nil
 	})
 }
 

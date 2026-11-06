@@ -1,4 +1,4 @@
-import { Button, Checkbox, Text, VStack } from "@chakra-ui/react";
+import { Button, Text } from "@chakra-ui/react";
 import { can } from "@features/hosts/permissions";
 import { AutoUpdateModal } from "@features/quadlets/components/AutoUpdateModal";
 import { ImportComposeModal } from "@features/quadlets/components/ImportComposeModal";
@@ -7,90 +7,61 @@ import {
 	CreateQuadletDialog,
 	EditQuadletDialog,
 } from "@features/quadlets/components/QuadletDialog";
-import { QuadletRow } from "@features/quadlets/components/QuadletRow";
+import {
+	LifecycleOptionsModal,
+	type QuadletLifecycleMutations,
+	renderQuadletRow,
+} from "@features/quadlets/components/QuadletRow";
 import { useQuadletAutoUpdate } from "@features/quadlets/hooks/useQuadletAutoUpdate";
 import {
+	useBulkRemoveQuadlets,
 	useCreateQuadlet,
-	useDeleteQuadlet,
 	useMoveQuadlet,
 	useQuadlets,
+	useRestartQuadlet,
+	useStartQuadlet,
+	useStopQuadlet,
 	useUpdateQuadlet,
 } from "@features/quadlets/hooks/useQuadlets";
 import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
-import { ActionDialog, ConfirmDialog } from "@shared/components/MutationDialog";
+import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
+import { ActionDialog } from "@shared/components/MutationDialog";
+
 import { ResourceList } from "@shared/components/ResourceList";
 import { useOpenLogs } from "@shared/logs/logRoute";
 import type { Host } from "@shared/types/api";
 import { useState } from "react";
 
-// No delete request leaves the browser until the user explicitly confirms.
-// The danger footer, pending wiring, close-on-success, reset lifecycle, and
-// error region are ConfirmDialog's; this adapter owns the domain body (the
-// two option checkboxes) and the variables: stop-first defaults to on and
-// force to off, matching the backend contract's defaults, so confirming
-// without touching anything behaves like the API's own defaults.
-function DeleteQuadletModal({
-	quadlet,
-	deleteQuadlet,
-	onClose,
-}: {
-	quadlet: QuadletSummary;
-	deleteQuadlet: ReturnType<typeof useDeleteQuadlet>;
-	onClose: () => void;
-}) {
-	const [stopFirst, setStopFirst] = useState(true);
-	const [force, setForce] = useState(false);
-
-	return (
-		<ConfirmDialog
-			mutation={deleteQuadlet}
-			title="Delete quadlet"
-			confirmLabel="Delete quadlet"
-			confirm={() => ({ quadletId: quadlet.id, stop: stopFirst, force })}
-			onClose={onClose}
-			body={
-				<>
-					<Text>Delete “{quadlet.name}”? This cannot be undone.</Text>
-					<VStack align="flex-start" mt={3} spacing={2}>
-						<Checkbox
-							isChecked={stopFirst}
-							onChange={(event) => setStopFirst(event.target.checked)}
-							data-testid="stop-first-option"
-						>
-							Stop the unit before deleting
-						</Checkbox>
-						<Checkbox
-							isChecked={force}
-							onChange={(event) => setForce(event.target.checked)}
-							data-testid="force-option"
-						>
-							Force
-						</Checkbox>
-					</VStack>
-				</>
-			}
-		/>
-	);
-}
-
 // The toolbar/triad/table plumbing, the plural testids, and the hint swap
 // are ResourceList's; this adapter owns the busiest toolbar of the five
-// (create plus the two auto-update buttons), the edit/delete/logs/auto-update
-// and move/copy feature code, and the now-tiny update-all pre-flight (an
+// (create plus the two auto-update buttons), the edit/logs/auto-update and
+// move/copy feature code, and the now-tiny update-all pre-flight (an
 // ActionDialog: the confirm gates the caller-owned stream, so no mutation
 // plumbing applies).
 // The row and its lifecycle options modal live in QuadletRow; the transfer
 // dialog (mode, target, volume warning) lives in MoveQuadletDialog. Create is
 // a write like every other toolbar action, so below manage level the module
 // swaps the whole toolbar for the canonical read hint.
+//
+// Removal has no per-row button (spec 461, ticket #470), and quadlets have no
+// detail page either: a single quadlet is removed by selecting it and using
+// the toolbar's "Remove selected", exactly like a bulk selection.
 export function QuadletList({ host }: { host: Host }) {
 	const hostId = host.id;
 	const { data: quadlets, isPending, error } = useQuadlets(hostId);
 	const createQuadlet = useCreateQuadlet(hostId);
 	const updateQuadlet = useUpdateQuadlet(hostId);
-	const deleteQuadlet = useDeleteQuadlet(hostId);
+	const bulkRemoveQuadlets = useBulkRemoveQuadlets(hostId);
 	const moveQuadlet = useMoveQuadlet(hostId);
 	const autoUpdate = useQuadletAutoUpdate(hostId);
+	// One instance per lifecycle action, shared by every row: a plain row
+	// function cannot own hooks, so the list keeps them and each row scopes
+	// its own pending state off the mutation's variables.
+	const lifecycle: QuadletLifecycleMutations = {
+		start: useStartQuadlet(hostId),
+		stop: useStopQuadlet(hostId),
+		restart: useRestartQuadlet(hostId),
+	};
 	const canManage = can(host, "manage-quadlets");
 	const [isConfirmUpdateOpen, setIsConfirmUpdateOpen] = useState(false);
 	const [isAutoUpdateOpen, setIsAutoUpdateOpen] = useState(false);
@@ -102,8 +73,23 @@ export function QuadletList({ host }: { host: Host }) {
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [isImportOpen, setIsImportOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null);
-	const [deleteTarget, setDeleteTarget] = useState<QuadletSummary | null>(null);
 	const [moveTarget, setMoveTarget] = useState<QuadletSummary | null>(null);
+	// Stop and restart both run through the options modal; this remembers
+	// which one is open and for which quadlet (null = none). The row names
+	// the action, the list mounts the modal.
+	const [lifecycleTarget, setLifecycleTarget] = useState<{
+		quadlet: QuadletSummary;
+		action: "stop" | "restart";
+	} | null>(null);
+	// The bulk-remove dialog's snapshot: the selected quadlets plus the
+	// selection's own clear, captured when the dialog opens. The list owns
+	// the selection, so the adapter never keeps a second copy of it — it
+	// holds the snapshot the run reports on and hands the clear back on
+	// close.
+	const [bulkRemoveTarget, setBulkRemoveTarget] = useState<{
+		quadlets: QuadletSummary[];
+		clear: () => void;
+	} | null>(null);
 	const openLogs = useOpenLogs(hostId, "quadlet");
 
 	return (
@@ -120,25 +106,23 @@ export function QuadletList({ host }: { host: Host }) {
 					{},
 					{},
 					// The move/copy column exists only when the rows can offer the
-					// action (ContainerList's conditional delete column is the
-					// precedent), so the header matches the row either way.
+					// action (the networks list's conditional connect column is
+					// the precedent), so the header matches the row either way.
 					...(canManage ? [{}] : []),
-					{},
 				]}
-				renderRow={(row) => (
-					<QuadletRow
-						key={row.id}
-						hostId={hostId}
-						quadlet={row}
-						canManage={canManage}
-						onEdit={setEditTarget}
-						onMove={setMoveTarget}
-						onDelete={setDeleteTarget}
-						onShowLogs={(quadlet) =>
-							openLogs({ targetId: quadlet.id, name: quadlet.name })
-						}
-					/>
-				)}
+				renderRow={(quadlet) =>
+					renderQuadletRow({
+						quadlet,
+						canManage,
+						lifecycle,
+						onEdit: setEditTarget,
+						onMove: setMoveTarget,
+						onShowLogs: (target) =>
+							openLogs({ targetId: target.id, name: target.name }),
+						onLifecycle: (target, action) =>
+							setLifecycleTarget({ quadlet: target, action }),
+					})
+				}
 				toolbar={
 					<>
 						<Button
@@ -180,20 +164,45 @@ export function QuadletList({ host }: { host: Host }) {
 					</>
 				}
 				canManage={canManage}
+				selection={{ getKey: (quadlet) => quadlet.id }}
+				onRemoveSelected={(selection) =>
+					setBulkRemoveTarget({
+						quadlets: selection.selectedItems,
+						clear: selection.clear,
+					})
+				}
 			/>
+			{bulkRemoveTarget ? (
+				<BulkRemoveDialog
+					items={bulkRemoveTarget.quadlets}
+					noun="quadlet"
+					itemKey={(quadlet) => quadlet.id}
+					itemLabel={(quadlet) => quadlet.name}
+					mutation={bulkRemoveQuadlets}
+					// The selection clears when the run succeeds, not when the
+					// dialog closes: a failed run keeps it for the retry.
+					onSuccess={bulkRemoveTarget.clear}
+					onClose={() => setBulkRemoveTarget(null)}
+				/>
+			) : null}
+			{lifecycleTarget ? (
+				<LifecycleOptionsModal
+					quadlet={lifecycleTarget.quadlet}
+					actionLabel={lifecycleTarget.action === "stop" ? "Stop" : "Restart"}
+					lifecycle={
+						lifecycleTarget.action === "stop"
+							? lifecycle.stop
+							: lifecycle.restart
+					}
+					onClose={() => setLifecycleTarget(null)}
+				/>
+			) : null}
 			{editTarget ? (
 				<EditQuadletDialog
 					hostId={hostId}
 					quadlet={editTarget}
 					mutation={updateQuadlet}
 					onClose={() => setEditTarget(null)}
-				/>
-			) : null}
-			{deleteTarget ? (
-				<DeleteQuadletModal
-					quadlet={deleteTarget}
-					deleteQuadlet={deleteQuadlet}
-					onClose={() => setDeleteTarget(null)}
 				/>
 			) : null}
 			{moveTarget ? (

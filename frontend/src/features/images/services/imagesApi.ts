@@ -1,4 +1,5 @@
-import { api, hostApiPath, hostApiUrl } from "@shared/utils/api";
+import type { BulkRemoveEntry, BulkRemoveInput } from "@shared/types/api";
+import { api, bulkRemove, hostApiPath, hostApiUrl } from "@shared/utils/api";
 
 // Image as returned by GET /api/hosts/{id}/images
 // (backend/internal/domain/images/dto.go ImageListResponse).
@@ -153,4 +154,18 @@ export function imageCopyStreamUrl(hostId: string, imageId: string): string {
 // the helper saves under the server-provided name.
 export function imageExportUrl(hostId: string, imageId: string): string {
 	return hostApiUrl(hostId, "images", imageId, "export");
+}
+
+// POST /api/hosts/{id}/images/remove -> 200 (backend
+// internal/bulkremove Entry): one report entry per requested id, in request
+// order. A per-id failure is an entry, never a status code, so an in-use
+// image without force answers an IMAGE_USED_BY_CONTAINERS entry while the
+// rest of the batch still processes. The POST is the shared bulkRemove helper's
+// (shared/utils/api.ts): the first pass is plain on the wire, and only the
+// report's retry carries force.
+export function bulkRemoveImages(
+	hostId: string,
+	input: BulkRemoveInput,
+): Promise<BulkRemoveEntry[]> {
+	return bulkRemove(hostId, "images", input);
 }

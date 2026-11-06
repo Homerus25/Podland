@@ -125,9 +125,11 @@ describe("SecretList move/copy", () => {
 			secretsHandler(() => [dbPassword]),
 			hostsHandler([source, staging, readOnly, backup]),
 		);
-		// Write on the source: the manage cell renders (delete shows), but
-		// the transfer's source gate is admin — the value leaving the
-		// host is a reveal — so Move/Copy must not.
+		// Write on the source: the transfer's source gate is admin — the
+		// value leaving the host is a reveal — so Move/Copy must not render.
+		// Spec 461, ticket #470: the row's delete button is gone too, so a
+		// write-level row offers no action at all and the action column
+		// disappears with it.
 		renderWithQuery(
 			<SecretList
 				host={hostFixture({ permission: "write", isOwner: false })}
@@ -136,13 +138,11 @@ describe("SecretList move/copy", () => {
 			{ chakra: true, router: true },
 		);
 
-		expect(await screen.findByTestId("secret-row")).toBeInTheDocument();
+		const row = await screen.findByTestId("secret-row");
 		expect(
 			screen.queryByRole("button", { name: "Move or copy db-password" }),
 		).not.toBeInTheDocument();
-		expect(
-			screen.getByRole("button", { name: "Delete db-password" }),
-		).toBeInTheDocument();
+		expect(within(row).queryAllByRole("button")).toHaveLength(0);
 	});
 
 	it("offers one dialog listing only manageable hosts, source excluded", async () => {

@@ -66,11 +66,38 @@ func IsUniqueConstraintViolation(err error) bool {
 // message is `"x" has associated containers with it. Use -f to forcibly
 // delete containers and pods: network is being used`, so the sentinel text
 // is the only conflict signature on that path.
+//
+// This is the IsRefusal for volumes, networks and secrets (delete and move
+// source), so it deliberately carries only the still-referenced vocabulary
+// those domains share. The running-container removal refusal is a
+// containers-only fact and lives in IsRunningContainerRefusal.
 func IsConflict(err error) bool {
 	if code, ok := responseCode(err); ok && code == http.StatusConflict {
 		return true
 	}
 	return containsAny(err, "in use", "used by", "unable to delete", "is being used")
+}
+
+// IsRunningContainerRefusal reports whether err is podman refusing to
+// remove a running (or paused) container without force (issue 462): a 409
+// ErrorModel, or the phrase "cannot be removed without force". The compat
+// layer answers the refusal as a 500 whose message is
+// `cannot remove container <id> as it is running - running or paused
+// containers cannot be removed without force: container state improper`,
+// so the phrase is its only signature on that path. The trailing
+// ErrCtrStateInvalid text ("container state improper") is shared with every
+// other improper-state answer (pausing a paused container, killing a
+// stopped one), so it is deliberately not a phrase here. The phrase covers
+// the paused variant too, which says "as it is paused".
+//
+// This is the containers domain's IsRefusal and nothing else's: volumes,
+// networks and secrets use IsConflict, where a running-container refusal is
+// not their in-use refusal.
+func IsRunningContainerRefusal(err error) bool {
+	if code, ok := responseCode(err); ok && code == http.StatusConflict {
+		return true
+	}
+	return containsAny(err, "cannot be removed without force")
 }
 
 // IsClientError reports whether err is a client-side rejection: a 4xx

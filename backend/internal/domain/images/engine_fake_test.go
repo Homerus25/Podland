@@ -12,14 +12,15 @@ import (
 // Each test arms only the operations its scenario needs; an unarmed
 // operation panics, so an unexpected engine call fails the test loudly.
 type fakeImageEngine struct {
-	listFn    func(opts entities.ImageListOptions) ([]*entities.ImageSummary, error)
-	removeFn  func(id string, force bool) (*entities.ImageRemoveReport, []error)
-	pullFn    func(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error)
-	pruneFn   func() ([]*reports.PruneReport, error)
-	inspectFn func(id string) ([]*entities.ImageInspectReport, []error, error)
-	existsFn  func(id string) (bool, error)
-	exportFn  func(ref string, w io.Writer) error
-	loadFn    func(r io.Reader) ([]string, error)
+	listFn      func(opts entities.ImageListOptions) ([]*entities.ImageSummary, error)
+	removeFn    func(id string, force bool) (*entities.ImageRemoveReport, []error)
+	removeAllFn func(ids []string, force bool) (*entities.ImageRemoveReport, []error)
+	pullFn      func(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error)
+	pruneFn     func() ([]*reports.PruneReport, error)
+	inspectFn   func(id string) ([]*entities.ImageInspectReport, []error, error)
+	existsFn    func(id string) (bool, error)
+	exportFn    func(ref string, w io.Writer) error
+	loadFn      func(r io.Reader) ([]string, error)
 }
 
 func (f *fakeImageEngine) List(opts entities.ImageListOptions) ([]*entities.ImageSummary, error) {
@@ -34,6 +35,13 @@ func (f *fakeImageEngine) Remove(id string, force bool) (*entities.ImageRemoveRe
 		panic("unexpected ImageEngine.Remove call")
 	}
 	return f.removeFn(id, force)
+}
+
+func (f *fakeImageEngine) RemoveAll(ids []string, force bool) (*entities.ImageRemoveReport, []error) {
+	if f.removeAllFn == nil {
+		panic("unexpected ImageEngine.RemoveAll call")
+	}
+	return f.removeAllFn(ids, force)
 }
 
 func (f *fakeImageEngine) Pull(rawImage string, opts entities.ImagePullOptions) (*entities.ImagePullReport, error) {

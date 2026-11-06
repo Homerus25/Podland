@@ -139,6 +139,26 @@ describe("PodList", () => {
 		expect(within(rows[1]).getByText("zebra-pod")).toBeInTheDocument();
 	});
 
+	// Spec 461, ticket #470: single-item removal lives on the detail page and
+	// bulk removal on the toolbar, so no row carries a destructive button any
+	// more — a mis-click on a row can never destroy a pod.
+	it("renders no per-row remove button", async () => {
+		mockPods([podFixture()]);
+		renderPodList();
+
+		const row = await screen.findByTestId("pod-row");
+		expect(
+			within(row).queryByRole("button", { name: /remove/i }),
+		).not.toBeInTheDocument();
+		// The row keeps its surviving actions: the lifecycle controls and logs.
+		expect(
+			within(row).getByRole("button", { name: "Stop app-pod" }),
+		).toBeInTheDocument();
+		expect(
+			within(row).getByRole("button", { name: "Logs app-pod" }),
+		).toBeInTheDocument();
+	});
+
 	it("navigates to the pod's detail page on row click", async () => {
 		mockPods([podFixture()]);
 		renderWithQuery(

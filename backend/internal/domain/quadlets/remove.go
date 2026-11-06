@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Homerus25/podland/backend/internal/bulkremove"
+	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/removal"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -83,8 +85,8 @@ func (s *QuadletService) stopAndRemove(ctx context.Context, userID, hostID, name
 		}
 
 		if running && stop && !force {
-			if err := s.applyUnitAction(ctx, userID, hostID, actionStop, resolveUnitName(target, name), LifecycleOptions{}); err != nil {
-				return fmt.Errorf("failed to stop quadlet before remove: %w", err)
+			if err := s.stopQuadletResource(ctx, userID, hostID, name, target); err != nil {
+				return err
 			}
 		}
 
@@ -108,4 +110,116 @@ func (s *QuadletService) stopAndRemove(ctx context.Context, userID, hostID, name
 // evaluate it, so the ritual and its preflight cannot drift apart.
 func quadletResourceRunning(q *entities.ListQuadlet) bool {
 	return parseStateFromStatus(q.Status) == "running"
+}
+
+// stopQuadletResource is the one stop-before-remove gate both removal
+// shapes cross (issue 231) — the single-item ritual and the batch
+// preflight — through the lifecycle seam, so a stop edit cannot drift
+// between them. The wrap keeps the ritual's message: the single-item
+// surface returns it, the batch classifies it.
+func (s *QuadletService) stopQuadletResource(ctx context.Context, userID, hostID, name string, target *entities.ListQuadlet) error {
+	if err := s.applyUnitAction(ctx, userID, hostID, actionStop, resolveUnitName(target, name), LifecycleOptions{}); err != nil {
+		return fmt.Errorf("failed to stop quadlet before remove: %w", err)
+	}
+	return nil
+}
+
+// BulkDelete removes several quadlets through ONE podman batch call —
+// the batch remove endpoint accepts the whole array, so the bulk surface
+// stops paying one podman call per id. The ritual keeps the
+// stop-and-remove shape (issue 231) at batch width: one list locates
+// every target, a missing id answers its QUADLET_NOT_FOUND entry, and a
+// running resource is stopped through the lifecycle seam before the
+// removal (the silent stop=true default, spec 461 user story 14 — the
+// request has no stop field, so a client cannot turn it off). The
+// removals then cross as one call whose report answers per name.
+//
+// A quadlet that fails AT the call answers the kit's generic internal
+// entry: podman's batch endpoint marshals the report's error values as
+// empty objects, so the wire names the failed quadlet but never the
+// cause (the adapter owns that fact) — the running-refusal race window
+// (a resource started between the list and the remove) answers the
+// generic entry where the single-item delete answers
+// QUADLET_RESOURCE_RUNNING. An acquisition or list failure answers the
+// classified cause on every entry — byte-identical to the per-item
+// loop's answer when every single-item call failed the same way.
+func (s *QuadletService) BulkDelete(ctx context.Context, userID, hostID string, ids []string, force bool) []bulkremove.Entry {
+	entries := make([]bulkremove.Entry, len(ids))
+	for i, id := range ids {
+		entries[i] = bulkremove.Entry{ID: id}
+	}
+
+	err := s.engines.WithEngine(ctx, userID, hostID, "quadlets.BulkRemove", func(e QuadletEngine) error {
+		list, err := e.List(entities.QuadletListOptions{})
+		if err != nil {
+			// The only early exit: it runs before any entry is
+			// answered, so the acquisition branch below may safely
+			// answer every entry.
+			return fmt.Errorf("failed to list quadlets: %w", err)
+		}
+
+		// pending carries the entry indices the batch call answers.
+		var pending []int
+		for i, id := range ids {
+			target := findQuadletByName(list, id)
+			if target == nil {
+				entries[i].Error = bulkremove.Classify(ctx, id, appErrors.ErrQuadletNotFound)
+				continue
+			}
+			if !force && quadletResourceRunning(target) {
+				if err := s.stopQuadletResource(ctx, userID, hostID, id, target); err != nil {
+					entries[i].Error = bulkremove.Classify(ctx, id, err)
+					continue
+				}
+			}
+			pending = append(pending, i)
+		}
+		if len(pending) == 0 {
+			return nil
+		}
+
+		names := make([]string, len(pending))
+		for i, idx := range pending {
+			names[i] = ids[idx]
+		}
+		report, err := e.RemoveAll(names, force)
+		if err != nil {
+			for _, idx := range pending {
+				entries[idx].Error = bulkremove.Classify(ctx, ids[idx], err)
+			}
+			return nil
+		}
+
+		removed := make(map[string]bool, len(report.Removed))
+		for _, name := range report.Removed {
+			removed[name] = true
+		}
+		failed := make(map[string]bool, len(report.Failed))
+		for _, name := range report.Failed {
+			failed[name] = true
+		}
+		for _, idx := range pending {
+			name := ids[idx]
+			switch {
+			case removed[name]:
+				entries[idx].Success = true
+			case failed[name]:
+				// The cause does not cross the wire (see the adapter):
+				// the entry answers the kit's generic internal error,
+				// with the cause logged once and never surfaced.
+				entries[idx].Error = bulkremove.Classify(ctx, name,
+					fmt.Errorf("quadlet removal failed: podman's batch report carries no cause"))
+			default:
+				entries[idx].Error = bulkremove.Classify(ctx, name,
+					fmt.Errorf("quadlet absent from the batch remove report"))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		for i := range entries {
+			entries[i].Error = bulkremove.Classify(ctx, ids[i], err)
+		}
+	}
+	return entries
 }

@@ -1,4 +1,5 @@
 import {
+	bulkRemovePods,
 	type CreatePodInput,
 	createPod,
 	getPod,
@@ -19,6 +20,7 @@ import {
 	useOneShotQuery,
 } from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
+import type { BulkRemoveInput } from "@shared/types/api";
 
 export function usePods(hostId: string) {
 	return useAlwaysRefetchListQuery(podsQueryKey(hostId), () =>
@@ -72,6 +74,16 @@ export function useRemovePod(hostId: string) {
 		"pods",
 		({ podId, force }: { podId: string; force: boolean }) =>
 			removePod(hostId, podId, force),
+	);
+}
+
+// A bulk remove changes the host's pod set, so the list refetches on
+// success — including after a partial run, where the successes are gone and
+// the refused pods stay. The report is the mutation's own data, so the
+// dialog reads it straight off the result.
+export function useBulkRemovePods(hostId: string) {
+	return useListInvalidatingMutation(hostId, "pods", (input: BulkRemoveInput) =>
+		bulkRemovePods(hostId, input),
 	);
 }
 

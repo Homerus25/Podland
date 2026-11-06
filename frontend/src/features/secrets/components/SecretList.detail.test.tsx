@@ -80,22 +80,6 @@ describe("SecretList row navigation", () => {
 		);
 	});
 
-	it("does not navigate when the delete button is clicked", async () => {
-		mockSecrets([secretFixture()]);
-		renderSecretList();
-		const user = userEvent.setup();
-
-		await user.click(
-			await screen.findByRole("button", { name: "Delete db-password" }),
-		);
-
-		expect(
-			await screen.findByTestId("confirm-delete-button"),
-		).toBeInTheDocument();
-		expect(screen.queryByTestId("secret-detail-page")).not.toBeInTheDocument();
-		expect(screen.getByTestId("secret-row")).toBeInTheDocument();
-	});
-
 	it("does not navigate when the move/copy button is clicked", async () => {
 		mockSecrets([secretFixture()]);
 		server.use(

@@ -1,5 +1,6 @@
 import { createLogSource, type LogSource } from "@shared/streaming/logSource";
-import { api, hostApiPath, hostApiUrl } from "@shared/utils/api";
+import type { BulkRemoveEntry, BulkRemoveInput } from "@shared/types/api";
+import { api, bulkRemove, hostApiPath, hostApiUrl } from "@shared/utils/api";
 
 // Quadlet as returned by GET /api/hosts/{id}/quadlets
 // (backend/internal/domain/quadlets/dto.go QuadletListResponse; raw is omitted
@@ -144,24 +145,18 @@ export async function updateQuadlet(
 	return response.data;
 }
 
-// DELETE /api/hosts/{id}/quadlets/{quadletId} -> 204
-// (backend/internal/domain/quadlets/handler.go QuadletHandler.Delete).
-// stop stops the unit before the quadlet file is removed and defaults to
-// true in the backend; force enables aggressive teardown and defaults to
-// false. Both are always sent so the request reflects the chosen options.
-export interface DeleteQuadletOptions {
-	stop: boolean;
-	force: boolean;
-}
-
-export async function deleteQuadlet(
+// POST /api/hosts/{id}/quadlets/remove -> 200 (backend
+// internal/bulkremove Entry): one report entry per requested id, in request
+// order. A per-id failure is an entry, never a status code, so a unit that
+// refuses to stop answers a failure entry while the rest of the batch still
+// processes. The POST is the shared bulkRemove helper's
+// (shared/utils/api.ts): the first pass is plain on the wire, and only the
+// report's retry carries force.
+export function bulkRemoveQuadlets(
 	hostId: string,
-	quadletId: string,
-	options: DeleteQuadletOptions,
-): Promise<void> {
-	await api.delete(hostApiPath(hostId, "quadlets", quadletId), {
-		params: { stop: options.stop, force: options.force },
-	});
+	input: BulkRemoveInput,
+): Promise<BulkRemoveEntry[]> {
+	return bulkRemove(hostId, "quadlets", input);
 }
 
 // POST /api/hosts/{id}/quadlets/{quadletId}/start -> 200

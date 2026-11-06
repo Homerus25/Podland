@@ -1,5 +1,6 @@
 import { createLogSource, type LogSource } from "@shared/streaming/logSource";
-import { api, hostApiPath, hostApiUrl } from "@shared/utils/api";
+import type { BulkRemoveEntry, BulkRemoveInput } from "@shared/types/api";
+import { api, bulkRemove, hostApiPath, hostApiUrl } from "@shared/utils/api";
 import { keyValueRowsToRecord } from "@shared/utils/keyValueRows";
 
 // Container as returned by GET /api/hosts/{id}/containers
@@ -685,12 +686,31 @@ export function buildUpdateContainerInput(
 
 // DELETE /api/hosts/{id}/containers/{containerId} -> 204
 // (backend/internal/domain/containers/handler.go ContainerHandler.Delete).
-// The force query param exists on the endpoint but is out of scope for now.
+// A running container is refused with 409 CONTAINER_RUNNING unless the
+// force query param is set, which stops it and then removes it (spec 461,
+// ticket #462 added the sentinel; ticket #467 wires the flag).
 export async function deleteContainer(
 	hostId: string,
 	containerId: string,
+	force = false,
 ): Promise<void> {
-	await api.delete(hostApiPath(hostId, "containers", containerId));
+	await api.delete(hostApiPath(hostId, "containers", containerId), {
+		params: force ? { force: true } : undefined,
+	});
+}
+
+// POST /api/hosts/{id}/containers/remove -> 200 (backend
+// internal/bulkremove Entry): one report entry per requested id, in request
+// order. A per-id failure is an entry, never a status code, so a running
+// container answers a CONTAINER_RUNNING entry while the rest of the batch
+// still processes. The POST is the shared bulkRemove helper's
+// (shared/utils/api.ts): the first pass is plain on the wire, and only the
+// report's retry carries force.
+export function bulkRemoveContainers(
+	hostId: string,
+	input: BulkRemoveInput,
+): Promise<BulkRemoveEntry[]> {
+	return bulkRemove(hostId, "containers", input);
 }
 
 // One entry of POST /api/hosts/{id}/containers/prune -> 200 (backend

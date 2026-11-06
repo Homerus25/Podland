@@ -94,6 +94,26 @@ describe("ContainerList permission gating", () => {
 			screen.queryByTestId("containers-permission-hint"),
 		).not.toBeInTheDocument();
 	});
+
+	// Spec 461, ticket #470: single-item removal lives on the detail page and
+	// bulk removal on the toolbar, so no row carries a destructive button any
+	// more — a mis-click on a row can never destroy a container.
+	it("renders no per-row delete button for a write-capable user", async () => {
+		mockContainers([containerFixture()]);
+		renderContainerList();
+
+		const row = await screen.findByTestId("container-row");
+		expect(
+			within(row).queryByRole("button", { name: /delete/i }),
+		).not.toBeInTheDocument();
+		// The row keeps its surviving actions: the lifecycle toggle and logs.
+		expect(
+			within(row).getByRole("button", { name: "Stop" }),
+		).toBeInTheDocument();
+		expect(
+			within(row).getByRole("button", { name: "Logs my-container" }),
+		).toBeInTheDocument();
+	});
 });
 
 describe("ContainerList", () => {

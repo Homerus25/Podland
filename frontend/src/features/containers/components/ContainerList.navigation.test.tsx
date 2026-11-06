@@ -147,11 +147,6 @@ describe("ContainerList row navigation", () => {
 			await screen.findByText("Connect web to a network"),
 		).toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "Close dialog" }));
-		// delete — opens the confirm dialog, not the detail page
-		await user.click(rowAt(0).getByRole("button", { name: "Delete web" }));
-		expect(
-			await screen.findByTestId("confirm-delete-button"),
-		).toBeInTheDocument();
 
 		expect(screen.queryByTestId("probe-container")).not.toBeInTheDocument();
 		expect(screen.getAllByTestId("container-row")).toHaveLength(2);

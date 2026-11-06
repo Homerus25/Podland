@@ -151,6 +151,72 @@ One entry per removed image with its ID and reclaimed size (bytes). An empty arr
 
 ---
 
+### POST /api/hosts/{id}/images/remove
+
+Remove several images by id in one request. The removals cross as ONE
+podman call (podman's batch remove endpoint accepts the whole array), and
+each entry answers the same classification as the single-item
+`DELETE /api/hosts/{id}/images/{imageId}`: an image used by containers
+without `force` is refused in its own report entry while the rest of the
+batch still processes.
+
+**Authentication:** Required
+
+**Permissions:** Write level required (bulk deletion, wide blast radius)
+
+**Request Body:**
+```json
+{
+  "ids": ["sha256:abc123...", "sha256:def456..."],
+  "force": false
+}
+```
+
+- `ids` (array of strings, required): the image ids to remove. Must be
+  non-empty and carry no empty entry.
+- `force` (boolean, optional, default false): with `force=true` podman
+  removes the image even if containers use it.
+
+**Response (Success - 200):** one entry per requested id, in request
+order.
+```json
+[
+  { "id": "sha256:abc123...", "success": true },
+  {
+    "id": "sha256:def456...",
+    "success": false,
+    "error": { "code": "IMAGE_USED_BY_CONTAINERS", "message": "Image is used by one or more containers" }
+  }
+]
+```
+
+Notes:
+- A per-id failure is a report entry, never a status code: the batch
+  answers 200 even when every entry failed.
+- `error` is present only on a failed entry. Its `code` is the same code
+  the single-item delete would answer — `IMAGE_NOT_FOUND`,
+  `IMAGE_USED_BY_CONTAINERS`, or `INTERNAL_ERROR` for an unclassified
+  cause (whose detail is never surfaced). The images refusal answers the
+  bare sentinel, so its message carries no podman text.
+- Podman's batch remove report carries an unkeyed error list: it cannot
+  attribute an error to a requested id. The failed ids answer the
+  sentinel every cause classifies to when they agree (a batch of in-use
+  images answers `IMAGE_USED_BY_CONTAINERS`, a batch of vanished ones
+  `IMAGE_NOT_FOUND`); a batch whose causes disagree answers
+  `INTERNAL_ERROR` on every failed id rather than guess.
+- The report is `[]`, never `null`.
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body), `VALIDATION_FAILED` (missing
+  or empty `ids`, or an empty entry)
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED`, `PERMISSION_DENIED` (read-level users)
+- 404: `HOST_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+---
+
 ### DELETE /api/hosts/{id}/images/{imageId}
 
 Remove an image from a host.

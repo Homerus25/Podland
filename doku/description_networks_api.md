@@ -101,6 +101,63 @@ Notes:
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 
+### POST /api/hosts/{id}/networks/remove
+
+Remove several networks by exact name in one request. Each name is
+removed through the same classification as the single-item
+`DELETE /api/hosts/{id}/networks/{networkName}`, so an in-use network
+without `force` is refused in its own report entry while the rest of the
+batch still processes.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Request Body:**
+```json
+{
+  "ids": ["network-name-a", "network-name-b"],
+  "force": false
+}
+```
+
+- `ids` (array of strings, required): the network names to remove. Must
+  be non-empty and carry no empty entry.
+- `force` (boolean, optional, default false): with `force=true` podman
+  removes the containers attached to the network — stopping any that are
+  running — and then removes the network.
+
+**Response (Success - 200):** one entry per requested name, in request
+order.
+```json
+[
+  { "id": "network-name-a", "success": true },
+  {
+    "id": "network-name-b",
+    "success": false,
+    "error": { "code": "NETWORK_IN_USE", "message": "string (podman's refusal text)" }
+  }
+]
+```
+
+Notes:
+- A per-name failure is a report entry, never a status code: the batch
+  answers 200 even when every entry failed.
+- `error` is present only on a failed entry. Its `code` is the same code
+  the single-item delete would answer — `NETWORK_NOT_FOUND`,
+  `NETWORK_IN_USE`, or `INTERNAL_ERROR` for an unclassified cause (whose
+  detail is never surfaced).
+- The report is `[]`, never `null`.
+
+**Response (Error):**
+- 400: `INVALID_REQUEST` (malformed body), `VALIDATION_FAILED` (missing
+  or empty `ids`, or an empty entry)
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row or read-level grantee)
+- 404: `HOST_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
 ### POST /api/hosts/{id}/networks/{networkName}/connect
 
 Attach a container to a network on the host. The body carries the container's ID.

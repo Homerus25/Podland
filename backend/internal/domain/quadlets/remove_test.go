@@ -352,3 +352,142 @@ func TestQuadletService_StopAndRemove_ListFailureWraps(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to list quadlets")
 }
+
+// TestQuadletService_BulkDelete_StopsRunningThenOneBatchCall pins the
+// batch ritual's shape: one list locates every target, each running
+// resource is stopped through the lifecycle seam, and every located
+// quadlet crosses as ONE batch call the report answers per name.
+func TestQuadletService_BulkDelete_StopsRunningThenOneBatchCall(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{
+				runningQuadlet(),
+				quadletFixture("db.container", "/x/db.container", "stopped"),
+			}, nil
+		},
+		removeAllFn: func(names []string, force bool) (*QuadletBatchRemoveReport, error) {
+			assert.Equal(t, []string{"web.container", "db.container"}, names,
+				"every located quadlet must cross in the one batch call")
+			return &QuadletBatchRemoveReport{Removed: names}, nil
+		},
+	}
+	sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, opts sshexec.ExecOptions) (sshexec.ExecResult, error) {
+		assert.Equal(t, []string{"--user", "stop", "web.service"}, opts.Args,
+			"the running resource must be stopped through the lifecycle seam before the batch call")
+		return sshexec.ExecResult{ExitCode: 0}, nil
+	})
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
+
+	entries := service.BulkDelete(context.Background(), "user", "host", []string{"web.container", "db.container"}, false)
+
+	require.Len(t, entries, 2)
+	for _, entry := range entries {
+		assert.True(t, entry.Success)
+		assert.Nil(t, entry.Error)
+	}
+	assert.Equal(t, 1, sshExec.CallCount(), "the one running resource answers one systemctl stop")
+}
+
+// TestQuadletService_BulkDelete_StopFailureAnswersEntrySkipsCall pins the
+// stop gate's failure branch: a quadlet whose resource cannot be stopped
+// answers a failed entry and is left out of the batch call entirely —
+// a stop failure must not fail its batch mates.
+func TestQuadletService_BulkDelete_StopFailureAnswersEntrySkipsCall(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return []*entities.ListQuadlet{runningQuadlet()}, nil
+		},
+		// removeAllFn stays unarmed: with the only target skipped, the
+		// batch call must not happen at all — an unexpected call panics.
+	}
+	sshExec := testutils.NewMockSSHExecWithFunc(func(_ context.Context, _, _, _ string, _ sshexec.ExecOptions) (sshexec.ExecResult, error) {
+		return sshexec.ExecResult{ExitCode: 1, Stderr: "job failed"}, nil
+	})
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, sshExec, lookupForUser("core"))
+
+	entries := service.BulkDelete(context.Background(), "user", "host", []string{"web.container"}, false)
+
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Error)
+	assert.False(t, entries[0].Success)
+	assert.Equal(t, appErrors.ErrInternalError.Code, entries[0].Error.Code,
+		"the stop failure's wrap classifies to the generic entry")
+}
+
+// TestQuadletService_BulkDelete_CallFailureFailsPendingEntries pins the
+// batch call's failure branch: a transport-level failure answers the
+// classified cause on every pending entry, while the entries the
+// preflight already answered (the missing quadlet) keep their own code.
+func TestQuadletService_BulkDelete_CallFailureFailsPendingEntries(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: stoppedQuadlets("real.container"),
+		removeAllFn: func([]string, bool) (*QuadletBatchRemoveReport, error) {
+			return nil, appErrors.ErrConnectionFailed
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core"))
+
+	entries := service.BulkDelete(context.Background(), "user", "host", []string{"ghost.container", "real.container"}, false)
+
+	require.Len(t, entries, 2)
+	require.NotNil(t, entries[0].Error)
+	assert.Equal(t, "QUADLET_NOT_FOUND", entries[0].Error.Code, "the preflight's answer survives the call failure")
+	require.NotNil(t, entries[1].Error)
+	assert.Equal(t, appErrors.ErrConnectionFailed.Code, entries[1].Error.Code)
+}
+
+// TestQuadletService_BulkDelete_NameAbsentFromReportAnswersEntry pins the
+// defensive branch: a name the batch report lists neither as removed nor
+// as failed answers the generic entry — the report never claims a
+// removal it did not report.
+func TestQuadletService_BulkDelete_NameAbsentFromReportAnswersEntry(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: stoppedQuadlets("web.container"),
+		removeAllFn: func([]string, bool) (*QuadletBatchRemoveReport, error) {
+			return &QuadletBatchRemoveReport{}, nil
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), lookupForUser("core"))
+
+	entries := service.BulkDelete(context.Background(), "user", "host", []string{"web.container"}, false)
+
+	require.Len(t, entries, 1)
+	require.NotNil(t, entries[0].Error)
+	assert.Equal(t, appErrors.ErrInternalError.Code, entries[0].Error.Code)
+}
+
+// TestQuadletService_BulkDelete_ListFailureFailsEveryEntry pins the
+// early-exit branch: a list failure runs before any entry is answered,
+// so every entry answers the classified cause.
+func TestQuadletService_BulkDelete_ListFailureFailsEveryEntry(t *testing.T) {
+	engine := &fakeQuadletEngine{
+		listFn: func(entities.QuadletListOptions) ([]*entities.ListQuadlet, error) {
+			return nil, errors.New("boom")
+		},
+	}
+	service := NewQuadletService(fakeEngineProvider{engine: engine}, testutils.NewMockSSHExec(), nil)
+
+	entries := service.BulkDelete(context.Background(), "user", "host", []string{"a.container", "b.container"}, false)
+
+	require.Len(t, entries, 2)
+	for _, entry := range entries {
+		require.NotNil(t, entry.Error)
+		assert.Equal(t, appErrors.ErrInternalError.Code, entry.Error.Code)
+	}
+}
+
+// TestQuadletService_BulkDelete_AcquisitionFailureFailsEveryEntry pins
+// the lease branch: when the engine lease is never granted, every
+// requested id answers the classified acquisition error — the report
+// stays 200 with all-failed entries, never a status code.
+func TestQuadletService_BulkDelete_AcquisitionFailureFailsEveryEntry(t *testing.T) {
+	service := NewQuadletService(fakeEngineProvider{err: appErrors.ErrConnectionFailed}, testutils.NewMockSSHExec(), nil)
+
+	entries := service.BulkDelete(context.Background(), "user", "host", []string{"a.container", "b.container"}, false)
+
+	require.Len(t, entries, 2)
+	for _, entry := range entries {
+		require.NotNil(t, entry.Error)
+		assert.Equal(t, appErrors.ErrConnectionFailed.Code, entry.Error.Code)
+	}
+}
