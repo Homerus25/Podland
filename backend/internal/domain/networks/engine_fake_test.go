@@ -16,6 +16,7 @@ type fakeNetworkEngine struct {
 	createFn  func(name string) (*types.Network, error)
 	connectFn func(networkName, containerID string) error
 	inspectFn func(name string) ([]entities.NetworkInspectReport, []error, error)
+	removeFn  func(name string, force bool) error
 	pruneFn   func() ([]*entities.NetworkPruneReport, error)
 }
 
@@ -45,6 +46,13 @@ func (f *fakeNetworkEngine) Inspect(name string) ([]entities.NetworkInspectRepor
 		panic("unexpected NetworkEngine.Inspect call")
 	}
 	return f.inspectFn(name)
+}
+
+func (f *fakeNetworkEngine) Remove(name string, force bool) error {
+	if f.removeFn == nil {
+		panic("unexpected NetworkEngine.Remove call")
+	}
+	return f.removeFn(name, force)
 }
 
 func (f *fakeNetworkEngine) Prune() ([]*entities.NetworkPruneReport, error) {

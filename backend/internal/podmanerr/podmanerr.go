@@ -57,13 +57,20 @@ func IsUniqueConstraintViolation(err error) bool {
 
 // IsConflict reports whether err is podman's conflict answer: a 409
 // ErrorModel, or the refusal texts podman emits when a resource is still
-// referenced ("in use", "used by", "unable to delete") — which arrive as
-// plain errors or 500 ErrorModels on several paths.
+// referenced ("in use", "used by", "unable to delete", "is being used") —
+// which arrive as plain errors or 500 ErrorModels on several paths.
+//
+// "is being used" is the bare text of podman's ErrNetworkInUse and
+// ErrVolumeBeingUsed sentinels. Network removal reaches it without the
+// surrounding "used by" phrasing: the compat handler answers a 500 whose
+// message is `"x" has associated containers with it. Use -f to forcibly
+// delete containers and pods: network is being used`, so the sentinel text
+// is the only conflict signature on that path.
 func IsConflict(err error) bool {
 	if code, ok := responseCode(err); ok && code == http.StatusConflict {
 		return true
 	}
-	return containsAny(err, "in use", "used by", "unable to delete")
+	return containsAny(err, "in use", "used by", "unable to delete", "is being used")
 }
 
 // IsClientError reports whether err is a client-side rejection: a 4xx

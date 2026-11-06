@@ -281,6 +281,10 @@ var (
 	// network stays created (no rollback). Non-5xx so the naming message
 	// survives the envelope's 5xx rewrite.
 	ErrNetworkAttachFailed = NewAppError("NETWORK_ATTACH_FAILED", "Failed to attach container to network", http.StatusConflict)
+	// ErrNetworkInUse is 409: podman refuses to remove a network that a
+	// container is attached to unless force is requested. Distinct code
+	// so the UI can explain what is attached (issue 460).
+	ErrNetworkInUse = NewAppError("NETWORK_IN_USE", "Network is in use by a container", http.StatusConflict)
 )
 
 // Access

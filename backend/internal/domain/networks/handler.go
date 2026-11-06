@@ -74,6 +74,25 @@ func (h *NetworkHandler) Connect(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Delete handles removing a network by exact name. Route-level
+// RequireHostPermission(write) (app.go) gates it at write. The force
+// query flag (default false) lets podman remove the attached containers
+// (stopping any that are running) and then the network; without it an
+// in-use network surfaces as 409 NETWORK_IN_USE. Returns 204 with an
+// empty body.
+func (h *NetworkHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	web.Handle(w, r, http.StatusNoContent, func(ctx context.Context, userID, hostID string) (struct{}, error) {
+		networkName, guard := web.URLParam(r, "networkName", "MISSING_NETWORK_NAME")
+		if guard != nil {
+			return struct{}{}, guard
+		}
+
+		force := web.QueryBool(r, "force", false)
+
+		return struct{}{}, h.service.Delete(ctx, userID, hostID, networkName, force)
+	})
+}
+
 // Prune handles removing all unused networks on a host. Route-level
 // RequireHostPermission(write) (app.go) gates it at write; podman
 // leaves in-use networks alone. Returns 200 with one report entry per

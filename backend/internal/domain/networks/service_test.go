@@ -395,3 +395,103 @@ func TestNetworkService_Connect_AcquireFailureIsThe502Sentinel(t *testing.T) {
 	require.ErrorAs(t, err, &appErr)
 	assert.Equal(t, http.StatusBadGateway, appErr.Status)
 }
+
+// TestNetworkService_Delete_RemovesByName pins the delete contract: the
+// exact name and the force flag reach the host, and a clean removal
+// answers nil.
+func TestNetworkService_Delete_RemovesByName(t *testing.T) {
+	var gotName string
+	var gotForce bool
+	engine := &fakeNetworkEngine{
+		removeFn: func(name string, force bool) error {
+			gotName = name
+			gotForce = force
+			return nil
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	err := service.Delete(context.Background(), "user", "host", "frontend", true)
+
+	require.NoError(t, err)
+	assert.Equal(t, "frontend", gotName)
+	assert.True(t, gotForce, "the force flag must reach the host")
+}
+
+// TestNetworkService_Delete_MapsNotFoundTo404 pins the vanished-network
+// terminal: podman's not-found answer becomes the clean 404 sentinel.
+func TestNetworkService_Delete_MapsNotFoundTo404(t *testing.T) {
+	engine := &fakeNetworkEngine{
+		removeFn: func(string, bool) error {
+			return &errorhandling.ErrorModel{
+				ResponseCode: http.StatusNotFound,
+				Message:      "no such network",
+			}
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	err := service.Delete(context.Background(), "user", "host", "ghost-net", false)
+
+	require.ErrorIs(t, err, appErrors.ErrNetworkNotFound)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusNotFound, appErr.Status)
+	assert.Equal(t, "NETWORK_NOT_FOUND", appErr.Code)
+}
+
+// TestNetworkService_Delete_MapsInUseTo409 pins the in-use refusal: 409
+// NETWORK_IN_USE carrying podman's refusal text, so the UI can explain
+// what is attached. The error shape is podman's real one — the compat
+// handler answers a 500 whose message ends in the ErrNetworkInUse text,
+// not a 409 — so this test fails if the conflict vocabulary stops
+// recognising "is being used".
+func TestNetworkService_Delete_MapsInUseTo409(t *testing.T) {
+	const refusal = `"frontend" has associated containers with it. Use -f to forcibly delete containers and pods: network is being used`
+	engine := &fakeNetworkEngine{
+		removeFn: func(string, bool) error {
+			return &errorhandling.ErrorModel{
+				ResponseCode: http.StatusInternalServerError,
+				Message:      refusal,
+			}
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	err := service.Delete(context.Background(), "user", "host", "frontend", false)
+
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusConflict, appErr.Status)
+	assert.Equal(t, "NETWORK_IN_USE", appErr.Code)
+	assert.Contains(t, appErr.Message, refusal,
+		"podman's refusal text must reach the frontend")
+}
+
+// TestNetworkService_Delete_PropagatesEngineFailure pins the unclassified
+// branch: anything else is wrapped with the domain's wrap text and rides
+// the envelope's 500 fallback.
+func TestNetworkService_Delete_PropagatesEngineFailure(t *testing.T) {
+	engine := &fakeNetworkEngine{
+		removeFn: func(string, bool) error {
+			return errors.New("boom")
+		},
+	}
+	service := NewNetworkService(fakeEngineProvider{engine: engine})
+
+	err := service.Delete(context.Background(), "user", "host", "frontend", false)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to remove network")
+}
+
+func TestNetworkService_Delete_AcquireFailureIsThe502Sentinel(t *testing.T) {
+	service := NewNetworkService(fakeEngineProvider{err: appErrors.ErrConnectionFailed})
+
+	err := service.Delete(context.Background(), "user", "host", "frontend", false)
+
+	require.ErrorIs(t, err, appErrors.ErrConnectionFailed)
+	var appErr *appErrors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, http.StatusBadGateway, appErr.Status)
+}

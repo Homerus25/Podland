@@ -5,6 +5,7 @@ import type {
 import {
 	connectContainer,
 	createNetwork,
+	deleteNetwork,
 	getNetwork,
 	inspectNetwork,
 	listNetworks,
@@ -73,6 +74,18 @@ export function useCreateNetwork(hostId: string) {
 export function usePruneNetworks(hostId: string) {
 	return useListInvalidatingMutation(hostId, "networks", () =>
 		pruneNetworks(hostId),
+	);
+}
+
+// A delete removes the network; with force podman also removes the
+// containers attached to it (stopping any that are running), so both
+// lists refetch — the containers DTO carries each container's networks.
+export function useDeleteNetwork(hostId: string) {
+	return useListInvalidatingMutation(
+		hostId,
+		NETWORK_MUTATION_INVALIDATIONS,
+		({ networkName, force }: { networkName: string; force: boolean }) =>
+			deleteNetwork(hostId, networkName, force),
 	);
 }
 

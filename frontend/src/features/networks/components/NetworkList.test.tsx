@@ -130,13 +130,21 @@ describe("NetworkList", () => {
 
 		const row = await screen.findByTestId("network-row");
 		const cells = within(row).getAllByRole("cell");
-		expect(cells.map((cell) => cell.textContent)).toEqual([
+		expect(cells.slice(0, 4).map((cell) => cell.textContent)).toEqual([
 			"app-net",
 			"bridge",
 			"10.88.0.0/16",
 			"3 days ago",
-			"Connect container",
 		]);
+		const actions = cells[4];
+		expect(
+			within(actions).getByRole("button", {
+				name: "Connect container app-net",
+			}),
+		).toBeInTheDocument();
+		expect(
+			within(actions).getByRole("button", { name: "Delete app-net" }),
+		).toBeInTheDocument();
 	});
 
 	it("shows the create-network toolbar button at write level", async () => {

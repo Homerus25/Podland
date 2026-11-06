@@ -26,6 +26,13 @@ type NetworkEngine interface {
 	// Inspect returns podman's raw inspect reports for the named
 	// network, plus the tunnel's per-item errors.
 	Inspect(name string) ([]entities.NetworkInspectReport, []error, error)
+	// Remove uninstalls one network by exact name and answers one error:
+	// the adapter folds podman's report slice into the single error the
+	// service classifies — a transport error, or a report entry's own
+	// error (the race window where the network vanished or came into use
+	// between the call's checks and its execution), becomes the error; a
+	// clean removal answers nil.
+	Remove(name string, force bool) error
 	// Prune removes every unused network (podman's own selection).
 	Prune() ([]*entities.NetworkPruneReport, error)
 }
@@ -81,6 +88,25 @@ func (e *podmanNetworkEngine) Connect(networkName, containerID string) error {
 
 func (e *podmanNetworkEngine) Inspect(name string) ([]entities.NetworkInspectReport, []error, error) {
 	return e.tunnelEngine().NetworkInspect(e.ctx, []string{name}, entities.InspectOptions{})
+}
+
+// Remove narrows podman's report-slice remove to the single error the
+// service classifies, mirroring the volumes engine's Remove: a transport
+// error becomes the error, and any report entry's per-network error — the
+// race window where the network vanished or came into use between the
+// call's checks and its execution — becomes the error too; a clean
+// removal answers nil.
+func (e *podmanNetworkEngine) Remove(name string, force bool) error {
+	reports, err := e.tunnelEngine().NetworkRm(e.ctx, []string{name}, entities.NetworkRmOptions{Force: force})
+	if err != nil {
+		return err
+	}
+	for _, report := range reports {
+		if report != nil && report.Err != nil {
+			return report.Err
+		}
+	}
+	return nil
 }
 
 func (e *podmanNetworkEngine) Prune() ([]*entities.NetworkPruneReport, error) {

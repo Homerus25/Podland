@@ -91,4 +91,20 @@ describe("NetworkList navigation", () => {
 		).toBeInTheDocument();
 		expect(screen.queryByTestId("network-detail-page")).not.toBeInTheDocument();
 	});
+
+	it("does not navigate when the row's delete button is clicked", async () => {
+		server.use(...mockLists());
+		renderNetworkList();
+		const user = userEvent.setup();
+
+		const row = await screen.findByTestId("network-row");
+		await user.click(
+			within(row).getByRole("button", { name: "Delete app-net" }),
+		);
+
+		// the delete confirm opens, not the detail page
+		expect(await screen.findByTestId("modal")).toBeInTheDocument();
+		expect(screen.getByText(/Delete network app-net/)).toBeInTheDocument();
+		expect(screen.queryByTestId("network-detail-page")).not.toBeInTheDocument();
+	});
 });

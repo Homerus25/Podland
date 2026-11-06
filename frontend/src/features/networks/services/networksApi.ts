@@ -133,3 +133,18 @@ export async function connectContainer(
 		container: containerId,
 	});
 }
+
+// DELETE /api/hosts/{id}/networks/{networkName}?force= -> 204, empty body
+// (backend/internal/domain/networks handler Delete). Without force podman
+// refuses to remove a network a container is attached to (409
+// NETWORK_IN_USE); with force podman removes the attached containers
+// (stopping any that are running) and then the network.
+export async function deleteNetwork(
+	hostId: string,
+	networkName: string,
+	force: boolean,
+): Promise<void> {
+	await api.delete(hostApiPath(hostId, "networks", networkName), {
+		params: force ? { force: true } : undefined,
+	});
+}

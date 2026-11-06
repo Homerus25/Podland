@@ -101,6 +101,8 @@ func TestIsConflict(t *testing.T) {
 		{"unable to delete phrase", errors.New("unable to delete image"), true},
 		{"in use phrase", errors.New("resource is in use"), true},
 		{"secret in-use 500 with message text", model(http.StatusInternalServerError, `secret "db-password" is in use by container 3f2e1d0c`, "secret in use"), true},
+		{"network in-use 500 with podman's real refusal text", model(http.StatusInternalServerError, `"podland-test" has associated containers with it. Use -f to forcibly delete containers and pods: network is being used`, "network is being used"), true},
+		{"bare ErrNetworkInUse sentinel text", errors.New("network is being used"), true},
 		{"case-insensitive", errors.New("Volume IN USE"), true},
 		{"already exists is not itself a conflict", errors.New("a Quadlet with name x.container already exists"), false},
 		{"unrelated", assert.AnError, false},

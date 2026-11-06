@@ -7,6 +7,7 @@ import (
 	appErrors "github.com/Homerus25/podland/backend/internal/errors"
 	"github.com/Homerus25/podland/backend/internal/inspect"
 	"github.com/Homerus25/podland/backend/internal/podmanerr"
+	"github.com/Homerus25/podland/backend/internal/removal"
 	"go.podman.io/common/libnetwork/types"
 	"go.podman.io/podman/v6/pkg/domain/entities"
 )
@@ -134,6 +135,39 @@ func (s *NetworkService) Inspect(ctx context.Context, userID, hostID, networkNam
 		return nil
 	})
 	return report, err
+}
+
+// Delete removes a network by exact name. Without force, podman refuses
+// to remove a network a container is attached to — that refusal surfaces
+// as 409 NETWORK_IN_USE carrying podman's message; with force, podman
+// removes the attached containers (stopping any that are running) and
+// then the network. Unknown names surface as the same clean 404 as
+// inspect.
+//
+// The classification covers the remove call's own failure too, like the
+// volumes delete (issue 263's accepted tightening): a remove that errors
+// at the call rather than in podman's report — the race window where the
+// network vanished or came into use between the request and podman's
+// execution — answers the same terminals (404 NETWORK_NOT_FOUND / 409
+// NETWORK_IN_USE) instead of a wrapped unclassified error. The
+// remove-and-classify ritual itself rides internal/removal (issue 264).
+func (s *NetworkService) Delete(ctx context.Context, userID, hostID, networkName string, force bool) error {
+	return s.engines.WithEngine(ctx, userID, hostID, "networks.Delete", func(e NetworkEngine) error {
+		return removal.Run(func() error {
+			return e.Remove(networkName, force)
+		}, removal.Terminals{
+			Missing: appErrors.ErrNetworkNotFound,
+			// Podman's compat layer answers the in-use refusal as a 500
+			// whose message ends in the ErrNetworkInUse text ("network is
+			// being used"), not a 409; the predicate owns that shape, and
+			// the builder threads podman's message so the UI can explain
+			// what is attached.
+			Refusal: func(cause string) error {
+				return appErrors.ErrNetworkInUse.WithMessage(cause)
+			},
+			IsRefusal: podmanerr.IsConflict,
+		}, "failed to remove network")
+	})
 }
 
 // Prune removes every unused network on the host in one call

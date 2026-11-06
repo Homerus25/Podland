@@ -2,7 +2,7 @@
 
 Part of the [API contract](description_api.md). See the main document for base URL, common headers, and the error response format.
 
-Networks live only in the remote host's podman; the backend proxies podman's service API and persists nothing locally. Listing and the per-network detail endpoint are available at `read` level; creating a network, connecting a container to one, and pruning unused networks mutate remote state and gate at `write` level. Disconnect and delete remain follow-up issues.
+Networks live only in the remote host's podman; the backend proxies podman's service API and persists nothing locally. Listing and the per-network detail endpoint are available at `read` level; creating a network, connecting a container to one, deleting one, and pruning unused networks mutate remote state and gate at `write` level. Disconnect remains a follow-up issue.
 
 ---
 
@@ -161,6 +161,41 @@ Notes:
 - 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
 - 403: `ACCESS_DENIED`
 - 404: `HOST_NOT_FOUND`, `NETWORK_NOT_FOUND`
+- 500: `INTERNAL_ERROR`
+- 502: `CONNECTION_FAILED`
+
+### DELETE /api/hosts/{id}/networks/{networkName}
+
+Remove a network by exact name. Query flag `force` (default false): with
+`force=true` podman removes the containers attached to the network —
+stopping any that are running — and then removes the network. Without
+`force` an attached container makes the removal a 409 `NETWORK_IN_USE`.
+A non-boolean `force` value is ignored (treated as false), matching every
+other boolean query flag in the API.
+
+A remove failing at the call itself — the race window where the network
+vanished or came into use between the request and podman's execution, no
+per-network report involved — is classified the same way: not-found
+answers 404 `NETWORK_NOT_FOUND`, an in-use refusal 409 `NETWORK_IN_USE`
+carrying podman's message.
+
+**Authentication:** Required
+
+**Access:** Write level on `{id}`.
+
+**Query Parameters:**
+- `force` (boolean, optional, default false; non-boolean values are
+  ignored and treated as false)
+
+**Response (Success - 204):** no body.
+
+**Response (Error):**
+- 400: `MISSING_NETWORK_NAME`
+- 401: `TOKEN_MISSING`, `TOKEN_INVALID`, `TOKEN_EXPIRED`
+- 403: `ACCESS_DENIED` (no access row or read-level grantee)
+- 404: `HOST_NOT_FOUND`, `NETWORK_NOT_FOUND`
+- 409: `NETWORK_IN_USE` (a container is attached to the network and
+  `force` was not set; carries podman's message)
 - 500: `INTERNAL_ERROR`
 - 502: `CONNECTION_FAILED`
 

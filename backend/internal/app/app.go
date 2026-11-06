@@ -461,10 +461,10 @@ func New(cfg *config.Config) (*App, error) {
 	hostMux.Handle("/{id}/volumes/", volumesMux)
 
 	// Networks — the list and the detail endpoint stay at the
-	// subtree's read level; create, connect, and prune mutate remote
-	// state, so they gate at write (issue 252; prune spec #385). The
-	// prune route is literal so it is not shadowed by the
-	// {networkName} subtree.
+	// subtree's read level; create, connect, delete, and prune mutate
+	// remote state, so they gate at write (issue 252; prune spec #385;
+	// delete issue 460). The prune route is literal so it is not
+	// shadowed by the {networkName} subtree.
 	networksMux := http.NewServeMux()
 	networksMux.HandleFunc("GET /{id}/networks", networkHandler.List)
 	networksMux.Handle("POST /{id}/networks/prune", requireWrite(networkHandler.Prune))
@@ -472,6 +472,7 @@ func New(cfg *config.Config) (*App, error) {
 	networksMux.HandleFunc("GET /{id}/networks/{networkName}/inspect", networkHandler.Inspect)
 	networksMux.Handle("POST /{id}/networks", requireWrite(networkHandler.Create))
 	networksMux.Handle("POST /{id}/networks/{networkName}/connect", requireWrite(networkHandler.Connect))
+	networksMux.Handle("DELETE /{id}/networks/{networkName}", requireWrite(networkHandler.Delete))
 	networksMux.Handle("/", apiNotFound)
 	hostMux.Handle("/{id}/networks", networksMux)
 	hostMux.Handle("/{id}/networks/", networksMux)
