@@ -92,6 +92,50 @@ describe("QuadletList lifecycle", () => {
 		).not.toBeInTheDocument();
 	});
 
+	// The lifecycle gate's adapter smoke (issue #484): below the
+	// manage-quadlets capability the rows hide Start/Stop/Restart and keep
+	// Logs — the list's hide-and-hint pattern, whose hint is ResourceList's
+	// own (the module swaps the toolbar for it), so the row renders no hint
+	// itself.
+	it("hides the row lifecycle actions from a read-only caller, keeping Logs", async () => {
+		server.use(
+			quadletsHandler(() => [
+				quadletFixture(),
+				quadletFixture({
+					id: "db",
+					name: "db",
+					unit: "db.service",
+					state: "stopped",
+				}),
+			]),
+		);
+		renderWithQuery(
+			<QuadletList
+				host={hostFixture({ permission: "read", isOwner: false })}
+			/>,
+			{ router: true },
+		);
+
+		const hint = await screen.findByTestId("quadlets-permission-hint");
+		expect(hint).toHaveAttribute("data-requirement", "write");
+		const rows = await screen.findAllByTestId("quadlet-row");
+		expect(rows).toHaveLength(2);
+		for (const row of rows) {
+			expect(
+				within(row).queryByTestId("start-quadlet-button"),
+			).not.toBeInTheDocument();
+			expect(
+				within(row).queryByTestId("stop-quadlet-button"),
+			).not.toBeInTheDocument();
+			expect(
+				within(row).queryByTestId("restart-quadlet-button"),
+			).not.toBeInTheDocument();
+			expect(
+				within(row).getByRole("button", { name: /Logs / }),
+			).toBeInTheDocument();
+		}
+	});
+
 	it("posts to the start endpoint with no options on Start click", async () => {
 		server.use(
 			quadletsHandler(() => [web]),

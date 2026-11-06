@@ -257,6 +257,71 @@ describe("QuadletDetailPage actions", () => {
 		expect(lifecycleRequests[0].search).toBe("");
 	});
 
+	// The lifecycle gate's adapter smokes (issue #484): the capability
+	// gate's tri-state answers Start/Stop/Restart — allowed renders the
+	// controls (the lifecycle tests above), denied hides them behind the
+	// page's one write hint, and pending renders neither. The header's
+	// Remove cascade already renders the write hint for the same
+	// capability, so the lifecycle actions carry no hint of their own —
+	// a denied caller reads one sentence, not two (the one-hint rule).
+	// The classification itself is pinned once in the hook's suite.
+	it("hides the lifecycle actions behind the write hint for a read-only caller", async () => {
+		// A stopped quadlet, so Start is the state-rendered control the
+		// gate must hide alongside Restart — Stop's absence is trivial
+		// under a running fixture.
+		reported = quadletDetailFixture({ state: "stopped" });
+		mockHost("read");
+		renderDetailPage();
+
+		await screen.findByTestId("quadlet-detail-name");
+		const hint = await screen.findByTestId("quadlets-permission-hint");
+		expect(hint).toHaveAttribute("data-requirement", "write");
+		expect(
+			screen.queryByTestId("start-quadlet-button"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("restart-quadlet-button"),
+		).not.toBeInTheDocument();
+		// Exactly one hint on the page: the Remove cascade's.
+		expect(screen.getAllByTestId(/permission-hint$/)).toHaveLength(1);
+		// Logs and Edit are read-level and unchanged (issue #484).
+		expect(
+			screen.getByRole("button", { name: "Logs web" }),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("edit-quadlet-button")).toBeInTheDocument();
+	});
+
+	it("renders neither the lifecycle actions nor the hint while the gate is pending", async () => {
+		// A stopped quadlet, so Start is the control the released gate
+		// must reveal.
+		reported = quadletDetailFixture({ state: "stopped" });
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		server.use(
+			http.get("*/api/hosts/m-1", async () => {
+				await gate;
+				return HttpResponse.json(hostFixture({ permission: "write" }));
+			}),
+		);
+		renderDetailPage();
+
+		await screen.findByTestId("quadlet-detail-name");
+		expect(
+			screen.queryByTestId("start-quadlet-button"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("restart-quadlet-button"),
+		).not.toBeInTheDocument();
+		expect(
+			screen.queryByTestId("quadlets-permission-hint"),
+		).not.toBeInTheDocument();
+
+		release();
+		await screen.findByTestId("start-quadlet-button");
+	});
+
 	it("navigates to the logs route when Logs is clicked", async () => {
 		const user = userEvent.setup();
 		renderDetailPage();

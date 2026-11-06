@@ -151,47 +151,55 @@ export function QuadletDetailPage() {
 				{data ? (
 					<VStack align="stretch" spacing={4}>
 						{/* The row's action set, page-sized: Start/Stop by state,
-						    Restart and Logs always, Edit always, Move/Copy only
-						    for a manage-capable caller (hidden otherwise, the
-						    container page's edit-configuration pattern — a
-						    read-only caller is never baited into a 403). */}
+						    Restart, and Move/Copy ride the capability gate's
+						    tri-state (issue #484) — allowed renders the control,
+						    pending renders neither, and denied hides it behind
+						    the page's one write hint, which the header's Remove
+						    cascade already renders for the same capability (the
+						    one-hint rule), so these actions carry no hint of
+						    their own. Logs and Edit are unchanged: read-level
+						    here, they render for every caller. */}
 						<HStack spacing={2} flexWrap="wrap">
-							{!isRunning ? (
-								<Button
-									size="sm"
-									variant="outline"
-									colorScheme="green"
-									aria-label={`Start ${data.name}`}
-									onClick={() => lifecycle.start.mutate(data.id)}
-									isLoading={lifecycle.start.isPending}
-									isDisabled={lifecyclePending}
-									data-testid="start-quadlet-button"
-								>
-									Start
-								</Button>
+							{gate === "allowed" ? (
+								<>
+									{!isRunning ? (
+										<Button
+											size="sm"
+											variant="outline"
+											colorScheme="green"
+											aria-label={`Start ${data.name}`}
+											onClick={() => lifecycle.start.mutate(data.id)}
+											isLoading={lifecycle.start.isPending}
+											isDisabled={lifecyclePending}
+											data-testid="start-quadlet-button"
+										>
+											Start
+										</Button>
+									) : null}
+									{isRunning ? (
+										<Button
+											size="sm"
+											variant="outline"
+											aria-label={`Stop ${data.name}`}
+											onClick={() => setLifecycleAction("stop")}
+											isDisabled={lifecyclePending}
+											data-testid="stop-quadlet-button"
+										>
+											Stop
+										</Button>
+									) : null}
+									<Button
+										size="sm"
+										variant="outline"
+										aria-label={`Restart ${data.name}`}
+										onClick={() => setLifecycleAction("restart")}
+										isDisabled={lifecyclePending}
+										data-testid="restart-quadlet-button"
+									>
+										Restart
+									</Button>
+								</>
 							) : null}
-							{isRunning ? (
-								<Button
-									size="sm"
-									variant="outline"
-									aria-label={`Stop ${data.name}`}
-									onClick={() => setLifecycleAction("stop")}
-									isDisabled={lifecyclePending}
-									data-testid="stop-quadlet-button"
-								>
-									Stop
-								</Button>
-							) : null}
-							<Button
-								size="sm"
-								variant="outline"
-								aria-label={`Restart ${data.name}`}
-								onClick={() => setLifecycleAction("restart")}
-								isDisabled={lifecyclePending}
-								data-testid="restart-quadlet-button"
-							>
-								Restart
-							</Button>
 							<Button
 								size="sm"
 								variant="outline"

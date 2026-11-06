@@ -120,6 +120,11 @@ const quadletOptionsKey = (variables: { quadletId: string }) =>
 // variables keeps other rows usable. Stop and restart run through the
 // options modal, which the list mounts — the row only names the action.
 //
+// The lifecycle buttons are write-gated (issue #484): below the
+// manage-quadlets capability the row hides them and leaves Logs — the
+// list's hide-and-hint pattern, whose hint is ResourceList's own (the
+// module swaps the toolbar for it), so the row renders no hint itself.
+//
 // The row navigates to the quadlet's detail page on click (issue #472, the
 // volumes list's pattern), so every action button stops the click from
 // reaching the row. The row carries no destructive button (spec 461, ticket
@@ -174,51 +179,55 @@ export function renderQuadletRow({
 				</Td>
 				<Td>
 					<HStack spacing={2}>
-						{!isRunning ? (
-							<Button
-								size="xs"
-								variant="outline"
-								colorScheme="green"
-								aria-label={`Start ${quadlet.name}`}
-								onClick={(event) => {
-									event.stopPropagation();
-									lifecycle.start.mutate(quadlet.id);
-								}}
-								isLoading={startPending}
-								isDisabled={lifecyclePending}
-								data-testid="start-quadlet-button"
-							>
-								Start
-							</Button>
+						{canManage ? (
+							<>
+								{!isRunning ? (
+									<Button
+										size="xs"
+										variant="outline"
+										colorScheme="green"
+										aria-label={`Start ${quadlet.name}`}
+										onClick={(event) => {
+											event.stopPropagation();
+											lifecycle.start.mutate(quadlet.id);
+										}}
+										isLoading={startPending}
+										isDisabled={lifecyclePending}
+										data-testid="start-quadlet-button"
+									>
+										Start
+									</Button>
+								) : null}
+								{isRunning ? (
+									<Button
+										size="xs"
+										variant="outline"
+										aria-label={`Stop ${quadlet.name}`}
+										onClick={(event) => {
+											event.stopPropagation();
+											onLifecycle(quadlet, "stop");
+										}}
+										isDisabled={lifecyclePending}
+										data-testid="stop-quadlet-button"
+									>
+										Stop
+									</Button>
+								) : null}
+								<Button
+									size="xs"
+									variant="outline"
+									aria-label={`Restart ${quadlet.name}`}
+									onClick={(event) => {
+										event.stopPropagation();
+										onLifecycle(quadlet, "restart");
+									}}
+									isDisabled={lifecyclePending}
+									data-testid="restart-quadlet-button"
+								>
+									Restart
+								</Button>
+							</>
 						) : null}
-						{isRunning ? (
-							<Button
-								size="xs"
-								variant="outline"
-								aria-label={`Stop ${quadlet.name}`}
-								onClick={(event) => {
-									event.stopPropagation();
-									onLifecycle(quadlet, "stop");
-								}}
-								isDisabled={lifecyclePending}
-								data-testid="stop-quadlet-button"
-							>
-								Stop
-							</Button>
-						) : null}
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Restart ${quadlet.name}`}
-							onClick={(event) => {
-								event.stopPropagation();
-								onLifecycle(quadlet, "restart");
-							}}
-							isDisabled={lifecyclePending}
-							data-testid="restart-quadlet-button"
-						>
-							Restart
-						</Button>
 						<Button
 							size="xs"
 							variant="outline"
