@@ -16,6 +16,7 @@ import {
 	optionListHandlers,
 	renderContainersTab,
 	resetCounters,
+	setField,
 	setupCreatePage,
 	startHandler,
 	startRequests,
@@ -84,10 +85,7 @@ describe("CreateContainerPage", () => {
 	it("returns to the containers tab on cancel without sending a create request", async () => {
 		setupCreatePage();
 		const user = await openCreatePage();
-		await user.type(
-			screen.getByLabelText(/image/i),
-			"docker.io/library/redis:7",
-		);
+		typeImage();
 
 		await user.click(screen.getByTestId("container-form-cancel"));
 
@@ -132,7 +130,7 @@ describe("CreateContainerPage", () => {
 		expect(await screen.findByTestId("containers-empty")).toBeInTheDocument();
 		const user = userEvent.setup();
 		await user.click(screen.getByTestId("create-container-button"));
-		await user.type(
+		setField(
 			await screen.findByLabelText(/image/i),
 			"docker.io/library/redis:7",
 		);
@@ -176,10 +174,7 @@ describe("CreateContainerPage", () => {
 		const user = await openCreatePage();
 		expect(listRequests.count).toBe(1);
 
-		await user.type(
-			screen.getByLabelText(/image/i),
-			"docker.io/library/redis:7",
-		);
+		typeImage();
 		await user.click(screen.getByTestId("container-form-submit"));
 
 		expect(await screen.findByTestId("containers-tab")).toHaveTextContent(
@@ -202,10 +197,7 @@ describe("CreateContainerPage", () => {
 		);
 		const user = await openCreatePage();
 
-		await user.type(
-			screen.getByLabelText(/image/i),
-			"docker.io/library/nope:latest",
-		);
+		typeImage("docker.io/library/nope:latest");
 		await user.click(screen.getByTestId("container-form-submit"));
 
 		expect(await screen.findByRole("alert")).toBeInTheDocument();
@@ -256,7 +248,7 @@ describe("CreateContainerPage", () => {
 	it("submits privileged and the trimmed cap-add entries, dropping empty rows", async () => {
 		setupCreatePage();
 		const user = await openCreatePage();
-		await typeImage(user, "redis:7");
+		typeImage("redis:7");
 		await user.click(screen.getByLabelText(/privileged/i));
 		await user.click(screen.getByTestId("add-capability"));
 		await user.type(screen.getByLabelText("Capability 1"), "  NET_ADMIN  ");
@@ -317,8 +309,13 @@ describe("CreateContainerPage", () => {
 	it("blocks the submit while a resource limit is unparseable and explains why", async () => {
 		setupCreatePage();
 		const user = await openCreatePage();
-		await typeImage(user);
-		expect(screen.getByTestId("container-form-submit")).toBeEnabled();
+		typeImage();
+		// The change event is synchronous, so the submit's validity
+		// catches up asynchronously; wait for it instead of asserting
+		// the pre-validation state.
+		await waitFor(() =>
+			expect(screen.getByTestId("container-form-submit")).toBeEnabled(),
+		);
 
 		const memory = screen.getByLabelText("Memory");
 		await user.type(memory, "abc");
@@ -346,7 +343,7 @@ describe("CreateContainerPage", () => {
 	it("submits cpus as a number and memory as the trimmed string", async () => {
 		setupCreatePage();
 		const user = await openCreatePage();
-		await typeImage(user);
+		typeImage();
 		await user.type(screen.getByLabelText("CPUs"), "1.5");
 		await user.type(screen.getByLabelText("Memory"), " 512m ");
 
@@ -376,10 +373,7 @@ describe("CreateContainerPage run after create", () => {
 	it("starts the created container and returns to the tab when the checkbox is checked", async () => {
 		setupCreatePage();
 		const user = await openCreatePage();
-		await user.type(
-			screen.getByLabelText(/image/i),
-			"docker.io/library/redis:7",
-		);
+		typeImage();
 
 		await user.click(screen.getByTestId("container-form-submit"));
 
@@ -395,10 +389,7 @@ describe("CreateContainerPage run after create", () => {
 		setupCreatePage();
 		const user = await openCreatePage();
 		await user.click(screen.getByTestId("container-form-run-after-create"));
-		await user.type(
-			screen.getByLabelText(/image/i),
-			"docker.io/library/redis:7",
-		);
+		typeImage();
 
 		await user.click(screen.getByTestId("container-form-submit"));
 
@@ -423,10 +414,7 @@ describe("CreateContainerPage run after create", () => {
 			),
 		);
 		const user = await openCreatePage();
-		await user.type(
-			screen.getByLabelText(/image/i),
-			"docker.io/library/redis:7",
-		);
+		typeImage();
 
 		await user.click(screen.getByTestId("container-form-submit"));
 

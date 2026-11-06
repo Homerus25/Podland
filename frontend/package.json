@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:related": "vitest related --run",
+    "test:changed": "vitest run --changed",
     "coverage": "vitest run --coverage --testTimeout=30000 --minWorkers=1 --maxWorkers=8",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "lint": "biome check src",

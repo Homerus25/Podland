@@ -79,7 +79,7 @@ describe("CreateContainerPage image-not-found pull flow", () => {
 			);
 			const user = await openCreatePage();
 
-			await typeImage(user, "docker.io/library/nope:latest");
+			typeImage("docker.io/library/nope:latest");
 			await user.type(screen.getByLabelText(/name/i), "cache");
 			await submitForm(user);
 
@@ -123,7 +123,7 @@ describe("CreateContainerPage image-not-found pull flow", () => {
 		);
 		const user = await openCreatePage();
 
-		await typeImage(user, "docker.io/library/nope:latest");
+		typeImage("docker.io/library/nope:latest");
 		await submitForm(user);
 		// The error region must be up (and the submit relabeled) before
 		// the click targets the pull-mode button.
@@ -162,7 +162,7 @@ describe("CreateContainerPage image-not-found pull flow", () => {
 		);
 		const user = await openCreatePage();
 
-		await typeImage(user, "docker.io/library/nope:latest");
+		typeImage("docker.io/library/nope:latest");
 		await user.type(screen.getByLabelText(/name/i), "cache");
 		await submitForm(user);
 		// The error region must be up (and the submit relabeled) before
@@ -197,7 +197,7 @@ describe("CreateContainerPage image-not-found pull flow", () => {
 		);
 		const user = await openCreatePage();
 
-		await typeImage(user, "docker.io/library/nope:latest");
+		typeImage("docker.io/library/nope:latest");
 		await user.type(screen.getByLabelText(/name/i), "cache");
 		await submitForm(user);
 		// The error region must be up (and the submit relabeled) before
@@ -229,7 +229,7 @@ describe("CreateContainerPage image-not-found pull flow", () => {
 		setupCreatePage(imageNotFoundCreate());
 		const user = await openCreatePage();
 
-		await typeImage(user, "docker.io/library/nope:latest");
+		typeImage("docker.io/library/nope:latest");
 		await submitForm(user);
 		await screen.findByRole("alert");
 		expect(screen.getByTestId("container-form-submit")).toHaveTextContent(

@@ -8,6 +8,7 @@ import {
 	optionRequests,
 	populateAllFields,
 	reopenCreatePage,
+	setField,
 	setupCreatePage,
 	submitForm,
 	typeImage,
@@ -193,7 +194,7 @@ describe("CreateContainerPage integration", () => {
 		async () => {
 			setupCreatePage();
 			const user = await openCreatePage();
-			await typeImage(user);
+			typeImage();
 			await user.type(screen.getByLabelText(/name/i), "cache");
 			await submitForm(user);
 			// The success navigation returned to the containers tab.
@@ -217,16 +218,16 @@ describe("CreateContainerPage integration", () => {
 		async () => {
 			setupCreatePage();
 			const user = await openCreatePage();
-			await typeImage(user);
+			typeImage();
 			await user.click(screen.getByTestId("add-bind-mount"));
-			await user.type(screen.getByLabelText("Mount source 1"), "/srv/app");
-			await user.type(screen.getByLabelText("Mount destination 1"), "/app");
+			setField(screen.getByLabelText("Mount source 1"), "/srv/app");
+			setField(screen.getByLabelText("Mount destination 1"), "/app");
 			await user.click(
 				screen.getByLabelText("Bind mount 1 SELinux shared (z)"),
 			);
 			await user.click(screen.getByTestId("add-bind-mount"));
-			await user.type(screen.getByLabelText("Mount source 2"), "/srv/other");
-			await user.type(screen.getByLabelText("Mount destination 2"), "/opt");
+			setField(screen.getByLabelText("Mount source 2"), "/srv/other");
+			setField(screen.getByLabelText("Mount destination 2"), "/opt");
 			await user.click(screen.getByLabelText("Bind mount 2 chown to user (U)"));
 
 			await submitForm(user);

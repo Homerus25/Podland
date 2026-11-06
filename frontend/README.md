@@ -11,6 +11,8 @@ Vite + React 18 + TypeScript (strict) app for managing Podman on remote hosts.
 | `npm run preview` | Serve the production build locally |
 | `npm test` | Run the Vitest suite once |
 | `npm run test:watch` | Vitest in watch mode |
+| `npm run test:related -- <files>` | Run only the test files importing the given source files (dev loop) |
+| `npm run test:changed` | Run only the tests affected by uncommitted changes (`-- <branch>` to diff against a branch) |
 | `npm run typecheck` | `tsc --noEmit` for `tsconfig.json` (src) and `tsconfig.node.json` (vite config) |
 
 ## Layout

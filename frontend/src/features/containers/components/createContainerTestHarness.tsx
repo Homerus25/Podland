@@ -1,7 +1,7 @@
 import { ContainerList } from "@features/containers/components/ContainerList";
 import { CreateContainerPage } from "@features/containers/components/CreateContainerPage";
 import type { ContainerSummary } from "@features/containers/services/containersApi";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
 	type DefaultBodyType,
@@ -235,11 +235,17 @@ export async function reopenCreatePage(user: User) {
 	expect(await screen.findByLabelText(/image/i)).toBeInTheDocument();
 }
 
-export async function typeImage(
-	user: User,
-	image = "docker.io/library/redis:7",
-) {
-	await user.type(screen.getByLabelText(/image/i), image);
+// Sets a text field's value in one change event. The create-page suites
+// pin payload mapping and navigation, not per-keystroke UX, and a single
+// change event skips the full-form re-render user.type fires per
+// character — the dominant cost of these suites. Per-keystroke behavior
+// (validation while typing) keeps user.type in the suites that pin it.
+export function setField(element: Element, value: string) {
+	fireEvent.change(element, { target: { value } });
+}
+
+export function typeImage(image = "docker.io/library/redis:7") {
+	setField(screen.getByLabelText(/image/i), image);
 }
 
 export async function submitForm(user: User) {
@@ -254,56 +260,47 @@ export async function populateAllFields(
 	user: User,
 	image = "docker.io/library/redis:7",
 ) {
-	await typeImage(user, image);
+	typeImage(image);
 	// Basic
-	await user.type(screen.getByLabelText(/name/i), "cache");
-	await user.type(
-		screen.getByLabelText(/command/i),
-		"redis-server --appendonly yes",
-	);
-	await user.type(screen.getByLabelText(/user/i), "1000:1000");
-	await user.type(screen.getByLabelText(/timezone/i), "Europe/Berlin");
+	setField(screen.getByLabelText(/name/i), "cache");
+	setField(screen.getByLabelText(/command/i), "redis-server --appendonly yes");
+	setField(screen.getByLabelText(/user/i), "1000:1000");
+	setField(screen.getByLabelText(/timezone/i), "Europe/Berlin");
 	await user.selectOptions(screen.getByLabelText(/restart policy/i), "always");
 	await user.click(screen.getByLabelText(/remove on exit/i));
 	// Environment
 	await user.click(screen.getByTestId("add-env-variable"));
-	await user.type(screen.getByLabelText("Environment variable 1 key"), "FOO");
-	await user.type(screen.getByLabelText("Environment variable 1 value"), "bar");
+	setField(screen.getByLabelText("Environment variable 1 key"), "FOO");
+	setField(screen.getByLabelText("Environment variable 1 value"), "bar");
 	await user.click(screen.getByTestId("add-env-variable"));
-	await user.type(screen.getByLabelText("Environment variable 2 key"), "MODE");
-	await user.type(
-		screen.getByLabelText("Environment variable 2 value"),
-		"prod",
-	);
+	setField(screen.getByLabelText("Environment variable 2 key"), "MODE");
+	setField(screen.getByLabelText("Environment variable 2 value"), "prod");
 	// Ports
 	await user.click(screen.getByTestId("add-port-binding"));
-	await user.type(screen.getByLabelText("Host port 1"), "8080");
-	await user.type(screen.getByLabelText("Container port 1"), "80");
+	setField(screen.getByLabelText("Host port 1"), "8080");
+	setField(screen.getByLabelText("Container port 1"), "80");
 	await user.selectOptions(screen.getByLabelText("Protocol 1"), "udp");
 	// Storage: bind mount + named volume
 	await user.click(screen.getByTestId("add-bind-mount"));
-	await user.type(screen.getByLabelText("Mount source 1"), "/srv/app");
-	await user.type(screen.getByLabelText("Mount destination 1"), "/app");
+	setField(screen.getByLabelText("Mount source 1"), "/srv/app");
+	setField(screen.getByLabelText("Mount destination 1"), "/app");
 	await user.selectOptions(screen.getByLabelText("Mount mode 1"), "ro");
 	await user.click(screen.getByTestId("add-named-volume"));
 	const volumeSelect = screen.getByLabelText("Volume name 1");
 	await within(volumeSelect).findByText("pgdata");
 	await user.selectOptions(volumeSelect, "pgdata");
-	await user.type(screen.getByLabelText("Volume destination 1"), "/data");
+	setField(screen.getByLabelText("Volume destination 1"), "/data");
 	// Network + Secrets
 	await user.click(await screen.findByLabelText("app-net"));
 	await user.click(await screen.findByLabelText("db-password"));
 	// Devices
 	await user.click(screen.getByTestId("add-device"));
-	await user.type(
-		screen.getByLabelText("Device host path 1"),
-		"/dev/dri/renderD128",
-	);
-	await user.type(
+	setField(screen.getByLabelText("Device host path 1"), "/dev/dri/renderD128");
+	setField(
 		screen.getByLabelText("Device container path 1"),
 		"/dev/dri/renderD128",
 	);
 	// Resources (issue #377)
-	await user.type(screen.getByLabelText("CPUs"), "1.5");
-	await user.type(screen.getByLabelText("Memory"), "512m");
+	setField(screen.getByLabelText("CPUs"), "1.5");
+	setField(screen.getByLabelText("Memory"), "512m");
 }

@@ -1,6 +1,7 @@
 import {
 	openCreatePage,
 	setupCreatePage,
+	typeImage,
 } from "@features/containers/components/createContainerTestHarness";
 import { screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
@@ -139,10 +140,7 @@ describe("CreateContainerPage inline volume create", () => {
 		"cancelling the volume dialog leaves the create form untouched",
 		async () => {
 			const user = await openCreatePage();
-			await user.type(
-				screen.getByLabelText(/image/i),
-				"docker.io/library/redis:7",
-			);
+			typeImage();
 			await user.click(screen.getByTestId("add-named-volume"));
 
 			await user.click(screen.getByTestId("create-volume-inline"));

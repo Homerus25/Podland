@@ -71,7 +71,7 @@ describe("CreateContainerPage pod selector", () => {
 		// travel: the pod owns networking.
 		await user.click(await screen.findByLabelText("app-net"));
 		await user.selectOptions(screen.getByLabelText("Pod"), "app-pod");
-		await typeImage(user);
+		typeImage();
 		await submitForm(user);
 
 		expect(createRequests.body).toEqual({
@@ -91,8 +91,12 @@ describe("CreateContainerPage pod selector", () => {
 		renderCreatePage();
 		const user = userEvent.setup();
 
-		await typeImage(user);
-		await user.selectOptions(screen.getByLabelText("Pod"), "app-pod");
+		typeImage();
+		// The pods options arrive from the mount fetch; wait for the
+		// option instead of relying on typing to fill the time.
+		const podSelect = screen.getByLabelText("Pod");
+		await within(podSelect).findByText("app-pod");
+		await user.selectOptions(podSelect, "app-pod");
 		await user.click(screen.getByTestId("container-form-submit"));
 
 		const errorRegion = await screen.findByTestId("container-form-error");
@@ -107,8 +111,12 @@ describe("CreateContainerPage pod selector", () => {
 		// The selector's own fetch on mount.
 		await waitFor(() => expect(optionRequests.pods).toBe(1));
 		const user = userEvent.setup();
-		await typeImage(user);
-		await user.selectOptions(screen.getByLabelText("Pod"), "app-pod");
+		typeImage();
+		// The pods options arrive from the mount fetch; wait for the
+		// option instead of relying on typing to fill the time.
+		const podSelect = screen.getByLabelText("Pod");
+		await within(podSelect).findByText("app-pod");
+		await user.selectOptions(podSelect, "app-pod");
 		await submitForm(user);
 
 		// The create joined a pod, so the pods list invalidates and
@@ -122,7 +130,7 @@ describe("CreateContainerPage pod selector", () => {
 
 		await waitFor(() => expect(optionRequests.pods).toBe(1));
 		const user = userEvent.setup();
-		await typeImage(user);
+		typeImage();
 		await submitForm(user);
 
 		// The navigate-back lands on the containers tab, whose list
