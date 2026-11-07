@@ -1,10 +1,9 @@
-import { Box, Heading, VStack } from "@chakra-ui/react";
+import { Box, VStack } from "@chakra-ui/react";
 import { LoginForm } from "@features/auth/components/LoginForm";
 import { useAuth } from "@features/auth/hooks/useAuth";
+import { AppBrand } from "@shared/components/AppBrand";
 import { FullPageSpinner } from "@shared/components/FullPageSpinner";
 import { Navigate } from "react-router-dom";
-
-const appName = import.meta.env.VITE_APP_NAME || "Podland";
 
 export function LoginPage() {
 	const { isResolving, needsSetup } = useAuth();
@@ -21,7 +20,7 @@ export function LoginPage() {
 
 	return (
 		<VStack spacing={8} justify="center" minH="100vh" px={4}>
-			<Heading>{appName}</Heading>
+			<AppBrand />
 			<Box w="full" maxW="sm">
 				<LoginForm />
 			</Box>

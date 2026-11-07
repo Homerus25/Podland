@@ -1,10 +1,9 @@
-import { Heading, Text, VStack } from "@chakra-ui/react";
+import { Text, VStack } from "@chakra-ui/react";
 import { useIsAdmin } from "@features/auth/hooks/useAuth";
 import { HostNavSection } from "@features/hosts/components/HostNavSection";
+import { AppBrand } from "@shared/components/AppBrand";
 import { NavLink } from "react-router-dom";
 import { navItemStyle } from "./navItemStyle";
-
-const appName = import.meta.env.VITE_APP_NAME || "Podland";
 
 interface NavItem {
 	label: string;
@@ -27,7 +26,7 @@ const adminNavItems: NavItem[] = [{ label: "Users", to: "/users" }];
 // The nav list both navigation surfaces render — the desktop sidebar
 // and the mobile drawer share items, admin gating, and active styling.
 // onNavigate is the drawer's close-on-navigate seam; the sidebar passes
-// nothing. The app title lives here as plain text above the links, and
+// nothing. The app brand (logo + title) lives here above the links, and
 // the current host's tabs render as a second section below the main
 // links on host-scoped routes (issue #459).
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
@@ -36,9 +35,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
 	return (
 		<VStack as="nav" spacing={1} align="stretch">
-			<Heading size="md" mb={6} px={3}>
-				{appName}
-			</Heading>
+			<AppBrand headingSize="md" mb={6} px={3} />
 			{items.map((item) => (
 				<NavLink
 					key={item.to}
