@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { Fragment } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithQuery } from "@/test/render";
-import { breakpointRules } from "@/test/responsiveCss";
+import { breakpointRules, cssRulesFor } from "@/test/responsiveCss";
 
 type Gadget = { id: string; name: string };
 
@@ -51,6 +51,34 @@ describe("ResourceList composition", () => {
 		expect(screen.getByText("spinner")).toBeInTheDocument();
 		expect(screen.getByText("doodad")).toBeInTheDocument();
 		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
+	});
+});
+
+describe("ResourceList clickable-row hover", () => {
+	it("gives a row carrying onClick the button hover (tint, shadow, lift) and leaves plain rows without it", () => {
+		renderResourceList({
+			renderRow: (gadget: Gadget) => (
+				<Tr
+					key={gadget.id}
+					data-testid={`gadget-row-${gadget.id}`}
+					onClick={gadget.id === "g-1" ? () => {} : undefined}
+				>
+					<Td>{gadget.name}</Td>
+				</Tr>
+			),
+		});
+
+		const clickableRules = cssRulesFor(
+			screen.getByTestId("gadget-row-g-1"),
+		).join("\n");
+		expect(clickableRules).toMatch(/:hover/);
+		expect(clickableRules).toMatch(/background-color/);
+		expect(clickableRules).toMatch(/box-shadow/);
+		expect(clickableRules).toMatch(/translateY\(-1px\)/);
+		const plainRules = cssRulesFor(screen.getByTestId("gadget-row-g-2")).join(
+			"\n",
+		);
+		expect(plainRules).not.toMatch(/:hover/);
 	});
 });
 

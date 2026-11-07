@@ -100,6 +100,21 @@ function pinnedCellProps(side: "left" | "right") {
 const pinnedNameCellProps = pinnedCellProps("left");
 const pinnedActionsCellProps = pinnedCellProps("right");
 
+// A clickable row is a button: a Tr carrying onClick gets this hover
+// affordance — tint plus shadow and a 1px lift — so the row reads as
+// actionable under the cursor. Applied in the same row walk that owns the
+// pins and the checkbox column, so every feature row gets it for free.
+const clickableRowHoverProps = {
+	transition:
+		"background-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out, transform 0.15s ease-in-out",
+	_hover: {
+		backgroundColor: "gray.100",
+		_dark: { backgroundColor: "gray.700" },
+		boxShadow: "0 2px 10px rgba(0, 0, 0, 0.18)",
+		transform: "translateY(-1px)",
+	},
+};
+
 // Rows are feature-rendered, so the pin contract has to reach the feature
 // <Td>s, not just the headers this module renders. The owner walks the
 // row's rendered node: fragments (a data row with sibling error rows or
@@ -163,6 +178,8 @@ function decorateRowCells(
 	return Children.toArray(decorated);
 }
 
+// The row walk: recurses fragments, and on each Tr applies the clickable-row
+// hover (a Tr with onClick) plus the cell decoration below.
 function decorateRow(
 	node: ReactNode,
 	selectCell: ReactNode | null,
@@ -179,6 +196,7 @@ function decorateRow(
 	}
 	if (node.type === Tr) {
 		return cloneElement(node, {
+			...(node.props.onClick ? clickableRowHoverProps : {}),
 			children: decorateRowCells(
 				node.props.children,
 				selectCell,
@@ -510,7 +528,6 @@ export function ResourceList<T>({
 						<Tbody>
 							{sortedItems?.map((item) => {
 								const row = renderRow(item);
-								if (!isPinned && !isSelectable) return row;
 								const key = getKey?.(item);
 								const selectCell =
 									isSelectable && key !== undefined ? (
