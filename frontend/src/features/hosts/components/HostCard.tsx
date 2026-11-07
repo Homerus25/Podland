@@ -33,7 +33,12 @@ export function HostCard({ host }: { host: Host }) {
 			onClick={() => navigate(`/hosts/${host.id}`)}
 			cursor="pointer"
 			textAlign="left"
-			_hover={{ shadow: "md" }}
+			transition="all 0.2s ease-in-out"
+			_hover={{
+				transform: "translateY(-2px)",
+				shadow:
+					"0 12px 16px -2px rgba(0, 0, 0, 0.28), 0 5px 8px -8px rgba(14, 165, 233, 0.35), inset 0 0 0 1px var(--chakra-colors-brand-500)",
+			}}
 		>
 			<CardHeader>
 				<HStack justify="space-between">
