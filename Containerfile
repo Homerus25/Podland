@@ -18,6 +18,10 @@ COPY --from=frontend package.json package-lock.json ./
 RUN npm ci
 COPY --from=frontend index.html vite.config.ts tsconfig.json tsconfig.node.json ./
 COPY --from=frontend src ./src
+# public/ holds the static assets Vite copies into dist/ at build time
+# (currently podland.jpg, the logo and tab icon). Without this line the
+# bundle ships without them and the SPA fallback answers index.html.
+COPY --from=frontend public ./public
 RUN npm run build
 
 # --- Stage 2: backend build, SPA embedded ---------------------------------
