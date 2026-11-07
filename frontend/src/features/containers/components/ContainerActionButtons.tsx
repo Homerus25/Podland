@@ -32,6 +32,13 @@ export type ContainerLifecycleMutations = {
 // the detail page — whose mutations only ever carry its one container's id —
 // shows the same thing.
 //
+// The set renders the actions its caller offers: Connect to network is
+// opt-in through `onConnect` (spec #486, ticket #491), so a surface that
+// connects some other way — the containers list, whose bulk "Connect
+// selected to network" replaces the per-row button — simply does not hand
+// the handler over and the button never renders. The container detail page
+// still passes it, so its Connect action is unchanged (spec #477 parity).
+//
 // Every button stops propagation: the list row is clickable (it opens the
 // container's detail page) and a button click must never also fire the row
 // action.
@@ -53,7 +60,9 @@ export function ContainerActionButtons({
 	canManage: boolean;
 	canManageNetworks: boolean;
 	size?: "xs" | "sm";
-	onConnect: () => void;
+	// Opt-in: a caller that offers no per-container connect passes nothing
+	// and the button never renders.
+	onConnect?: () => void;
 	onShowLogs: () => void;
 }) {
 	const isRunning = container.state === "running";
@@ -112,7 +121,7 @@ export function ContainerActionButtons({
 					) : null}
 				</>
 			) : null}
-			{canManageNetworks ? (
+			{canManageNetworks && onConnect ? (
 				<Button
 					size={size}
 					variant="outline"

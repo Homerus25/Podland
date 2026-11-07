@@ -1,15 +1,14 @@
-import { VolumeList } from "@features/volumes/components/VolumeList";
+import { MoveVolumeDialog } from "@features/volumes/components/MoveVolumeDialog";
+import { useVolumes } from "@features/volumes/hooks/useVolumes";
 import type {
 	VolumeMovePreview,
 	VolumeMoveResult,
-	VolumeSummary,
 } from "@features/volumes/services/volumesApi";
 import type { Host } from "@shared/types/api";
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { beforeEach, describe, expect, it } from "vitest";
-import { errorJson } from "@/test/errors";
 import {
 	hostFixture,
 	volumeFixture,
@@ -19,6 +18,22 @@ import {
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import { liveNdjsonResponse, ndjsonResponse } from "@/test/stream";
+
+// The single-item volume transfer dialog's volume-domain behavior (issue
+// 238): the force flag the move body carries and the copy body omits, the
+// in-use warning and its checkbox, the NDJSON run with its in-place report
+// and both-hosts refetch, the partial report's copy, and the two
+// execution-time refusal hints. The dialog skeleton — the target select, the
+// mode radio, the preview's pending/error/collision states, the
+// referencing-quadlet warning, the stay-open report's footer swap — is
+// pinned once in the shared TransferDialog suite, and the target list's
+// capability filtering in its `useTransferState` suite, so neither is
+// re-pinned here.
+//
+// The dialog is driven at its own seam: the volumes list no longer mounts it
+// (spec 486, ticket #490 retired the row's Move/Copy button in favour of the
+// toolbar's batch transfer), so the volume detail page is its only caller and
+// the dialog itself is the surface under test.
 
 const volume = volumeFixture();
 
@@ -36,19 +51,17 @@ let moveRequests: { count: number; body: Record<string, unknown> } = {
 	count: 0,
 	body: {},
 };
-let previewTargets: string[] = [];
 let volumeFetches = 0;
 
 function resetCounters() {
 	moveRequests = { count: 0, body: {} };
-	previewTargets = [];
 	volumeFetches = 0;
 }
 
-function volumesHandler(volumes: () => VolumeSummary[]) {
+function volumesHandler() {
 	return http.get("*/api/hosts/m-1/volumes", () => {
 		volumeFetches++;
-		return HttpResponse.json(volumes());
+		return HttpResponse.json([volume]);
 	});
 }
 
@@ -57,14 +70,8 @@ function hostsHandler(hosts: Host[]) {
 }
 
 function previewHandler(overrides: Partial<VolumeMovePreview> = {}) {
-	return http.get(
-		"*/api/hosts/m-1/volumes/app-data/move-preview",
-		({ request }) => {
-			previewTargets.push(
-				new URL(request.url).searchParams.get("targetHostId") ?? "",
-			);
-			return HttpResponse.json(volumeMovePreviewFixture(overrides));
-		},
+	return http.get("*/api/hosts/m-1/volumes/app-data/move-preview", () =>
+		HttpResponse.json(volumeMovePreviewFixture(overrides)),
 	);
 }
 
@@ -101,25 +108,40 @@ function errorEvent(code: string, message: string) {
 	};
 }
 
+// The source list's observer: a completed transfer invalidates both hosts'
+// volume lists, and the refetch is what tells a mounted list. The probe keeps
+// that contract observable without mounting the whole list.
+function VolumesProbe({ hostId }: { hostId: string }) {
+	useVolumes(hostId);
+	return null;
+}
+
+function renderDialog() {
+	return renderWithQuery(
+		<>
+			<VolumesProbe hostId={source.id} />
+			<MoveVolumeDialog
+				host={source}
+				volume={volume}
+				onClose={() => undefined}
+			/>
+		</>,
+		{ chakra: true },
+	);
+}
+
 async function openMoveDialog(
 	previewOverrides: Partial<VolumeMovePreview> = {},
 ) {
 	server.use(
-		volumesHandler(() => [volume]),
+		volumesHandler(),
 		hostsHandler([source, staging, readOnly, backup]),
 		previewHandler(previewOverrides),
 		moveStreamHandler([completeEvent(volumeMoveResultFixture())]),
 	);
-	renderWithQuery(<VolumeList host={source} />, {
-		chakra: true,
-		router: true,
-	});
-	const user = userEvent.setup();
-	await user.click(
-		await screen.findByRole("button", { name: "Move or copy app-data" }),
-	);
+	renderDialog();
 	expect(await screen.findByTestId("modal")).toBeInTheDocument();
-	return user;
+	return userEvent.setup();
 }
 
 // Ready-to-confirm state: the preview resolved (the default fixture is
@@ -134,41 +156,8 @@ async function openMoveDialogReadyToConfirm(
 	return user;
 }
 
-describe("VolumeList move/copy", () => {
+describe("MoveVolumeDialog", () => {
 	beforeEach(resetCounters);
-
-	it("hides the Move/Copy action below the manage-volumes capability", async () => {
-		server.use(volumesHandler(() => [volume]));
-		renderWithQuery(
-			<VolumeList host={hostFixture({ permission: "read", isOwner: false })} />,
-			{ chakra: true, router: true },
-		);
-
-		expect(await screen.findByTestId("volume-row")).toBeInTheDocument();
-		expect(
-			screen.queryByRole("button", { name: "Move or copy app-data" }),
-		).not.toBeInTheDocument();
-	});
-
-	it("offers one dialog listing only manageable hosts, source excluded", async () => {
-		await openMoveDialog();
-
-		const select = screen.getByTestId("move-target-select");
-		const names = within(select)
-			.getAllByRole("option")
-			.map((option) => option.textContent);
-		expect(names).toEqual(["staging-01", "backup-01"]);
-		expect(names).not.toContain("prod-web-01");
-		expect(names).not.toContain("laptop-01");
-	});
-
-	it("refetches the preview when the target changes", async () => {
-		const user = await openMoveDialogReadyToConfirm();
-
-		await user.selectOptions(screen.getByTestId("move-target-select"), "m-4");
-
-		await waitFor(() => expect(previewTargets).toEqual(["m-2", "m-4"]));
-	});
 
 	it("sends the move body with force, and the copy body without it", async () => {
 		const user = await openMoveDialogReadyToConfirm();
@@ -180,86 +169,6 @@ describe("VolumeList move/copy", () => {
 			mode: "move",
 			force: false,
 		});
-
-		// Copy never removes anything: force is move-mode vocabulary.
-		await user.click(screen.getByTestId("close-move-report-button"));
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-		);
-		await user.click(
-			screen.getByRole("button", { name: "Move or copy app-data" }),
-		);
-		expect(await screen.findByTestId("modal")).toBeInTheDocument();
-		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this host's volume)" }),
-		);
-		await waitFor(() =>
-			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
-		);
-		await user.click(screen.getByTestId("confirm-move-button"));
-		await waitFor(() => expect(moveRequests.count).toBe(2));
-		expect(moveRequests.body).toEqual({
-			targetHostId: "m-2",
-			mode: "copy",
-		});
-	});
-
-	it("disables confirm on a collision with a clear message", async () => {
-		await openMoveDialog({ collision: true });
-
-		expect(
-			await screen.findByTestId("move-collision-warning"),
-		).toHaveTextContent("already exists on staging-01");
-		expect(screen.getByTestId("confirm-move-button")).toBeDisabled();
-		expect(moveRequests.count).toBe(0);
-	});
-
-	it("keeps confirm disabled while the preview is pending", async () => {
-		server.use(
-			volumesHandler(() => [volume]),
-			hostsHandler([source, staging, readOnly, backup]),
-			http.get(
-				"*/api/hosts/m-1/volumes/app-data/move-preview",
-				() => new Promise<Response>(() => {}),
-			),
-		);
-		renderWithQuery(<VolumeList host={source} />, {
-			chakra: true,
-			router: true,
-		});
-		const user = userEvent.setup();
-		await user.click(
-			await screen.findByRole("button", { name: "Move or copy app-data" }),
-		);
-
-		expect(
-			await screen.findByTestId("move-preview-pending"),
-		).toBeInTheDocument();
-		expect(screen.getByTestId("confirm-move-button")).toBeDisabled();
-	});
-
-	it("shows a failed preview and keeps confirm disabled", async () => {
-		server.use(
-			volumesHandler(() => [volume]),
-			hostsHandler([source, staging, readOnly, backup]),
-			http.get("*/api/hosts/m-1/volumes/app-data/move-preview", () =>
-				HttpResponse.json(
-					errorJson("ACCESS_DENIED", "Access denied", "req-71"),
-					{ status: 403 },
-				),
-			),
-		);
-		renderWithQuery(<VolumeList host={source} />, {
-			chakra: true,
-			router: true,
-		});
-		const user = userEvent.setup();
-		await user.click(
-			await screen.findByRole("button", { name: "Move or copy app-data" }),
-		);
-
-		expect(await screen.findByText("ACCESS_DENIED")).toBeInTheDocument();
-		expect(screen.getByTestId("confirm-move-button")).toBeDisabled();
 	});
 
 	it("warns an in-use source in move mode with the force checkbox, and hides both in copy mode", async () => {
@@ -292,31 +201,9 @@ describe("VolumeList move/copy", () => {
 		});
 	});
 
-	it("lists referencing quadlets as a warning, with the dangling note in move mode only", async () => {
-		const user = await openMoveDialogReadyToConfirm({
-			referencingQuadlets: [
-				{ name: "web.container" },
-				{ name: "db.container" },
-			],
-		});
-
-		const warning = screen.getByTestId("move-referencing-warning");
-		expect(warning).toHaveTextContent("web.container");
-		expect(warning).toHaveTextContent("db.container");
-		expect(warning).toHaveTextContent("keep pointing at prod-web-01");
-		expect(warning).toHaveTextContent("references dangle");
-
-		await user.click(
-			screen.getByRole("radio", { name: "Copy (keep this host's volume)" }),
-		);
-		expect(
-			screen.getByTestId("move-referencing-warning"),
-		).not.toHaveTextContent("references dangle");
-	});
-
 	it("runs the transfer over the NDJSON transport, narrates in place, and refetches the source list", async () => {
 		server.use(
-			volumesHandler(() => [volume]),
+			volumesHandler(),
 			hostsHandler([source, staging, readOnly, backup]),
 			previewHandler(),
 			moveStreamHandler(
@@ -341,14 +228,8 @@ describe("VolumeList move/copy", () => {
 				true,
 			),
 		);
-		renderWithQuery(<VolumeList host={source} />, {
-			chakra: true,
-			router: true,
-		});
+		renderDialog();
 		const user = userEvent.setup();
-		await user.click(
-			await screen.findByRole("button", { name: "Move or copy app-data" }),
-		);
 		await waitFor(() =>
 			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
 		);
@@ -374,11 +255,6 @@ describe("VolumeList move/copy", () => {
 		expect(report).toHaveTextContent("2.1 MB");
 		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
 		await waitFor(() => expect(volumeFetches).toBeGreaterThan(before));
-
-		await user.click(screen.getByTestId("close-move-report-button"));
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-		);
 	});
 
 	it("keeps the dialog open on a partial result, naming the both-hosts state", async () => {
@@ -401,11 +277,6 @@ describe("VolumeList move/copy", () => {
 		expect(message).toHaveTextContent("failed to remove volume");
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
-
-		await user.click(screen.getByTestId("close-move-report-button"));
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-		);
 	});
 
 	it("maps a VOLUME_IN_USE refusal to the force hint, surfaces the checkbox, and retries with force", async () => {

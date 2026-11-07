@@ -1,12 +1,19 @@
 import { Button, HStack } from "@chakra-ui/react";
 
 // The volume action set, owned once (spec #477): the list row and the volume
-// detail page render the same three buttons, so the labels, the aria names,
-// the testids, and the gating can never drift between the two surfaces.
-// Export is a read and renders for every caller; Move/Copy and Populate are
-// write-gated, so `canManage` false leaves Export alone — the caller decides
-// whether that means a hidden group (the list's read-only row) or the shared
-// write hint beside it (the detail page's denied gate).
+// detail page render the same buttons, so the labels, the aria names, the
+// testids, and the gating can never drift between the two surfaces. Export is
+// a read and renders for every caller; Move/Copy and Populate are write-gated,
+// so `canManage` false leaves Export alone — the caller decides whether that
+// means a hidden group (the list's read-only row) or the shared write hint
+// beside it (the detail page's denied gate).
+//
+// The set renders the actions its caller offers: Move/Copy is opt-in through
+// `onMove` (spec #486, ticket #490), so a surface that moves some other way —
+// the volumes list, whose bulk "Move/copy selected" replaces the per-row
+// button — simply does not hand the handler over and the button never
+// renders. The volume detail page still passes it, so its Move/Copy action is
+// unchanged (spec #477 parity).
 //
 // Every button stops propagation: the list row is clickable (it opens the
 // volume's detail page) and a button click must never also fire the row
@@ -25,7 +32,9 @@ export function VolumeActionButtons({
 	isExporting: boolean;
 	size?: "xs" | "sm";
 	onExport: () => void;
-	onMove: () => void;
+	// Opt-in: a caller that offers no per-volume move passes nothing and the
+	// button never renders.
+	onMove?: () => void;
 	onPopulate: () => void;
 }) {
 	return (
@@ -45,18 +54,20 @@ export function VolumeActionButtons({
 			</Button>
 			{canManage ? (
 				<>
-					<Button
-						size={size}
-						variant="outline"
-						aria-label={`Move or copy ${volume.name}`}
-						onClick={(event) => {
-							event.stopPropagation();
-							onMove();
-						}}
-						data-testid="move-volume-button"
-					>
-						Move/Copy
-					</Button>
+					{onMove ? (
+						<Button
+							size={size}
+							variant="outline"
+							aria-label={`Move or copy ${volume.name}`}
+							onClick={(event) => {
+								event.stopPropagation();
+								onMove();
+							}}
+							data-testid="move-volume-button"
+						>
+							Move/Copy
+						</Button>
+					) : null}
 					<Button
 						size={size}
 						variant="outline"

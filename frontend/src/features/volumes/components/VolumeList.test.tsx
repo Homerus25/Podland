@@ -108,10 +108,6 @@ describe("VolumeList", () => {
 
 	it("keeps the row's action buttons from triggering the navigation", async () => {
 		mockVolumes([volumeFixture()]);
-		// The hosts endpoint for the move/copy dialog's target list.
-		server.use(
-			http.get("*/api/hosts", () => HttpResponse.json([hostFixture()])),
-		);
 		renderVolumeList();
 
 		const user = userEvent.setup();
@@ -133,12 +129,6 @@ describe("VolumeList", () => {
 		).toBeInTheDocument();
 		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
 		await user.click(screen.getByRole("button", { name: "Cancel" }));
-
-		// Move/Copy — opens the transfer dialog, not the detail page.
-		await user.click(within(row).getByTestId("move-volume-button"));
-		expect(await screen.findByText(/move or copy/i)).toBeInTheDocument();
-		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
-		await user.click(screen.getByRole("button", { name: "Cancel" }));
 	});
 
 	// Spec 461, ticket #470: single-item removal lives on the detail page and
@@ -152,7 +142,8 @@ describe("VolumeList", () => {
 		expect(
 			within(row).queryByRole("button", { name: /delete/i }),
 		).not.toBeInTheDocument();
-		// The row keeps its surviving actions: export, move/copy, populate.
+		// The row keeps its surviving actions: export and populate (Move/Copy
+		// left the row for the toolbar's batch transfer, spec 486 #490).
 		expect(
 			within(row).getByRole("button", { name: "Export app-data" }),
 		).toBeInTheDocument();

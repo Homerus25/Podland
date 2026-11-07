@@ -51,8 +51,7 @@ function baseProps(overrides: Partial<WarningsProps> = {}): WarningsProps {
 		sourceName: "prod-web-01",
 		targetName: "staging-01",
 		transferCompanions: true,
-		volumesAcknowledged: false,
-		onAcknowledge: () => {},
+		acknowledge: { checked: false, onChange: () => {} },
 		...overrides,
 	};
 }
@@ -360,11 +359,13 @@ describe("MoveQuadletWarnings rendering", () => {
 			return (
 				<MoveQuadletWarnings
 					{...baseProps({
-						onAcknowledge: (next) => {
-							onAcknowledge(next);
-							setAcknowledged(next);
+						acknowledge: {
+							checked: acknowledged,
+							onChange: (next) => {
+								onAcknowledge(next);
+								setAcknowledged(next);
+							},
 						},
-						volumesAcknowledged: acknowledged,
 					})}
 				/>
 			);

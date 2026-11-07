@@ -14,7 +14,10 @@ import {
 } from "@shared/queries/queryKeys";
 import { useAlwaysRefetchListQuery } from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
-import { useMovePreview } from "@shared/transfers/transferHooks";
+import {
+	useMovePreview,
+	useMovePreviews,
+} from "@shared/transfers/transferHooks";
 import type { BulkRemoveInput } from "@shared/types/api";
 
 export function useVolumes(hostId: string) {
@@ -92,6 +95,26 @@ export function useVolumeMovePreview(
 	return useMovePreview(
 		(target) => volumeMovePreviewQueryKey(hostId, volumeName, target),
 		(target) => getVolumeMovePreview(hostId, volumeName, target),
+		targetHostId,
+	);
+}
+
+// The batch transfer's per-volume previews (spec 486, ticket #490): one
+// target-scoped query per selected volume, over the same key constructor and
+// fetcher the single-item hook uses, so the two surfaces can never ask the
+// backend different questions. The ritual is the shared transfer-hooks
+// module's (useMovePreviews); this adapter supplies the key constructor and
+// fetcher.
+export function useVolumeMovePreviews(
+	hostId: string,
+	volumeNames: string[],
+	targetHostId: string | null,
+) {
+	return useMovePreviews(
+		(volumeName, target) =>
+			volumeMovePreviewQueryKey(hostId, volumeName, target),
+		(volumeName, target) => getVolumeMovePreview(hostId, volumeName, target),
+		volumeNames,
 		targetHostId,
 	);
 }

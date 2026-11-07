@@ -1,12 +1,10 @@
 import { CopyImageDialog } from "@features/images/components/CopyImageDialog";
-import { ImageList } from "@features/images/components/ImageList";
 import { useImages } from "@features/images/hooks/useImages";
 import type { ImageCopyPreview } from "@features/images/services/imagesApi";
 import type { Host } from "@shared/types/api";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	hostFixture,
@@ -21,12 +19,18 @@ import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import { liveNdjsonResponse, ndjsonResponse } from "@/test/stream";
 
-// The image copy surface's domain assertions (issue 376), mirroring the
-// volumes move suite: the row button and its navigation stop, the
-// already-present fact as information, the copy-only body, the live
-// progress and stay-open report, the both-hosts refetch, and the
-// too-large hint. The skeleton behavior (the hidden radio, the Copy
-// confirm) is pinned once in the TransferDialog preset's suite.
+// The single-image copy dialog's domain assertions (issue 376), mirroring the
+// volumes move suite: the already-present fact as information, the
+// target-scoped preview refetch, the copy-only body, the live progress and
+// stay-open report, the both-hosts refetch, and the too-large hint. The
+// skeleton behavior (the hidden radio, the Copy confirm) is pinned once in
+// the TransferDialog preset's suite.
+//
+// The dialog is rendered directly here, not through a list: spec 486 (ticket
+// #488) retired the images list's row button, so the single-image copy is
+// reached from the image detail page — whose own suite pins the header
+// action's gate and wiring — and the batch copy from the toolbar. This suite
+// keeps the dialog's domain, which neither of those re-pins.
 
 const image = imageFixture();
 const encodedImageId = encodeURIComponent(image.id);
@@ -96,22 +100,37 @@ function copyStreamHandler(events: Record<string, unknown>[], live = false) {
 	);
 }
 
-// The row click navigates, so the navigation test observes the location
-// through the public interface: a probe reading the router's pathname.
-function LocationProbe() {
-	const location = useLocation();
-	return <div data-testid="location">{location.pathname}</div>;
-}
-
-// The target host's image list is not rendered by the source list; the
-// probe mounts its query so the both-hosts refetch is observable
-// through MSW.
-function TargetImagesProbe() {
+// Neither host's image list is rendered by the dialog; the probes mount
+// both queries so the both-hosts refetch is observable through MSW.
+function ImagesProbe() {
+	useImages("m-1");
 	useImages("m-2");
 	return null;
 }
 
-async function openCopyDialog(
+function renderCopyDialog() {
+	renderWithQuery(
+		<>
+			<CopyImageDialog host={source} image={image} onClose={() => {}} />
+			<ImagesProbe />
+		</>,
+		{ chakra: true, router: true },
+	);
+}
+
+// The confirm unlocks only once the hosts list and the target-scoped preview
+// have both resolved; under a loaded worker that can outlast waitFor's
+// one-second default, so the gate gets a wider window.
+async function waitForConfirmEnabled() {
+	await waitFor(
+		() => expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
+		{ timeout: 3000 },
+	);
+}
+
+// Ready-to-confirm state: the preview resolved (the default fixture says
+// the target does not hold the image), so confirm unlocks once it arrives.
+async function renderCopyDialogReadyToConfirm(
 	previewOverrides: Partial<ImageCopyPreview> = {},
 ) {
 	server.use(
@@ -123,75 +142,17 @@ async function openCopyDialog(
 			imageCopyCompleteEventFixture(imageCopyResultFixture()),
 		]),
 	);
-	renderWithQuery(
-		<>
-			<LocationProbe />
-			<ImageList host={source} />
-			<TargetImagesProbe />
-		</>,
-		{ chakra: true, router: { initialEntries: ["/hosts/m-1"] } },
-	);
+	renderCopyDialog();
 	const user = userEvent.setup();
-	await user.click(
-		await screen.findByRole("button", {
-			name: "Copy docker.io/library/nginx:1.27 to another host",
-		}),
-	);
-	expect(await screen.findByTestId("modal")).toBeInTheDocument();
+	await waitForConfirmEnabled();
 	return user;
 }
 
-// Ready-to-confirm state: the preview resolved (the default fixture says
-// the target does not hold the image), so confirm unlocks once it arrives.
-async function openCopyDialogReadyToConfirm(
-	previewOverrides: Partial<ImageCopyPreview> = {},
-) {
-	const user = await openCopyDialog(previewOverrides);
-	await waitFor(() =>
-		expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
-	);
-	return user;
-}
-
-describe("ImageList copy to host", () => {
+describe("CopyImageDialog", () => {
 	beforeEach(resetCounters);
 
-	it("hides the Copy to host action below the manage-images capability", async () => {
-		server.use(imagesHandler("m-1"));
-		renderWithQuery(
-			<ImageList host={hostFixture({ permission: "read", isOwner: false })} />,
-			{ chakra: true, router: true },
-		);
-
-		expect(await screen.findByTestId("image-row")).toBeInTheDocument();
-		expect(
-			screen.queryByRole("button", {
-				name: "Copy docker.io/library/nginx:1.27 to another host",
-			}),
-		).not.toBeInTheDocument();
-	});
-
-	it("opens the copy dialog from the row without firing the row's navigation", async () => {
-		await openCopyDialog();
-
-		expect(screen.getByTestId("modal")).toBeInTheDocument();
-		expect(screen.getByTestId("location").textContent).toBe("/hosts/m-1");
-	});
-
-	it("offers one dialog listing only manageable hosts, source excluded", async () => {
-		await openCopyDialog();
-
-		const select = screen.getByTestId("move-target-select");
-		const names = within(select)
-			.getAllByRole("option")
-			.map((option) => option.textContent);
-		expect(names).toEqual(["staging-01", "backup-01"]);
-		expect(names).not.toContain("prod-web-01");
-		expect(names).not.toContain("laptop-01");
-	});
-
 	it("renders the preview's already-present fact as information, never a block", async () => {
-		await openCopyDialogReadyToConfirm({ present: true });
+		await renderCopyDialogReadyToConfirm({ present: true });
 
 		const present = screen.getByTestId("copy-already-present");
 		expect(present).toHaveTextContent("staging-01");
@@ -201,7 +162,7 @@ describe("ImageList copy to host", () => {
 	});
 
 	it("refetches the preview when the target changes", async () => {
-		const user = await openCopyDialogReadyToConfirm();
+		const user = await renderCopyDialogReadyToConfirm();
 
 		await user.selectOptions(screen.getByTestId("move-target-select"), "m-4");
 
@@ -209,7 +170,7 @@ describe("ImageList copy to host", () => {
 	});
 
 	it("sends the copy body — the target only, no mode, no force", async () => {
-		const user = await openCopyDialogReadyToConfirm();
+		const user = await renderCopyDialogReadyToConfirm();
 
 		await user.click(screen.getByTestId("confirm-move-button"));
 
@@ -233,23 +194,9 @@ describe("ImageList copy to host", () => {
 				true,
 			),
 		);
-		renderWithQuery(
-			<>
-				<LocationProbe />
-				<ImageList host={source} />
-				<TargetImagesProbe />
-			</>,
-			{ chakra: true, router: { initialEntries: ["/hosts/m-1"] } },
-		);
+		renderCopyDialog();
 		const user = userEvent.setup();
-		await user.click(
-			await screen.findByRole("button", {
-				name: "Copy docker.io/library/nginx:1.27 to another host",
-			}),
-		);
-		await waitFor(() =>
-			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
-		);
+		await waitForConfirmEnabled();
 		const beforeSource = sourceImageFetches;
 		const beforeTarget = targetImageFetches;
 
@@ -277,15 +224,10 @@ describe("ImageList copy to host", () => {
 			expect(sourceImageFetches).toBeGreaterThan(beforeSource);
 			expect(targetImageFetches).toBeGreaterThan(beforeTarget);
 		});
-
-		await user.click(screen.getByTestId("close-move-report-button"));
-		await waitFor(() =>
-			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
-		);
 	});
 
 	it("narrates the too-large refusal as a hint in the error region", async () => {
-		const user = await openCopyDialogReadyToConfirm();
+		const user = await renderCopyDialogReadyToConfirm();
 		server.use(
 			copyStreamHandler([
 				imageCopyErrorEventFixture(
@@ -304,13 +246,6 @@ describe("ImageList copy to host", () => {
 		expect(hint).toHaveTextContent("transfer bound");
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
 	});
-});
-
-// The dialog adapter renders through the list above; this direct render
-// pins the report's loaded-names block against a load that reported no
-// names (the backend answers [], never null).
-describe("CopyImageDialog report", () => {
-	beforeEach(resetCounters);
 
 	it("narrates a completed copy without a loaded-names block when the load reported none", async () => {
 		server.use(
@@ -320,14 +255,9 @@ describe("CopyImageDialog report", () => {
 				imageCopyCompleteEventFixture(imageCopyResultFixture({ names: [] })),
 			]),
 		);
-		renderWithQuery(
-			<CopyImageDialog host={source} image={image} onClose={() => {}} />,
-			{ chakra: true, router: true },
-		);
+		renderCopyDialog();
 		const user = userEvent.setup();
-		await waitFor(() =>
-			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
-		);
+		await waitForConfirmEnabled();
 
 		await user.click(screen.getByTestId("confirm-move-button"));
 

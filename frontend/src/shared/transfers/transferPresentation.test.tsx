@@ -1,9 +1,16 @@
 import {
+	partialOutcome,
+	TransferModeRadio,
+	TransferPreviewStates,
 	TransferReport,
+	TransferTargetSelect,
 	transferProgressLabel,
 } from "@shared/transfers/transferPresentation";
 import { screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { axiosError } from "@/test/errors";
+import { hostFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 
 // The presentation module's suite pins the two rituals from props — no
@@ -246,5 +253,208 @@ describe("TransferReport", () => {
 		);
 		expect(within(message).getByTestId("domain-extra")).toBeInTheDocument();
 		expect(screen.queryByTestId("move-success-report")).not.toBeInTheDocument();
+	});
+});
+
+// The dialog-body rituals both transfer dialogs render (spec 486 review): the
+// target picker, the mode radio, and the preview's three states. The single
+// dialog and the batch dialog hand over their own testids, so the module's
+// suite pins the ritual and each surface's suite keeps its own vocabulary.
+describe("TransferTargetSelect", () => {
+	const staging = hostFixture({ id: "m-2", name: "staging-01" });
+	const backup = hostFixture({ id: "m-4", name: "backup-01" });
+
+	it("lists the writable targets and reports the chosen one", async () => {
+		const user = userEvent.setup();
+		const onSelect = vi.fn();
+		renderWithQuery(
+			<TransferTargetSelect
+				targets={[staging, backup]}
+				targetId="m-2"
+				onSelect={onSelect}
+				noun="gadget"
+			/>,
+			{ chakra: true },
+		);
+
+		const select = screen.getByTestId("move-target-select");
+		expect(
+			within(select)
+				.getAllByRole("option")
+				.map((option) => option.textContent),
+		).toEqual(["staging-01", "backup-01"]);
+
+		await user.selectOptions(select, "m-4");
+		expect(onSelect).toHaveBeenCalledWith("m-4");
+	});
+
+	it("renders the noun-derived empty-picker copy, or the adapter's override", () => {
+		const first = renderWithQuery(
+			<TransferTargetSelect
+				targets={[]}
+				targetId=""
+				onSelect={vi.fn()}
+				noun="gadget"
+			/>,
+			{ chakra: true },
+		);
+		expect(screen.getByTestId("move-no-targets")).toHaveTextContent(
+			"No other host you can manage gadgets on.",
+		);
+		first.unmount();
+
+		renderWithQuery(
+			<TransferTargetSelect
+				targets={[]}
+				targetId=""
+				onSelect={vi.fn()}
+				noun="gadget"
+				noTargetsMessage="No other host you can write to."
+			/>,
+			{ chakra: true },
+		);
+		expect(screen.getByTestId("move-no-targets")).toHaveTextContent(
+			"No other host you can write to.",
+		);
+	});
+});
+
+describe("TransferModeRadio", () => {
+	it("renders both modes and reports the chosen one", async () => {
+		const user = userEvent.setup();
+		const onModeChange = vi.fn();
+		renderWithQuery(
+			<TransferModeRadio
+				mode="move"
+				onModeChange={onModeChange}
+				noun="gadget"
+			/>,
+			{ chakra: true },
+		);
+
+		expect(screen.getByTestId("move-mode-radio")).toBeInTheDocument();
+		expect(screen.getByTestId("move-mode-move")).toBeInTheDocument();
+		await user.click(
+			screen.getByRole("radio", { name: "Copy (keep this host's gadget)" }),
+		);
+		expect(onModeChange).toHaveBeenCalledWith("copy");
+	});
+
+	it("renders nothing when the mode is pinned", () => {
+		renderWithQuery(
+			<TransferModeRadio
+				mode="copy"
+				onModeChange={vi.fn()}
+				noun="gadget"
+				pinnedMode="copy"
+			/>,
+			{ chakra: true },
+		);
+
+		expect(screen.queryByTestId("move-mode-radio")).not.toBeInTheDocument();
+	});
+});
+
+describe("TransferPreviewStates", () => {
+	const testIds = {
+		pending: "stub-pending",
+		error: "stub-error",
+		collision: "stub-collision",
+	};
+
+	function renderStates(
+		preview: Parameters<typeof TransferPreviewStates>[0]["preview"],
+	) {
+		return renderWithQuery(
+			<TransferPreviewStates
+				preview={preview}
+				noun="gadget"
+				itemName="g-1"
+				targetName="staging-01"
+				testIds={testIds}
+			/>,
+			{ chakra: true },
+		);
+	}
+
+	it("renders the pending line under the caller's testid", () => {
+		renderStates({
+			isPending: true,
+			isError: false,
+			error: null,
+			data: undefined,
+		});
+
+		expect(screen.getByTestId("stub-pending")).toHaveTextContent(
+			"Checking the target host…",
+		);
+		expect(screen.queryByTestId("stub-error")).not.toBeInTheDocument();
+		expect(screen.queryByTestId("stub-collision")).not.toBeInTheDocument();
+	});
+
+	it("renders a failed preview through the shared error display", () => {
+		renderStates({
+			isPending: false,
+			isError: true,
+			error: axiosError(403, "ACCESS_DENIED", "Access denied"),
+			data: undefined,
+		});
+
+		expect(screen.getByTestId("stub-error")).toHaveTextContent("ACCESS_DENIED");
+	});
+
+	it("names the item and the target in the collision warning", () => {
+		renderStates({
+			isPending: false,
+			isError: false,
+			error: null,
+			data: { collision: true },
+		});
+
+		const collision = screen.getByTestId("stub-collision");
+		expect(collision).toHaveTextContent("A gadget named “g-1”");
+		expect(collision).toHaveTextContent("already exists on staging-01");
+	});
+
+	it("renders nothing once the preview settles without a collision", () => {
+		renderStates({
+			isPending: false,
+			isError: false,
+			error: null,
+			data: { collision: false },
+		});
+
+		expect(screen.queryByTestId("stub-pending")).not.toBeInTheDocument();
+		expect(screen.queryByTestId("stub-error")).not.toBeInTheDocument();
+		expect(screen.queryByTestId("stub-collision")).not.toBeInTheDocument();
+	});
+});
+
+describe("partialOutcome", () => {
+	it("maps a partial result to a failed outcome carrying the domain sentence and the error line", () => {
+		expect(
+			partialOutcome(
+				{ status: "partial", error: "failed to delete secret: in use" },
+				"The value crossed but the source secret could not be removed.",
+			),
+		).toEqual({
+			ok: false,
+			detail:
+				"The value crossed but the source secret could not be removed. failed to delete secret: in use",
+		});
+	});
+
+	it("omits the error line when the envelope carries none", () => {
+		expect(partialOutcome({ status: "partial" }, "The data crossed.")).toEqual({
+			ok: false,
+			detail: "The data crossed.",
+		});
+	});
+
+	it("answers null for a settled result, so the adapter keeps its success mapping", () => {
+		expect(partialOutcome({ status: "moved" }, "The data crossed.")).toBeNull();
+		expect(
+			partialOutcome({ status: "copied" }, "The data crossed."),
+		).toBeNull();
 	});
 });

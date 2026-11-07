@@ -200,8 +200,7 @@ export function MoveQuadletWarnings({
 	sourceName,
 	targetName,
 	transferCompanions,
-	volumesAcknowledged,
-	onAcknowledge,
+	acknowledge,
 }: {
 	volumes: QuadletMovePreviewVolume[];
 	// The differing-companion projection, computed by the adapter through
@@ -217,9 +216,12 @@ export function MoveQuadletWarnings({
 	// backend default); the checkbox only exists to opt out — the note in
 	// the volume list answers this flag.
 	transferCompanions: boolean;
-	// The stranded-data acknowledgement (issue 207), owned by the adapter.
-	volumesAcknowledged: boolean;
-	onAcknowledge: (acknowledged: boolean) => void;
+	// The stranded-data acknowledgement (issue 207), owned by the adapter:
+	// present renders the checkbox, absent renders none. The single-item
+	// dialog collects the answer; the batch transfer (spec 486, ticket #489)
+	// has no per-item acknowledgement to collect — it shows the facts only —
+	// so it passes nothing rather than a checkbox that answers nothing.
+	acknowledge?: { checked: boolean; onChange: (checked: boolean) => void };
 }) {
 	const differsNames = moveCompanionNames(differsCompanions);
 	return (
@@ -254,14 +256,16 @@ export function MoveQuadletWarnings({
 							</HStack>
 						))}
 					</VStack>
-					<Checkbox
-						isChecked={volumesAcknowledged}
-						onChange={(event) => onAcknowledge(event.target.checked)}
-						mt={3}
-						data-testid="move-volume-confirm-option"
-					>
-						I understand this data stays behind
-					</Checkbox>
+					{acknowledge ? (
+						<Checkbox
+							isChecked={acknowledge.checked}
+							onChange={(event) => acknowledge.onChange(event.target.checked)}
+							mt={3}
+							data-testid="move-volume-confirm-option"
+						>
+							I understand this data stays behind
+						</Checkbox>
+					) : null}
 				</Box>
 			) : null}
 			{secrets.length > 0 ? (

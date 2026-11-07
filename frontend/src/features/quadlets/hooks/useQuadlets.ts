@@ -35,6 +35,7 @@ import { useListInvalidatingMutation } from "@shared/queries/useListInvalidating
 import {
 	invalidateMoveResult,
 	useMovePreview,
+	useMovePreviews,
 } from "@shared/transfers/transferHooks";
 import type { BulkRemoveInput } from "@shared/types/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -148,6 +149,25 @@ export function useQuadletMovePreview(
 	return useMovePreview(
 		(target) => quadletMovePreviewQueryKey(hostId, quadletId, target),
 		(target) => quadletMovePreview(hostId, quadletId, target),
+		targetHostId,
+	);
+}
+
+// The batch transfer's previews (spec 486, ticket #489): one query per
+// selected quadlet, over the SAME key constructor and fetcher the single-item
+// hook uses, so a batch and a single transfer share cache entries. The
+// ritual is the shared transfer-hooks module's (useMovePreviews); this
+// adapter supplies the key constructor and fetcher.
+export function useQuadletMovePreviews(
+	hostId: string,
+	quadletIds: string[],
+	targetHostId: string | null,
+) {
+	return useMovePreviews(
+		(quadletId, target) =>
+			quadletMovePreviewQueryKey(hostId, quadletId, target),
+		(quadletId, target) => quadletMovePreview(hostId, quadletId, target),
+		quadletIds,
 		targetHostId,
 	);
 }

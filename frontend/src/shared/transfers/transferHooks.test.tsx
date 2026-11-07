@@ -5,14 +5,18 @@ import {
 import {
 	invalidateMoveResult,
 	type MoveStreamConfig,
+	runMoveStream,
+	transferErrorMessage,
 	useMovePreview,
+	useMovePreviews,
 	useMoveStream,
 } from "@shared/transfers/transferHooks";
-import { api, hostApiPath } from "@shared/utils/api";
+import { api, genericError, hostApiPath } from "@shared/utils/api";
 import { QueryClient } from "@tanstack/react-query";
 import { act, waitFor } from "@testing-library/react";
 import { type DefaultBodyType, HttpResponse, http } from "msw";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { axiosError } from "@/test/errors";
 import { renderHookWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 import { abortableStream, ndjsonResponse, streamResponse } from "@/test/stream";
@@ -355,6 +359,136 @@ describe("useMoveStream", () => {
 	});
 });
 
+// The plain runner (spec 486, ticket #487): the batch transfers cannot call
+// a hook in a loop, so the same event loop is reachable as a function. The
+// hook suite above pins the lifecycle through the hook; this block pins the
+// function's own contract — the envelope it resolves, the progress it hands
+// over, and the two ways it rejects.
+describe("runMoveStream", () => {
+	function runOptions(progress: (string | null)[] = []) {
+		return {
+			signal: new AbortController().signal,
+			onProgress: (next: string | null) => progress.push(next),
+		};
+	}
+
+	it("resolves the terminal envelope, folds progress, and invalidates both hosts", async () => {
+		mockMoveStream(() =>
+			moveStreamResponse([
+				progressEvent({ phase: "start" }),
+				progressEvent({ phase: "bytes" }),
+				completeEvent(testMoveResult()),
+			]),
+		);
+		const queryClient = new QueryClient();
+		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+		const progress: (string | null)[] = [];
+
+		const result = await runMoveStream(
+			streamConfig,
+			queryClient,
+			"app",
+			transferInput,
+			runOptions(progress),
+		);
+
+		expect(result).toEqual(testMoveResult());
+		expect(progress).toEqual(["start", "bytes"]);
+		expect(invalidateSpy).toHaveBeenCalledWith({
+			queryKey: volumesQueryKey("m-1"),
+		});
+		expect(invalidateSpy).toHaveBeenCalledWith({
+			queryKey: volumesQueryKey("m-2"),
+		});
+	});
+
+	it("rejects with the terminal error event's code and message, invalidating nothing", async () => {
+		mockMoveStream(() =>
+			moveStreamResponse([errorEvent("THING_IN_USE", "thing is in use")]),
+		);
+		const queryClient = new QueryClient();
+		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+		await expect(
+			runMoveStream(
+				streamConfig,
+				queryClient,
+				"app",
+				transferInput,
+				runOptions(),
+			),
+		).rejects.toEqual({ code: "THING_IN_USE", message: "thing is in use" });
+		expect(invalidateSpy).not.toHaveBeenCalled();
+	});
+
+	it("rejects with the generic error when the stream ends without an envelope", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		mockMoveStream(() =>
+			moveStreamResponse([
+				{ operationId: "op-1", type: "complete", hostId: "m-1" },
+			]),
+		);
+		const queryClient = new QueryClient();
+
+		await expect(
+			runMoveStream(
+				streamConfig,
+				queryClient,
+				"app",
+				transferInput,
+				runOptions(),
+			),
+		).rejects.toEqual({ ...genericError });
+		expect(warn).toHaveBeenCalledWith(
+			"Skipping complete event without a transfer envelope:",
+			{ operationId: "op-1", type: "complete", hostId: "m-1" },
+		);
+	});
+
+	it("ends the run at the FIRST terminal — a second terminal or a late event reaches nobody", async () => {
+		// Exactly-one-terminal is the transport's plain runner's (spec 486
+		// review): a complete-then-error stream resolves with the envelope
+		// the first terminal carried, and a second complete can neither
+		// overwrite it nor re-invalidate.
+		mockMoveStream(() =>
+			moveStreamResponse([
+				completeEvent(testMoveResult()),
+				errorEvent("THING_IN_USE", "thing is in use"),
+				progressEvent({ phase: "bytes" }),
+				completeEvent(testMoveResult({ name: "other" })),
+			]),
+		);
+		const queryClient = new QueryClient();
+		const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+		const progress: (string | null)[] = [];
+
+		const result = await runMoveStream(
+			streamConfig,
+			queryClient,
+			"app",
+			transferInput,
+			runOptions(progress),
+		);
+
+		expect(result).toEqual(testMoveResult());
+		expect(progress).toEqual([]);
+		expect(invalidateSpy).toHaveBeenCalledTimes(2);
+	});
+
+	it("rejects rather than resolving when the run is aborted", async () => {
+		mockMoveStream(() => moveStreamResponse([completeEvent(testMoveResult())]));
+		const controller = new AbortController();
+		controller.abort();
+
+		await expect(
+			runMoveStream(streamConfig, new QueryClient(), "app", transferInput, {
+				signal: controller.signal,
+				onProgress: () => {},
+			}),
+		).rejects.toBeDefined();
+	});
+});
+
 // The suite's preview surface: the shared key vocabulary's volume preview
 // constructor and a fetcher over the shared axios instance.
 interface TestPreview {
@@ -425,6 +559,114 @@ describe("useMovePreview", () => {
 				.getAll()
 				.map((query) => query.queryKey),
 		).toContainEqual(volumeMovePreviewQueryKey("m-1", "app-data", "m-2"));
+	});
+});
+
+// The batch previews (spec 486, ticket #487): a batch transfer cannot call a
+// hook in a loop, so the same preview ritual is reachable over a list of ids.
+// The suite pins the shared hook once — the per-id key constructor and
+// fetcher, the order the ids were given, the null-target gate, and one query
+// per id — so the four feature hooks stay one-liners and their suites keep
+// domain assertions only.
+async function fetchTestPreviewFor(
+	id: string,
+	targetHostId: string,
+): Promise<TestPreview> {
+	const response = await api.get<TestPreview>(
+		hostApiPath("m-1", "volumes", id, "move-preview"),
+		{ params: { targetHostId } },
+	);
+	return response.data;
+}
+
+function renderMovePreviews(ids: string[], targetHostId: string | null) {
+	return renderHookWithQuery(() =>
+		useMovePreviews(
+			(id, target) => volumeMovePreviewQueryKey("m-1", id, target),
+			fetchTestPreviewFor,
+			ids,
+			targetHostId,
+		),
+	);
+}
+
+describe("useMovePreviews", () => {
+	it("fetches one preview per id for the chosen target, in the order the ids were given", async () => {
+		const requests: string[] = [];
+		server.use(
+			http.get(
+				"*/api/hosts/m-1/volumes/:volumeName/move-preview",
+				({ request, params }) => {
+					const target = new URL(request.url).searchParams.get("targetHostId");
+					requests.push(`${params.volumeName}@${target}`);
+					return HttpResponse.json({
+						collision: params.volumeName === "logs-data",
+					});
+				},
+			),
+		);
+		const { result } = renderMovePreviews(["app-data", "logs-data"], "m-2");
+
+		await waitFor(() =>
+			expect(result.current.every((preview) => preview.isSuccess)).toBe(true),
+		);
+
+		expect(requests.sort()).toEqual(["app-data@m-2", "logs-data@m-2"]);
+		// One query per id, in the caller's order: the adapter zips the
+		// results onto its items by position.
+		expect(result.current).toHaveLength(2);
+		expect(result.current[0].data).toEqual({ collision: false });
+		expect(result.current[1].data).toEqual({ collision: true });
+	});
+
+	it("stays disabled and fetches nothing while no target is chosen, one query per id", () => {
+		let fetches = 0;
+		server.use(
+			http.get("*/api/hosts/m-1/volumes/:volumeName/move-preview", () => {
+				fetches++;
+				return HttpResponse.json({ collision: false });
+			}),
+		);
+		const { result, queryClient } = renderMovePreviews(
+			["app-data", "logs-data"],
+			null,
+		);
+
+		expect(result.current).toHaveLength(2);
+		for (const preview of result.current) {
+			expect(preview.fetchStatus).toBe("idle");
+		}
+		expect(fetches).toBe(0);
+		expect(
+			queryClient
+				.getQueryCache()
+				.getAll()
+				.map((query) => query.queryKey),
+		).toContainEqual(volumeMovePreviewQueryKey("m-1", "logs-data", ""));
+	});
+});
+
+describe("transferErrorMessage", () => {
+	it("reads the message off an ApiError-shaped stream refusal", () => {
+		expect(
+			transferErrorMessage({
+				code: "VOLUME_IN_USE",
+				message: "volume is in use",
+			}),
+		).toBe("volume is in use");
+	});
+
+	it("passes an axios envelope's message through rather than the transport's own", () => {
+		expect(
+			transferErrorMessage(
+				axiosError(409, "GADGET_ALREADY_EXISTS", "already there"),
+			),
+		).toBe("already there");
+	});
+
+	it("falls back to the generic message for an unrecognised failure", () => {
+		expect(transferErrorMessage(new Error("boom"))).toBe(genericError.message);
+		expect(transferErrorMessage(undefined)).toBe(genericError.message);
 	});
 });
 

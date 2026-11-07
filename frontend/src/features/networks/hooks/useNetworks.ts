@@ -29,6 +29,7 @@ import {
 import type { ApiError, BulkRemoveInput } from "@shared/types/api";
 import { getApiError } from "@shared/utils/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
 
 export function useNetworks(hostId: string) {
 	return useAlwaysRefetchListQuery(networksQueryKey(hostId), () =>
@@ -165,4 +166,60 @@ export function useConnectContainers(hostId: string) {
 				NETWORK_MUTATION_INVALIDATIONS,
 			),
 	});
+}
+
+// The sequential multi-connect runner behind the containers list's bulk
+// connect (spec #486): one request at a time in the caller's order, each
+// item's outcome reported as it settles, both lists invalidated once at the
+// end. The parallel allSettled mutation above stays the two single-fixed-side
+// dialogs' transport.
+//
+// It is a plain hook over the service function, not a react-query mutation:
+// the bulk flow narrates per item as it goes (a mutation reports one
+// aggregate result at the end), and the caller owns the report it builds from
+// `onItem`. A failed pair never aborts the batch — the remaining pairs still
+// fire — and the invalidation runs once after the last pair settles, success
+// or failure alike, so succeeded items leave the eligible options and failed
+// ones remain for retry.
+//
+// The optional signal is the batch dialog's abort seam (spec 486 review):
+// an aborted run stops before the next pair fires — the pairs that already
+// settled are real, so the invalidation still runs, but the caller learns
+// nothing further through `onItem` it does not already hold. The dialog
+// closes on abort and reports nothing back through its own seam, the same
+// abandoned-run rule the batch transfer dialog pins.
+export function useSequentialConnect(hostId: string): {
+	run: (
+		pairs: ConnectContainerVariables[],
+		onItem: (containerId: string, failure: ApiError | undefined) => void,
+		signal?: AbortSignal,
+	) => Promise<void>;
+} {
+	const queryClient = useQueryClient();
+
+	const run = useCallback(
+		async (
+			pairs: ConnectContainerVariables[],
+			onItem: (containerId: string, failure: ApiError | undefined) => void,
+			signal?: AbortSignal,
+		) => {
+			for (const { networkName, containerId } of pairs) {
+				if (signal?.aborted) break;
+				try {
+					await connectContainer(hostId, networkName, containerId, signal);
+					onItem(containerId, undefined);
+				} catch (error) {
+					onItem(containerId, getApiError(error));
+				}
+			}
+			invalidateHostResources(
+				queryClient,
+				hostId,
+				NETWORK_MUTATION_INVALIDATIONS,
+			);
+		},
+		[hostId, queryClient],
+	);
+
+	return { run };
 }

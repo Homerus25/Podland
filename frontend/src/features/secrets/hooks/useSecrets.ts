@@ -24,6 +24,7 @@ import { useListInvalidatingMutation } from "@shared/queries/useListInvalidating
 import {
 	invalidateMoveResult,
 	useMovePreview,
+	useMovePreviews,
 } from "@shared/transfers/transferHooks";
 import type { BulkRemoveInput } from "@shared/types/api";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -106,6 +107,25 @@ export function useSecretMovePreview(
 	return useMovePreview(
 		(target) => secretMovePreviewQueryKey(hostId, secretId, target),
 		(target) => getSecretMovePreview(hostId, secretId, target),
+		targetHostId,
+	);
+}
+
+// The batch transfer's previews (spec 486, ticket #487): one query per
+// selected secret, over the SAME key constructor and fetcher the single-item
+// hook uses, so a batch and a single transfer share cache entries. The
+// ritual is the shared transfer-hooks module's (useMovePreviews); this
+// adapter supplies the key constructor and fetcher.
+export function useSecretMovePreviews(
+	hostId: string,
+	secretNames: string[],
+	targetHostId: string | null,
+) {
+	return useMovePreviews(
+		(secretName, target) =>
+			secretMovePreviewQueryKey(hostId, secretName, target),
+		(secretName, target) => getSecretMovePreview(hostId, secretName, target),
+		secretNames,
 		targetHostId,
 	);
 }

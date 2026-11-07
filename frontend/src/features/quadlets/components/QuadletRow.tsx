@@ -130,12 +130,18 @@ const quadletOptionsKey = (variables: { quadletId: string }) =>
 // reaching the row. The row carries no destructive button (spec 461, ticket
 // #470): single-item removal lives on the detail page's Remove button, and
 // the list keeps its bulk "Remove selected".
+//
+// The row carries no Move/Copy button either (spec 486, ticket #489): a
+// transfer is a selection-scoped action now — the toolbar's "Move/copy
+// selected" serves one quadlet and many alike, and the detail page keeps its
+// own Move/Copy action for the single-item option set. The row keeps the
+// lifecycle buttons, Logs, and Edit, so the table is five columns for every
+// caller.
 export function renderQuadletRow({
 	quadlet,
 	canManage,
 	lifecycle,
 	onEdit,
-	onMove,
 	onShowLogs,
 	onLifecycle,
 	onOpen,
@@ -144,7 +150,6 @@ export function renderQuadletRow({
 	canManage: boolean;
 	lifecycle: QuadletLifecycleMutations;
 	onEdit: (quadlet: QuadletSummary) => void;
-	onMove: (quadlet: QuadletSummary) => void;
 	onShowLogs: (quadlet: QuadletSummary) => void;
 	onLifecycle: (quadlet: QuadletSummary, action: "stop" | "restart") => void;
 	onOpen: (quadlet: QuadletSummary) => void;
@@ -255,26 +260,13 @@ export function renderQuadletRow({
 						Edit
 					</Button>
 				</Td>
-				{canManage ? (
-					<Td>
-						<Button
-							size="xs"
-							variant="outline"
-							aria-label={`Move or copy ${quadlet.name}`}
-							onClick={(event) => {
-								event.stopPropagation();
-								onMove(quadlet);
-							}}
-							data-testid="move-quadlet-button"
-						>
-							Move/Copy
-						</Button>
-					</Td>
-				) : null}
 			</Tr>
 			{rowError ? (
 				<Tr>
-					<Td colSpan={canManage ? 6 : 5}>
+					{/* Five columns for every caller: name, resource, state,
+					    the lifecycle/Logs cell, and the edit cell. The move/copy
+					    column went with the row button (spec 486, ticket #489). */}
+					<Td colSpan={5}>
 						<ErrorDisplay error={getApiError(rowError)} />
 					</Td>
 				</Tr>

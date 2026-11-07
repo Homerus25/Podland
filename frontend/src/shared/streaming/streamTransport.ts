@@ -132,11 +132,46 @@ function terminalType(value: unknown): "complete" | "error" | null {
 	return null;
 }
 
+// The plain runner behind every operation stream's event loop (spec 486
+// review): it owns the loop's ritual — every parsed value is dispatched to
+// `onEvent` until the FIRST terminal event, which is dispatched to both
+// handlers and ends dispatch, so a second terminal or any late event reaches
+// nobody (exactly-one-terminal). The hook below delegates to it, and the
+// transfer kit's plain move runner does too, so a batch transfer and the
+// operation flows cannot drift on terminal semantics. It resolves on clean
+// stream end — with or without a terminal, the outcome mapping is the
+// caller's — and rejects per `streamNdjson`: raw abort errors and
+// ApiError-shaped values only.
+export interface NdjsonOperationHandlers {
+	onEvent: (value: unknown) => void;
+	onTerminal: (type: "complete" | "error", value: unknown) => void;
+}
+
+export async function runNdjsonOperation(
+	url: string,
+	init: { method?: string; body?: string } | undefined,
+	signal: AbortSignal,
+	handlers: NdjsonOperationHandlers,
+): Promise<void> {
+	let finished = false;
+	await streamNdjson(url, { ...init, signal }, (value) => {
+		if (finished) return;
+		handlers.onEvent(value);
+		const terminal = terminalType(value);
+		if (!terminal) return;
+		finished = true;
+		handlers.onTerminal(terminal, value);
+	});
+}
+
 // The operation lifecycle both mutation-stream flows share: starting a new
 // operation supersedes the previous one (its late events and terminal side
 // effects reach nobody), terminal complete/error events end the run exactly
 // once, an error event or transport failure surfaces as error, an abort
-// never does, and unmounting tears the connection down.
+// never does, and unmounting tears the connection down. The event loop and
+// the terminal semantics are the plain runner's above; this hook owns the
+// state around them — the abort controller, the supersede identity, and
+// the running/error state.
 export function useNdjsonOperation(): NdjsonOperation {
 	const [isRunning, setIsRunning] = useState(false);
 	const [error, setError] = useState<ApiError | null>(null);
@@ -173,16 +208,15 @@ export function useNdjsonOperation(): NdjsonOperation {
 
 		void (async () => {
 			try {
-				await streamNdjson(
-					options.url,
-					{ ...options.init, signal: controller.signal },
-					(value) => {
+				await runNdjsonOperation(options.url, options.init, controller.signal, {
+					onEvent: (value) => {
 						if (abortRef.current !== controller || controller.signal.aborted)
 							return;
 						options.onEvent(value);
-						const terminal = terminalType(value);
-						if (!terminal) return;
-						if (finish() && terminal === "error") {
+					},
+					onTerminal: (terminal, value) => {
+						if (controller.signal.aborted || !finish()) return;
+						if (terminal === "error") {
 							const event = value as {
 								error?: { code?: string; message?: string };
 							};
@@ -192,7 +226,7 @@ export function useNdjsonOperation(): NdjsonOperation {
 							});
 						}
 					},
-				);
+				});
 				finish();
 			} catch (streamError) {
 				// streamNdjson rejects raw abort errors and ApiError-shaped values

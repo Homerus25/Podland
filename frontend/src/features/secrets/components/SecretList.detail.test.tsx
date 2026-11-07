@@ -80,7 +80,10 @@ describe("SecretList row navigation", () => {
 		);
 	});
 
-	it("does not navigate when the move/copy button is clicked", async () => {
+	// Spec 486, ticket #487: the row's Move/Copy button is gone, so the
+	// toolbar's batch action is the list's only transfer entry point — and it
+	// opens the dialog without navigating away from the list.
+	it("does not navigate when the toolbar's move/copy selected button is clicked", async () => {
 		mockSecrets([secretFixture()]);
 		server.use(
 			http.get("*/api/hosts", () =>
@@ -94,8 +97,9 @@ describe("SecretList row navigation", () => {
 		const user = userEvent.setup();
 
 		await user.click(
-			await screen.findByRole("button", { name: "Move or copy db-password" }),
+			await screen.findByRole("checkbox", { name: "Select db-password" }),
 		);
+		await user.click(screen.getByTestId("move-selected-secrets-button"));
 
 		expect(await screen.findByTestId("modal")).toBeInTheDocument();
 		expect(screen.queryByTestId("secret-detail-page")).not.toBeInTheDocument();

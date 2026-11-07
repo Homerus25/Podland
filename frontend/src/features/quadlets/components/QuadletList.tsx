@@ -2,7 +2,7 @@ import { Button, Text } from "@chakra-ui/react";
 import { can } from "@features/hosts/permissions";
 import { AutoUpdateModal } from "@features/quadlets/components/AutoUpdateModal";
 import { ImportComposeModal } from "@features/quadlets/components/ImportComposeModal";
-import { MoveQuadletDialog } from "@features/quadlets/components/MoveQuadletDialog";
+import { MoveQuadletsDialog } from "@features/quadlets/components/MoveQuadletsDialog";
 import {
 	CreateQuadletDialog,
 	EditQuadletDialog,
@@ -16,7 +16,6 @@ import { useQuadletAutoUpdate } from "@features/quadlets/hooks/useQuadletAutoUpd
 import {
 	useBulkRemoveQuadlets,
 	useCreateQuadlet,
-	useMoveQuadlet,
 	useQuadlets,
 	useRestartQuadlet,
 	useStartQuadlet,
@@ -27,7 +26,11 @@ import type { QuadletSummary } from "@features/quadlets/services/quadletsApi";
 import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
 import { ActionDialog } from "@shared/components/MutationDialog";
 
-import { ResourceList } from "@shared/components/ResourceList";
+import {
+	ResourceList,
+	type ResourceListSelectionSnapshot,
+	snapshotSelection,
+} from "@shared/components/ResourceList";
 import { useOpenLogs } from "@shared/logs/logRoute";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
@@ -36,26 +39,27 @@ import { useNavigate } from "react-router-dom";
 
 // The toolbar/triad/table plumbing, the plural testids, and the hint swap
 // are ResourceList's; this adapter owns the busiest toolbar of the five
-// (create plus the two auto-update buttons), the edit/logs/auto-update and
-// move/copy feature code, and the now-tiny update-all pre-flight (an
-// ActionDialog: the confirm gates the caller-owned stream, so no mutation
-// plumbing applies).
-// The row and its lifecycle options modal live in QuadletRow; the transfer
-// dialog (mode, target, volume warning) lives in MoveQuadletDialog. Create is
-// a write like every other toolbar action, so below manage level the module
-// swaps the whole toolbar for the canonical read hint.
+// (create plus the two auto-update buttons), the edit/logs/auto-update
+// feature code, the selection-scoped transfer, and the now-tiny update-all
+// pre-flight (an ActionDialog: the confirm gates the caller-owned stream, so
+// no mutation plumbing applies).
+// The row and its lifecycle options modal live in QuadletRow; the batch
+// transfer dialog (one target and mode for the whole selection) lives in
+// MoveQuadletsDialog. Create is a write like every other toolbar action, so
+// below manage level the module swaps the whole toolbar for the canonical
+// read hint.
 //
 // The row navigates to the quadlet's detail page (issue #472), which is the
-// single-quadlet management surface — including its Remove button. The list
-// keeps its bulk "Remove selected" for multi-select removal (spec 461,
-// ticket #470).
+// single-quadlet management surface — including its Remove button and its
+// full-option-set Move/Copy. The list keeps its bulk "Remove selected" for
+// multi-select removal (spec 461, ticket #470) and its "Move/copy selected"
+// for multi-select transfer (spec 486, ticket #489).
 export function QuadletList({ host }: { host: Host }) {
 	const hostId = host.id;
 	const { data: quadlets, isPending, error } = useQuadlets(hostId);
 	const createQuadlet = useCreateQuadlet(hostId);
 	const updateQuadlet = useUpdateQuadlet(hostId);
 	const bulkRemoveQuadlets = useBulkRemoveQuadlets(hostId);
-	const moveQuadlet = useMoveQuadlet(hostId);
 	const autoUpdate = useQuadletAutoUpdate(hostId);
 	// One instance per lifecycle action, shared by every row: a plain row
 	// function cannot own hooks, so the list keeps them and each row scopes
@@ -76,7 +80,6 @@ export function QuadletList({ host }: { host: Host }) {
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [isImportOpen, setIsImportOpen] = useState(false);
 	const [editTarget, setEditTarget] = useState<QuadletSummary | null>(null);
-	const [moveTarget, setMoveTarget] = useState<QuadletSummary | null>(null);
 	// Stop and restart both run through the options modal; this remembers
 	// which one is open and for which quadlet (null = none). The row names
 	// the action, the list mounts the modal.
@@ -93,6 +96,11 @@ export function QuadletList({ host }: { host: Host }) {
 		quadlets: QuadletSummary[];
 		clear: () => void;
 	} | null>(null);
+	// The batch transfer's snapshot, the same shape: the selected quadlets
+	// plus the selection's partial reset. A transfer clears only the
+	// quadlets that succeeded, so the failures stay selected for the retry.
+	const [moveSelectedTarget, setMoveSelectedTarget] =
+		useState<ResourceListSelectionSnapshot<QuadletSummary> | null>(null);
 	const openLogs = useOpenLogs(hostId, "quadlet");
 	const navigate = useNavigate();
 
@@ -109,10 +117,6 @@ export function QuadletList({ host }: { host: Host }) {
 					{ label: "State", sortBy: (q) => q.state },
 					{},
 					{},
-					// The move/copy column exists only when the rows can offer the
-					// action (the networks list's conditional connect column is
-					// the precedent), so the header matches the row either way.
-					...(canManage ? [{}] : []),
 				]}
 				renderRow={(quadlet) =>
 					renderQuadletRow({
@@ -120,7 +124,6 @@ export function QuadletList({ host }: { host: Host }) {
 						canManage,
 						lifecycle,
 						onEdit: setEditTarget,
-						onMove: setMoveTarget,
 						onShowLogs: (target) =>
 							openLogs({ targetId: target.id, name: target.name }),
 						onLifecycle: (target, action) =>
@@ -177,6 +180,22 @@ export function QuadletList({ host }: { host: Host }) {
 						clear: selection.clear,
 					})
 				}
+				// The transfer is a selection-scoped action (spec 486, ticket
+				// #489): one dialog serves the whole selection, so the button
+				// renders permanently for a write-capable caller and disables
+				// itself while nothing is selected. Below manage level the
+				// module's hint swap takes the toolbar with it.
+				selectionActions={(selection) => (
+					<Button
+						size="sm"
+						variant="outline"
+						isDisabled={selection.selectedKeys.length === 0}
+						onClick={() => setMoveSelectedTarget(snapshotSelection(selection))}
+						data-testid="move-selected-quadlets-button"
+					>
+						Move/copy selected
+					</Button>
+				)}
 			/>
 			{bulkRemoveTarget ? (
 				<BulkRemoveDialog
@@ -189,6 +208,15 @@ export function QuadletList({ host }: { host: Host }) {
 					// dialog closes: a failed run keeps it for the retry.
 					onSuccess={bulkRemoveTarget.clear}
 					onClose={() => setBulkRemoveTarget(null)}
+				/>
+			) : null}
+			{moveSelectedTarget ? (
+				<MoveQuadletsDialog
+					host={host}
+					quadlets={moveSelectedTarget.items}
+					// Only the succeeded quadlets leave the selection.
+					onFinished={moveSelectedTarget.clearKeys}
+					onClose={() => setMoveSelectedTarget(null)}
 				/>
 			) : null}
 			{lifecycleTarget ? (
@@ -209,14 +237,6 @@ export function QuadletList({ host }: { host: Host }) {
 					quadlet={editTarget}
 					mutation={updateQuadlet}
 					onClose={() => setEditTarget(null)}
-				/>
-			) : null}
-			{moveTarget ? (
-				<MoveQuadletDialog
-					host={host}
-					quadlet={moveTarget}
-					moveQuadlet={moveQuadlet}
-					onClose={() => setMoveTarget(null)}
 				/>
 			) : null}
 			{isConfirmUpdateOpen ? (

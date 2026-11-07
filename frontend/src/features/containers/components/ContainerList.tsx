@@ -20,7 +20,11 @@ import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 
-import { ResourceList } from "@shared/components/ResourceList";
+import {
+	ResourceList,
+	type ResourceListSelectionSnapshot,
+	snapshotSelection,
+} from "@shared/components/ResourceList";
 import { StateBadge } from "@shared/components/StateBadge";
 import { useOpenLogs } from "@shared/logs/logRoute";
 import { identityKey, rowScoped } from "@shared/queries/rowScopedMutation";
@@ -78,7 +82,9 @@ function PruneContainersModal({
 // The row carries no destructive button (spec 461, ticket #470): removal
 // lives on the container's detail page (single item) and in the toolbar's
 // "Remove selected" (bulk), so a mis-click on a row can never destroy a
-// container.
+// container. It carries no connect button either (spec #486, ticket #491):
+// connecting is the toolbar's "Connect selected to network", which serves one
+// selected row and many alike, so the action set is handed no `onConnect`.
 function renderContainerRow({
 	container,
 	canManage,
@@ -86,7 +92,6 @@ function renderContainerRow({
 	lifecycle,
 	onOpen,
 	onShowLogs,
-	onConnect,
 }: {
 	container: ContainerSummary;
 	canManage: boolean;
@@ -94,7 +99,6 @@ function renderContainerRow({
 	lifecycle: ContainerLifecycleMutations;
 	onOpen: (container: ContainerSummary) => void;
 	onShowLogs: (container: ContainerSummary) => void;
-	onConnect: (container: ContainerSummary) => void;
 }) {
 	const isRunning = container.state === "running";
 	// A failed lifecycle action or restart shows the row-level error like
@@ -127,7 +131,6 @@ function renderContainerRow({
 						lifecycle={lifecycle}
 						canManage={canManage}
 						canManageNetworks={canManageNetworks}
-						onConnect={() => onConnect(container)}
 						onShowLogs={() => onShowLogs(container)}
 					/>
 				</Td>
@@ -149,16 +152,23 @@ function renderContainerRow({
 // their start/stop/restart affordances; logs reads at read level, so
 // the row keeps its logs button.
 // Connect-to-network is gated on the separate manage-networks capability
-// (issue 256): the row button hides below it while Logs stays visible. The
-// toolbar/triad/table plumbing and the derived testids are ResourceList's;
-// this adapter owns only the columns, the row, and the create/prune/bulk
-// remove modals. The row's connect button opens the networks feature's one
-// connect dialog (issue 274) with the container fixed — the containers
-// feature calls into networks for connect, never the reverse.
+// (issue 256), and the bulk connect rides it (spec 486, ticket #491): the
+// selection gate is the union of the two capabilities, so a network-only
+// admin gets the checkboxes and the connect button without the
+// container-write toolbar, and only a caller below both sees the hint. The toolbar/triad/table plumbing and the derived testids are
+// ResourceList's; this adapter owns only the columns, the row, and the
+// create/prune/bulk remove/bulk connect modals. The toolbar's connect button
+// opens the networks feature's one connect dialog (issue 274) with the whole
+// selection fixed — the containers feature calls into networks for connect,
+// never the reverse.
 //
 // Removal has no per-row button (spec 461, ticket #470): a single container
 // is removed from its detail page, several from the toolbar's "Remove
-// selected".
+// selected". Connect follows the same shape (spec #486, ticket #491): the
+// row's per-container button is gone, and the toolbar's "Connect selected to
+// network" serves one selected row and many alike — one network chosen once
+// for the selection, then a per-item report. Succeeded containers leave the
+// selection; failed ones stay for the retry.
 export function ContainerList({ host }: { host: Host }) {
 	const hostId = host.id;
 	const { data: containers, isPending, error } = useContainers(hostId);
@@ -173,10 +183,21 @@ export function ContainerList({ host }: { host: Host }) {
 	};
 	const canManage = can(host, "manage-containers");
 	const canManageNetworks = can(host, "manage-networks");
+	// The selection gate is the union (spec 486, ticket #491): the bulk
+	// connect rides manage-networks — the capability the row button used to
+	// carry — while the toolbar's write actions (Create, Prune, Remove
+	// selected) ride manage-containers. A network-only admin therefore
+	// gets the checkboxes and the connect button without the container-write
+	// toolbar; a caller below both capabilities keeps the permission hint.
+	const canSelect = canManage || canManageNetworks;
 	const navigate = useNavigate();
-	const [pendingConnect, setPendingConnect] = useState<ContainerSummary | null>(
-		null,
-	);
+	// The bulk-connect dialog's snapshot: the selected containers plus the
+	// selection's own partial clear, captured when the dialog opens. The list
+	// owns the selection, so the adapter never keeps a second copy of it — it
+	// holds the snapshot the run reports on and clears exactly the succeeded
+	// keys when the run finishes, leaving the failures selected for retry.
+	const [connectTarget, setConnectTarget] =
+		useState<ResourceListSelectionSnapshot<ContainerSummary> | null>(null);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const [isStatsOpen, setIsStatsOpen] = useState(false);
 	// The bulk-remove dialog's snapshot: the selected containers plus the
@@ -192,8 +213,10 @@ export function ContainerList({ host }: { host: Host }) {
 	// Stats is a read, so the button must survive ResourceList's manage
 	// gate: manage users get it in the toolbar beside Create/Prune, while
 	// read users — whose toolbar the module swaps for the permission hint
-	// — get the same button feature-locally above the list. The shared
-	// module is deliberately not extended for one ungated action.
+	// — get the same button feature-locally above the list. A network-only
+	// admin's toolbar renders (the selection gate), so the fallback keys
+	// on the same union. The shared module is deliberately not extended
+	// for one ungated action.
 	const statsButton = (
 		<Button
 			size="sm"
@@ -207,7 +230,7 @@ export function ContainerList({ host }: { host: Host }) {
 
 	return (
 		<>
-			{canManage ? null : (
+			{canSelect ? null : (
 				<HStack justify="flex-end" mb={2}>
 					{statsButton}
 				</HStack>
@@ -240,38 +263,69 @@ export function ContainerList({ host }: { host: Host }) {
 								targetId: target.id,
 								name: containerDisplayName(target),
 							}),
-						onConnect: setPendingConnect,
 					})
 				}
 				toolbar={
 					<>
-						<Button
-							size="sm"
-							colorScheme="blue"
-							onClick={() => navigate(containerCreatePath(hostId))}
-							data-testid="create-container-button"
-						>
-							Create container
-						</Button>
-						<Button
-							size="sm"
-							colorScheme="red"
-							variant="outline"
-							onClick={() => setIsPruneOpen(true)}
-							data-testid="prune-containers-button"
-						>
-							Prune
-						</Button>
+						{/* Create and Prune are container writes: a network-only
+							admin's toolbar renders (the selection gate), so they
+							gate themselves on the toolbar's write grant. */}
+						{canManage ? (
+							<>
+								<Button
+									size="sm"
+									colorScheme="blue"
+									onClick={() => navigate(containerCreatePath(hostId))}
+									data-testid="create-container-button"
+								>
+									Create container
+								</Button>
+								<Button
+									size="sm"
+									colorScheme="red"
+									variant="outline"
+									onClick={() => setIsPruneOpen(true)}
+									data-testid="prune-containers-button"
+								>
+									Prune
+								</Button>
+							</>
+						) : null}
 						{statsButton}
 					</>
 				}
 				canManage={canManage}
+				// The selection gate: the union of the toolbar's write grant
+				// and the bulk connect's own capability, so a network-only
+				// admin can select and connect (spec 486, ticket #491).
+				canSelect={canSelect}
 				selection={{ getKey: (container) => container.id }}
 				onRemoveSelected={(selection) =>
 					setBulkRemoveTarget({
 						containers: selection.selectedItems,
 						clear: selection.clear,
 					})
+				}
+				// The bulk connect sits beside Remove selected and is
+				// permanently visible for a manage-networks caller — the
+				// capability the row button used to carry — disabling itself
+				// while nothing is selected. The module renders it for a
+				// selection-capable caller only, so a read-level caller keeps
+				// the permission-hint swap untouched.
+				selectionActions={
+					canManageNetworks
+						? (selection) => (
+								<Button
+									size="sm"
+									variant="outline"
+									isDisabled={selection.selectedKeys.length === 0}
+									onClick={() => setConnectTarget(snapshotSelection(selection))}
+									data-testid="connect-selected-containers-button"
+								>
+									Connect selected to network
+								</Button>
+							)
+						: undefined
 				}
 			/>
 			{bulkRemoveTarget ? (
@@ -299,11 +353,14 @@ export function ContainerList({ host }: { host: Host }) {
 					onClose={() => setIsStatsOpen(false)}
 				/>
 			) : null}
-			{pendingConnect ? (
+			{connectTarget ? (
 				<ConnectDialog
 					hostId={hostId}
-					container={pendingConnect}
-					onClose={() => setPendingConnect(null)}
+					containers={connectTarget.items}
+					// The run's own seam: the succeeded containers leave the
+					// selection, the failed ones stay for the retry.
+					onFinished={connectTarget.clearKeys}
+					onClose={() => setConnectTarget(null)}
 				/>
 			) : null}
 		</>

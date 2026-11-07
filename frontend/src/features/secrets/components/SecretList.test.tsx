@@ -99,10 +99,11 @@ describe("SecretList", () => {
 		expect(screen.getByTestId("secrets-loading")).toBeInTheDocument();
 	});
 
-	// Spec 461, ticket #470: single-item removal lives on the detail page and
-	// bulk removal on the toolbar, so no row carries a destructive button any
-	// more — a mis-click on a row can never destroy a secret.
-	it("renders no per-row delete button", async () => {
+	// Spec 461, ticket #470 retired the row's delete button; spec 486, ticket
+	// #487 retired Move/Copy too. Both single-item actions live on the detail
+	// page and both bulk actions on the toolbar, so a row carries no button at
+	// all — a mis-click on a row can never destroy or transfer a secret.
+	it("renders no per-row action button", async () => {
 		mockSecrets([secretFixture()]);
 		renderSecretList();
 
@@ -110,10 +111,10 @@ describe("SecretList", () => {
 		expect(
 			within(row).queryByRole("button", { name: /delete/i }),
 		).not.toBeInTheDocument();
-		// The row keeps its surviving action: the admin-gated move/copy.
 		expect(
-			within(row).getByRole("button", { name: "Move or copy db-password" }),
-		).toBeInTheDocument();
+			within(row).queryByRole("button", { name: /move/i }),
+		).not.toBeInTheDocument();
+		expect(within(row).queryAllByRole("button")).toHaveLength(0);
 	});
 
 	it("sorts rows when a column header is clicked", async () => {

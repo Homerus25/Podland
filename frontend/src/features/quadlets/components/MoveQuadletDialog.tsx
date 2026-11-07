@@ -237,10 +237,11 @@ export function MoveQuadletDialog({
 					sourceName={host.name}
 					targetName={targetName}
 					transferCompanions={transferCompanions}
-					volumesAcknowledged={volumesAcknowledged}
-					onAcknowledge={(acknowledged) =>
-						setAcknowledgedFor(acknowledged ? targetId : null)
-					}
+					acknowledge={{
+						checked: volumesAcknowledged,
+						onChange: (acknowledged) =>
+							setAcknowledgedFor(acknowledged ? targetId : null),
+					}}
 				/>
 			}
 			onConfirm={confirmTransfer}

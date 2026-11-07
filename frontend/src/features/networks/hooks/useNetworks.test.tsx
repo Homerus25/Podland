@@ -4,10 +4,12 @@ import {
 	useConnectContainers,
 	useNetwork,
 	useNetworks,
+	useSequentialConnect,
 } from "@features/networks/hooks/useNetworks";
 import { getNetwork } from "@features/networks/services/networksApi";
 import { networkQueryKey } from "@shared/queries/queryKeys";
-import { waitFor } from "@testing-library/react";
+import type { ApiError } from "@shared/types/api";
+import { act, waitFor } from "@testing-library/react";
 import { HttpResponse, http, type JsonBodyType } from "msw";
 import { describe, expect, it } from "vitest";
 import { errorResponse } from "@/test/errors";
@@ -184,6 +186,128 @@ describe("useConnectContainers", () => {
 				containerId: "c-2",
 				error: { code: "CONTAINER_NOT_FOUND", message: "container not found" },
 			},
+		]);
+		// The settle still invalidates both lists, so succeeded items leave
+		// the eligible options and failed ones remain for retry.
+		await waitFor(() => expect(containersGets).toBe(2));
+		await waitFor(() => expect(networksGets).toBe(2));
+	});
+});
+
+// --- spec #486 / ticket #491: the sequential bulk-connect runner ---------
+
+// A connect handler that holds each request open for a tick and records how
+// many were in flight at once, so a parallel fire is observable as an
+// overlap rather than inferred from the request order alone.
+function sequentialConnectHandler(
+	failures: Record<string, HttpResponse<JsonBodyType>> = {},
+) {
+	let inFlight = 0;
+	const overlap = { max: 0 };
+	const handler = http.post(
+		"*/api/hosts/m-1/networks/:networkName/connect",
+		async ({ request, params }) => {
+			inFlight++;
+			overlap.max = Math.max(overlap.max, inFlight);
+			const body = (await request.json()) as { container: string };
+			connectRequests.push({ url: request.url, body });
+			await new Promise((resolve) => setTimeout(resolve, 5));
+			inFlight--;
+			const failure = failures[`${params.networkName}/${body.container}`];
+			if (failure) return failure;
+			return new HttpResponse(null, { status: 200 });
+		},
+	);
+	return { handler, overlap };
+}
+
+describe("useSequentialConnect", () => {
+	it("connects one pair at a time in the caller's order, reporting each outcome and invalidating both lists once", async () => {
+		resetConnectCounters();
+		const { handler, overlap } = sequentialConnectHandler();
+		server.use(...mockConnectLists(), handler);
+		// The list queries ride the same hook render so the invalidation's
+		// refetch is observable through MSW, not an invalidation spy.
+		const { result } = renderHookWithQuery(() => {
+			useNetworks("m-1");
+			useContainers("m-1");
+			return useSequentialConnect("m-1");
+		});
+		await waitFor(() => expect(containersGets).toBe(1));
+		await waitFor(() => expect(networksGets).toBe(1));
+
+		const reported: { containerId: string; failure?: ApiError }[] = [];
+		await act(async () => {
+			await result.current.run(
+				[
+					{ networkName: "app-net", containerId: "c-2" },
+					{ networkName: "app-net", containerId: "c-4" },
+				],
+				(containerId, failure) => reported.push({ containerId, failure }),
+			);
+		});
+
+		// One request at a time, in the caller's order.
+		expect(connectRequests.map((request) => request.body)).toEqual([
+			{ container: "c-2" },
+			{ container: "c-4" },
+		]);
+		expect(overlap.max).toBe(1);
+		// Each item's outcome reported as it settles.
+		expect(reported).toEqual([
+			{ containerId: "c-2", failure: undefined },
+			{ containerId: "c-4", failure: undefined },
+		]);
+		// One invalidation round after the last pair settles — not one per
+		// request.
+		await waitFor(() => expect(containersGets).toBe(2));
+		await waitFor(() => expect(networksGets).toBe(2));
+	});
+
+	it("keeps going after a failed pair, reporting it and still invalidating both lists once", async () => {
+		resetConnectCounters();
+		const { handler } = sequentialConnectHandler({
+			"app-net/c-2": errorResponse(
+				404,
+				"CONTAINER_NOT_FOUND",
+				"container not found",
+				"req-21",
+			),
+		});
+		server.use(...mockConnectLists(), handler);
+		const { result } = renderHookWithQuery(() => {
+			useNetworks("m-1");
+			useContainers("m-1");
+			return useSequentialConnect("m-1");
+		});
+		await waitFor(() => expect(containersGets).toBe(1));
+		await waitFor(() => expect(networksGets).toBe(1));
+
+		const reported: { containerId: string; failure?: ApiError }[] = [];
+		await act(async () => {
+			await result.current.run(
+				[
+					{ networkName: "app-net", containerId: "c-2" },
+					{ networkName: "app-net", containerId: "c-4" },
+				],
+				(containerId, failure) => reported.push({ containerId, failure }),
+			);
+		});
+
+		// The failure does not abort the batch: the second pair still fires.
+		expect(connectRequests.map((request) => request.body)).toEqual([
+			{ container: "c-2" },
+			{ container: "c-4" },
+		]);
+		expect(reported).toEqual([
+			{
+				containerId: "c-2",
+				failure: {
+					code: "CONTAINER_NOT_FOUND",
+					message: "container not found",
+				},
+			},
+			{ containerId: "c-4", failure: undefined },
 		]);
 		// The settle still invalidates both lists, so succeeded items leave
 		// the eligible options and failed ones remain for retry.

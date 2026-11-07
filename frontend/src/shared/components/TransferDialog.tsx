@@ -1,39 +1,28 @@
-import {
-	Box,
-	Button,
-	FormControl,
-	FormLabel,
-	HStack,
-	Radio,
-	RadioGroup,
-	Select,
-	Text,
-	VStack,
-} from "@chakra-ui/react";
+import { Box, Button, VStack } from "@chakra-ui/react";
 import { useHosts } from "@features/hosts/hooks/useHosts";
 import { type Capability, can } from "@features/hosts/permissions";
 import { ErrorDisplay } from "@shared/components/ErrorDisplay";
 import { Modal } from "@shared/components/Modal";
+import {
+	TransferModeRadio,
+	type TransferPreviewSlice,
+	TransferPreviewStates,
+	TransferReferencingWarning,
+	TransferTargetSelect,
+} from "@shared/transfers/transferPresentation";
 import type { ApiError, Host } from "@shared/types/api";
-import { getApiError } from "@shared/utils/api";
 import { type ReactNode, useEffect, useState } from "react";
+
+// The preview slice's shape is the presentation module's (it renders the
+// pending/error/collision states from it); re-exported here so the adapters
+// and suites that import it from the dialog keep their import path.
+export type { TransferPreviewSlice };
 
 // The mode vocabulary every cross-host transfer shares (the backend's
 // MoveMode* unions): "copy" installs on the target, "move" also removes the
 // source. The feature DTOs (QuadletMoveMode, VolumeMoveMode, SecretMoveMode)
 // are the same union; the preset speaks it once.
 export type TransferMode = "copy" | "move";
-
-// The structural slice of a target-scoped move-preview query the preset
-// drives. The feature keeps its own preview hook and query key and hands
-// over the result; the preset reads only the states every transfer shares —
-// pending, failure, and the collision flag — never the domain fields.
-export interface TransferPreviewSlice {
-	isPending: boolean;
-	isError: boolean;
-	error: unknown;
-	data: { collision: boolean } | undefined;
-}
 
 // The skeleton's state, owned by useTransferState and handed to the
 // component whole: the writable targets, the selected one (defaulting to
@@ -227,96 +216,37 @@ export function TransferDialog({
 			) : null}
 			{report ?? (
 				<VStack align="flex-start" spacing={4}>
-					<FormControl isRequired>
-						<FormLabel htmlFor="move-target">Target host</FormLabel>
-						{targets.length > 0 ? (
-							<Select
-								id="move-target"
-								value={targetId}
-								onChange={(event) => selectTarget(event.target.value)}
-								data-testid="move-target-select"
-							>
-								{targets.map((candidate) => (
-									<option key={candidate.id} value={candidate.id}>
-										{candidate.name}
-									</option>
-								))}
-							</Select>
-						) : (
-							<Text color="gray.500" data-testid="move-no-targets">
-								{noTargetsMessage ??
-									`No other host you can manage ${noun}s on.`}
-							</Text>
-						)}
-					</FormControl>
-					{pinnedMode ? null : (
-						<FormControl>
-							<FormLabel>Mode</FormLabel>
-							<RadioGroup
-								value={mode}
-								onChange={(next) => setMode(next as TransferMode)}
-								data-testid="move-mode-radio"
-							>
-								{/* The two mode radios stack at base (spec 393): their
-								    labels are too wide to sit side by side at 360px. */}
-								<HStack
-									spacing={4}
-									flexDirection={{ base: "column", md: "row" }}
-									align={{ base: "flex-start", md: "center" }}
-								>
-									<Radio value="move" data-testid="move-mode-move">
-										Move (remove from this host)
-									</Radio>
-									<Radio value="copy" data-testid="move-mode-copy">
-										Copy (keep this host&apos;s {noun})
-									</Radio>
-								</HStack>
-							</RadioGroup>
-						</FormControl>
-					)}
-					{preview.isPending ? (
-						<Text color="gray.500" data-testid="move-preview-pending">
-							Checking the target host…
-						</Text>
-					) : null}
-					{preview.isError ? (
-						<ErrorDisplay
-							error={getApiError(preview.error)}
-							data-testid="move-preview-error"
-						/>
-					) : null}
-					{preview.data?.collision ? (
-						<Text color="red.500" data-testid="move-collision-warning">
-							A {noun} named “{itemName}” already exists on {targetName}. Choose
-							another target or remove it there first.
-						</Text>
-					) : null}
+					<TransferTargetSelect
+						targets={targets}
+						targetId={targetId}
+						onSelect={selectTarget}
+						noun={noun}
+						noTargetsMessage={noTargetsMessage}
+					/>
+					<TransferModeRadio
+						mode={mode}
+						onModeChange={setMode}
+						noun={noun}
+						pinnedMode={pinnedMode}
+					/>
+					<TransferPreviewStates
+						preview={preview}
+						noun={noun}
+						itemName={itemName}
+						targetName={targetName}
+						testIds={{
+							pending: "move-preview-pending",
+							error: "move-preview-error",
+							collision: "move-collision-warning",
+						}}
+					/>
 					{warnings}
-					{referencingQuadlets.length > 0 ? (
-						<Box data-testid="move-referencing-warning">
-							<Text>
-								Quadlets on this host reference this {noun}. They are not
-								transferred and keep pointing at {host.name}:
-							</Text>
-							<VStack align="flex-start" mt={2} spacing={1}>
-								{referencingQuadlets.map((quadlet) => (
-									<HStack
-										key={quadlet.name}
-										spacing={2}
-										data-testid="move-referencing-row"
-									>
-										<Text fontFamily="mono">{quadlet.name}</Text>
-									</HStack>
-								))}
-							</VStack>
-							{effectiveMode === "move" ? (
-								<Text mt={2} color="orange.500">
-									After a move these references dangle — the {noun} they name is
-									gone from this host.
-								</Text>
-							) : null}
-						</Box>
-					) : null}
+					<TransferReferencingWarning
+						noun={noun}
+						hostName={host.name}
+						quadlets={referencingQuadlets}
+						mode={effectiveMode}
+					/>
 					{children}
 				</VStack>
 			)}

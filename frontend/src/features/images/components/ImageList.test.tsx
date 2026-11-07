@@ -168,8 +168,11 @@ describe("ImageList", () => {
 
 	// Spec 461, ticket #470: single-item removal lives on the detail page and
 	// bulk removal on the toolbar, so no row carries a destructive button any
-	// more — a mis-click on a row can never destroy an image.
-	it("renders no per-row delete button", async () => {
+	// more — a mis-click on a row can never destroy an image. Spec 486,
+	// ticket #488 retired the row's Copy to host the same way: a single image
+	// is copied from its detail page, several from the toolbar's "Copy
+	// selected to host".
+	it("renders no per-row delete or copy button, keeping the read-level download", async () => {
 		server.use(
 			http.get("*/api/hosts/m-1/images", () =>
 				HttpResponse.json(imagesFixture),
@@ -181,16 +184,13 @@ describe("ImageList", () => {
 		expect(
 			within(row).queryByRole("button", { name: /delete/i }),
 		).not.toBeInTheDocument();
-		// The row keeps its surviving actions: the read-level download and the
-		// write-gated copy.
+		expect(
+			within(row).queryByRole("button", { name: /copy/i }),
+		).not.toBeInTheDocument();
+		// The row keeps its surviving action: the read-level download.
 		expect(
 			within(row).getByRole("button", {
 				name: "Download docker.io/library/nginx:1.27",
-			}),
-		).toBeInTheDocument();
-		expect(
-			within(row).getByRole("button", {
-				name: "Copy docker.io/library/nginx:1.27 to another host",
 			}),
 		).toBeInTheDocument();
 	});

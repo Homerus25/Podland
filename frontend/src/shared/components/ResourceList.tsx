@@ -2,7 +2,6 @@ import {
 	Button,
 	Checkbox,
 	HStack,
-	Spacer,
 	Table,
 	TableContainer,
 	Tbody,
@@ -49,12 +48,34 @@ export type ResourceListSelection<T> = {
 // onto the current items. `selectedItems` follows the list's current order
 // (so a sorted list reports its selection sorted too) and drops keys that
 // are no longer in `items`; `clear` is the post-mutation reset the adapter
-// calls once a bulk action has removed the selected rows.
+// calls once a bulk action has removed the selected rows. `clearKeys` is the
+// partial reset a batch run needs (spec 486, ticket #487): it drops exactly
+// the named keys, so a bulk transfer clears only the items that succeeded
+// and leaves the failures selected for the retry. Both resets go through the
+// same `applySelection`, so `onChange` fires either way.
 export type ResourceListSelectionState<T> = {
 	selectedKeys: string[];
 	selectedItems: T[];
 	clear: () => void;
+	clearKeys: (keys: string[]) => void;
 };
+
+// The snapshot a batch adapter takes when it opens its dialog (spec 486): the
+// selected items as they stood at that moment, plus the selection's own
+// partial reset. The list owns the selection, so the adapter never keeps a
+// second copy of it — it holds this snapshot and hands `clearKeys` back when
+// the run finishes, so the report keeps naming the items after the list drops
+// the successes from its selection.
+export type ResourceListSelectionSnapshot<T> = {
+	items: T[];
+	clearKeys: (keys: string[]) => void;
+};
+
+export function snapshotSelection<T>(
+	selection: ResourceListSelectionState<T>,
+): ResourceListSelectionSnapshot<T> {
+	return { items: selection.selectedItems, clearKeys: selection.clearKeys };
+}
 
 // The mobile pin styles (spec 393), applied below `lg` only — at `lg` and
 // up every value returns to today's rendering (static, transparent, no
@@ -201,7 +222,9 @@ export function ResourceList<T>({
 	canManage,
 	emptyMessage,
 	selection,
+	canSelect,
 	onRemoveSelected,
+	selectionActions,
 }: {
 	resource: string;
 	isPending: boolean;
@@ -212,8 +235,34 @@ export function ResourceList<T>({
 	toolbar?: ReactNode;
 	canManage?: boolean;
 	emptyMessage?: string;
+	// Selection is opt-in and gated on who may act through it: the caller
+	// that can use a selection action. That is the toolbar's write grant by
+	// default — no `selection` prop, or a caller that has not been granted
+	// write, means no checkbox column at all, so a read-only list never
+	// offers a selection it cannot act on. The gate is `canManage === true`,
+	// not `!== false`: an omitted `canManage` means "ungated" for the toolbar
+	// (which then renders), but it is not a write grant, so a list that asks
+	// for selection without saying who may write renders no checkboxes
+	// rather than offering a read-only caller an action that would 403. A
+	// list whose selection action rides a LOWER capability than its
+	// toolbar's write grant passes `canSelect` explicitly (spec 486,
+	// ticket #491): the containers list's bulk connect rides
+	// manage-networks while its toolbar rides manage-containers, so a
+	// network-only admin still gets the checkboxes and the connect button —
+	// the adapter gates its own toolbar buttons and the owner keeps Remove
+	// selected on the toolbar's write grant.
 	selection?: ResourceListSelection<T>;
+	canSelect?: boolean;
 	onRemoveSelected?: (selection: ResourceListSelectionState<T>) => void;
+	// The adapter's own selection-driven toolbar buttons (spec 486, ticket
+	// #487), rendered in the selection group beside the owner's Remove
+	// selected button. Gated like the checkboxes (the selection gate, so a
+	// `canSelect` list renders them below its toolbar's write grant), and
+	// rendered ALWAYS — never gated on a non-empty selection, because the
+	// adapter's buttons disable themselves (a bulk transfer's button is
+	// permanently visible and disabled while nothing is selected).
+	// Read-only callers keep the permission-hint swap untouched.
+	selectionActions?: (selection: ResourceListSelectionState<T>) => ReactNode;
 }) {
 	const plural = `${resource}s`;
 	// Pinning activates only when a list marks its name column; an
@@ -232,16 +281,19 @@ export function ResourceList<T>({
 		columnIndex: number;
 		direction: "asc" | "desc";
 	} | null>(null);
-	// Selection is opt-in and write-gated: no `selection` prop, or a caller
-	// that has not been granted write, means no checkbox column at all — the
-	// same rule the toolbar follows, so a read-only list never offers a
-	// selection it cannot act on. The gate is `canManage === true`, not
-	// `!== false`: an omitted `canManage` means "ungated" for the toolbar
-	// (which then renders), but it is not a write grant, so a list that asks
-	// for selection without saying who may write renders no checkboxes
-	// rather than offering a read-only caller an action that would 403.
+	// Selection is opt-in and gated on who may act through it (spec 486,
+	// ticket #491): the toolbar's write grant by default, or the adapter's
+	// explicit `canSelect` when its selection action rides a lower
+	// capability than its toolbar does — the containers list's bulk
+	// connect rides manage-networks while its toolbar rides
+	// manage-containers. The gate is a real grant, not `!== false`: an
+	// omitted `canManage` means "ungated" for the toolbar (which then
+	// renders), but it is not a write grant, so a list that asks for
+	// selection without saying who may act renders no checkboxes rather
+	// than offering a read-only caller an action that would 403.
 	const getKey = selection?.getKey;
-	const isSelectable = getKey !== undefined && canManage === true;
+	const selectionCapable = canSelect ?? canManage === true;
+	const isSelectable = getKey !== undefined && selectionCapable;
 	const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
 
 	let sortedItems = items;
@@ -314,6 +366,8 @@ export function ResourceList<T>({
 		selectedKeys,
 		selectedItems,
 		clear: () => applySelection([]),
+		clearKeys: (keys) =>
+			applySelection(selectedKeys.filter((key) => !keys.includes(key))),
 	};
 
 	// The "Remove selected" button (spec 461) is owner-rendered, not a
@@ -322,18 +376,16 @@ export function ResourceList<T>({
 	// — label, red outline, derived testid, and its left-edge place on the
 	// toolbar row — so the placement cannot drift per feature. The bulk
 	// action exists only while something is selected: no disabled button,
-	// ever. The write gate is explicit — `canManage === true`, the same
-	// grant the checkboxes require — not derived from the selection, so
-	// the button can never ride along un-gated. The auto margin keeps the
-	// button at the left of its line even when the wrapper wraps below
-	// `lg` (spec 393) and the button ends up alone on a wrapped line.
+	// ever. The gate is the toolbar's write grant — `canManage === true`,
+	// not the wider selection gate a `canSelect` list opens for its own
+	// action — because removal is a container-write act even on a list
+	// whose connect action rides manage-networks.
 	const removeSelectedButton =
 		onRemoveSelected && canManage === true && selectedKeys.length > 0 ? (
 			<Button
 				size="sm"
 				colorScheme="red"
 				variant="outline"
-				marginRight="auto"
 				onClick={() => onRemoveSelected(selectionState)}
 				data-testid={`remove-selected-${plural}-button`}
 			>
@@ -341,9 +393,29 @@ export function ResourceList<T>({
 			</Button>
 		) : null;
 
+	// The selection group (spec 486, ticket #487): the owner's Remove
+	// selected button and the adapter's own selection actions share one
+	// left-edge wrapper, Remove selected first. The auto margin lives on the
+	// wrapper, not on the button, so the group stays at the left of its line
+	// even when the toolbar wraps below `lg` (spec 393) and the group ends up
+	// alone on a wrapped line. The adapter's actions render for a
+	// selection-capable caller only and always — they disable themselves —
+	// so the group's presence is the union of the two.
+	const selectionActionsNode =
+		selectionCapable && selectionActions
+			? selectionActions(selectionState)
+			: null;
+	const selectionGroup =
+		removeSelectedButton || selectionActionsNode ? (
+			<HStack spacing={2} marginRight="auto">
+				{removeSelectedButton}
+				{selectionActionsNode}
+			</HStack>
+		) : null;
+
 	return (
 		<>
-			{canManage === false ? (
+			{canManage === false && !selectionCapable ? (
 				<PermissionHint
 					scope={plural}
 					requirement="write"
@@ -351,20 +423,19 @@ export function ResourceList<T>({
 					mb={2}
 				/>
 			) : (
-				(toolbar || removeSelectedButton) && (
+				(toolbar || selectionGroup) && (
 					// The toolbar wrapper wraps its buttons below `lg` instead of
 					// overflowing the viewport (spec 393); Chakra's Stack spaces
 					// wrapped children through gap, so the rows stay evenly spaced.
-					// The Remove selected button leads the row at the left edge
-					// and a spacer holds the adapter's own toolbar to the right.
+					// The selection group leads the row at the left edge and its
+					// auto margin holds the adapter's own toolbar to the right.
 					<HStack
 						justify="flex-end"
 						mb={2}
 						flexWrap={{ base: "wrap", lg: "nowrap" }}
 						data-testid={`${plural}-toolbar`}
 					>
-						{removeSelectedButton}
-						{removeSelectedButton ? <Spacer /> : null}
+						{selectionGroup}
 						{toolbar}
 					</HStack>
 				)

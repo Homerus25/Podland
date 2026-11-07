@@ -21,7 +21,7 @@ export interface VolumeMoveProgress {
 // Event shape mirror of the backend's VolumeMoveEvent (issue 238): progress
 // events for the one volume, then exactly one terminal event — the transfer
 // envelope on "complete", the mapped code/message on "error".
-interface VolumeMoveStreamEvent {
+export interface VolumeMoveStreamEvent {
 	operationId: string;
 	type: "volume" | "complete" | "error";
 	hostId: string;
@@ -69,6 +69,23 @@ export interface UseVolumeMoveStreamResult {
 	cancel: () => void;
 }
 
+// The volume transfer's stream config, owned once (spec 486, ticket #490):
+// the event vocabulary, shape guard, and progress fold are module-private,
+// so the single-item hook and the batch adapter share this factory instead
+// of the batch re-deriving them. The resource whose lists a completed
+// transfer invalidates, the URL builder, and the reset state ride along.
+export function volumeMoveStreamConfig(
+	hostId: string,
+): MoveStreamConfig<VolumeMoveStreamEvent, VolumeMoveProgress | null> {
+	return {
+		resource: "volumes",
+		url: (volumeName) => volumeMoveStreamUrl(hostId, volumeName),
+		isEvent: isVolumeMoveStreamEvent,
+		foldProgress,
+		initialProgress: null,
+	};
+}
+
 // The volume copy/move transfer (issue 238): the endpoint always answers
 // NDJSON, so the dialog drives it through the stream transport. The
 // run/cancel lifecycle, reset-on-run, the malformed-event and
@@ -77,18 +94,7 @@ export interface UseVolumeMoveStreamResult {
 // 273); this adapter keeps the volume domain — the event vocabulary, shape
 // guard, and single-value progress fold — and supplies the URL builder.
 export function useVolumeMoveStream(hostId: string): UseVolumeMoveStreamResult {
-	const config = useMemo<
-		MoveStreamConfig<VolumeMoveStreamEvent, VolumeMoveProgress | null>
-	>(
-		() => ({
-			resource: "volumes",
-			url: (volumeName) => volumeMoveStreamUrl(hostId, volumeName),
-			isEvent: isVolumeMoveStreamEvent,
-			foldProgress,
-			initialProgress: null,
-		}),
-		[hostId],
-	);
+	const config = useMemo(() => volumeMoveStreamConfig(hostId), [hostId]);
 	return useMoveStream<
 		VolumeMoveStreamEvent,
 		VolumeMoveProgress | null,

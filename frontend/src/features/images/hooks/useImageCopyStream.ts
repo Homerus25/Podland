@@ -22,7 +22,7 @@ export interface ImageCopyProgress {
 // Event shape mirror of the backend's ImageCopyEvent (issue 375): progress
 // events for the one image, then exactly one terminal event — the transfer
 // envelope on "complete", the mapped code/message on "error".
-interface ImageCopyStreamEvent {
+export interface ImageCopyStreamEvent {
 	operationId: string;
 	type: "image" | "complete" | "error";
 	hostId: string;
@@ -68,6 +68,24 @@ export interface UseImageCopyStreamResult {
 	cancel: () => void;
 }
 
+// The image copy's stream config, as a factory (spec 486, ticket #488): the
+// event vocabulary, shape guard, progress fold, and URL builder are the
+// images domain, and both the single-item dialog's hook and the batch
+// adapter's plain runner drive the identical stream — so the config is built
+// here once instead of being re-declared per caller. The hook memoizes it;
+// the batch calls it per item.
+export function imageCopyStreamConfig(
+	hostId: string,
+): MoveStreamConfig<ImageCopyStreamEvent, ImageCopyProgress | null> {
+	return {
+		resource: "images",
+		url: (imageId) => imageCopyStreamUrl(hostId, imageId),
+		isEvent: isImageCopyStreamEvent,
+		foldProgress,
+		initialProgress: null,
+	};
+}
+
 // The cross-host image copy (issue 376 over issue 375's endpoints): the
 // endpoint always answers NDJSON, so the dialog drives it through the
 // stream transport. The run/cancel lifecycle, reset-on-run, the
@@ -79,16 +97,7 @@ export interface UseImageCopyStreamResult {
 export function useImageCopyStream(hostId: string): UseImageCopyStreamResult {
 	const config = useMemo<
 		MoveStreamConfig<ImageCopyStreamEvent, ImageCopyProgress | null>
-	>(
-		() => ({
-			resource: "images",
-			url: (imageId) => imageCopyStreamUrl(hostId, imageId),
-			isEvent: isImageCopyStreamEvent,
-			foldProgress,
-			initialProgress: null,
-		}),
-		[hostId],
-	);
+	>(() => imageCopyStreamConfig(hostId), [hostId]);
 	return useMoveStream<
 		ImageCopyStreamEvent,
 		ImageCopyProgress | null,

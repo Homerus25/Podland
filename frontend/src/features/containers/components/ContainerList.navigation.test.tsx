@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest";
 import {
 	containerFixture,
 	hostFixture,
-	networkFixture,
 	rawInspectFixture,
 } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
@@ -125,9 +124,6 @@ describe("ContainerList row navigation", () => {
 			http.post("*/api/hosts/m-1/containers/*/start", () =>
 				HttpResponse.json({ id: "c-2" }),
 			),
-			http.get("*/api/hosts/m-1/networks", () =>
-				HttpResponse.json([networkFixture()]),
-			),
 		);
 		renderContainerList();
 		const user = userEvent.setup();
@@ -139,15 +135,6 @@ describe("ContainerList row navigation", () => {
 		// start/stop, both lifecycle directions
 		await user.click(rowAt(0).getByTestId("stop-container-button"));
 		await user.click(rowAt(1).getByTestId("start-container-button"));
-		// connect — opens the networks feature's dialog, not the detail page
-		await user.click(
-			rowAt(0).getByRole("button", { name: "Connect to network web" }),
-		);
-		expect(
-			await screen.findByText("Connect web to a network"),
-		).toBeInTheDocument();
-		await user.click(screen.getByRole("button", { name: "Close dialog" }));
-
 		expect(screen.queryByTestId("probe-container")).not.toBeInTheDocument();
 		expect(screen.getAllByTestId("container-row")).toHaveLength(2);
 	});

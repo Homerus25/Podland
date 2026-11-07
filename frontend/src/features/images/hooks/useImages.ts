@@ -18,7 +18,10 @@ import {
 	useOneShotQuery,
 } from "@shared/queries/useFreshQuery";
 import { useListInvalidatingMutation } from "@shared/queries/useListInvalidatingMutation";
-import { useMovePreview } from "@shared/transfers/transferHooks";
+import {
+	useMovePreview,
+	useMovePreviews,
+} from "@shared/transfers/transferHooks";
 import type { BulkRemoveInput } from "@shared/types/api";
 
 export function useImages(hostId: string) {
@@ -85,6 +88,24 @@ export function useImageCopyPreview(
 	return useMovePreview(
 		(target) => imageCopyPreviewQueryKey(hostId, imageId, target),
 		(target) => getImageCopyPreview(hostId, imageId, target),
+		targetHostId,
+	);
+}
+
+// The batch copy's per-image previews (spec 486, ticket #488): one query per
+// selected image over the SAME key constructor and fetcher the single-item
+// hook uses, so a batch and a single copy share cache entries. The ritual is
+// the shared transfer-hooks module's (useMovePreviews); this adapter supplies
+// the key constructor and fetcher.
+export function useImageCopyPreviews(
+	hostId: string,
+	imageIds: string[],
+	targetHostId: string | null,
+) {
+	return useMovePreviews(
+		(imageId, target) => imageCopyPreviewQueryKey(hostId, imageId, target),
+		(imageId, target) => getImageCopyPreview(hostId, imageId, target),
+		imageIds,
 		targetHostId,
 	);
 }

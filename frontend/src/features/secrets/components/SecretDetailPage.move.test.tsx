@@ -9,6 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
+import { errorJson } from "@/test/errors";
 import {
 	hostFixture,
 	secretFixture,
@@ -214,5 +215,194 @@ describe("SecretDetailPage move/copy", () => {
 		expect(screen.getAllByTestId("move-secret-button")).toHaveLength(1);
 		expect(screen.getAllByTestId("remove-secret-button")).toHaveLength(1);
 		expect(screen.getAllByTestId("reveal-secret-button")).toHaveLength(1);
+	});
+});
+
+// The single-item dialog's secret domain (issue 239), relocated here when
+// spec 486, ticket #487 retired the list row's Move/Copy button: the detail
+// page is now the only surface that opens MoveSecretDialog, so its domain
+// assertions — the preview states, the referencing warning, the envelope
+// narration, the partial both-hosts state, and the SECRET_ALREADY_EXISTS
+// hint — live with the surface that reaches it. The skeleton itself stays
+// pinned once in the shared TransferDialog suite.
+describe("SecretDetailPage move/copy dialog domain", () => {
+	beforeEach(resetCounters);
+
+	async function openDialog() {
+		renderDetailPage();
+		const user = userEvent.setup();
+		await user.click(await screen.findByTestId("move-secret-button"));
+		await screen.findByTestId("modal");
+		return user;
+	}
+
+	async function openDialogReadyToConfirm() {
+		const user = await openDialog();
+		await waitFor(() =>
+			expect(screen.getByTestId("confirm-move-button")).toBeEnabled(),
+		);
+		return user;
+	}
+
+	it("refetches the preview when the target changes", async () => {
+		installHandlers();
+		const user = await openDialogReadyToConfirm();
+
+		await user.selectOptions(screen.getByTestId("move-target-select"), "m-4");
+
+		await waitFor(() => expect(previewTargets).toEqual(["m-2", "m-4"]));
+	});
+
+	it("sends the copy body on a mode switch", async () => {
+		installHandlers();
+		const user = await openDialogReadyToConfirm();
+
+		await user.click(
+			screen.getByRole("radio", { name: "Copy (keep this host's secret)" }),
+		);
+		await user.click(screen.getByTestId("confirm-move-button"));
+
+		await waitFor(() => expect(moveRequests.count).toBe(1));
+		expect(moveRequests.body).toEqual({
+			targetHostId: "m-2",
+			mode: "copy",
+		});
+	});
+
+	it("disables confirm on a collision with a clear message", async () => {
+		installHandlers({ preview: { collision: true } });
+		await openDialog();
+
+		expect(
+			await screen.findByTestId("move-collision-warning"),
+		).toHaveTextContent("already exists on staging-01");
+		expect(screen.getByTestId("confirm-move-button")).toBeDisabled();
+		expect(moveRequests.count).toBe(0);
+	});
+
+	it("keeps confirm disabled while the preview is pending", async () => {
+		installHandlers();
+		server.use(
+			http.get(
+				"*/api/hosts/m-1/secrets/db-password/move-preview",
+				() => new Promise<Response>(() => {}),
+			),
+		);
+		await openDialog();
+
+		expect(
+			await screen.findByTestId("move-preview-pending"),
+		).toBeInTheDocument();
+		expect(screen.getByTestId("confirm-move-button")).toBeDisabled();
+	});
+
+	it("shows a failed preview and keeps confirm disabled", async () => {
+		installHandlers();
+		server.use(
+			http.get("*/api/hosts/m-1/secrets/db-password/move-preview", () =>
+				HttpResponse.json(
+					errorJson("ACCESS_DENIED", "Access denied", "req-71"),
+					{ status: 403 },
+				),
+			),
+		);
+		await openDialog();
+
+		expect(await screen.findByText("ACCESS_DENIED")).toBeInTheDocument();
+		expect(screen.getByTestId("confirm-move-button")).toBeDisabled();
+	});
+
+	it("lists referencing quadlets as a warning, with the dangling note in move mode only", async () => {
+		installHandlers({
+			preview: {
+				referencingQuadlets: [
+					{ name: "web.container" },
+					{ name: "db.container" },
+				],
+			},
+		});
+		const user = await openDialogReadyToConfirm();
+
+		const warning = screen.getByTestId("move-referencing-warning");
+		expect(warning).toHaveTextContent("web.container");
+		expect(warning).toHaveTextContent("db.container");
+		expect(warning).toHaveTextContent("keep pointing at prod-web-01");
+		expect(warning).toHaveTextContent("references dangle");
+
+		await user.click(
+			screen.getByRole("radio", { name: "Copy (keep this host's secret)" }),
+		);
+		expect(
+			screen.getByTestId("move-referencing-warning"),
+		).not.toHaveTextContent("references dangle");
+	});
+
+	it("narrates the envelope in place instead of closing", async () => {
+		installHandlers();
+		const user = await openDialogReadyToConfirm();
+
+		await user.click(screen.getByTestId("confirm-move-button"));
+
+		const report = await screen.findByTestId("move-success-report");
+		expect(report).toHaveTextContent("Moved");
+		expect(report).toHaveTextContent("db-password");
+		expect(report).toHaveTextContent("staging-01");
+		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
+
+		await user.click(screen.getByTestId("close-move-report-button"));
+		await waitFor(() =>
+			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
+		);
+	});
+
+	it("keeps the dialog open on a partial result, naming the both-hosts state", async () => {
+		installHandlers({
+			moveResult: () =>
+				secretMoveResultFixture({
+					status: "partial",
+					error: "failed to delete secret: secret is in use",
+				}),
+		});
+		const user = await openDialogReadyToConfirm();
+
+		await user.click(screen.getByTestId("confirm-move-button"));
+
+		const message = await screen.findByTestId("move-partial-message");
+		expect(message).toHaveTextContent("both hosts");
+		expect(message).toHaveTextContent("failed to delete secret");
+		expect(screen.getByTestId("modal")).toBeInTheDocument();
+		expect(screen.queryByTestId("confirm-move-button")).not.toBeInTheDocument();
+
+		await user.click(screen.getByTestId("close-move-report-button"));
+		await waitFor(() =>
+			expect(screen.queryByTestId("modal")).not.toBeInTheDocument(),
+		);
+	});
+
+	it("maps a SECRET_ALREADY_EXISTS refusal to the collision hint", async () => {
+		installHandlers();
+		const user = await openDialogReadyToConfirm();
+		server.use(
+			http.post("*/api/hosts/m-1/secrets/db-password/move", () =>
+				HttpResponse.json(
+					errorJson(
+						"SECRET_ALREADY_EXISTS",
+						"Secret with this name already exists",
+						"req-81",
+					),
+					{ status: 409 },
+				),
+			),
+		);
+
+		await user.click(screen.getByTestId("confirm-move-button"));
+
+		expect(
+			await screen.findByText("SECRET_ALREADY_EXISTS"),
+		).toBeInTheDocument();
+		const hint = screen.getByTestId("move-collision-hint");
+		expect(hint).toHaveTextContent("staging-01");
+		expect(hint).toHaveTextContent("remove it there first");
+		expect(screen.getByTestId("confirm-move-button")).toBeEnabled();
 	});
 });

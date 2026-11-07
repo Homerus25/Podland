@@ -5,11 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { Route, Routes, useParams } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import {
-	hostFixture,
-	quadletFixture,
-	quadletMovePreviewFixture,
-} from "@/test/factories";
+import { hostFixture, quadletFixture } from "@/test/factories";
 import { renderWithQuery } from "@/test/render";
 import { server } from "@/test/server";
 
@@ -91,22 +87,12 @@ describe("QuadletList row navigation", () => {
 		expect(screen.queryByTestId("quadlet-detail-page")).not.toBeInTheDocument();
 	});
 
-	it("does not navigate when the move/copy button is clicked", async () => {
+	it("does not navigate when a row action button is clicked", async () => {
 		mockQuadlets([quadletFixture()]);
-		server.use(
-			http.get("*/api/hosts", () =>
-				HttpResponse.json([hostFixture({ id: "m-2", name: "staging-01" })]),
-			),
-			http.get("*/api/hosts/m-1/quadlets/web/move-preview", () =>
-				HttpResponse.json(quadletMovePreviewFixture()),
-			),
-		);
 		renderQuadletList();
 		const user = userEvent.setup();
 
-		await user.click(
-			await screen.findByRole("button", { name: "Move or copy web" }),
-		);
+		await user.click(await screen.findByRole("button", { name: "Edit web" }));
 
 		expect(await screen.findByTestId("modal")).toBeInTheDocument();
 		expect(screen.queryByTestId("quadlet-detail-page")).not.toBeInTheDocument();

@@ -1,6 +1,6 @@
 import { Box, Button, Td, Tr } from "@chakra-ui/react";
 import { can } from "@features/hosts/permissions";
-import { CopyImageDialog } from "@features/images/components/CopyImageDialog";
+import { CopyImagesDialog } from "@features/images/components/CopyImagesDialog";
 import { PullImageForm } from "@features/images/components/PullImageForm";
 import { useImageDownload } from "@features/images/hooks/useImageDownload";
 import {
@@ -16,7 +16,11 @@ import type { ImageSummary } from "@features/images/services/imagesApi";
 import { BulkRemoveDialog } from "@shared/components/BulkRemoveDialog";
 import { PruneReportDialog } from "@shared/components/PruneReportDialog";
 
-import { ResourceList } from "@shared/components/ResourceList";
+import {
+	ResourceList,
+	type ResourceListSelectionSnapshot,
+	snapshotSelection,
+} from "@shared/components/ResourceList";
 import { detailPath } from "@shared/routes/detailRoute";
 import type { Host } from "@shared/types/api";
 import {
@@ -59,6 +63,10 @@ function PruneImagesModal({
 //
 // Removal has no per-row button (spec 461, ticket #470): a single image is
 // removed from its detail page, several from the toolbar's "Remove selected".
+// The cross-host copy follows the same shape (spec 486, ticket #488): the row
+// button is gone, a single image is copied from its detail page, and several
+// from the toolbar's "Copy selected to host" — one dialog for the whole
+// selection, one target chosen once, N sequential per-item copy runs.
 export function ImageList({ host }: { host: Host }) {
 	const hostId = host.id;
 	const { data: images, isPending, error } = useImages(hostId);
@@ -73,7 +81,11 @@ export function ImageList({ host }: { host: Host }) {
 		images: ImageSummary[];
 		clear: () => void;
 	} | null>(null);
-	const [pendingCopy, setPendingCopy] = useState<ImageSummary | null>(null);
+	// The batch copy's snapshot, the same shape as the bulk remove's: the
+	// selected images plus the selection's partial reset. A copy clears only
+	// the images that succeeded, so the failures stay selected for the retry.
+	const [copySelectedTarget, setCopySelectedTarget] =
+		useState<ResourceListSelectionSnapshot<ImageSummary> | null>(null);
 	const [isPruneOpen, setIsPruneOpen] = useState(false);
 	const canManage = can(host, "manage-images");
 	const navigate = useNavigate();
@@ -126,21 +138,6 @@ export function ImageList({ host }: { host: Host }) {
 							>
 								Download
 							</Button>
-							{canManage ? (
-								<Button
-									size="xs"
-									colorScheme="blue"
-									variant="outline"
-									aria-label={`Copy ${displayTags(image)} to another host`}
-									onClick={(event) => {
-										event.stopPropagation();
-										setPendingCopy(image);
-									}}
-									data-testid="copy-image-button"
-								>
-									Copy to host
-								</Button>
-							) : null}
 						</Td>
 					</Tr>
 				)}
@@ -169,6 +166,22 @@ export function ImageList({ host }: { host: Host }) {
 						clear: selection.clear,
 					})
 				}
+				// The batch copy rides manage-images — the capability the row
+				// button it replaces used, and the one the copy endpoint
+				// enforces — which is also the list's `canManage`, so the
+				// module's own write gate is the whole gate: no second
+				// predicate to keep in sync.
+				selectionActions={(selection) => (
+					<Button
+						size="sm"
+						variant="outline"
+						isDisabled={selection.selectedKeys.length === 0}
+						onClick={() => setCopySelectedTarget(snapshotSelection(selection))}
+						data-testid="copy-selected-images-button"
+					>
+						Copy selected to host
+					</Button>
+				)}
 				emptyMessage="No images on this host yet. Pull one to get started."
 			/>
 			{bulkRemoveTarget ? (
@@ -190,11 +203,13 @@ export function ImageList({ host }: { host: Host }) {
 					pruneImages={pruneImages}
 				/>
 			) : null}
-			{pendingCopy ? (
-				<CopyImageDialog
+			{copySelectedTarget ? (
+				<CopyImagesDialog
 					host={host}
-					image={pendingCopy}
-					onClose={() => setPendingCopy(null)}
+					images={copySelectedTarget.items}
+					// Only the succeeded images leave the selection.
+					onFinished={copySelectedTarget.clearKeys}
+					onClose={() => setCopySelectedTarget(null)}
 				/>
 			) : null}
 		</>

@@ -134,8 +134,10 @@ describe("QuadletList", () => {
 
 	// Spec 461, ticket #470: quadlets have no detail page, so the row's delete
 	// button is gone and the bulk button is the only removal path — a
-	// mis-click on a row can never destroy a quadlet.
-	it("renders no per-row delete button", async () => {
+	// mis-click on a row can never destroy a quadlet. Spec 486, ticket #489
+	// retired the row's Move/Copy button the same way: a transfer is a
+	// selection-scoped toolbar action now.
+	it("renders no per-row delete or move/copy button", async () => {
 		mockQuadlets([quadletFixture()]);
 		renderQuadletList();
 
@@ -143,7 +145,7 @@ describe("QuadletList", () => {
 		expect(
 			within(row).queryByRole("button", { name: /delete/i }),
 		).not.toBeInTheDocument();
-		// The row keeps its surviving actions: lifecycle, logs, edit, move/copy.
+		// The row keeps its surviving actions: lifecycle, logs, and edit.
 		expect(
 			within(row).getByRole("button", { name: "Restart web" }),
 		).toBeInTheDocument();
@@ -151,8 +153,8 @@ describe("QuadletList", () => {
 			within(row).getByRole("button", { name: "Edit web" }),
 		).toBeInTheDocument();
 		expect(
-			within(row).getByRole("button", { name: "Move or copy web" }),
-		).toBeInTheDocument();
+			within(row).queryByRole("button", { name: "Move or copy web" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("sorts rows when a column header is clicked", async () => {

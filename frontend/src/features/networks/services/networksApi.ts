@@ -124,15 +124,22 @@ export async function pruneNetworks(
 }
 
 // POST /api/hosts/{id}/networks/{networkName}/connect -> 200, empty body
-// (backend/internal/domain/networks handler Connect).
+// (backend/internal/domain/networks handler Connect). The optional signal
+// is the bulk run's abort seam (spec 486, ticket #491): closing the batch
+// dialog mid-run cancels the in-flight request.
 export async function connectContainer(
 	hostId: string,
 	networkName: string,
 	containerId: string,
+	signal?: AbortSignal,
 ): Promise<void> {
-	await api.post(hostApiPath(hostId, "networks", networkName, "connect"), {
-		container: containerId,
-	});
+	await api.post(
+		hostApiPath(hostId, "networks", networkName, "connect"),
+		{
+			container: containerId,
+		},
+		signal ? { signal } : undefined,
+	);
 }
 
 // DELETE /api/hosts/{id}/networks/{networkName}?force= -> 204, empty body

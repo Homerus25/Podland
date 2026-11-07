@@ -564,9 +564,12 @@ describe("ResourceList selection", () => {
 
 		const removeButton = screen.getByTestId("remove-selected-gadgets-button");
 		// The left edge is the contract: the button leads the toolbar row,
-		// before the adapter's own actions.
+		// before the adapter's own actions. It leads the selection group,
+		// which is itself the toolbar row's first child.
 		const toolbar = screen.getByTestId("gadgets-toolbar");
-		expect(toolbar.firstElementChild).toBe(removeButton);
+		const group = toolbar.firstElementChild as HTMLElement;
+		expect(group).toContainElement(removeButton);
+		expect(group.firstElementChild).toBe(removeButton);
 		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
 
 		await user.click(rowCheckboxes()[1]);
@@ -746,5 +749,199 @@ describe("ResourceList selection", () => {
 		expect(nameCell).toHaveStyle("left: 0px");
 		expect(actionsCell).toHaveStyle("position: sticky");
 		expect(actionsCell).toHaveStyle("right: 0px");
+	});
+});
+
+// The selection-action seam (spec 486, ticket #487): a list whose selection
+// drives more than one bulk action hands the owner a render function for its
+// own toolbar buttons. The owner renders them in the selection group beside
+// the Remove selected button — for a write-capable caller only, and always,
+// never gated on a non-empty selection (the adapter's buttons disable
+// themselves). `clearKeys` is the partial reset a batch run needs: only the
+// items that succeeded leave the selection, so failures stay selected for
+// the retry.
+describe("ResourceList selection actions", () => {
+	function renderActionList(
+		overrides: Partial<Parameters<typeof ResourceList<Gadget>>[0]> = {},
+	) {
+		const onChange = vi.fn();
+		const props = {
+			resource: "gadget",
+			isPending: false,
+			error: undefined as unknown,
+			items: gadgets as Gadget[] | undefined,
+			columns: [{ label: "Name" }],
+			renderRow: renderGadgetRow,
+			canManage: true,
+			selection: { getKey: (gadget: Gadget) => gadget.id, onChange },
+			...overrides,
+		};
+		return { onChange, ...render(<ResourceList {...props} />) };
+	}
+
+	function rowCheckboxes(): HTMLElement[] {
+		return screen
+			.getAllByTestId("gadget-row")
+			.map((row) => within(row).getByRole("checkbox"));
+	}
+
+	it("renders the adapter's selection actions permanently for a write-capable caller", async () => {
+		const user = userEvent.setup();
+		renderActionList({
+			selectionActions: (selection) => (
+				<Button
+					size="sm"
+					isDisabled={selection.selectedKeys.length === 0}
+					data-testid="bulk-transfer-gadgets-button"
+				>
+					Move/copy selected
+				</Button>
+			),
+		});
+
+		// Always rendered — the adapter's button disables itself, so the
+		// toolbar never grows or shrinks as the selection changes.
+		const button = screen.getByTestId("bulk-transfer-gadgets-button");
+		expect(button).toBeDisabled();
+
+		await user.click(rowCheckboxes()[0]);
+		expect(screen.getByTestId("bulk-transfer-gadgets-button")).toBeEnabled();
+
+		await user.click(rowCheckboxes()[0]);
+		expect(screen.getByTestId("bulk-transfer-gadgets-button")).toBeDisabled();
+	});
+
+	it("renders the selection actions after Remove selected in the left group", async () => {
+		const user = userEvent.setup();
+		renderActionList({
+			onRemoveSelected: vi.fn(),
+			selectionActions: () => (
+				<Button size="sm" data-testid="bulk-transfer-gadgets-button">
+					Move/copy selected
+				</Button>
+			),
+		});
+
+		await user.click(rowCheckboxes()[0]);
+
+		const toolbar = screen.getByTestId("gadgets-toolbar");
+		const group = toolbar.firstElementChild as HTMLElement;
+		const removeButton = screen.getByTestId("remove-selected-gadgets-button");
+		const transferButton = screen.getByTestId("bulk-transfer-gadgets-button");
+		expect(group).toContainElement(removeButton);
+		expect(group).toContainElement(transferButton);
+		expect(group.firstElementChild).toBe(removeButton);
+		expect(removeButton.nextElementSibling).toBe(transferButton);
+	});
+
+	it("renders no selection actions for a read-only caller", () => {
+		renderActionList({
+			canManage: false,
+			selectionActions: () => (
+				<Button size="sm" data-testid="bulk-transfer-gadgets-button">
+					Move/copy selected
+				</Button>
+			),
+		});
+
+		expect(
+			screen.queryByTestId("bulk-transfer-gadgets-button"),
+		).not.toBeInTheDocument();
+		expect(screen.getByTestId("gadgets-permission-hint")).toBeInTheDocument();
+	});
+
+	// The canSelect gate (spec 486, ticket #491): a list whose selection
+	// action rides a lower capability than its toolbar's write grant
+	// passes `canSelect` explicitly, and the whole selection seam renders
+	// below the write grant — checkboxes and the adapter's own action for
+	// a selection-capable caller — while the owner's Remove selected
+	// button stays on the write grant (removal is a write act even on a
+	// list whose connect action rides a lower capability) and the hint
+	// stays away, because the caller is not below both capabilities.
+	it("renders the selection seam below the write grant when canSelect is passed, keeping Remove selected on the write grant", async () => {
+		const user = userEvent.setup();
+		const onRemoveSelected = vi.fn();
+		renderActionList({
+			canManage: false,
+			canSelect: true,
+			onRemoveSelected,
+			selectionActions: () => (
+				<Button size="sm" data-testid="bulk-transfer-gadgets-button">
+					Move/copy selected
+				</Button>
+			),
+		});
+
+		expect(rowCheckboxes()).toHaveLength(2);
+		expect(
+			screen.getByTestId("bulk-transfer-gadgets-button"),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByTestId("gadgets-permission-hint"),
+		).not.toBeInTheDocument();
+
+		// Remove selected exists only while something is selected and only
+		// on the write grant: selecting a row must not conjure it.
+		await user.click(rowCheckboxes()[0]);
+		expect(
+			screen.queryByTestId("remove-selected-gadgets-button"),
+		).not.toBeInTheDocument();
+		expect(onRemoveSelected).not.toHaveBeenCalled();
+	});
+
+	it("hands the live selection state to the selection actions", async () => {
+		const user = userEvent.setup();
+		const seen: string[][] = [];
+		renderActionList({
+			selectionActions: (selection) => {
+				seen.push(selection.selectedKeys);
+				return (
+					<Button
+						size="sm"
+						onClick={() => selection.clearKeys([selection.selectedKeys[0]])}
+						data-testid="bulk-transfer-gadgets-button"
+					>
+						Move/copy selected
+					</Button>
+				);
+			},
+		});
+
+		await user.click(rowCheckboxes()[0]);
+		await user.click(rowCheckboxes()[1]);
+		expect(seen[seen.length - 1]).toEqual(["g-1", "g-2"]);
+	});
+
+	it("clearKeys drops only the named keys and fires onChange", async () => {
+		const user = userEvent.setup();
+		let live:
+			| Parameters<
+					NonNullable<
+						Parameters<typeof ResourceList<Gadget>>[0]["selectionActions"]
+					>
+			  >[0]
+			| null = null;
+		const { onChange } = renderActionList({
+			selectionActions: (selection) => {
+				live = selection;
+				return (
+					<Button size="sm" data-testid="bulk-transfer-gadgets-button">
+						Move/copy selected
+					</Button>
+				);
+			},
+		});
+
+		await user.click(rowCheckboxes()[0]);
+		await user.click(rowCheckboxes()[1]);
+		expect(onChange).toHaveBeenLastCalledWith(["g-1", "g-2"]);
+
+		act(() => live?.clearKeys(["g-1"]));
+
+		// Only the named key left the selection: the failure stays selected
+		// for the retry.
+		expect(onChange).toHaveBeenLastCalledWith(["g-2"]);
+		expect(rowCheckboxes()[0]).not.toBeChecked();
+		expect(rowCheckboxes()[1]).toBeChecked();
 	});
 });
