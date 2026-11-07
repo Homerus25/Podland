@@ -541,7 +541,7 @@ describe("ResourceList selection", () => {
 		expect(onChange).toHaveBeenLastCalledWith([]);
 	});
 
-	it("renders the owner's Remove selected button on the left of the toolbar row only while something is selected", async () => {
+	it("renders the owner's Remove selected button permanently on the left of the toolbar row, disabled while nothing is selected", async () => {
 		const user = userEvent.setup();
 		const onRemoveSelected = vi.fn();
 		renderSelectableList({
@@ -553,19 +553,20 @@ describe("ResourceList selection", () => {
 			onRemoveSelected,
 		});
 
-		// The bulk action exists only while something is selected: no
-		// disabled button, ever.
-		expect(
-			screen.queryByTestId("remove-selected-gadgets-button"),
-		).not.toBeInTheDocument();
+		// The bulk action is always rendered (ticket #493) and disables
+		// itself while nothing is selected, like the adapter's own
+		// selection actions — the toolbar never grows or shrinks as the
+		// selection changes.
+		const removeButton = screen.getByTestId("remove-selected-gadgets-button");
+		expect(removeButton).toBeDisabled();
 		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
 
 		await user.click(rowCheckboxes()[1]);
 
-		const removeButton = screen.getByTestId("remove-selected-gadgets-button");
 		// The left edge is the contract: the button leads the toolbar row,
 		// before the adapter's own actions. It leads the selection group,
 		// which is itself the toolbar row's first child.
+		expect(screen.getByTestId("remove-selected-gadgets-button")).toBeEnabled();
 		const toolbar = screen.getByTestId("gadgets-toolbar");
 		const group = toolbar.firstElementChild as HTMLElement;
 		expect(group).toContainElement(removeButton);
@@ -573,9 +574,7 @@ describe("ResourceList selection", () => {
 		expect(screen.getByTestId("gadgets-toolbar-action")).toBeInTheDocument();
 
 		await user.click(rowCheckboxes()[1]);
-		expect(
-			screen.queryByTestId("remove-selected-gadgets-button"),
-		).not.toBeInTheDocument();
+		expect(screen.getByTestId("remove-selected-gadgets-button")).toBeDisabled();
 	});
 
 	it("hands the live selection to onRemoveSelected, and clears through the clear it hands back", async () => {
@@ -880,8 +879,9 @@ describe("ResourceList selection actions", () => {
 			screen.queryByTestId("gadgets-permission-hint"),
 		).not.toBeInTheDocument();
 
-		// Remove selected exists only while something is selected and only
-		// on the write grant: selecting a row must not conjure it.
+		// Remove selected stays on the write grant (ticket #493): a
+		// selection-capable caller below the write grant never gets it,
+		// selected or not.
 		await user.click(rowCheckboxes()[0]);
 		expect(
 			screen.queryByTestId("remove-selected-gadgets-button"),

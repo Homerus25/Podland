@@ -105,28 +105,22 @@ async function openBulkRemove(...ids: string[]) {
 describe("ImageList bulk remove", () => {
 	beforeEach(resetCounters);
 
-	it("offers Remove selected only while something is selected", async () => {
+	it("renders Remove selected permanently, disabled while nothing is selected", async () => {
 		installHandlers();
 		renderImageList();
 		await screen.findByText("docker.io/library/nginx:1.27");
 		const user = userEvent.setup();
 
-		expect(
-			screen.queryByTestId("remove-selected-images-button"),
-		).not.toBeInTheDocument();
+		expect(screen.getByTestId("remove-selected-images-button")).toBeDisabled();
 
 		const checkbox = screen.getByRole("checkbox", {
 			name: `Select ${victimA.id}`,
 		});
 		await user.click(checkbox);
-		expect(
-			screen.getByTestId("remove-selected-images-button"),
-		).toBeInTheDocument();
+		expect(screen.getByTestId("remove-selected-images-button")).toBeEnabled();
 
 		await user.click(checkbox);
-		expect(
-			screen.queryByTestId("remove-selected-images-button"),
-		).not.toBeInTheDocument();
+		expect(screen.getByTestId("remove-selected-images-button")).toBeDisabled();
 	});
 
 	it("hides the selection from read-level users", async () => {
@@ -259,7 +253,9 @@ describe("ImageList bulk remove", () => {
 	// clear rides the run's success, not the dialog's close, so the report
 	// stays open over a list that has already let go of its selection. The
 	// toolbar button is the selection's visible edge and, unlike the row
-	// checkboxes, it stays queryable while the modal hides the page.
+	// checkboxes, it stays queryable while the modal hides the page —
+	// rendered permanently (ticket #493), its disabled state is the
+	// cleared selection's evidence.
 	it("clears the selection after a successful run, while the report stays open", async () => {
 		installHandlers();
 		const user = await openBulkRemove(victimA.id, victimB.id);
@@ -268,9 +264,7 @@ describe("ImageList bulk remove", () => {
 		await screen.findByTestId("bulk-remove-report");
 
 		expect(screen.getByTestId("modal")).toBeInTheDocument();
-		expect(
-			screen.queryByTestId("remove-selected-images-button"),
-		).not.toBeInTheDocument();
+		expect(screen.getByTestId("remove-selected-images-button")).toBeDisabled();
 
 		await user.click(screen.getByTestId("close-bulk-remove-report-button"));
 		for (const checkbox of screen.getAllByRole("checkbox")) {

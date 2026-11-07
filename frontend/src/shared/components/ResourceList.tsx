@@ -370,22 +370,25 @@ export function ResourceList<T>({
 			applySelection(selectedKeys.filter((key) => !keys.includes(key))),
 	};
 
-	// The "Remove selected" button (spec 461) is owner-rendered, not a
-	// toolbar slot the adapter fills: every selectable list hands over only
-	// its reaction (`onRemoveSelected`), and the owner draws the one button
-	// — label, red outline, derived testid, and its left-edge place on the
-	// toolbar row — so the placement cannot drift per feature. The bulk
-	// action exists only while something is selected: no disabled button,
-	// ever. The gate is the toolbar's write grant — `canManage === true`,
-	// not the wider selection gate a `canSelect` list opens for its own
-	// action — because removal is a container-write act even on a list
-	// whose connect action rides manage-networks.
+	// The "Remove selected" button (spec 461, ticket #493) is owner-rendered,
+	// not a toolbar slot the adapter fills: every selectable list hands over
+	// only its reaction (`onRemoveSelected`), and the owner draws the one
+	// button — label, red outline, derived testid, and its left-edge place
+	// on the toolbar row — so the placement cannot drift per feature. Like
+	// the adapter's own selection actions (spec 486), the button renders
+	// permanently — never gated on a non-empty selection — and disables
+	// itself while nothing is selected. The gate is the toolbar's write
+	// grant — `canManage === true`, not the wider selection gate a
+	// `canSelect` list opens for its own action — because removal is a
+	// container-write act even on a list whose connect action rides
+	// manage-networks.
 	const removeSelectedButton =
-		onRemoveSelected && canManage === true && selectedKeys.length > 0 ? (
+		onRemoveSelected && canManage === true ? (
 			<Button
 				size="sm"
 				colorScheme="red"
 				variant="outline"
+				isDisabled={selectedKeys.length === 0}
 				onClick={() => onRemoveSelected(selectionState)}
 				data-testid={`remove-selected-${plural}-button`}
 			>
