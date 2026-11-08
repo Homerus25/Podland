@@ -4,8 +4,12 @@
 # This script creates RSA private and public keys for JWT token signing
 
 KEY_DIR="$(dirname "$0")/.."
-PRIVATE_KEY_PATH="${KEY_DIR}/jwt-private.pem"
-PUBLIC_KEY_PATH="${KEY_DIR}/jwt-public.pem"
+# JWT_PRIVATE_KEY_PATH / JWT_PUBLIC_KEY_PATH override the default
+# locations; the backend reads the same variables (internal/config).
+PRIVATE_KEY_PATH="${JWT_PRIVATE_KEY_PATH:-${KEY_DIR}/jwt-private.pem}"
+PUBLIC_KEY_PATH="${JWT_PUBLIC_KEY_PATH:-${KEY_DIR}/jwt-public.pem}"
+
+mkdir -p "$(dirname "$PRIVATE_KEY_PATH")" "$(dirname "$PUBLIC_KEY_PATH")"
 
 echo "Generating JWT keys..."
 

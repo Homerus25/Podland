@@ -77,6 +77,8 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/api/health || exit 1
 # A fresh image ships no database and no credentials: first boot creates
 # and migrates the SQLite database, generates the JWT signing keys unless
-# they are mounted in, and serves the setup landing page — the first
-# admin is created through the UI (POST /api/setup/user).
-ENTRYPOINT ["/bin/sh", "-c", "[ -f jwt-private.pem ] || ./scripts/generate-keys.sh; exec ./podland"]
+# they are mounted in (or their location is overridden via
+# JWT_PRIVATE_KEY_PATH / JWT_PUBLIC_KEY_PATH, which generate-keys.sh
+# honors), and serves the setup landing page — the first admin is created
+# through the UI (POST /api/setup/user).
+ENTRYPOINT ["/bin/sh", "-c", "[ -f \"${JWT_PRIVATE_KEY_PATH:-jwt-private.pem}\" ] || ./scripts/generate-keys.sh; exec ./podland"]
