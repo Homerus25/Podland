@@ -4,9 +4,9 @@ A web application for managing [Podman](https://podman.io/) containers on remote
 
 ## Overview
 
-Podland is a full-stack web app that lets you register remote hosts, manage their
-Podman containers, images, and quadlets, and share access to those hosts with
-other users — all from a single browser interface.
+Podland is a full-stack web app that lets you register remote hosts and manage
+Podman resources like containers, images, and quadlets and more. Share access to those hosts with
+other users all from a single browser interface.
 
 **Stack**
 
@@ -19,16 +19,22 @@ other users — all from a single browser interface.
 
 - Register remote hosts and connect via the owner's SSH credentials
 - Hosts are managed through Podman's Unix socket, exposed over an SSH tunnel
-- Manage containers: create, start, stop, delete, stream logs
-- Browse and filter images
+- Manage podman resources: containers, volumes, images, networks, pods, quadlets and secrets 
 - Manage quadlets with lifecycle integration over SSH/systemctl
+- Update quadlets via remote execution of podman auto-update
 - Share hosts with other users (`read` / `write` / `admin` permissions)
 - Multi-user authentication with refresh sessions and rate-limited login
+- Stream Logs
+- Copy images between hosts without the need of a registry
+- Convert compose-files to quadlets
 
 ## Requirements
 
-- Go 1.22+ (backend)
-- Node.js 18+ (frontend)
+Build Requirements:
+- Go 1.26.4+ (backend)
+- Node.js 22+ (frontend)
+
+Runtime Requirements:
 - Podman pre-installed on every managed host
 
 ## Getting Started
