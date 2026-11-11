@@ -123,6 +123,26 @@ using a patched fork of Podman's Go bindings —
 [github.com/Homerus25/podman](https://github.com/Homerus25/podman).
 Podman must be pre-installed on every managed host.
 
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="doku/screenshots/hosts.png" alt="Hosts overview">
+    </td>
+    <td width="50%">
+      <img src="doku/screenshots/container.png" alt="Hosts overview">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="doku/screenshots/quadlets.png" alt="Hosts overview">
+    </td>
+  </tr>
+</table>
+
+
 ## License
 
 This software is licensed under a modified PolyForm Small Business License —
